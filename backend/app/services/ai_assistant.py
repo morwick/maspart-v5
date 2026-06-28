@@ -524,6 +524,20 @@ def _t_cari_part(args: dict, user: dict) -> dict:
             search_terms = list(dict.fromkeys(search_terms + corr_terms))
             rows = _search_terms_rows(corr_terms)
 
+    # Untuk query TRANSMISI/GEARBOX: baris gearbox assy kerap bernama hanya kode
+    # "HW….(spec)" TANPA kata 变速器/transmission (mis. HW13709XST216603 di NX280 6X2),
+    # sehingga pencarian-nama melewatkannya & seolah varian itu "tak punya transmisi
+    # assy". Surface-kan baris assy berdasar PN-nya (sumber kebenaran repairkit), exact
+    # match — sub-part yang PN-nya kebetulan memuat kode itu (mis. WG…+008/1) di-skip.
+    gearbox_q = _is_gearbox_query(q)
+    if gearbox_q:
+        seen_keys = {(r.get("part_number"), r.get("file")) for r in rows}
+        for r in part_index.search_exact_pns(repairkit.assy_pns_raw()):
+            k = (r.get("part_number"), r.get("file"))
+            if k not in seen_keys:
+                seen_keys.add(k)
+                rows.append(r)
+
     notes: list[str] = []
     if matched_syn:
         notes.append(
@@ -568,7 +582,6 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         if u and u not in grouped[pn]["varian_unit"]:
             grouped[pn]["varian_unit"].append(u)
 
-    gearbox_q = _is_gearbox_query(q)
     items = []
     for pn in order:
         it = grouped[pn]

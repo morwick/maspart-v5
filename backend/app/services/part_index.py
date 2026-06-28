@@ -515,6 +515,56 @@ def search_part_number(term: str) -> list[dict]:
     return results
 
 
+def search_exact_pns(pns) -> list[dict]:
+    """Ambil baris untuk Part Number PERSIS (exact match) dari sekumpulan PN.
+    CEPAT: lookup dict O(1) per sheet (bukan scan substring spt search_part_number).
+    Satu baris per (PN, unit). Format baris sama dengan search_part_number."""
+    ensure_index()
+    want = {(p or "").strip().upper() for p in pns}
+    want.discard("")
+    if not want:
+        return []
+
+    excel_files = _state["excel_files"]
+    stok_cache = _state["stok_cache"]
+    harga_lookup = _state["harga_lookup"]
+    gudang_cache = _state["gudang_cache"]
+
+    results, seen = [], set()
+    for fi in excel_files:
+        sn = fi["simple_name"]
+        pidx = fi.get("part_number_index", {})
+        if not pidx:
+            continue
+        df = fi["dataframe"]
+        for au in want:
+            indices = pidx.get(au)
+            if not indices:
+                continue
+            key = (au, sn)
+            if key in seen:
+                continue
+            seen.add(key)
+            row = df.iloc[indices[0]]
+            pn_value = str(row["part_number"]).strip() if pd.notna(row["part_number"]) else "N/A"
+            pn_key = pn_value.upper()
+            results.append({
+                "file": sn,
+                "path": fi["relative_path"],
+                "sheet": fi["sheet"],
+                "part_number": pn_value,
+                "part_name": str(row["part_name"]) if pd.notna(row["part_name"]) else "N/A",
+                "keterangan": str(row["remark"]).strip() if pd.notna(row.get("remark")) else "",
+                "quantity": str(row["quantity"]) if pd.notna(row["quantity"]) else "N/A",
+                "stok": stok_cache.get(pn_key, "—"),
+                "harga": harga_lookup.get(pn_key, "—"),
+                "berat": harga.weight_for(pn_key),
+                "gudang": gudang_cache.get(pn_key, {}),
+                "excel_row": int(indices[0]) + 2,
+            })
+    return results
+
+
 def search_part_name(term: str) -> list[dict]:
     """Cari berdasarkan Part Name — mirror app.py::search_part_name."""
     ensure_index()

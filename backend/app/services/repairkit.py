@@ -40,15 +40,12 @@ def _norm(s: str) -> str:
     return re.sub(r"[\s_\-/]", "", (s or "")).upper()
 
 
-# Cache set PN gearbox-assy (dinormalkan), di-refresh saat file transmisi.json berubah.
-_ASSY_CACHE: dict = {"mtime": None, "set": set()}
+# Cache PN gearbox-assy (set ternormalisasi + daftar mentah), di-refresh saat
+# file transmisi.json berubah.
+_ASSY_CACHE: dict = {"mtime": None, "set": set(), "raw": []}
 
 
-def all_assy_pns() -> set[str]:
-    """Set Part Number gearbox/transmisi assy (dinormalkan) dari transmisi.json —
-    sumber kebenaran kurasi untuk mengenali PN assy yang TIDAK tertangkap heuristik
-    pola (mis. Fast `FZ…`, ZF `WG…`, atau HOWO `HW19710…` tanpa huruf). Di-cache
-    per-mtime agar tetap 'segar tiap query' tanpa baca-parse JSON tiap baris."""
+def _refresh_assy_cache() -> None:
     try:
         p = get_settings().data_path / "repairkit" / "transmisi.json"
         mt = p.stat().st_mtime if p.exists() else None
@@ -56,14 +53,32 @@ def all_assy_pns() -> set[str]:
         mt = None
     if mt != _ASSY_CACHE["mtime"]:
         s: set[str] = set()
+        raw: list[str] = []
         for v in _load().values():
             for pn in v.get("assy_pn", []):
                 n = _norm(pn)
                 if n:
                     s.add(n)
-        _ASSY_CACHE["mtime"] = mt
-        _ASSY_CACHE["set"] = s
+                    if pn not in raw:
+                        raw.append(pn)
+        _ASSY_CACHE.update(mtime=mt, set=s, raw=raw)
+
+
+def all_assy_pns() -> set[str]:
+    """Set Part Number gearbox/transmisi assy (dinormalkan) dari transmisi.json —
+    sumber kebenaran kurasi untuk mengenali PN assy yang TIDAK tertangkap heuristik
+    pola (mis. Fast `FZ…`, ZF `WG…`, atau HOWO `HW19710…` tanpa huruf). Di-cache
+    per-mtime agar tetap 'segar tiap query' tanpa baca-parse JSON tiap baris."""
+    _refresh_assy_cache()
     return _ASSY_CACHE["set"]
+
+
+def assy_pns_raw() -> list[str]:
+    """Daftar Part Number gearbox/transmisi assy MENTAH (apa adanya, untuk pencarian
+    PN persis di katalog). Dipakai cari_part agar baris assy yang namanya hanya kode
+    'HW….(spec)' (tanpa kata 变速器/transmission) tetap muncul saat user tanya transmisi."""
+    _refresh_assy_cache()
+    return _ASSY_CACHE["raw"]
 
 
 def list_models() -> list[dict]:
