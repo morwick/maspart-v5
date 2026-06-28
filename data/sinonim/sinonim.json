@@ -1074,7 +1074,9 @@
     "triggers": [
       "brake chamber",
       "matahari rem",
-      "pampam rem"
+      "pampam rem",
+      "booster rem",
+      "buster rem"
     ],
     "keywords": [
       "brake chamber"

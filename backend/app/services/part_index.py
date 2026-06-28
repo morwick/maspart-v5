@@ -36,7 +36,14 @@ _EXCEL_EXT = (".xlsx", ".xls", ".xlsm")
 # Subfolder data yang BUKAN database part (di-load terpisah sebagai lookup).
 # 'manuals' berisi PDF/Excel referensi (mis. filter Shantui) — jangan diparse
 # sebagai katalog part.
-_NON_PART_DIRS = {"stok", "harga", "populasi", "manuals", "sinonim"}
+_NON_PART_DIRS = {"stok", "harga", "populasi", "manuals", "sinonim", "repairkit"}
+
+# Teks baris JUDUL kolom yang kerap ikut terbaca sebagai "part" (kolom B atau D).
+# Dicocokkan PERSIS (UPPER, stripped) agar tidak menyentuh Part Number asli.
+_HEADER_TOKENS = {
+    "图号", "序号", "零件图号", "PART NO.", "PART NO", "PART NUMBER", "PARTS NO.",
+    "P/N", "NO.", "ITEM", "ITEM NO.", "PART NAME", "PARTS NAME", "名称", "零件名称",
+}
 
 # Singkatan umum katalog part → bentuk panjang, agar 'kabin assy' = 'kabin
 # assembly', 'cyl' = 'cylinder', dst. Dicocokkan per-token (kata utuh).
@@ -65,7 +72,7 @@ def _phrase_or_allwords(haystack_up: str, kw_up: str) -> bool:
 # ── Disk cache per-file (mirror app.py: hash size+mtime → pickle) ─────
 # Versi schema cache — naikkan kalau struktur entri _process_file berubah,
 # supaya cache lama otomatis diabaikan.
-_CACHE_VERSION = "v2"  # v2: + kolom 'remark' (备注/F) ikut diindeks sbg keterangan
+_CACHE_VERSION = "v3"  # v3: saring baris header (图号/PART NO.) agar tak jadi part palsu
 _CACHE_DIR = Path(__file__).resolve().parents[2] / ".cache"
 
 
@@ -156,6 +163,16 @@ def _process_file(file_path: Path, relative_path: Path) -> list[dict]:
                 "quantity": _col(4),
                 "remark": _col(5),
             })
+
+            # Buang baris JUDUL/HEADER yang ikut terbaca sebagai part: tiap sheet
+            # punya baris judul kolom (mis. B='图号'/'PART NO.' dgn D='Part Name')
+            # yang sebelumnya terindeks jadi "part palsu" di 73 unit. Saring agar
+            # tak mengotori hasil (detail_part('PART NO.') dll).
+            _pn_u = df["part_number"].fillna("").astype(str).str.strip().str.upper()
+            _nm_u = df["part_name"].fillna("").astype(str).str.strip().str.upper()
+            _hdr = _pn_u.isin(_HEADER_TOKENS) | _nm_u.isin(_HEADER_TOKENS)
+            if _hdr.any():
+                df = df[~_hdr].reset_index(drop=True)
 
             pn_series = df["part_number"].fillna("").astype(str).str.strip().str.upper()
             pn_valid = pn_series[pn_series != ""]

@@ -125,6 +125,17 @@ _HW_GEARBOX_RE = re.compile(r"^HW\d{4,6}[A-Z]")
 _GEARBOX_TERMS = ("transmisi", "persneling", "perseneling", "persneleng",
                   "gearbox", "girboks", "bak gigi", "gear box")
 
+# Kata kunci UMUM yang sendirian terlalu luas (mis. ekspansi 'seal kruk as' →
+# 'seal' mencocokkan ribuan part). Kecocokan HANYA pada kata umum tunggal ini
+# dianggap LEMAH saat menghitung 'jumlah_relevan_kuat' — agar angka yang
+# dilaporkan ke user jujur (bukan total ekor panjang yang menyesatkan).
+_GENERIC_KW = {
+    "seal", "oil seal", "bolt", "nut", "washer", "screw", "valve", "spring",
+    "hose", "pipe", "gasket", "ring", "pin", "gear", "cover", "plate",
+    "bearing", "shaft", "filter", "switch", "sensor", "cap", "plug",
+    "bracket", "clamp", "bushing", "wheel", "joint", "housing", "rod",
+}
+
 
 def _is_gearbox_assy(pn: str, name: str) -> bool:
     """True bila part ini UNIT TRANSMISI/GEARBOX utuh (bukan sub-part): PN berpola
@@ -613,6 +624,15 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         if gearbox_q and _is_gearbox_assy(pn, it.get("part_name") or ""):
             rel += 100000
             it["jenis"] = "TRANSMISI ASSY (gearbox/unit utuh)"
+        # Tandai kecocokan KUAT vs LEMAH: kuat = match PN/assy atau kata kunci
+        # spesifik (frasa atau kata non-generik); lemah = hanya kata umum tunggal
+        # (mis. 'seal'/'bolt'). Dipakai utk 'jumlah_relevan_kuat' yang jujur.
+        ql = (q or "").lower().strip()
+        kuat = bool(it.get("jenis")) or (ql and ql in pn.lower())
+        if not kuat and cocok:
+            cl = cocok.lower().strip()
+            kuat = (" " in cl) or (cl not in _GENERIC_KW)
+        it["_kuat"] = kuat
         it["_rel"] = rel
         items.append(it)
 
@@ -621,8 +641,10 @@ def _t_cari_part(args: dict, user: dict) -> dict:
     # kecocokannya (cuma ditandai 'tersedia' untuk info). Tiebreak deterministik:
     # jumlah varian unit (lebih umum dipakai) lalu PN, supaya urutan stabil.
     items.sort(key=lambda x: (x["_rel"], x.get("jumlah_varian", 0)), reverse=True)
+    jumlah_relevan = sum(1 for it in items if it.get("_kuat"))
     for it in items:
         it.pop("_rel", None)
+        it.pop("_kuat", None)
 
     jumlah_tersedia = sum(1 for it in items if it.get("tersedia"))
     # Saat difilter ke 1 unit, hasil sudah sempit & user biasanya ingin daftar
@@ -631,12 +653,24 @@ def _t_cari_part(args: dict, user: dict) -> dict:
     # Pencarian global tetap dibatasi ketat agar hemat token.
     row_cap = _MAX_PART_ROWS_UNIT if unit else _MAX_PART_ROWS
     out = items[:row_cap]
-    if note is None and len(items) > row_cap:
-        note = (
-            f"{len(items)} part cocok — ditampilkan {len(out)} teratas (diurut berdasarkan "
-            f"KECOCOKAN katalog, bukan stok). Bila kurang tepat, persempit dengan menyebut "
-            f"UNIT/MODEL atau kata kunci yang lebih spesifik."
-        )
+    # Catatan jumlah yang JUJUR: bila total membengkak karena kecocokan kata umum
+    # (mis. 'seal' pada 'seal kruk as' → ribuan), laporkan 'jumlah_relevan_kuat'
+    # agar AI tak menyebut total mentah yang menyesatkan ke user.
+    if len(items) > row_cap:
+        if 0 < jumlah_relevan < len(items):
+            tail = (
+                f"{jumlah_relevan} part RELEVAN dengan '{q}' (dari {len(items)} total — "
+                f"sisanya hanya cocok di kata umum & berada di peringkat bawah). Ditampilkan "
+                f"{len(out)} teratas paling cocok. Saat menyebut jumlah ke user, pakai angka "
+                f"RELEVAN ({jumlah_relevan}), JANGAN total mentah ({len(items)})."
+            )
+        else:
+            tail = (
+                f"{len(items)} part cocok — ditampilkan {len(out)} teratas (diurut berdasarkan "
+                f"KECOCOKAN katalog, bukan stok). Bila kurang tepat, persempit dengan menyebut "
+                f"UNIT/MODEL atau kata kunci yang lebih spesifik."
+            )
+        note = f"{note} {tail}" if note else tail
 
     # "Mungkin maksud Anda" — hanya saat benar-benar 0 hasil.
     saran = part_index.suggest_names(q, limit=6) if not items else []
@@ -656,7 +690,8 @@ def _t_cari_part(args: dict, user: dict) -> dict:
     return {
         "query": q, "kata_kunci_dicari": search_terms, "unit_filter": unit or None,
         "catatan": note,
-        "jumlah_part_unik": len(items), "ditampilkan": len(out),
+        "jumlah_part_unik": len(items), "jumlah_relevan_kuat": jumlah_relevan,
+        "ditampilkan": len(out),
         "jumlah_tersedia_stok": jumlah_tersedia,
         "saran_mungkin_maksud": saran,
         "urutan": "Hasil DIURUT berdasarkan KECOCOKAN/KOMPATIBILITAS part dengan katalog (BUKAN stok). Rekomendasikan part yang paling cocok untuk unit/kebutuhan user — stok hanya info, bukan dasar rekomendasi.",
@@ -1298,6 +1333,14 @@ def _system_prompt(user: dict) -> str:
         "Bila user menyebut PN, gunakan apa adanya.\n"
         "5. Tampilkan harga dalam format Rupiah (mis. Rp 1.250.000) dan sebut stok "
         "per gudang bila relevan.\n"
+        "5b. Nilai stok/harga '—' (atau kosong) berarti BELUM ADA DATA stok/harga "
+        "untuk PN itu di sistem — BUKAN berarti barang habis/stok 0. Sampaikan "
+        "sebagai 'belum ada data stok/harga', JANGAN klaim 'habis' atau 'kosong'. "
+        "Mayoritas part katalog memang belum punya data stok/harga (hanya sebagian "
+        "kecil yang distok), jadi '—' itu normal.\n"
+        "5c. Bila hasil cari_part memuat 'jumlah_relevan_kuat', itulah jumlah part "
+        "yang BENAR-BENAR relevan — sebut angka itu ke user, JANGAN 'jumlah_part_unik' "
+        "(total mentah yang bisa membengkak karena kecocokan kata umum).\n"
         "6. Bila tool mengembalikan kosong / tidak ditemukan, katakan terus terang "
         "dan sarankan langkah lain (cek ejaan PN, cari per nama, atau daftar_unit).\n"
         "7. Jangan menjanjikan aksi yang tak bisa Anda lakukan (Anda hanya membaca "
