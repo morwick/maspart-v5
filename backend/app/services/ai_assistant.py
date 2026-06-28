@@ -319,6 +319,22 @@ def _tool_specs(user: dict) -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "daftar_transmisi_assy",
+                "description": (
+                    "Daftar LENGKAP & PASTI SEMUA transmisi/gearbox assy (unit gearbox "
+                    "utuh) yang ada di katalog — lintas merek (Sinotruk/HOWO, ZF, Fast, "
+                    "Shantui, Wechai), dikelompokkan per seri, dengan PN, nama, stok, dan "
+                    "unit pemakai. WAJIB pakai tool ini (bukan cari_part) untuk permintaan "
+                    "'listkan/daftar SEMUA transmisi assy', 'ada berapa transmisi assy', "
+                    "'list seluruhnya', dsb. — karena cari_part dibatasi jumlah barisnya "
+                    "sehingga TIDAK lengkap. Gunakan 'total_transmisi_assy' sbg jumlah resmi."
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
     ]
 
     # Populasi Unit — data armada/unit terdaftar. HANYA admin & akun 'mas'
@@ -914,9 +930,86 @@ def _t_repair_kit_transmisi(args: dict, user: dict) -> dict:
     }
 
 
+def _assy_seri(pn: str, name: str, tipe: str | None) -> str:
+    """Kelompokkan transmisi assy ke seri/merek untuk penyajian rapi."""
+    pu = (pn or "").upper()
+    t = (tipe or "")
+    if pu.startswith("HW"):
+        return "HOWO/Sinotruk (HW)"
+    if pu.startswith("WG") or "ZF" in t.upper():
+        return "ZF (WG)"
+    if "JS" in pu or "FZ" in pu or "FAST" in t.upper() or "8JS" in t.upper():
+        return "Fast (JS/8JS)"
+    if "变速器" in (name or "") or "变速箱" in (name or ""):
+        return "Lainnya (变速器/变速箱)"
+    return "Shantui/Wechai & lainnya"
+
+
+def _t_daftar_transmisi_assy(args: dict, user: dict) -> dict:
+    """Daftar LENGKAP & PASTI seluruh transmisi/gearbox assy (unit utuh) di katalog.
+    Sumber: scan seluruh katalog (_is_gearbox_assy) ∪ PN assy repair kit. TIDAK
+    di-cap seperti cari_part, sehingga jumlahnya otoritatif (anti-undercount)."""
+    part_index.ensure_index()
+    # Peta PN(ternormalisasi) -> tipe gearbox dari repair kit (bila terdaftar).
+    tipe_by_pn: dict[str, str] = {}
+    for _mk, e in repairkit._load().items():
+        for pn in e.get("assy_pn", []):
+            tipe_by_pn[re.sub(r"[\s_\-/]", "", (pn or "")).upper()] = e.get("tipe") or ""
+
+    assy_pns: set[str] = set()
+    for pn, name in part_index.all_parts_min():
+        if _is_gearbox_assy(pn, name):
+            assy_pns.add(pn.upper())
+    for pn in repairkit.assy_pns_raw():
+        assy_pns.add((pn or "").upper())
+
+    # Gabung per PN: stok per-PN (global) + daftar unit pemakai (dipakai pada).
+    grouped: dict[str, dict] = {}
+    for r in part_index.search_exact_pns(sorted(assy_pns)):
+        pn = (r.get("part_number") or "").upper()
+        if not pn:
+            continue
+        g = grouped.get(pn)
+        if g is None:
+            norm = re.sub(r"[\s_\-/]", "", pn)
+            tipe = tipe_by_pn.get(norm)
+            g = grouped[pn] = {
+                "part_number": r.get("part_number"),
+                "nama": r.get("part_name"),
+                "tipe_gearbox": tipe or None,
+                "stok": r.get("stok"),
+                "harga": r.get("harga"),
+                "seri": _assy_seri(pn, r.get("part_name") or "", tipe),
+                "dipakai_pada": [],
+            }
+        u = r.get("file")
+        if u and u not in g["dipakai_pada"]:
+            g["dipakai_pada"].append(u)
+
+    items = sorted(grouped.values(), key=lambda x: (x["seri"], x["part_number"]))
+    ringkasan: dict[str, int] = {}
+    for it in items:
+        ringkasan[it["seri"]] = ringkasan.get(it["seri"], 0) + 1
+
+    return {
+        "total_transmisi_assy": len(items),
+        "ringkasan_per_seri": ringkasan,
+        "catatan": (
+            "Ini daftar LENGKAP & PASTI semua transmisi/gearbox assy (unit utuh) di "
+            "katalog — sudah mencakup Sinotruk/HOWO, ZF, Fast, DAN Shantui/Wechai. "
+            "Gunakan 'total_transmisi_assy' sebagai jumlah resmi; JANGAN mengarang/"
+            "menghitung sendiri. Sajikan dikelompokkan per 'seri' dengan PN, nama, stok, "
+            "dan unit pemakai (dipakai_pada). Hanya sebagian punya data repair kit "
+            "(lihat tipe_gearbox terisi)."
+        ),
+        "daftar": items,
+    }
+
+
 _DISPATCH = {
     "cari_part": _t_cari_part,
     "repair_kit_transmisi": _t_repair_kit_transmisi,
+    "daftar_transmisi_assy": _t_daftar_transmisi_assy,
     "cek_populasi": _t_cek_populasi,
     "detail_part": _t_detail_part,
     "harga_sims": _t_harga_sims,
@@ -1047,7 +1140,11 @@ def _system_prompt(user: dict) -> str:
         "user tanya transmisi/gearbox assy suatu unit SPESIFIK (terutama Shantui mis. SD16/"
         "SG21/L55 atau varian Wechai) yang TIDAK ada di 'unit_tercatat', JANGAN langsung "
         "bilang 'tidak punya' — panggil cari_part(query='transmisi', unit=<unit>) dulu, sebab "
-        "banyak unit ini tetap punya gearbox assy di katalog meski tanpa data repair kit."
+        "banyak unit ini tetap punya gearbox assy di katalog meski tanpa data repair kit.\n"
+        "- ⛔ Untuk permintaan 'LISTKAN/DAFTAR SEMUA transmisi assy', 'ada berapa transmisi "
+        "assy', 'list seluruhnya', WAJIB panggil tool daftar_transmisi_assy (argumen kosong) "
+        "dan pakai 'total_transmisi_assy' sebagai jumlah RESMI — JANGAN memakai cari_part "
+        "untuk ini (cari_part dibatasi 12 baris → daftar jadi TIDAK lengkap & jumlahnya salah)."
     )
 
     # ── Konteks model/unit yang benar-benar ada (anti-ngarang unit) ──

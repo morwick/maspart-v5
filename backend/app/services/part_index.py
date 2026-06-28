@@ -565,6 +565,38 @@ def search_exact_pns(pns) -> list[dict]:
     return results
 
 
+# Cache (pn, name) seluruh part — utk scan kelas part tertentu (mis. transmisi
+# assy) tanpa men-scan ulang tiap query. Di-refresh saat index dibangun ulang.
+_ALLPARTS_CACHE: dict = {"at": None, "rows": []}
+
+
+def all_parts_min() -> list[tuple[str, str]]:
+    """Daftar (PART_NUMBER_UPPER, nama_part) UNIK utk SELURUH katalog — satu entri
+    per PN (nama dari kemunculan pertama). Ringan & di-cache per build index, dipakai
+    untuk menyaring kelas part tertentu (mis. semua transmisi/gearbox assy) tanpa
+    cap hasil pencarian biasa."""
+    ensure_index()
+    at = _state["indexed_at"]
+    c = _ALLPARTS_CACHE
+    if c["at"] != at:
+        out: dict[str, str] = {}
+        for fi in _state["excel_files"]:
+            df = fi.get("dataframe")
+            if df is None:
+                continue
+            for pn_up, idxs in fi.get("part_number_index", {}).items():
+                if pn_up in out or not idxs:
+                    continue
+                try:
+                    nm = df.iloc[idxs[0]]["part_name"]
+                    out[pn_up] = "" if pd.isna(nm) else str(nm)
+                except Exception:
+                    out[pn_up] = ""
+        c["at"] = at
+        c["rows"] = list(out.items())
+    return c["rows"]
+
+
 def search_part_name(term: str) -> list[dict]:
     """Cari berdasarkan Part Name — mirror app.py::search_part_name."""
     ensure_index()
