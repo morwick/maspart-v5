@@ -1,0 +1,33 @@
+# Route domain maspart.tech → MASPART (via Traefik milik Coolify).
+# Lokasi di VPS: /data/coolify/proxy/dynamic/maspart.yaml
+# Traefik membaca folder ini otomatis (providers.file.watch=true).
+#
+# Alur: maspart.tech (443, SSL Let's Encrypt) → Traefik → Nginx kita (host:8090)
+#        → Next.js (/) + FastAPI (/api). HTTP (80) di-redirect ke HTTPS.
+# 172.16.1.1 = gateway network "coolify" = cara Traefik (dalam container) menjangkau host.
+http:
+  routers:
+    maspart-https:
+      rule: "Host(`maspart.tech`) || Host(`www.maspart.tech`)"
+      entryPoints:
+        - https
+      tls:
+        certResolver: letsencrypt
+      service: maspart-svc
+    maspart-http:
+      rule: "Host(`maspart.tech`) || Host(`www.maspart.tech`)"
+      entryPoints:
+        - http
+      middlewares:
+        - maspart-redirect-https
+      service: maspart-svc
+  middlewares:
+    maspart-redirect-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+  services:
+    maspart-svc:
+      loadBalancer:
+        servers:
+          - url: "http://172.16.1.1:8090"

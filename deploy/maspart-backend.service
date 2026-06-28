@@ -1,0 +1,19 @@
+# MASPART backend (FastAPI + torch). Salin ke /etc/systemd/system/maspart-backend.service
+# Catatan: 1 worker saja — tiap worker memuat torch + DINOv2 + galeri 112MB, jadi
+# di VPS 4GB JANGAN tambah --workers.
+[Unit]
+Description=MASPART FastAPI backend (uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/maspart/backend
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/maspart/backend/venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=5
+# Load torch + DINOv2 + parse galeri CSV bisa lama saat start.
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,3629 @@
+[
+  {
+    "grup": "kabin",
+    "triggers": [
+      "kabin"
+    ],
+    "keywords": [
+      "Cab body"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "pintu",
+      "pintu kanan"
+    ],
+    "keywords": [
+      "Right door",
+      "Right door assembly"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "pintu",
+      "pintu kiri"
+    ],
+    "keywords": [
+      "Left door",
+      "Left door assembly"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "engsel",
+      "engsel pintu",
+      "engsel pintu kiri",
+      "engsel pintu kanan",
+      "engsel pintu atas"
+    ],
+    "keywords": [
+      "hinge",
+      "Front upper hinge",
+      "upper hinge",
+      "door hinge"
+    ]
+  },
+  {
+    "grup": "filter",
+    "triggers": [
+      "saringan solar",
+      "filter solar",
+      "saringan bahan bakar",
+      "filter bahan bakar"
+    ],
+    "keywords": [
+      "fuel filter",
+      "diesel filter"
+    ]
+  },
+  {
+    "grup": "filter",
+    "triggers": [
+      "saringan oli",
+      "filter oli"
+    ],
+    "keywords": [
+      "oil filter"
+    ]
+  },
+  {
+    "grup": "filter",
+    "triggers": [
+      "saringan udara",
+      "filter udara",
+      "saringan hawa",
+      "saringan angin"
+    ],
+    "keywords": [
+      "air filter",
+      "air filter assembly"
+    ]
+  },
+  {
+    "grup": "filter",
+    "triggers": [
+      "water separator",
+      "saringan air solar",
+      "sedimenter"
+    ],
+    "keywords": [
+      "water separator",
+      "oil-water separator"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "stang seher",
+      "stang piston",
+      "batang piston",
+      "connecting rod",
+      "conrod"
+    ],
+    "keywords": [
+      "connecting rod",
+      "Linkage assembly"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "seher",
+      "piston",
+      "zuiger"
+    ],
+    "keywords": [
+      "piston"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "ring seher",
+      "ring piston"
+    ],
+    "keywords": [
+      "piston ring"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "klep",
+      "katup",
+      "payung klep",
+      "kepala klep"
+    ],
+    "keywords": [
+      "valve",
+      "intake valve",
+      "exhaust valve"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "injektor",
+      "injector",
+      "pengabut",
+      "nozzle",
+      "nozel"
+    ],
+    "keywords": [
+      "injector",
+      "nozzle",
+      "fuel injector"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "pompa solar",
+      "pompa injeksi",
+      "bosch pump",
+      "pompa bahan bakar"
+    ],
+    "keywords": [
+      "fuel injection pump",
+      "fuel delivery pump"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "turbo",
+      "turbocharger"
+    ],
+    "keywords": [
+      "turbocharger",
+      "turbo"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "paking",
+      "packing",
+      "gasket",
+      "perpak",
+      "pakingan",
+      "perpak mesin",
+      "paking set"
+    ],
+    "keywords": [
+      "gasket"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "metal jalan",
+      "metal stang"
+    ],
+    "keywords": [
+      "connecting rod bearing",
+      "upper connecting rod bearing"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "metal duduk"
+    ],
+    "keywords": [
+      "main bearing",
+      "main bearing bush"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "karter",
+      "bak oli"
+    ],
+    "keywords": [
+      "oil pan",
+      "oil pan assembly"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "van belt",
+      "vanbelt",
+      "fan belt",
+      "tali kipas",
+      "belt kipas",
+      "v ribbed belt"
+    ],
+    "keywords": [
+      "v-ribbed belt",
+      "ribbed belt"
+    ]
+  },
+  {
+    "grup": "pendingin",
+    "triggers": [
+      "radiator"
+    ],
+    "keywords": [
+      "radiator"
+    ]
+  },
+  {
+    "grup": "pendingin",
+    "triggers": [
+      "selang radiator",
+      "selang air"
+    ],
+    "keywords": [
+      "radiator water inlet hose",
+      "radiator outlet hose"
+    ]
+  },
+  {
+    "grup": "pendingin",
+    "triggers": [
+      "pompa air",
+      "water pump"
+    ],
+    "keywords": [
+      "water pump"
+    ]
+  },
+  {
+    "grup": "pendingin",
+    "triggers": [
+      "termostat",
+      "thermostat",
+      "rumah thermostat",
+      "rumah termostat"
+    ],
+    "keywords": [
+      "thermostat",
+      "thermostat housing"
+    ]
+  },
+  {
+    "grup": "pendingin",
+    "triggers": [
+      "kipas radiator",
+      "fan"
+    ],
+    "keywords": [
+      "fan",
+      "fan clutch"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "kampas rem",
+      "kanvas rem",
+      "kain rem"
+    ],
+    "keywords": [
+      "brake friction plate",
+      "brake pad",
+      "brake shoe assembly",
+      "friction plate",
+      "brake lining"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "sepatu rem"
+    ],
+    "keywords": [
+      "brake shoe assembly",
+      "brake shoe"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "tromol",
+      "tromol rem"
+    ],
+    "keywords": [
+      "brake drum"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "master rem",
+      "master rem atas"
+    ],
+    "keywords": [
+      "master brake valve",
+      "hand brake valve",
+      "brake valve"
+    ]
+  },
+  {
+    "grup": "kopling",
+    "triggers": [
+      "kampas kopling",
+      "plat kopling"
+    ],
+    "keywords": [
+      "driven disc",
+      "driven disk",
+      "driven plate",
+      "clutch driven disc",
+      "clutch driven disk"
+    ]
+  },
+  {
+    "grup": "kopling",
+    "triggers": [
+      "matahari kopling",
+      "matahari",
+      "dekrup",
+      "deksel"
+    ],
+    "keywords": [
+      "clutch pressure plate",
+      "pressure plate"
+    ]
+  },
+  {
+    "grup": "kopling",
+    "triggers": [
+      "drek lager",
+      "drek laher",
+      "release bearing"
+    ],
+    "keywords": [
+      "release bearing",
+      "clutch release bearing"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "gardan",
+      "differential"
+    ],
+    "keywords": [
+      "differential",
+      "axle",
+      "rear axle"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "as roda",
+      "as gardan"
+    ],
+    "keywords": [
+      "axle shaft",
+      "half shaft"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "kopel",
+      "as kopel",
+      "propeller"
+    ],
+    "keywords": [
+      "transmission shaft",
+      "drive shaft"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "cross joint",
+      "spider",
+      "spider kopel",
+      "salib",
+      "salib kopel",
+      "cross kopel"
+    ],
+    "keywords": [
+      "universal joint",
+      "cross"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "gigi nanas",
+      "gigi gardan"
+    ],
+    "keywords": [
+      "bevel gear",
+      "driving bevel gear",
+      "driven bevel gear",
+      "main reducer"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "per",
+      "pegas",
+      "per daun",
+      "peer",
+      "per truk"
+    ],
+    "keywords": [
+      "leaf spring",
+      "spring"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "shock",
+      "sokbreker",
+      "shockbreaker",
+      "sokbreaker",
+      "sekok",
+      "skok",
+      "sok breker"
+    ],
+    "keywords": [
+      "shock absorber"
+    ]
+  },
+  {
+    "grup": "kemudi",
+    "triggers": [
+      "ball joint",
+      "boljoin"
+    ],
+    "keywords": [
+      "ball joint"
+    ]
+  },
+  {
+    "grup": "kemudi",
+    "triggers": [
+      "tie rod",
+      "long tie rod"
+    ],
+    "keywords": [
+      "tie rod",
+      "steering tie rod",
+      "steering tie rod arm",
+      "tie rod arm"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "bushing",
+      "bos",
+      "boss"
+    ],
+    "keywords": [
+      "bushing",
+      "bush"
+    ]
+  },
+  {
+    "grup": "roda",
+    "triggers": [
+      "laher roda",
+      "bearing roda"
+    ],
+    "keywords": [
+      "wheel hub bearing",
+      "hub bearing"
+    ]
+  },
+  {
+    "grup": "roda",
+    "triggers": [
+      "velg",
+      "pelek"
+    ],
+    "keywords": [
+      "wheel rim",
+      "rim"
+    ]
+  },
+  {
+    "grup": "roda",
+    "triggers": [
+      "ban"
+    ],
+    "keywords": [
+      "tire",
+      "tyre"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "aki",
+      "accu",
+      "baterai"
+    ],
+    "keywords": [
+      "battery"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "dinamo ampere",
+      "alternator",
+      "dinamo isi",
+      "dinamo cas"
+    ],
+    "keywords": [
+      "generator"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "dinamo starter",
+      "dinamo stater",
+      "motor starter",
+      "starter"
+    ],
+    "keywords": [
+      "starter"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu depan",
+      "lampu utama"
+    ],
+    "keywords": [
+      "headlight",
+      "headlamp",
+      "front combination light"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "klakson",
+      "horn",
+      "klakson keong",
+      "klakson siput",
+      "klakson listrik"
+    ],
+    "keywords": [
+      "horn",
+      "electric horn"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "spakbor",
+      "sepatbor"
+    ],
+    "keywords": [
+      "fender",
+      "mudguard"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "bemper",
+      "bumper"
+    ],
+    "keywords": [
+      "bumper"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "spion",
+      "kaca spion"
+    ],
+    "keywords": [
+      "mirror",
+      "rear view mirror"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "kaca depan",
+      "kaca windshield"
+    ],
+    "keywords": [
+      "windshield",
+      "windscreen",
+      "front windshield"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "wiper",
+      "karet wiper",
+      "lengan wiper"
+    ],
+    "keywords": [
+      "wiper",
+      "wiper blade",
+      "wiper arm"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "seal",
+      "sil",
+      "sil oli"
+    ],
+    "keywords": [
+      "oil seal",
+      "seal"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "laher",
+      "laker",
+      "lager",
+      "bearing"
+    ],
+    "keywords": [
+      "bearing"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "selang"
+    ],
+    "keywords": [
+      "hose"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "baut"
+    ],
+    "keywords": [
+      "bolt"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "mur"
+    ],
+    "keywords": [
+      "nut"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "klem",
+      "klem selang",
+      "klem pipa"
+    ],
+    "keywords": [
+      "clamp",
+      "hose clamp",
+      "pipe clamp"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "ring plat",
+      "ring rata"
+    ],
+    "keywords": [
+      "flat washer",
+      "washer",
+      "large washer"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "ring per",
+      "ring pegas"
+    ],
+    "keywords": [
+      "spring washer"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "pen",
+      "pasak"
+    ],
+    "keywords": [
+      "pin",
+      "axis pin"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "kotter",
+      "pen kotter",
+      "split pin",
+      "pen belah"
+    ],
+    "keywords": [
+      "cotter pin"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "sirklip",
+      "klip as",
+      "circlip",
+      "snap ring"
+    ],
+    "keywords": [
+      "snap ring",
+      "circlip"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "nipel grease",
+      "vet nipel",
+      "gemuk nipel",
+      "grease nipple"
+    ],
+    "keywords": [
+      "grease nipple"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "paku keling",
+      "rivet"
+    ],
+    "keywords": [
+      "rivet"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "sumbat",
+      "plug",
+      "baut tap"
+    ],
+    "keywords": [
+      "plug",
+      "screw plug"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "bracket",
+      "braket",
+      "dudukan",
+      "breket"
+    ],
+    "keywords": [
+      "bracket",
+      "support"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "noken as",
+      "nokenas",
+      "nokken as",
+      "noken",
+      "kem",
+      "camshaft",
+      "nok as"
+    ],
+    "keywords": [
+      "camshaft"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "kruk as",
+      "kruk-as",
+      "krukas",
+      "crankshaft",
+      "poros engkol"
+    ],
+    "keywords": [
+      "crankshaft"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "blok mesin",
+      "cylinder block",
+      "blok silinder"
+    ],
+    "keywords": [
+      "cylinder block"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "kepala silinder",
+      "cylinder head",
+      "kop mesin",
+      "cop mesin"
+    ],
+    "keywords": [
+      "cylinder head"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "boring",
+      "liner",
+      "cylinder liner",
+      "silinder liner"
+    ],
+    "keywords": [
+      "cylinder liner",
+      "liner"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "roda gila",
+      "flywheel",
+      "fly wheel"
+    ],
+    "keywords": [
+      "flywheel"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "puli",
+      "pulley",
+      "pully"
+    ],
+    "keywords": [
+      "pulley"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "timing gear",
+      "gigi timing",
+      "rantai keteng",
+      "rante keteng",
+      "timing chain"
+    ],
+    "keywords": [
+      "timing gear"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "busi pijar",
+      "glow plug",
+      "pemanas intake",
+      "pemanas udara masuk"
+    ],
+    "keywords": [
+      "intake heater"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "intercooler",
+      "inter cooler"
+    ],
+    "keywords": [
+      "intercooler"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "manifold",
+      "intake manifold",
+      "exhaust manifold",
+      "manipul"
+    ],
+    "keywords": [
+      "manifold",
+      "exhaust manifold"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "dudukan mesin",
+      "engine mounting",
+      "kaki mesin",
+      "karet mesin",
+      "karet ganjel mesin",
+      "mounting mesin"
+    ],
+    "keywords": [
+      "engine support"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "sil klep",
+      "seal klep",
+      "valve seal"
+    ],
+    "keywords": [
+      "valve seal"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "tutup klep",
+      "cylinder head cover",
+      "valve cover"
+    ],
+    "keywords": [
+      "cylinder head cover",
+      "valve cover"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "knalpot",
+      "muffler",
+      "silencer"
+    ],
+    "keywords": [
+      "muffler",
+      "silencer",
+      "exhaust"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "pipa knalpot",
+      "exhaust pipe"
+    ],
+    "keywords": [
+      "exhaust pipe"
+    ]
+  },
+  {
+    "grup": "fuel",
+    "triggers": [
+      "tangki solar",
+      "tangki bahan bakar",
+      "fuel tank"
+    ],
+    "keywords": [
+      "fuel tank"
+    ]
+  },
+  {
+    "grup": "fuel",
+    "triggers": [
+      "selang solar",
+      "pipa solar",
+      "fuel pipe"
+    ],
+    "keywords": [
+      "fuel pipe"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "tabung angin",
+      "tangki angin",
+      "air tank",
+      "air reservoir"
+    ],
+    "keywords": [
+      "air reservoir"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "kompresor angin",
+      "air compressor",
+      "kompresor rem"
+    ],
+    "keywords": [
+      "air compressor"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "brake chamber",
+      "matahari rem",
+      "pampam rem"
+    ],
+    "keywords": [
+      "brake chamber"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "stelan rem",
+      "slack adjuster",
+      "adjuster rem"
+    ],
+    "keywords": [
+      "slack adjuster"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "selang rem",
+      "brake hose"
+    ],
+    "keywords": [
+      "brake hose"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "pipa rem",
+      "brake pipe"
+    ],
+    "keywords": [
+      "brake pipe"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "abs",
+      "sensor abs"
+    ],
+    "keywords": [
+      "ABS sensor",
+      "wheel speed sensor"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "garpu persneling",
+      "garpu perseneling",
+      "shift fork",
+      "garpu gigi"
+    ],
+    "keywords": [
+      "shift fork"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "tuas persneling",
+      "shift lever",
+      "tuas gigi"
+    ],
+    "keywords": [
+      "shift lever",
+      "gear shift"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "sincromes",
+      "synchromesh",
+      "sinkromes"
+    ],
+    "keywords": [
+      "synchronizer",
+      "synchronous"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "bak gigi",
+      "gearbox",
+      "girboks",
+      "transmisi",
+      "transmisi assy",
+      "transmission assy",
+      "rumah transmisi"
+    ],
+    "keywords": [
+      "transmission",
+      "gearbox",
+      "gear box",
+      "变速器"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "pto",
+      "power take off"
+    ],
+    "keywords": [
+      "power take-off",
+      "PTO"
+    ]
+  },
+  {
+    "grup": "kemudi",
+    "triggers": [
+      "stir",
+      "setir",
+      "kemudi",
+      "steering"
+    ],
+    "keywords": [
+      "steering"
+    ]
+  },
+  {
+    "grup": "kemudi",
+    "triggers": [
+      "gearbox stir",
+      "steering gear",
+      "power steering",
+      "steering box"
+    ],
+    "keywords": [
+      "steering gear",
+      "power steering"
+    ]
+  },
+  {
+    "grup": "kemudi",
+    "triggers": [
+      "king pin",
+      "kingpin",
+      "pen kingpin"
+    ],
+    "keywords": [
+      "king pin",
+      "kingpin"
+    ]
+  },
+  {
+    "grup": "kemudi",
+    "triggers": [
+      "batang stir",
+      "steering column",
+      "as stir"
+    ],
+    "keywords": [
+      "steering column",
+      "steering shaft"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "baut u",
+      "u bolt",
+      "u-bolt",
+      "baut per",
+      "klem per"
+    ],
+    "keywords": [
+      "U-bolt",
+      "U bolt"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "per keong",
+      "coil spring",
+      "per spiral"
+    ],
+    "keywords": [
+      "coil spring"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "stabilizer",
+      "stabiliser",
+      "anti roll",
+      "batang stabil"
+    ],
+    "keywords": [
+      "stabilizer",
+      "stabilizer bar"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "center bolt",
+      "baut tengah per"
+    ],
+    "keywords": [
+      "center bolt"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "hanger per",
+      "gantungan per",
+      "spring hanger"
+    ],
+    "keywords": [
+      "spring hanger",
+      "spring bracket"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "air bag",
+      "balon suspensi",
+      "air spring"
+    ],
+    "keywords": [
+      "air spring",
+      "air bag"
+    ]
+  },
+  {
+    "grup": "roda",
+    "triggers": [
+      "naf roda",
+      "hub roda",
+      "wheel hub",
+      "tromol depan"
+    ],
+    "keywords": [
+      "wheel hub",
+      "hub"
+    ]
+  },
+  {
+    "grup": "roda",
+    "triggers": [
+      "baut roda",
+      "wheel bolt",
+      "mur roda"
+    ],
+    "keywords": [
+      "wheel bolt",
+      "wheel nut",
+      "hub bolt"
+    ]
+  },
+  {
+    "grup": "roda",
+    "triggers": [
+      "sil roda",
+      "hub seal",
+      "sil hub"
+    ],
+    "keywords": [
+      "hub oil seal"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "kabel body",
+      "wiring",
+      "harness",
+      "soket kabel",
+      "wiring harness"
+    ],
+    "keywords": [
+      "wiring harness",
+      "harness"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "saklar",
+      "switch",
+      "sakelar"
+    ],
+    "keywords": [
+      "switch"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "sensor"
+    ],
+    "keywords": [
+      "sensor"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "sekring",
+      "fuse",
+      "sikring"
+    ],
+    "keywords": [
+      "fuse"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "relay",
+      "relai"
+    ],
+    "keywords": [
+      "relay"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu sein",
+      "lampu riting",
+      "lampu sen"
+    ],
+    "keywords": [
+      "turn signal",
+      "combination lamp"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu belakang",
+      "lampu rem",
+      "stop lamp",
+      "lampu stop"
+    ],
+    "keywords": [
+      "tail lamp",
+      "brake lamp"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "motor wiper",
+      "dinamo wiper",
+      "wiper motor"
+    ],
+    "keywords": [
+      "wiper motor"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "soket",
+      "konektor",
+      "socket",
+      "konektor kabel"
+    ],
+    "keywords": [
+      "connector",
+      "socket"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "spido",
+      "speedometer",
+      "panel instrumen",
+      "spidometer"
+    ],
+    "keywords": [
+      "instrument",
+      "speedometer"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "handle pintu",
+      "gagang pintu",
+      "door handle",
+      "hendel pintu"
+    ],
+    "keywords": [
+      "door handle"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "karet pintu",
+      "weatherstrip",
+      "list pintu"
+    ],
+    "keywords": [
+      "door seal",
+      "sealing strip"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "jok",
+      "kursi",
+      "bangku",
+      "jok sopir"
+    ],
+    "keywords": [
+      "seat"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "dasbor",
+      "dashboard",
+      "panel dasbor"
+    ],
+    "keywords": [
+      "dashboard",
+      "instrument panel"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "sabuk pengaman",
+      "seatbelt",
+      "seat belt",
+      "safety belt"
+    ],
+    "keywords": [
+      "safety belt",
+      "seat belt"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "power window",
+      "motor kaca",
+      "window regulator"
+    ],
+    "keywords": [
+      "window regulator",
+      "power window"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "tangki washer",
+      "tabung air wiper",
+      "washer tank"
+    ],
+    "keywords": [
+      "washer tank"
+    ]
+  },
+  {
+    "grup": "kopling",
+    "triggers": [
+      "master kopling",
+      "clutch master",
+      "master kopling atas"
+    ],
+    "keywords": [
+      "clutch master cylinder"
+    ]
+  },
+  {
+    "grup": "kopling",
+    "triggers": [
+      "booster kopling",
+      "clutch booster",
+      "master kopling bawah"
+    ],
+    "keywords": [
+      "clutch booster"
+    ]
+  },
+  {
+    "grup": "pendingin",
+    "triggers": [
+      "tabung reservoir",
+      "tabung radiator",
+      "expansion tank"
+    ],
+    "keywords": [
+      "expansion tank",
+      "reservoir"
+    ]
+  },
+  {
+    "grup": "pendingin",
+    "triggers": [
+      "kisi radiator",
+      "radiator core"
+    ],
+    "keywords": [
+      "radiator core"
+    ]
+  },
+  {
+    "grup": "ac",
+    "triggers": [
+      "kompresor ac",
+      "ac compressor",
+      "kompresor ec"
+    ],
+    "keywords": [
+      "air conditioner compressor",
+      "compressor"
+    ]
+  },
+  {
+    "grup": "ac",
+    "triggers": [
+      "kondensor",
+      "condenser",
+      "kondensor ac"
+    ],
+    "keywords": [
+      "condenser"
+    ]
+  },
+  {
+    "grup": "ac",
+    "triggers": [
+      "evaporator",
+      "evaporator ac"
+    ],
+    "keywords": [
+      "evaporator"
+    ]
+  },
+  {
+    "grup": "ac",
+    "triggers": [
+      "blower",
+      "blower ac",
+      "motor blower"
+    ],
+    "keywords": [
+      "blower"
+    ]
+  },
+  {
+    "grup": "ac",
+    "triggers": [
+      "filter ac",
+      "filter kabin",
+      "cabin filter"
+    ],
+    "keywords": [
+      "air conditioner filter"
+    ]
+  },
+  {
+    "grup": "ac",
+    "triggers": [
+      "dryer",
+      "drier",
+      "receiver drier",
+      "filter dryer",
+      "pengering angin",
+      "dryer rem"
+    ],
+    "keywords": [
+      "dryer",
+      "drier"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "spatbor",
+      "fender"
+    ],
+    "keywords": [
+      "fender",
+      "mudguard"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "tutup tangki",
+      "fuel tank cap",
+      "tutup solar"
+    ],
+    "keywords": [
+      "fuel tank cap",
+      "tank cap"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "tangga",
+      "injakan kaki",
+      "footstep"
+    ],
+    "keywords": [
+      "step"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "grill",
+      "gril depan",
+      "front grille"
+    ],
+    "keywords": [
+      "grille"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "persneling",
+      "perseneling",
+      "oper gigi",
+      "pindah gigi"
+    ],
+    "keywords": [
+      "transmission",
+      "gear shift",
+      "gearbox"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "pelatuk",
+      "pelatuk klep",
+      "templar klep",
+      "rocker arm"
+    ],
+    "keywords": [
+      "rocker arm",
+      "engine rocker arm",
+      "steering rocker arm"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "batang klep",
+      "tongkat klep",
+      "push rod",
+      "pushrod"
+    ],
+    "keywords": [
+      "push rod",
+      "valve push rod"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "tappet",
+      "valve tappet",
+      "lifter klep",
+      "pengangkat klep"
+    ],
+    "keywords": [
+      "tappet",
+      "valve tappet",
+      "tappet rod"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "pompa oli",
+      "oil pump"
+    ],
+    "keywords": [
+      "oil pump"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "oil cooler",
+      "pendingin oli",
+      "cooler oli"
+    ],
+    "keywords": [
+      "oil cooler",
+      "engine oil cooler"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "common rail",
+      "rel injektor",
+      "rel solar"
+    ],
+    "keywords": [
+      "common rail",
+      "common rail pipe"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "breather",
+      "ventilasi mesin",
+      "nafas mesin"
+    ],
+    "keywords": [
+      "breather",
+      "breather plug"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "balance shaft",
+      "poros penyeimbang",
+      "balancer"
+    ],
+    "keywords": [
+      "balance shaft"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "elbow",
+      "pipa siku",
+      "sambungan siku",
+      "knee pipa"
+    ],
+    "keywords": [
+      "elbow",
+      "exhaust elbow",
+      "coolant elbow"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "retarder",
+      "rem retarder"
+    ],
+    "keywords": [
+      "retarder"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "relay valve",
+      "katup relay",
+      "relay rem"
+    ],
+    "keywords": [
+      "relay valve"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "solenoid",
+      "solenoid valve",
+      "katup solenoid"
+    ],
+    "keywords": [
+      "solenoid valve",
+      "solenoid"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "drain valve",
+      "kran buang angin",
+      "katup pembuang",
+      "kran angin"
+    ],
+    "keywords": [
+      "drain valve"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "diaphragm",
+      "diafragma",
+      "membran rem"
+    ],
+    "keywords": [
+      "diaphragm",
+      "diaphragm spring brake chamber"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "reducer",
+      "gigi reduksi",
+      "gardan reduksi",
+      "final drive"
+    ],
+    "keywords": [
+      "reducer",
+      "main reducer",
+      "wheel rim reducer"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "idler",
+      "gigi idle",
+      "gigi antara",
+      "idler gear"
+    ],
+    "keywords": [
+      "idler",
+      "idler shaft"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "differential lock",
+      "kunci gardan",
+      "diff lock",
+      "gardan lock"
+    ],
+    "keywords": [
+      "differential lock"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "spline",
+      "alur as",
+      "spline shaft"
+    ],
+    "keywords": [
+      "spline"
+    ]
+  },
+  {
+    "grup": "kemudi",
+    "triggers": [
+      "knuckle",
+      "steering knuckle",
+      "kepalan kemudi",
+      "knuckle arm",
+      "lengan knuckle"
+    ],
+    "keywords": [
+      "steering knuckle",
+      "knuckle arm",
+      "knuckle"
+    ]
+  },
+  {
+    "grup": "kemudi",
+    "triggers": [
+      "regulator",
+      "voltage regulator",
+      "regulator tegangan",
+      "kiprok"
+    ],
+    "keywords": [
+      "regulator"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "thrust rod",
+      "batang reaksi",
+      "stang reaksi",
+      "torque rod"
+    ],
+    "keywords": [
+      "thrust rod",
+      "V-type thrust rod"
+    ]
+  },
+  {
+    "grup": "chassis",
+    "triggers": [
+      "cross member",
+      "cross beam",
+      "balok melintang",
+      "palang sasis"
+    ],
+    "keywords": [
+      "cross beam",
+      "cross member"
+    ]
+  },
+  {
+    "grup": "chassis",
+    "triggers": [
+      "sasis",
+      "chassis",
+      "rangka chassis"
+    ],
+    "keywords": [
+      "chassis",
+      "frame"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "sun shade",
+      "sun visor",
+      "pelindung matahari",
+      "penahan silau"
+    ],
+    "keywords": [
+      "sun shade",
+      "sun visor"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "kap mesin",
+      "hood",
+      "engine hood",
+      "kap depan"
+    ],
+    "keywords": [
+      "hood",
+      "engine hood"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "deflector",
+      "air deflector",
+      "pengarah angin",
+      "spoiler atap"
+    ],
+    "keywords": [
+      "air deflector",
+      "deflector"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "plat nomor",
+      "license plate",
+      "dudukan plat nomor"
+    ],
+    "keywords": [
+      "license plate"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "junction box",
+      "kotak sambungan",
+      "kotak sekring"
+    ],
+    "keywords": [
+      "junction box",
+      "electrical junction box"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu marka",
+      "marker lamp",
+      "marker light",
+      "lampu samping"
+    ],
+    "keywords": [
+      "marker light"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "bohlam",
+      "bulb",
+      "lampu bohlam"
+    ],
+    "keywords": [
+      "bulb"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "lantai kabin",
+      "floor",
+      "alas kabin"
+    ],
+    "keywords": [
+      "floor"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "sandaran jok",
+      "backrest",
+      "sandaran kursi"
+    ],
+    "keywords": [
+      "backrest"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "pemanas",
+      "heater",
+      "heater kabin"
+    ],
+    "keywords": [
+      "heater"
+    ]
+  },
+  {
+    "grup": "fuel",
+    "triggers": [
+      "urea",
+      "adblue",
+      "tangki urea",
+      "tangki adblue",
+      "def tank"
+    ],
+    "keywords": [
+      "urea",
+      "urea tank"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "spacer",
+      "ring antara",
+      "pengganjal",
+      "ganjal"
+    ],
+    "keywords": [
+      "spacer",
+      "spacer ring",
+      "spacer bushing"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "sleeve",
+      "selongsong",
+      "bos sleeve"
+    ],
+    "keywords": [
+      "sleeve"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "retainer",
+      "penahan"
+    ],
+    "keywords": [
+      "retainer"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "shield",
+      "pelindung",
+      "heat shield",
+      "pelindung panas"
+    ],
+    "keywords": [
+      "shield",
+      "heat shield"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "laher jarum",
+      "needle bearing",
+      "bearing jarum",
+      "needle roller"
+    ],
+    "keywords": [
+      "needle roller bearing",
+      "needle bearing"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "thrust washer",
+      "ring aksial",
+      "ring dorong"
+    ],
+    "keywords": [
+      "thrust washer"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "pedal",
+      "pedal gas",
+      "pedal rem",
+      "pedal kopling",
+      "pedal akselerator"
+    ],
+    "keywords": [
+      "pedal"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "tensioner",
+      "tensioner belt",
+      "puli tensioner",
+      "setelan van belt",
+      "stel belt",
+      "penegang belt"
+    ],
+    "keywords": [
+      "tensioning pulley",
+      "tension screw"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "gantungan kopel",
+      "center bearing",
+      "senter bearing",
+      "laher tengah kopel"
+    ],
+    "keywords": [
+      "center bearing"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "planetary carrier",
+      "rumah planet",
+      "dudukan planet",
+      "carrier planet"
+    ],
+    "keywords": [
+      "planetary carrier"
+    ]
+  },
+  {
+    "grup": "kemudi",
+    "triggers": [
+      "pompa power steering",
+      "pompa stir",
+      "pompa ps",
+      "vane pump",
+      "power steering pump"
+    ],
+    "keywords": [
+      "power steering pump",
+      "steering vane pump",
+      "vane pump"
+    ]
+  },
+  {
+    "grup": "ac",
+    "triggers": [
+      "expansion valve",
+      "katup ekspansi",
+      "klep ekspansi ac"
+    ],
+    "keywords": [
+      "expansion valve"
+    ]
+  },
+  {
+    "grup": "ac",
+    "triggers": [
+      "accumulator",
+      "akumulator ac",
+      "tabung akumulator ac"
+    ],
+    "keywords": [
+      "accumulator"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "damper kabin",
+      "shock kabin",
+      "peredam kabin",
+      "cab damper"
+    ],
+    "keywords": [
+      "cab coil spring damper",
+      "cab air spring damper",
+      "damper"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "alarm mundur",
+      "buzzer mundur",
+      "klakson mundur",
+      "reversing buzzer",
+      "buzzer"
+    ],
+    "keywords": [
+      "reversing buzzer",
+      "buzzer"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "sensor putaran",
+      "sensor kecepatan",
+      "speed sensor",
+      "rotational speed sensor"
+    ],
+    "keywords": [
+      "speed sensor",
+      "rotational speed sensor"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "kunci pintu",
+      "door lock",
+      "slot pintu"
+    ],
+    "keywords": [
+      "door lock"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "kaca pintu",
+      "door glass"
+    ],
+    "keywords": [
+      "door glass"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "dust cover",
+      "karet boot",
+      "karet pelindung",
+      "tutup debu",
+      "boot"
+    ],
+    "keywords": [
+      "dust cover"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "backing plate",
+      "tatakan rem",
+      "dudukan sepatu rem",
+      "piringan tatakan rem"
+    ],
+    "keywords": [
+      "backing plate"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "return spring",
+      "per balik",
+      "per pengembali",
+      "pegas pengembali"
+    ],
+    "keywords": [
+      "return spring"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "cushion",
+      "bantalan karet",
+      "karet ganjal",
+      "ganjal karet"
+    ],
+    "keywords": [
+      "cushion",
+      "cushion block"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "trim panel",
+      "list interior",
+      "panel trim",
+      "door trim",
+      "list pintu dalam"
+    ],
+    "keywords": [
+      "trim panel",
+      "trim cover"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "brake camshaft",
+      "nok rem",
+      "poros nok rem",
+      "cam rem",
+      "s-cam"
+    ],
+    "keywords": [
+      "brake camshaft"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "klakson angin",
+      "air horn",
+      "terompet",
+      "telolet"
+    ],
+    "keywords": [
+      "air horn"
+    ]
+  },
+  {
+    "grup": "kabin",
+    "triggers": [
+      "kunci kabin",
+      "cab lock",
+      "tilt kabin",
+      "cab lifting",
+      "cab turnover",
+      "pompa kabin"
+    ],
+    "keywords": [
+      "cab lock",
+      "cab lifting",
+      "cab turnover"
+    ]
+  },
+  {
+    "grup": "filter",
+    "triggers": [
+      "elemen filter",
+      "filter element"
+    ],
+    "keywords": [
+      "filter element"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "saklar kombinasi",
+      "combination switch",
+      "saklar lampu sein",
+      "tuas lampu"
+    ],
+    "keywords": [
+      "combination switch"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "sensor tekanan",
+      "pressure sensor",
+      "sensor tekanan oli"
+    ],
+    "keywords": [
+      "pressure sensor"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "sensor suhu",
+      "temperature sensor",
+      "sensor temperatur"
+    ],
+    "keywords": [
+      "temperature sensor"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "sensor ketinggian",
+      "level sensor",
+      "sensor level",
+      "pelampung solar"
+    ],
+    "keywords": [
+      "level sensor"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lock cylinder",
+      "silinder kunci"
+    ],
+    "keywords": [
+      "lock cylinder"
+    ]
+  },
+  {
+    "grup": "pendingin",
+    "triggers": [
+      "water tank",
+      "tangki air radiator",
+      "tangki air"
+    ],
+    "keywords": [
+      "water tank"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "range gear",
+      "gigi range",
+      "gigi tinggi rendah",
+      "high low"
+    ],
+    "keywords": [
+      "range gear"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "input shaft",
+      "as input",
+      "poros input",
+      "as primer"
+    ],
+    "keywords": [
+      "input shaft"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "main shaft",
+      "as utama",
+      "poros utama"
+    ],
+    "keywords": [
+      "main shaft"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "counter shaft",
+      "as counter",
+      "poros bantu",
+      "layshaft"
+    ],
+    "keywords": [
+      "counter shaft"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "output shaft",
+      "as output",
+      "poros keluaran"
+    ],
+    "keywords": [
+      "output shaft"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "fork shaft",
+      "as garpu",
+      "poros garpu persneling"
+    ],
+    "keywords": [
+      "fork shaft"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "planetary gear",
+      "gigi planet"
+    ],
+    "keywords": [
+      "planetary gear"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "synchronizer ring",
+      "ring sincromes",
+      "ring sinkromes"
+    ],
+    "keywords": [
+      "synchronizer ring"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "drive gear",
+      "driven gear",
+      "gigi penggerak",
+      "gigi yang digerakkan"
+    ],
+    "keywords": [
+      "drive gear",
+      "driven gear"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "per klep",
+      "valve spring",
+      "pegas klep"
+    ],
+    "keywords": [
+      "valve spring"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "pen piston",
+      "pen seher",
+      "piston pin"
+    ],
+    "keywords": [
+      "piston pin"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "thrust plate",
+      "plat aksial",
+      "plat dorong",
+      "metal bulan",
+      "metalan bulan",
+      "metal setengah bulan",
+      "metal stoper",
+      "metal stoper kruk as"
+    ],
+    "keywords": [
+      "thrust plate"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "sil depan mesin",
+      "sil belakang mesin",
+      "front oil seal",
+      "rear oil seal",
+      "sil kruk as"
+    ],
+    "keywords": [
+      "front oil seal",
+      "rear oil seal"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "gigi noken as",
+      "camshaft gear",
+      "gigi timing noken"
+    ],
+    "keywords": [
+      "camshaft gear"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "tutup oli",
+      "oil filler",
+      "lubang isi oli",
+      "filler oli"
+    ],
+    "keywords": [
+      "oil filler"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "stick oli",
+      "dipstick",
+      "tongkat ukur oli",
+      "deepstick"
+    ],
+    "keywords": [
+      "dipstick",
+      "oil dipstick"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "pipa oli",
+      "oil pipe",
+      "saluran oli",
+      "pipa balik oli"
+    ],
+    "keywords": [
+      "oil pipe",
+      "oil return pipe"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "air duct",
+      "saluran udara",
+      "ducting",
+      "selang intake"
+    ],
+    "keywords": [
+      "air duct"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "inlet pipe",
+      "pipa masuk",
+      "pipa inlet"
+    ],
+    "keywords": [
+      "inlet pipe"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "oil tank",
+      "tangki oli"
+    ],
+    "keywords": [
+      "oil tank"
+    ]
+  },
+  {
+    "grup": "filter",
+    "triggers": [
+      "saringan kasar",
+      "coarse filter",
+      "pre filter solar",
+      "filter kasar"
+    ],
+    "keywords": [
+      "coarse filter"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "rem tangan",
+      "hand brake",
+      "rem parkir",
+      "handbrake"
+    ],
+    "keywords": [
+      "hand brake"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "check valve",
+      "katup satu arah",
+      "quick release valve",
+      "katup pelepas cepat"
+    ],
+    "keywords": [
+      "check valve",
+      "quick release valve"
+    ]
+  },
+  {
+    "grup": "kopling",
+    "triggers": [
+      "garpu kopling",
+      "release fork",
+      "garpu pembebas",
+      "tuas pembebas kopling"
+    ],
+    "keywords": [
+      "release fork"
+    ]
+  },
+  {
+    "grup": "kemudi",
+    "triggers": [
+      "kabel gas",
+      "accelerator cable",
+      "tali gas",
+      "kabel akselerator"
+    ],
+    "keywords": [
+      "accelerator cable"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "emblem",
+      "logo",
+      "nameplate",
+      "name board",
+      "merk",
+      "stiker logo"
+    ],
+    "keywords": [
+      "nameplate",
+      "name board",
+      "logo"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "speed gear",
+      "gigi percepatan",
+      "gigi satu",
+      "gigi tiga"
+    ],
+    "keywords": [
+      "speed gear"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "planetary shaft",
+      "as planet",
+      "poros planet"
+    ],
+    "keywords": [
+      "planetary shaft"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "meshing sleeve",
+      "sliding sleeve",
+      "kopel sleeve",
+      "sleeve gigi"
+    ],
+    "keywords": [
+      "meshing sleeve"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "gear ring",
+      "ring gigi",
+      "ring starter",
+      "tone ring"
+    ],
+    "keywords": [
+      "gear ring"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "flywheel housing",
+      "rumah roda gila",
+      "rumah flywheel"
+    ],
+    "keywords": [
+      "flywheel housing"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "intake hose",
+      "selang turbo",
+      "selang intercooler",
+      "selang udara masuk"
+    ],
+    "keywords": [
+      "intake hose"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "throttle",
+      "skep gas",
+      "katup gas",
+      "throttle cable"
+    ],
+    "keywords": [
+      "throttle"
+    ]
+  },
+  {
+    "grup": "kopling",
+    "triggers": [
+      "clutch housing",
+      "rumah kopling",
+      "bak kopling"
+    ],
+    "keywords": [
+      "clutch housing"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "exhaust brake",
+      "rem buang",
+      "rem gas buang",
+      "engine brake"
+    ],
+    "keywords": [
+      "exhaust brake"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "limit block",
+      "blok pembatas",
+      "stopper",
+      "karet stopper"
+    ],
+    "keywords": [
+      "limit block"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "pipe joint",
+      "sambungan pipa",
+      "nepel pipa",
+      "joint pipa"
+    ],
+    "keywords": [
+      "pipe joint"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "guard plate",
+      "plat pelindung",
+      "pelat pelindung"
+    ],
+    "keywords": [
+      "guard plate"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "connecting plate",
+      "plat penghubung",
+      "plat sambung"
+    ],
+    "keywords": [
+      "connecting plate"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "protective cover",
+      "tutup pelindung",
+      "cover pelindung"
+    ],
+    "keywords": [
+      "protective cover"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "insulation",
+      "peredam panas",
+      "isolasi panas",
+      "insulation pad"
+    ],
+    "keywords": [
+      "insulation"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "buckle",
+      "gesper",
+      "klip plastik",
+      "pengunci sabuk"
+    ],
+    "keywords": [
+      "buckle"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "karpet lantai",
+      "floor mat",
+      "karpet kabin",
+      "alas kaki"
+    ],
+    "keywords": [
+      "floor mat"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "towing hook",
+      "kait derek",
+      "hook derek",
+      "pengait derek"
+    ],
+    "keywords": [
+      "towing hook"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "defrost",
+      "defroster",
+      "saluran defrost",
+      "ac kaca depan"
+    ],
+    "keywords": [
+      "defrost"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "kunci kontak",
+      "ignition lock",
+      "ignition switch",
+      "rumah kunci kontak"
+    ],
+    "keywords": [
+      "ignition lock"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "module",
+      "modul",
+      "modul ecu",
+      "cooling module"
+    ],
+    "keywords": [
+      "module"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "controller",
+      "kontroler",
+      "door controller",
+      "modul pintu"
+    ],
+    "keywords": [
+      "controller"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu kabut",
+      "fog lamp",
+      "fog light",
+      "lampu foglamp"
+    ],
+    "keywords": [
+      "fog lamp",
+      "fog light"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "rumah gardan",
+      "rumah as",
+      "axle housing",
+      "rumah differential",
+      "bak gardan"
+    ],
+    "keywords": [
+      "axle housing",
+      "differential housing"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "gigi pinion",
+      "pinion",
+      "drive pinion",
+      "as pinion"
+    ],
+    "keywords": [
+      "pinion shaft",
+      "bevel pinion"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "behel",
+      "pegangan tangan",
+      "handrail",
+      "pegangan kabin",
+      "behel kabin"
+    ],
+    "keywords": [
+      "handrail"
+    ]
+  },
+  {
+    "grup": "ac",
+    "triggers": [
+      "aktuator",
+      "actuator",
+      "motor aktuator",
+      "air door actuator"
+    ],
+    "keywords": [
+      "actuator"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "selang keriting",
+      "selang fleksibel",
+      "corrugated",
+      "pelindung kabel keriting",
+      "selang bergelombang"
+    ],
+    "keywords": [
+      "corrugated pipe",
+      "corrugated sheath"
+    ]
+  },
+  {
+    "grup": "fuel",
+    "triggers": [
+      "pipa balik solar",
+      "selang balik solar",
+      "fuel return",
+      "return solar",
+      "pipa pengembali solar",
+      "pipa balik",
+      "selang balik",
+      "pipa pengembali",
+      "pipa kembali",
+      "saluran balik"
+    ],
+    "keywords": [
+      "fuel return pipe",
+      "oil return pipe",
+      "return pipe",
+      "return hose"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "teromol",
+      "tromol roda"
+    ],
+    "keywords": [
+      "brake drum"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "piringan rem",
+      "cakram rem",
+      "disc rem"
+    ],
+    "keywords": [
+      "brake disc"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "kaliper rem",
+      "caliper rem",
+      "kaliper"
+    ],
+    "keywords": [
+      "brake caliper"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "slang rem"
+    ],
+    "keywords": [
+      "brake hose"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "kampas rem tromol"
+    ],
+    "keywords": [
+      "brake lining"
+    ]
+  },
+  {
+    "grup": "roda",
+    "triggers": [
+      "peleg"
+    ],
+    "keywords": [
+      "wheel rim"
+    ]
+  },
+  {
+    "grup": "roda",
+    "triggers": [
+      "seal roda"
+    ],
+    "keywords": [
+      "wheel oil seal",
+      "hub oil seal"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "panci oli"
+    ],
+    "keywords": [
+      "oil pan"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "tutup kepala silinder",
+      "cover klep"
+    ],
+    "keywords": [
+      "valve cover",
+      "cylinder head cover"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "paking kepala silinder",
+      "packing kepala silinder",
+      "paking head",
+      "gasket head"
+    ],
+    "keywords": [
+      "cylinder head gasket"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "tabung seher"
+    ],
+    "keywords": [
+      "cylinder liner"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "klep masuk",
+      "klep isap",
+      "klep in"
+    ],
+    "keywords": [
+      "intake valve"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "klep buang",
+      "klep ex"
+    ],
+    "keywords": [
+      "exhaust valve"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "dudukan klep",
+      "sitting klep"
+    ],
+    "keywords": [
+      "valve seat"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "tutup thermostat"
+    ],
+    "keywords": [
+      "thermostat housing",
+      "thermostat cover"
+    ]
+  },
+  {
+    "grup": "pendingin",
+    "triggers": [
+      "sarang radiator",
+      "inti radiator"
+    ],
+    "keywords": [
+      "radiator core"
+    ]
+  },
+  {
+    "grup": "pendingin",
+    "triggers": [
+      "selang radiator atas",
+      "selang radiator bawah"
+    ],
+    "keywords": [
+      "radiator hose"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu mundur"
+    ],
+    "keywords": [
+      "reversing lamp"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "reting"
+    ],
+    "keywords": [
+      "steering lamp",
+      "turn signal"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu kepala",
+      "lampu besar"
+    ],
+    "keywords": [
+      "head lamp",
+      "headlamp",
+      "front combination lamp"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "kabel bodi"
+    ],
+    "keywords": [
+      "wiring harness"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "motor stater"
+    ],
+    "keywords": [
+      "starter motor"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "handel pintu"
+    ],
+    "keywords": [
+      "door handle"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "slebor"
+    ],
+    "keywords": [
+      "fender",
+      "mudguard"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "bumper depan"
+    ],
+    "keywords": [
+      "bumper"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "injakan"
+    ],
+    "keywords": [
+      "step"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "wiper blade"
+    ],
+    "keywords": [
+      "wiper blade",
+      "wiper arm"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "laher kopling"
+    ],
+    "keywords": [
+      "release bearing"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "laher tengah",
+      "laher gardan tengah"
+    ],
+    "keywords": [
+      "center bearing",
+      "intermediate bearing"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "poros kopel"
+    ],
+    "keywords": [
+      "drive shaft"
+    ]
+  },
+  {
+    "grup": "transmisi",
+    "triggers": [
+      "kopel salib",
+      "laher cross"
+    ],
+    "keywords": [
+      "universal joint",
+      "cross joint"
+    ]
+  },
+  {
+    "grup": "gardan",
+    "triggers": [
+      "poros roda"
+    ],
+    "keywords": [
+      "axle shaft",
+      "half shaft"
+    ]
+  },
+  {
+    "grup": "gardan",
+    "triggers": [
+      "nanas gardan"
+    ],
+    "keywords": [
+      "drive pinion"
+    ]
+  },
+  {
+    "grup": "gardan",
+    "triggers": [
+      "teromol gardan",
+      "mangkok gardan"
+    ],
+    "keywords": [
+      "differential housing",
+      "differential case"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "pen per"
+    ],
+    "keywords": [
+      "spring pin"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "karet per",
+      "bushing per",
+      "bos per"
+    ],
+    "keywords": [
+      "spring bushing"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "balljoint",
+      "kepala tie rod"
+    ],
+    "keywords": [
+      "ball joint"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "gajah duduk"
+    ],
+    "keywords": [
+      "tie rod"
+    ]
+  },
+  {
+    "grup": "kemudi",
+    "triggers": [
+      "gear box stir",
+      "gear box kemudi"
+    ],
+    "keywords": [
+      "steering gear"
+    ]
+  },
+  {
+    "grup": "bahan bakar",
+    "triggers": [
+      "feed pump"
+    ],
+    "keywords": [
+      "fuel pump"
+    ]
+  },
+  {
+    "grup": "bahan bakar",
+    "triggers": [
+      "tanki solar"
+    ],
+    "keywords": [
+      "fuel tank"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "paking karter",
+      "paking bak oli"
+    ],
+    "keywords": [
+      "oil pan gasket"
+    ]
+  }
+]

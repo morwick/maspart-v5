@@ -1,0 +1,16 @@
+# MASPART frontend (Next.js). Salin ke /etc/systemd/system/maspart-frontend.service
+[Unit]
+Description=MASPART Next.js frontend (next start)
+After=network.target maspart-backend.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/maspart/frontend
+Environment=NODE_ENV=production
+# Dengarkan hanya di localhost — Nginx yang menghadap publik.
+ExecStart=/usr/bin/npm run start -- -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

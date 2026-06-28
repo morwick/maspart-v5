@@ -1,0 +1,40 @@
+.streamlit/secrets.toml
+
+# Artefak runtime (jangan di-commit)
+.cache/
+__pycache__/
+*.pyc
+*.pyo
+
+# Cache gambar SIMS (regeneratable, besar)
+images/sims_cache/
+
+# Galeri embedding Cari-by-Foto (export tabel part_image_index, besar ~300MB)
+part_image_index_rows.csv
+data/part_image_index_rows.csv
+
+# Embedding lama Streamlit (tidak dipakai backend FastAPI, besar ~80MB)
+data/embeddings.parquet
+
+# Manual PDF sumber kode kesalahan (sudah diekstrak ke fault_codes.json, ~11MB)
+data/manuals/
+*MC_BOSCHECU*.pdf
+
+# Backend
+backend/.env
+backend/.cache/
+backend/venv/
+backend/.venv/
+
+# Frontend (Next.js)
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+
+# IDE / OS / build artefak
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+frontend/tsconfig.tsbuildinfo

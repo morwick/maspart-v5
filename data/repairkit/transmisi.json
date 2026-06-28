@@ -1,0 +1,4729 @@
+{
+  "8JS85TE": {
+    "model": "8JS85TE",
+    "tipe": "8-speed (Fast)",
+    "unit": [
+      "HOMAN 150HP 4X4 (LEZAD1ED)",
+      "HOMAN 150HP 4X4 (LEZDD2CC)"
+    ],
+    "assy_pn": [
+      "FZ220100885010/1"
+    ],
+    "jumlah_seal_kit": 15,
+    "jumlah_overhaul_tambahan": 19,
+    "seal_kit": {
+      "oil_seal": [
+        {
+          "pn": "LZ971622000001+113/1",
+          "nama": "6J80T-1703036 Oil Seal Cover Plate"
+        },
+        {
+          "pn": "LZ971622000001+130/1",
+          "nama": "F91444 oil seal"
+        },
+        {
+          "pn": "SPYD0000001330",
+          "nama": "Oil seal 19109-5"
+        },
+        {
+          "pn": "SPYD0000002773",
+          "nama": "Oil seal of main shaft bearing cap F91410F91410"
+        },
+        {
+          "pn": "SPYD0000003412",
+          "nama": "Oil seal 6J80T-1703035"
+        }
+      ],
+      "gasket": [
+        {
+          "pn": "LZ970422000054+205/1",
+          "nama": "Double H gasket"
+        },
+        {
+          "pn": "LZ971622000001+109/1",
+          "nama": "1948 1 Range follow-up valve gasket"
+        },
+        {
+          "pn": "LZ971622000001+175/1",
+          "nama": "JS85T-1701021-1-1 Power take-off window gasket"
+        }
+      ],
+      "o_ring": [
+        {
+          "pn": "FG9604241640",
+          "nama": "Shift cable through hole sealing ring assembly"
+        },
+        {
+          "pn": "FZ9604241640",
+          "nama": "Shift cable through hole sealing ring assembly"
+        },
+        {
+          "pn": "LZ970422000089+115/2",
+          "nama": "GB3452_1-21_2X3:55 O-ring rubber seal"
+        },
+        {
+          "pn": "LZ971622000001+102/1",
+          "nama": "125X2_65-A-S-GB3452_1 O-ring seal"
+        },
+        {
+          "pn": "LZ971622000001+115/1",
+          "nama": "6JS160T-1709588-1 O-ring seal"
+        },
+        {
+          "pn": "SPYD0000000367",
+          "nama": "O-ring GB3452_1-D0487G"
+        },
+        {
+          "pn": "SPYD0000000378",
+          "nama": "O-ring GB3452_1-16X2_65"
+        }
+      ]
+    },
+    "overhaul_tambahan": {
+      "bearing": [
+        {
+          "pn": "LG9716220005+125/1",
+          "nama": "6015N deep groove ball bearing"
+        },
+        {
+          "pn": "LG9716220005+177/1",
+          "nama": "JS85T-1707071 Bearing Positioning Plate"
+        },
+        {
+          "pn": "LG9716220005+191/1",
+          "nama": "NUP210EN cylindrical roller bearing"
+        },
+        {
+          "pn": "LG9716220005+210/1",
+          "nama": "RN307M/YA cylindrical roller bearing"
+        },
+        {
+          "pn": "LZ970422000054+111/1",
+          "nama": "Cylindrical roller bearing"
+        },
+        {
+          "pn": "LZ971622000001+105/1",
+          "nama": "14287 needle roller bearing"
+        },
+        {
+          "pn": "LZ971622000001+178/1",
+          "nama": "JS85T-1701040 One shaft bearing cover"
+        },
+        {
+          "pn": "SPYD0000000408",
+          "nama": "Cylindrical roller bearing NJ306EN-C3"
+        },
+        {
+          "pn": "SPYD0000001334",
+          "nama": "Deep groove ball bearing 6013X3N"
+        },
+        {
+          "pn": "SPYD0000006180",
+          "nama": "Clutch disengage bearing FQZC23100X57X47F0"
+        }
+      ],
+      "synchronizer": [
+        {
+          "pn": "LG9716220005+165/1",
+          "nama": "JS85T-1701140 first and second gear synchronizer assembly"
+        },
+        {
+          "pn": "LG9716220005+166/1",
+          "nama": "JS85T-1701150 3rd and 4th synchronizer assembly"
+        },
+        {
+          "pn": "SPYD0000001326",
+          "nama": "Sub box synchronizer assembly JS85T-1707140-4"
+        }
+      ],
+      "snap_ring": [
+        {
+          "pn": "LG9716220005+168/1",
+          "nama": "JS85T-1707022 retaining ring fixing ring"
+        },
+        {
+          "pn": "Q430110",
+          "nama": "Elastic snap ring for hole"
+        },
+        {
+          "pn": "Q43117",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43135",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43150",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43372",
+          "nama": "Flattened round wire snap ring for shaft"
+        }
+      ]
+    }
+  },
+  "HW13709XST": {
+    "model": "HW13709XST",
+    "tipe": "9-speed",
+    "unit": [
+      "NX280 4X2 MT (LZZ1CCSD)",
+      "NX280 6X2 (LZZ1BG3H)",
+      "NX280 6X4 (LZZ1BLVF)",
+      "NX280TH 6X2 (LZZ1CCSD)"
+    ],
+    "assy_pn": [
+      "HW13709XST216603",
+      "HW13709XST254512",
+      "HW13709XST254513"
+    ],
+    "jumlah_seal_kit": 35,
+    "jumlah_overhaul_tambahan": 56,
+    "seal_kit": {
+      "oil_seal": [
+        {
+          "pn": "SPCY0000000054",
+          "nama": "Oil seal HTC 55X80X10"
+        },
+        {
+          "pn": "WG9003070095",
+          "nama": "Combination frame oil seal"
+        },
+        {
+          "pn": "WG9003070440",
+          "nama": "First axle oil seal"
+        },
+        {
+          "pn": "WG9003072501",
+          "nama": "Inner oil seal of end cover"
+        },
+        {
+          "pn": "WG9003072502",
+          "nama": "Outer oil seal of end cover"
+        }
+      ],
+      "gasket": [
+        {
+          "pn": "AZ2208030004",
+          "nama": "Counter shaft bearing adjusting gasket unit (For helical tooth)"
+        },
+        {
+          "pn": "AZ2208100005",
+          "nama": "Adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2229100384",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "SPCY0000000034",
+          "nama": "Sealing gasket HW50-40"
+        },
+        {
+          "pn": "SPCY0000000047",
+          "nama": "Sealing gasket CC5012904001"
+        },
+        {
+          "pn": "SPCY0000000048",
+          "nama": "Sealing gasket HW50-22"
+        },
+        {
+          "pn": "WG2229000063",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229100024",
+          "nama": "Sun gear gasket (Rear)"
+        },
+        {
+          "pn": "WG2229100104",
+          "nama": "Planetary gear gasket"
+        },
+        {
+          "pn": "WG2229100290",
+          "nama": "Sun gear gasket (Front)"
+        },
+        {
+          "pn": "WG2229100382",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "WG2229100384",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229210143",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210145",
+          "nama": "Small cover gasket"
+        },
+        {
+          "pn": "WG2229240147",
+          "nama": "Inlet pipe gasket"
+        },
+        {
+          "pn": "WG2229250138",
+          "nama": "Dual H-valve gasket"
+        },
+        {
+          "pn": "WG2229250140",
+          "nama": "Pneumatic control valve gasket"
+        }
+      ],
+      "o_ring": [
+        {
+          "pn": "AZ9003070085",
+          "nama": "O-ring 26500850 GB3452.1"
+        },
+        {
+          "pn": "AZ9003071700",
+          "nama": "O-ring seal"
+        },
+        {
+          "pn": "AZ9003072000",
+          "nama": "O-ring 20X2.65 GB/T 3452.1 - 2005"
+        },
+        {
+          "pn": "AZ9003077100",
+          "nama": "O-ring 26507100 GB3452.1"
+        },
+        {
+          "pn": "AZ972529000009+109/1",
+          "nama": "25X2.65 O-shaped seal ring"
+        },
+        {
+          "pn": "SPCY0000000053",
+          "nama": "O-ring 32.5x2.65"
+        },
+        {
+          "pn": "SPCY0000000063",
+          "nama": "O-ring 8X1.8"
+        },
+        {
+          "pn": "WG2229100040",
+          "nama": "Range gear piston O-ring"
+        },
+        {
+          "pn": "WG2229230010",
+          "nama": "Inner hole sealing ring of split gear rear housing"
+        },
+        {
+          "pn": "WG9003070085",
+          "nama": "O-ring 26500850 GB3452.1"
+        },
+        {
+          "pn": "WG9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "WG9003071700",
+          "nama": "O-ring 26500170 GB3452.1"
+        },
+        {
+          "pn": "WG9003077100",
+          "nama": "O-ring 26507100 GB3452.1"
+        }
+      ]
+    },
+    "overhaul_tambahan": {
+      "bearing": [
+        {
+          "pn": "AZ9729290097",
+          "nama": "Rear bearing adjusting circlip set of PTO connecting shaft"
+        },
+        {
+          "pn": "SPCY0000000036",
+          "nama": "Bearing NUP209E"
+        },
+        {
+          "pn": "SPCY0000000038",
+          "nama": "Needle roller bearing K16X22X17"
+        },
+        {
+          "pn": "SPCY0000000056",
+          "nama": "Bearing NUP2206E"
+        },
+        {
+          "pn": "SPCY0000000058",
+          "nama": "Bearing NUP208E"
+        },
+        {
+          "pn": "SPCY0000000060",
+          "nama": "Bearing NJ206E"
+        },
+        {
+          "pn": "WG2229020063",
+          "nama": "Thrust bearing race (Large)"
+        },
+        {
+          "pn": "WG2229020064",
+          "nama": "Thrust bearing block slice"
+        },
+        {
+          "pn": "WG2229020065",
+          "nama": "Thrust bearing block slice lock plate"
+        },
+        {
+          "pn": "WG2229020067",
+          "nama": "Thrust bearing race (Small)"
+        },
+        {
+          "pn": "WG2229050008",
+          "nama": "Idler shaft thrust bearing race"
+        },
+        {
+          "pn": "WG2229054460",
+          "nama": "Idler shaft thrust roller bearing"
+        },
+        {
+          "pn": "WG2229100119",
+          "nama": "Needle roller bearing outer ring"
+        },
+        {
+          "pn": "WG9003310209",
+          "nama": "Cylindrical roller bearing NJ209E"
+        },
+        {
+          "pn": "WG9003310211",
+          "nama": "Cylindrical roller bearing NUP211EN"
+        },
+        {
+          "pn": "WG9003312307",
+          "nama": "Cylindrical roller bearing NUP2307E"
+        },
+        {
+          "pn": "WG9003320105",
+          "nama": "Quill bearing (NKI105 / 24N / YA)"
+        },
+        {
+          "pn": "WG9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "WG9003322714",
+          "nama": "Quill bearing K21X27X14.5"
+        },
+        {
+          "pn": "WG9003323308",
+          "nama": "Tapered roller bearing 30308 GB / T297 (For counter shaft )"
+        },
+        {
+          "pn": "WG9003328030",
+          "nama": "Quill bearing K70X80X30"
+        },
+        {
+          "pn": "WG9003336216",
+          "nama": "Antifriction bearing 6216 / YA GB / T276"
+        },
+        {
+          "pn": "WG9003393921",
+          "nama": "Rear tapered roller bearing of input shaft"
+        },
+        {
+          "pn": "WG9003394420",
+          "nama": "Quill bearing K324420"
+        },
+        {
+          "pn": "WG9003395230",
+          "nama": "Rear tapered roller bearing of input shaft"
+        }
+      ],
+      "synchronizer": [
+        {
+          "pn": "AZ2203220217",
+          "nama": "Reversing , Climb-gear shift fork shaft assembly (Helical tooth , Synchronizer)"
+        },
+        {
+          "pn": "AZ2203220219",
+          "nama": "Third/fourth shift fork shaft assembly (Helical tooth , Synchronizer)"
+        },
+        {
+          "pn": "AZ2203220279",
+          "nama": "First/second gear shift fork shaft assembly (Helical tooth , Synchronizer)"
+        },
+        {
+          "pn": "WG2203040059",
+          "nama": "Synchronizer assembly"
+        },
+        {
+          "pn": "WG2210100128",
+          "nama": "Synchronous gear block for range gear"
+        },
+        {
+          "pn": "WG2210100129",
+          "nama": "Range gear synchronous sliding sleeve"
+        },
+        {
+          "pn": "WG2210100170",
+          "nama": "Range gear synchronizer ring"
+        },
+        {
+          "pn": "WG2214220098",
+          "nama": "Shift fork (For helical tooth , Synchronizer)"
+        },
+        {
+          "pn": "WG2214220099",
+          "nama": "Reversing , and climb gear shift fork shaft (For helical tooth , Synchronizer)"
+        },
+        {
+          "pn": "WG2229020001",
+          "nama": "Synchronous pushing block"
+        }
+      ],
+      "snap_ring": [
+        {
+          "pn": "AZ2208020006",
+          "nama": "Optional part set of circlip"
+        },
+        {
+          "pn": "AZ2229020062",
+          "nama": "Input shaft , Main shaft connecting circlip"
+        },
+        {
+          "pn": "AZ900399000001",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "AZ9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "AZ9003991130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43080",
+          "nama": "Elastic snap ring for hole"
+        },
+        {
+          "pn": "Q43112",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43120",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43145",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43370",
+          "nama": "circlip"
+        },
+        {
+          "pn": "SPCY0000000018",
+          "nama": "EZF100-30 shaft end retainer ring"
+        },
+        {
+          "pn": "WG1642930009",
+          "nama": "Circlip nut"
+        },
+        {
+          "pn": "WG2229020062",
+          "nama": "Input shaft , Main shaft connecting circlip"
+        },
+        {
+          "pn": "WG2229040078",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG2229040153",
+          "nama": "Elastic snap ring for hole"
+        },
+        {
+          "pn": "WG2229040154",
+          "nama": "circlip"
+        },
+        {
+          "pn": "WG2229100126",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "WG2229100135",
+          "nama": "Round wire snap ring"
+        },
+        {
+          "pn": "WG9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG9003991130",
+          "nama": "Elastic snap ring for shaft"
+        }
+      ]
+    }
+  },
+  "HW13709XSTC": {
+    "model": "HW13709XSTC",
+    "tipe": "9-speed",
+    "unit": [
+      "NX280 6X4 (LZZ1BLMJ)",
+      "NX350 8X4 (LZZPBXSF)"
+    ],
+    "assy_pn": [
+      "HW13709XSTC201262",
+      "HW13709XSTC225505"
+    ],
+    "jumlah_seal_kit": 35,
+    "jumlah_overhaul_tambahan": 49,
+    "seal_kit": {
+      "oil_seal": [
+        {
+          "pn": "WG9003070095",
+          "nama": "Combination frame oil seal"
+        },
+        {
+          "pn": "WG9003070440",
+          "nama": "First axle oil seal"
+        },
+        {
+          "pn": "WG9003072501",
+          "nama": "Inner oil seal of end cover"
+        },
+        {
+          "pn": "WG9003072502",
+          "nama": "Outer oil seal of end cover"
+        }
+      ],
+      "gasket": [
+        {
+          "pn": "AZ2208030004",
+          "nama": "Counter shaft bearing adjusting gasket unit (For helical tooth)"
+        },
+        {
+          "pn": "AZ2208100005",
+          "nama": "Adjusting gasket unit"
+        },
+        {
+          "pn": "AZ972929000004",
+          "nama": "gasket"
+        },
+        {
+          "pn": "WG2203080020+016/1",
+          "nama": "VR115CT Gasket for fuel tank Cap (Voith)"
+        },
+        {
+          "pn": "WG2229000063",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229100024",
+          "nama": "Sun gear gasket (Rear)"
+        },
+        {
+          "pn": "WG2229100104",
+          "nama": "Planetary gear gasket"
+        },
+        {
+          "pn": "WG2229100290",
+          "nama": "Sun gear gasket (Front)"
+        },
+        {
+          "pn": "WG2229100382",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "WG2229100383",
+          "nama": "End cover gasket of output shaft"
+        },
+        {
+          "pn": "WG2229100384",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229210143",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210145",
+          "nama": "Small cover gasket"
+        },
+        {
+          "pn": "WG2229240147",
+          "nama": "Inlet pipe gasket"
+        },
+        {
+          "pn": "WG2229250138",
+          "nama": "Dual H-valve gasket"
+        },
+        {
+          "pn": "WG2229250140",
+          "nama": "Pneumatic control valve gasket"
+        }
+      ],
+      "o_ring": [
+        {
+          "pn": "AZ9003071700",
+          "nama": "O-ring 26500170 GB3452.1"
+        },
+        {
+          "pn": "AZ9003072000",
+          "nama": "O-ring 20X2.65 GB/T 3452.1 - 2005"
+        },
+        {
+          "pn": "WG2203080020+002/1",
+          "nama": "O-ring at the interface (Voith )"
+        },
+        {
+          "pn": "WG2203080020+003/1",
+          "nama": "Silencer O-Ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+008/1",
+          "nama": "Exhaust valve O-ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+018/1",
+          "nama": "Drain plug O-ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+020/1",
+          "nama": "O-ring Heat exchanger (Voith)"
+        },
+        {
+          "pn": "WG2203080020+022/1",
+          "nama": "Sealing ring (oil pool cap, damping plate, proportional valve)(Voith)"
+        },
+        {
+          "pn": "WG2203080020+033/1",
+          "nama": "Water pipe O-ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+034/1",
+          "nama": "Sealing ring (Temperature sensor)(Voith)"
+        },
+        {
+          "pn": "WG2229100040",
+          "nama": "Range gear piston O-ring"
+        },
+        {
+          "pn": "WG2229230010",
+          "nama": "Inner hole sealing ring of split gear rear housing"
+        },
+        {
+          "pn": "WG9003070085",
+          "nama": "O-ring 26500850 GB3452.1"
+        },
+        {
+          "pn": "WG9003071700",
+          "nama": "O-ring 26500170 GB3452.1"
+        },
+        {
+          "pn": "WG9003077100",
+          "nama": "O-ring 26507100 GB3452.1"
+        }
+      ]
+    },
+    "overhaul_tambahan": {
+      "bearing": [
+        {
+          "pn": "AZ9003336213",
+          "nama": "Four point contact ball bearing"
+        },
+        {
+          "pn": "AZ9729290097",
+          "nama": "Rear bearing adjusting circlip set of PTO connecting shaft"
+        },
+        {
+          "pn": "WG2229020063",
+          "nama": "Thrust bearing race (Large)"
+        },
+        {
+          "pn": "WG2229020064",
+          "nama": "Thrust bearing block slice"
+        },
+        {
+          "pn": "WG2229020065",
+          "nama": "Thrust bearing block slice lock plate"
+        },
+        {
+          "pn": "WG2229020067",
+          "nama": "Thrust bearing race (Small)"
+        },
+        {
+          "pn": "WG2229050008",
+          "nama": "Idler shaft thrust bearing race"
+        },
+        {
+          "pn": "WG2229054460",
+          "nama": "Idler shaft thrust roller bearing"
+        },
+        {
+          "pn": "WG2229100119",
+          "nama": "Needle roller bearing outer ring"
+        },
+        {
+          "pn": "WG9003310209",
+          "nama": "Cylindrical roller bearing NJ209E"
+        },
+        {
+          "pn": "WG9003310211",
+          "nama": "Cylindrical roller bearing NUP211EN"
+        },
+        {
+          "pn": "WG9003312307",
+          "nama": "Cylindrical roller bearing NUP2307E"
+        },
+        {
+          "pn": "WG9003320105",
+          "nama": "Quill bearing (NKI105 / 24N / YA)"
+        },
+        {
+          "pn": "WG9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "WG9003322714",
+          "nama": "Quill bearing K21X27X14.5"
+        },
+        {
+          "pn": "WG9003323308",
+          "nama": "Tapered roller bearing 30308 GB / T297 (For counter shaft )"
+        },
+        {
+          "pn": "WG9003328030",
+          "nama": "Quill bearing K70X80X30"
+        },
+        {
+          "pn": "WG9003336216",
+          "nama": "Antifriction bearing 6216 / YA GB / T276"
+        },
+        {
+          "pn": "WG9003392616",
+          "nama": "Quill bearing HK20X26X16 - K1"
+        },
+        {
+          "pn": "WG9003393921",
+          "nama": "Rear tapered roller bearing of input shaft"
+        },
+        {
+          "pn": "WG9003394420",
+          "nama": "Quill bearing K324420"
+        },
+        {
+          "pn": "WG9003395230",
+          "nama": "Rear tapered roller bearing of input shaft"
+        }
+      ],
+      "synchronizer": [
+        {
+          "pn": "AZ2203220217",
+          "nama": "Reversing , Climb-gear shift fork shaft assembly (Helical tooth , Synchronizer)"
+        },
+        {
+          "pn": "AZ2203220221",
+          "nama": "Overspeed gear shift fork shaft assembly (Helical tooth , Synchronizer)"
+        },
+        {
+          "pn": "AZ2203220279",
+          "nama": "First/second gear shift fork shaft assembly (Helical tooth , Synchronizer)"
+        },
+        {
+          "pn": "WG2203040059",
+          "nama": "Synchronizer assembly"
+        },
+        {
+          "pn": "WG2210100128",
+          "nama": "Synchronous gear block for range gear"
+        },
+        {
+          "pn": "WG2210100129",
+          "nama": "Range gear synchronous sliding sleeve"
+        },
+        {
+          "pn": "WG2210100170",
+          "nama": "Range gear synchronizer ring"
+        },
+        {
+          "pn": "WG2214220098",
+          "nama": "Shift fork (For helical tooth , Synchronizer)"
+        },
+        {
+          "pn": "WG2214220099",
+          "nama": "Reversing , and climb gear shift fork shaft (For helical tooth , Synchronizer)"
+        },
+        {
+          "pn": "WG2214220100",
+          "nama": "Overspeed gear shift fork (For helical tooth , Synchronizer)"
+        },
+        {
+          "pn": "WG2229020001",
+          "nama": "Synchronous pushing block"
+        }
+      ],
+      "snap_ring": [
+        {
+          "pn": "AZ2208020006",
+          "nama": "Optional part set of circlip"
+        },
+        {
+          "pn": "AZ900399000001",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "AZ9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "Q43112",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43120",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43370",
+          "nama": "circlip"
+        },
+        {
+          "pn": "WG1642930009",
+          "nama": "Circlip nut"
+        },
+        {
+          "pn": "WG2229020062",
+          "nama": "Input shaft , Main shaft connecting circlip"
+        },
+        {
+          "pn": "WG2229040078",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG2229040153",
+          "nama": "Elastic snap ring for hole"
+        },
+        {
+          "pn": "WG2229040154",
+          "nama": "circlip"
+        },
+        {
+          "pn": "WG2229100126",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "WG2229100135",
+          "nama": "Round wire snap ring"
+        },
+        {
+          "pn": "WG9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG9003991130",
+          "nama": "Elastic snap ring for shaft"
+        }
+      ]
+    }
+  },
+  "HW15710AC": {
+    "model": "HW15710AC",
+    "tipe": "10-speed",
+    "unit": [
+      "NX280 4X2 AMT (LZZ1CCSD)"
+    ],
+    "assy_pn": [
+      "HW15710AC254082"
+    ],
+    "jumlah_seal_kit": 33,
+    "jumlah_overhaul_tambahan": 26,
+    "seal_kit": {
+      "oil_seal": [
+        {
+          "pn": "WG2222100022",
+          "nama": "Output shaft end cover (Double oil seal)"
+        },
+        {
+          "pn": "WG9003070055",
+          "nama": "Frame oil seal PS 55 75 12"
+        },
+        {
+          "pn": "WG9003071105",
+          "nama": "Combination frame oil seal ( Inner oil seal , Outer oil seal)"
+        }
+      ],
+      "gasket": [
+        {
+          "pn": "AZ2208020002",
+          "nama": "Input shaft bearing adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2208040002",
+          "nama": "Adjusting gasket unit of main shaft"
+        },
+        {
+          "pn": "AZ2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229000040",
+          "nama": "Transmission front housing gasket"
+        },
+        {
+          "pn": "WG2229000187",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229050001",
+          "nama": "Gasket"
+        },
+        {
+          "pn": "WG2229060018",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229060115",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229100005",
+          "nama": "Sun gear gasket (Front)"
+        },
+        {
+          "pn": "WG2229100006",
+          "nama": "Sun gear gasket (Rear)"
+        },
+        {
+          "pn": "WG2229100008",
+          "nama": "Planetary gear gasket"
+        },
+        {
+          "pn": "WG2229100141",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "WG2229100167",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229210145",
+          "nama": "Small cover gasket"
+        }
+      ],
+      "o_ring": [
+        {
+          "pn": "AZ9003070005",
+          "nama": "O-ring 13.2X1.8 GB3452"
+        },
+        {
+          "pn": "AZ9003070085",
+          "nama": "O-ring 26500850 GB3452.1"
+        },
+        {
+          "pn": "AZ9003071700",
+          "nama": "O-ring seal"
+        },
+        {
+          "pn": "AZ9003077100",
+          "nama": "O-ring 26507100 GB3452.1"
+        },
+        {
+          "pn": "WG2209210001+002",
+          "nama": "Solenoid valve Assembly (1 body +4 O-rings +4 bolts +4 washers)"
+        },
+        {
+          "pn": "WG2209210001+004",
+          "nama": "Position sensor Assembly ( Sensor + O-ring +2 bolts)"
+        },
+        {
+          "pn": "WG2209210001+005",
+          "nama": "Middle section housing reinforced with X-Y actuator ( with 2 lip rings, 3 bushings, 2 locating pins, 2 O-rings)"
+        },
+        {
+          "pn": "WG2229060046",
+          "nama": "Transmission braking piston sealing ring"
+        },
+        {
+          "pn": "WG2229100040",
+          "nama": "Range gear piston O-ring"
+        },
+        {
+          "pn": "WG2229230010",
+          "nama": "Inner hole sealing ring of split gear rear housing"
+        },
+        {
+          "pn": "WG9003070005",
+          "nama": "O-ring 13.2X1.8 GB3452"
+        },
+        {
+          "pn": "WG9003070085",
+          "nama": "O-ring 26500850 GB3452.1"
+        },
+        {
+          "pn": "WG9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "WG9003073150",
+          "nama": "O-ring 35503150 GB3452.1"
+        },
+        {
+          "pn": "WG9003077100",
+          "nama": "O-ring 26507100 GB3452.1"
+        }
+      ]
+    },
+    "overhaul_tambahan": {
+      "bearing": [
+        {
+          "pn": "AZ9003326213",
+          "nama": "Antifriction bearing 6213N - GB / T276"
+        },
+        {
+          "pn": "WG9003320309",
+          "nama": "Cylindrical roller bearing NUP309E"
+        },
+        {
+          "pn": "WG9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "WG9003326020",
+          "nama": "Antifriction bearing 6020 GB / T276"
+        },
+        {
+          "pn": "WG9003326213",
+          "nama": "Antifriction bearing 6213N - GB / T276"
+        },
+        {
+          "pn": "WG9003326218",
+          "nama": "Antifriction bearing 6218 GB / T276"
+        },
+        {
+          "pn": "WG9003326322",
+          "nama": "Rolling bearing 63 / 22 GB / T276"
+        },
+        {
+          "pn": "WG9003329309",
+          "nama": "Cylindrical roller bearing NUP309E (With snap ring groove )"
+        },
+        {
+          "pn": "WG9003395320",
+          "nama": "Needle roller bearing K455320"
+        }
+      ],
+      "synchronizer": [
+        {
+          "pn": "WG2210100007",
+          "nama": "Range-gear synchronous gear block"
+        },
+        {
+          "pn": "WG2210100059",
+          "nama": "Range gear synchronous sliding sleeve"
+        },
+        {
+          "pn": "WG2210100109",
+          "nama": "Range gear synchronizer ring"
+        },
+        {
+          "pn": "WG2229020001",
+          "nama": "Synchronous pushing block"
+        }
+      ],
+      "snap_ring": [
+        {
+          "pn": "AZ2208020001",
+          "nama": "Optional part set of circlip"
+        },
+        {
+          "pn": "AZ2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "AZ9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "AZ9003991130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43145",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43160",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "WG1642930009",
+          "nama": "Circlip nut"
+        },
+        {
+          "pn": "WG2229040003",
+          "nama": "circlip"
+        },
+        {
+          "pn": "WG2229040420",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG9000361005",
+          "nama": "Circlip NG8"
+        },
+        {
+          "pn": "WG9003991056",
+          "nama": "Elastic snap ring for hole"
+        },
+        {
+          "pn": "WG9003991130",
+          "nama": "Elastic snap ring for shaft"
+        }
+      ]
+    }
+  },
+  "HW19709XST": {
+    "model": "HW19709XST",
+    "tipe": "9-speed",
+    "unit": [
+      "HOWO-371 6X4 (LZZ5ELSD)",
+      "HOWO-380 6X4 (LZZ1ELSF)",
+      "HOWO-380 6X4 (LZZ5DLSD)",
+      "HOWO-380 6X4 (LZZ5ELSD)",
+      "HOWO-7 400 8X4 (LZZ5BXSG)",
+      "HOWO400 8X4 (LZZ5EXSF)",
+      "NX360 6X4 (LZZ1BLSJ)",
+      "NX360 DUMP 6X4 (LZZ1ELSE)",
+      "NX371 6X4 (LZZ1ELSF)",
+      "NX371 6X4 (LZZDDLSD)",
+      "NX380 6X4 (LZZ1ELSF)",
+      "NX400 6X4 (LZZ5EXSF)",
+      "V7X400 8X4 (LZZ1EXSF)",
+      "V7X400 8X4 (LZZ1EXSG)"
+    ],
+    "assy_pn": [
+      "HW19709XST201136",
+      "HW19709XST21C044",
+      "HW19709XST234055",
+      "HW19709XST235016",
+      "HW19709XST235019",
+      "HW19709XST236131",
+      "HW19709XST237036",
+      "HW19709XST23B051",
+      "HW19709XST256106"
+    ],
+    "jumlah_seal_kit": 42,
+    "jumlah_overhaul_tambahan": 45,
+    "seal_kit": {
+      "oil_seal": [
+        {
+          "pn": "1700N-306",
+          "nama": "Specification Drawing of Control Shaft Oil Seal"
+        },
+        {
+          "pn": "DG1700N-306",
+          "nama": "Specification Drawing of Control Shaft Oil Seal"
+        },
+        {
+          "pn": "SPDC0000000025",
+          "nama": "Oil seal FB 45 × 65 × 12GB 9877.1-88 FB 45 × 65 × 12"
+        },
+        {
+          "pn": "WG9003070055",
+          "nama": "Frame oil seal PS 55 75 12"
+        },
+        {
+          "pn": "WG9003071105",
+          "nama": "Combination frame oil seal ( Inner oil seal , Outer oil seal)"
+        },
+        {
+          "pn": "WG9003072501",
+          "nama": "Inner oil seal of end cover"
+        }
+      ],
+      "gasket": [
+        {
+          "pn": "AZ2208020002",
+          "nama": "Input shaft bearing adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2208030003",
+          "nama": "Counter shaft bearing adjusting gasket unit (For helical tooth)"
+        },
+        {
+          "pn": "AZ2208100003",
+          "nama": "Adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2229000187",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "AZ2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "AZ2229100184",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "AZ2229211926",
+          "nama": "Small cover input gasket"
+        },
+        {
+          "pn": "WG2229000001",
+          "nama": "Transmission front housing gasket"
+        },
+        {
+          "pn": "WG2229000040",
+          "nama": "Transmission front housing gasket"
+        },
+        {
+          "pn": "WG2229000187",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229050001",
+          "nama": "Gasket"
+        },
+        {
+          "pn": "WG2229100024",
+          "nama": "Sun gear gasket (Rear)"
+        },
+        {
+          "pn": "WG2229100115",
+          "nama": "Planetary gear gasket"
+        },
+        {
+          "pn": "WG2229100167",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229100179",
+          "nama": "Filter gasket"
+        },
+        {
+          "pn": "WG2229100184",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "WG2229210144",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210145",
+          "nama": "Small cover gasket"
+        },
+        {
+          "pn": "WG2229210630",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210928",
+          "nama": "Gasket"
+        },
+        {
+          "pn": "WG2229211926",
+          "nama": "Small cover input gasket"
+        },
+        {
+          "pn": "WG2229250138",
+          "nama": "Dual H-valve gasket"
+        }
+      ],
+      "o_ring": [
+        {
+          "pn": "AZ9003070085",
+          "nama": "O-ring 26500850 GB3452.1"
+        },
+        {
+          "pn": "AZ9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "AZ9003071700",
+          "nama": "O-ring seal"
+        },
+        {
+          "pn": "AZ9003077100",
+          "nama": "O-ring 26507100 GB3452.1"
+        },
+        {
+          "pn": "SPDC0000000131",
+          "nama": "O-ring 21.2×3.55 GB 3452. 1-82"
+        },
+        {
+          "pn": "SPDC0000000132",
+          "nama": "O-ring 8x1.8GB 3452.1-82"
+        },
+        {
+          "pn": "WG2203240204",
+          "nama": "Filter seal ring"
+        },
+        {
+          "pn": "WG2229100040",
+          "nama": "Range gear piston O-ring"
+        },
+        {
+          "pn": "WG2229230010",
+          "nama": "Inner hole sealing ring of split gear rear housing"
+        },
+        {
+          "pn": "WG9003070085",
+          "nama": "O-ring 26500850 GB3452.1"
+        },
+        {
+          "pn": "WG9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "WG9003071700",
+          "nama": "O-ring 26500170 GB3452.1"
+        },
+        {
+          "pn": "WG9003077100",
+          "nama": "O-ring 26507100 GB3452.1"
+        }
+      ]
+    },
+    "overhaul_tambahan": {
+      "bearing": [
+        {
+          "pn": "AZ9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "AZ9003329213",
+          "nama": "Cylindrical roller bearing NUP213ENC3 (With snap ring groove)"
+        },
+        {
+          "pn": "AZ9003336218",
+          "nama": "Antifriction bearing 6218 / YA GB / T276"
+        },
+        {
+          "pn": "SPDC0000000002",
+          "nama": "Cylindrical roller bearings NUP 2206EN GB/T 283-2007 NUP 2206EN"
+        },
+        {
+          "pn": "SPDC0000000017",
+          "nama": "Conical roller bearings 32206E GB/T 297-1994 32206E"
+        },
+        {
+          "pn": "SPDC0000000019",
+          "nama": "Cone roller bearing 30209EGB/T 297-1994 30209E"
+        },
+        {
+          "pn": "SPDC0000000036",
+          "nama": "Needle roller bearing K16 22 17GB 5846-86 K16 22 17"
+        },
+        {
+          "pn": "WG2229020035",
+          "nama": "Thrust bearing race"
+        },
+        {
+          "pn": "WG2229020036",
+          "nama": "Thrust bearing shim"
+        },
+        {
+          "pn": "WG2229100112",
+          "nama": "Needle roller bearing outer ring"
+        },
+        {
+          "pn": "WG9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "WG9003323012",
+          "nama": "Gear selection bearing 22X30X12"
+        },
+        {
+          "pn": "WG9003323309",
+          "nama": "Tapered roller bearing 30309 GB / T297 (For counter shaft )"
+        },
+        {
+          "pn": "WG9003323716",
+          "nama": "Quill bearing (K303716)"
+        },
+        {
+          "pn": "WG9003324824",
+          "nama": "Quill bearing (NA4824X1N / YA )"
+        },
+        {
+          "pn": "WG9003329835",
+          "nama": "Quill bearing (K909835)"
+        },
+        {
+          "pn": "WG9003336218",
+          "nama": "Antifriction bearing 6218 / YA GB / T276"
+        },
+        {
+          "pn": "WG9003395230",
+          "nama": "Rear tapered roller bearing of input shaft"
+        },
+        {
+          "pn": "WG9003395320",
+          "nama": "Needle roller bearing K455320"
+        },
+        {
+          "pn": "WG9003397145",
+          "nama": "Front tapered roller bearing of input shaft"
+        }
+      ],
+      "synchronizer": [
+        {
+          "pn": "WG2203040041",
+          "nama": "Synchronizer assembly"
+        },
+        {
+          "pn": "WG2210100128",
+          "nama": "Synchronous gear block for range gear"
+        },
+        {
+          "pn": "WG2210100186",
+          "nama": "Range gear synchronous sliding sleeve"
+        },
+        {
+          "pn": "WG2210100199",
+          "nama": "Range gear synchronizer ring"
+        },
+        {
+          "pn": "WG2229020001",
+          "nama": "Synchronous pushing block"
+        }
+      ],
+      "snap_ring": [
+        {
+          "pn": "AZ220802000001",
+          "nama": "Optional part set of circlip"
+        },
+        {
+          "pn": "AZ2208020001",
+          "nama": "Optional part set of circlip"
+        },
+        {
+          "pn": "AZ2229040150",
+          "nama": "circlip"
+        },
+        {
+          "pn": "AZ2229100114",
+          "nama": "Round wire snap ring"
+        },
+        {
+          "pn": "AZ2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "AZ9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "AZ9003991130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43072",
+          "nama": "Elastic snap ring for hole"
+        },
+        {
+          "pn": "Q43130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43378",
+          "nama": "Flattened round wire snap ring for shaft"
+        },
+        {
+          "pn": "SPDC0000000120",
+          "nama": "Circlip for shaft 30GB 894. 1-86 dangquan 30"
+        },
+        {
+          "pn": "WG1642930009",
+          "nama": "Circlip nut"
+        },
+        {
+          "pn": "WG2229020047",
+          "nama": "Input shaft , Main shaft connecting circlip"
+        },
+        {
+          "pn": "WG2229040025",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG2229040150",
+          "nama": "circlip"
+        },
+        {
+          "pn": "WG2229100114",
+          "nama": "Round wire snap ring"
+        },
+        {
+          "pn": "WG2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "WG9000361002",
+          "nama": "Circlip NG6"
+        },
+        {
+          "pn": "WG9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG9003991130",
+          "nama": "Elastic snap ring for shaft"
+        }
+      ]
+    }
+  },
+  "HW19709XSTL": {
+    "model": "HW19709XSTL",
+    "tipe": "9-speed",
+    "unit": [
+      "NX360 6X4 (LZZ1BLSG)",
+      "NX360TH 6X4 (LZZPCLSC)"
+    ],
+    "assy_pn": [
+      "HW19709XSTL227022"
+    ],
+    "jumlah_seal_kit": 47,
+    "jumlah_overhaul_tambahan": 35,
+    "seal_kit": {
+      "oil_seal": [
+        {
+          "pn": "1700N-306",
+          "nama": "Specification Drawing of Control Shaft Oil Seal"
+        },
+        {
+          "pn": "DG1700N-306",
+          "nama": "Specification Drawing of Control Shaft Oil Seal"
+        },
+        {
+          "pn": "WG9003070055",
+          "nama": "Frame oil seal PS 55 75 12"
+        },
+        {
+          "pn": "WG9003071105",
+          "nama": "Combination frame oil seal ( Inner oil seal , Outer oil seal)"
+        },
+        {
+          "pn": "WG9003072501",
+          "nama": "Inner oil seal of end cover"
+        },
+        {
+          "pn": "WG9003073001",
+          "nama": "Frame oil seal PS 30 45 8"
+        }
+      ],
+      "gasket": [
+        {
+          "pn": "AZ2208020002",
+          "nama": "Input shaft bearing adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2208030003",
+          "nama": "Counter shaft bearing adjusting gasket unit (For helical tooth)"
+        },
+        {
+          "pn": "AZ2208100005",
+          "nama": "Adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2229000187",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "AZ2229211926",
+          "nama": "Small cover input gasket"
+        },
+        {
+          "pn": "WG2203080020+016/1",
+          "nama": "VR115CT Gasket for fuel tank Cap (Voith)"
+        },
+        {
+          "pn": "WG2222100124",
+          "nama": "Rear end cover gasket of output shaft (Retarder)"
+        },
+        {
+          "pn": "WG2229000001",
+          "nama": "Transmission front housing gasket"
+        },
+        {
+          "pn": "WG2229000040",
+          "nama": "Transmission front housing gasket"
+        },
+        {
+          "pn": "WG2229000187",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229050001",
+          "nama": "Gasket"
+        },
+        {
+          "pn": "WG2229100024",
+          "nama": "Sun gear gasket (Rear)"
+        },
+        {
+          "pn": "WG2229100115",
+          "nama": "Planetary gear gasket"
+        },
+        {
+          "pn": "WG2229100167",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229100179",
+          "nama": "Filter gasket"
+        },
+        {
+          "pn": "WG2229210144",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210145",
+          "nama": "Small cover gasket"
+        },
+        {
+          "pn": "WG2229210630",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210928",
+          "nama": "Gasket"
+        },
+        {
+          "pn": "WG2229211926",
+          "nama": "Small cover input gasket"
+        },
+        {
+          "pn": "WG2229250005",
+          "nama": "Dual H-valve gasket"
+        }
+      ],
+      "o_ring": [
+        {
+          "pn": "AZ9003070085",
+          "nama": "O-ring 26500850 GB3452.1"
+        },
+        {
+          "pn": "AZ9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "AZ9003071700",
+          "nama": "O-ring seal"
+        },
+        {
+          "pn": "AZ9003077100",
+          "nama": "O-ring 26507100 GB3452.1"
+        },
+        {
+          "pn": "WG2203080020+002/1",
+          "nama": "O-ring at the interface (Voith )"
+        },
+        {
+          "pn": "WG2203080020+003/1",
+          "nama": "Silencer O-Ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+008/1",
+          "nama": "Exhaust valve O-ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+018/1",
+          "nama": "Drain plug O-ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+020/1",
+          "nama": "O-ring Heat exchanger (Voith)"
+        },
+        {
+          "pn": "WG2203080020+022/1",
+          "nama": "Sealing ring (oil pool cap, damping plate, proportional valve)(Voith)"
+        },
+        {
+          "pn": "WG2203080020+033/1",
+          "nama": "Water pipe O-ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+034/1",
+          "nama": "Sealing ring (Temperature sensor)(Voith)"
+        },
+        {
+          "pn": "WG2203240204",
+          "nama": "Filter seal ring"
+        },
+        {
+          "pn": "WG2229100040",
+          "nama": "Range gear piston O-ring"
+        },
+        {
+          "pn": "WG2229230010",
+          "nama": "Inner hole sealing ring of split gear rear housing"
+        },
+        {
+          "pn": "WG9003070085",
+          "nama": "O-ring 26500850 GB3452.1"
+        },
+        {
+          "pn": "WG9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "WG9003071700",
+          "nama": "O-ring 26500170 GB3452.1"
+        },
+        {
+          "pn": "WG9003077100",
+          "nama": "O-ring 26507100 GB3452.1"
+        }
+      ]
+    },
+    "overhaul_tambahan": {
+      "bearing": [
+        {
+          "pn": "AZ9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "AZ9003329213",
+          "nama": "Cylindrical roller bearing NUP213ENC3 (With snap ring groove)"
+        },
+        {
+          "pn": "WG2229020035",
+          "nama": "Thrust bearing race"
+        },
+        {
+          "pn": "WG2229020036",
+          "nama": "Thrust bearing shim"
+        },
+        {
+          "pn": "WG2229100112",
+          "nama": "Needle roller bearing outer ring"
+        },
+        {
+          "pn": "WG9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "WG9003323012",
+          "nama": "Gear selection bearing 22X30X12"
+        },
+        {
+          "pn": "WG9003323309",
+          "nama": "Tapered roller bearing 30309 GB / T297 (For counter shaft )"
+        },
+        {
+          "pn": "WG9003323716",
+          "nama": "Quill bearing (K303716)"
+        },
+        {
+          "pn": "WG9003324824",
+          "nama": "Quill bearing (NA4824X1N / YA )"
+        },
+        {
+          "pn": "WG9003327018",
+          "nama": "Angular contact ball bearing 7018C / DB"
+        },
+        {
+          "pn": "WG9003329835",
+          "nama": "Quill bearing (K909835)"
+        },
+        {
+          "pn": "WG9003395230",
+          "nama": "Rear tapered roller bearing of input shaft"
+        },
+        {
+          "pn": "WG9003395320",
+          "nama": "Needle roller bearing K455320"
+        },
+        {
+          "pn": "WG9003397145",
+          "nama": "Front tapered roller bearing of input shaft"
+        }
+      ],
+      "synchronizer": [
+        {
+          "pn": "WG2203040041",
+          "nama": "Synchronizer assembly"
+        },
+        {
+          "pn": "WG2210100128",
+          "nama": "Synchronous gear block for range gear"
+        },
+        {
+          "pn": "WG2210100186",
+          "nama": "Range gear synchronous sliding sleeve"
+        },
+        {
+          "pn": "WG2210100199",
+          "nama": "Range gear synchronizer ring"
+        },
+        {
+          "pn": "WG2229020001",
+          "nama": "Synchronous pushing block"
+        }
+      ],
+      "snap_ring": [
+        {
+          "pn": "AZ2208020001",
+          "nama": "Optional part set of circlip"
+        },
+        {
+          "pn": "AZ2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "AZ9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "AZ9003991130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43072",
+          "nama": "Elastic snap ring for hole"
+        },
+        {
+          "pn": "Q43130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43378",
+          "nama": "Flattened round wire snap ring for shaft"
+        },
+        {
+          "pn": "WG1642930009",
+          "nama": "Circlip nut"
+        },
+        {
+          "pn": "WG2229020047",
+          "nama": "Input shaft , Main shaft connecting circlip"
+        },
+        {
+          "pn": "WG2229040025",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG2229040150",
+          "nama": "circlip"
+        },
+        {
+          "pn": "WG2229100114",
+          "nama": "Round wire snap ring"
+        },
+        {
+          "pn": "WG2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "WG9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG9003991130",
+          "nama": "Elastic snap ring for shaft"
+        }
+      ]
+    }
+  },
+  "HW19710": {
+    "model": "HW19710",
+    "tipe": "9-speed (14.28)",
+    "unit": [
+      "N7B-371 (LZZ5DLSF)",
+      "NX371 6X4 (LZZ5DLSF)"
+    ],
+    "assy_pn": [
+      "HW19710100625"
+    ],
+    "jumlah_seal_kit": 49,
+    "jumlah_overhaul_tambahan": 40,
+    "seal_kit": {
+      "oil_seal": [
+        {
+          "pn": "SPDC0000000025",
+          "nama": "Oil seal FB 45 × 65 × 12GB 9877.1-88 FB 45 × 65 × 12"
+        },
+        {
+          "pn": "WG2222100023",
+          "nama": "Output shaft end cover (Double oil seal)"
+        },
+        {
+          "pn": "WG9003070055",
+          "nama": "Frame oil seal PS 55 75 12"
+        },
+        {
+          "pn": "WG9003071105",
+          "nama": "Combination frame oil seal ( Inner oil seal , Outer oil seal)"
+        },
+        {
+          "pn": "WG9003072501",
+          "nama": "Inner oil seal of end cover"
+        },
+        {
+          "pn": "WG9003072502",
+          "nama": "Outer oil seal of end cover"
+        },
+        {
+          "pn": "WG9003073001",
+          "nama": "Frame oil seal PS 30 45 8"
+        }
+      ],
+      "gasket": [
+        {
+          "pn": "AZ2208020002",
+          "nama": "Input shaft bearing adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2208040002",
+          "nama": "Adjusting gasket unit of main shaft"
+        },
+        {
+          "pn": "AZ2208100003",
+          "nama": "Adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2222100124",
+          "nama": "Rear end cover gasket of output shaft (Retarder)"
+        },
+        {
+          "pn": "AZ2229000187",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "AZ2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "AZ2229100184",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "AZ2229230033",
+          "nama": "Split gear cylinder gasket"
+        },
+        {
+          "pn": "WG2222100124",
+          "nama": "Rear end cover gasket of output shaft (Retarder)"
+        },
+        {
+          "pn": "WG2229000052",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229000187",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229050001",
+          "nama": "Gasket"
+        },
+        {
+          "pn": "WG2229100005",
+          "nama": "Sun gear gasket (Front)"
+        },
+        {
+          "pn": "WG2229100006",
+          "nama": "Sun gear gasket (Rear)"
+        },
+        {
+          "pn": "WG2229100008",
+          "nama": "Planetary gear gasket"
+        },
+        {
+          "pn": "WG2229100141",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "WG2229100167",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229100179",
+          "nama": "Filter gasket"
+        },
+        {
+          "pn": "WG2229100184",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "WG2229210143",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210144",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210145",
+          "nama": "Small cover gasket"
+        },
+        {
+          "pn": "WG2229210630",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210931",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229230033",
+          "nama": "Split gear cylinder gasket"
+        },
+        {
+          "pn": "WG2229250138",
+          "nama": "Dual H-valve gasket"
+        },
+        {
+          "pn": "WG2229250140",
+          "nama": "Pneumatic control valve gasket"
+        },
+        {
+          "pn": "WG9525240229",
+          "nama": "Manipulator sealing gasket"
+        }
+      ],
+      "o_ring": [
+        {
+          "pn": "AZ9003070085",
+          "nama": "O-ring 26500850 GB3452.1"
+        },
+        {
+          "pn": "AZ9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "AZ9003071700",
+          "nama": "O-ring seal"
+        },
+        {
+          "pn": "AZ9003077100",
+          "nama": "O-ring 26507100 GB3452.1"
+        },
+        {
+          "pn": "SPDC0000000131",
+          "nama": "O-ring 21.2×3.55 GB 3452. 1-82"
+        },
+        {
+          "pn": "SPDC0000000132",
+          "nama": "O-ring 8x1.8GB 3452.1-82"
+        },
+        {
+          "pn": "WG2229100040",
+          "nama": "Range gear piston O-ring"
+        },
+        {
+          "pn": "WG2229230010",
+          "nama": "Inner hole sealing ring of split gear rear housing"
+        },
+        {
+          "pn": "WG9003070085",
+          "nama": "O-ring 26500850 GB3452.1"
+        },
+        {
+          "pn": "WG9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "WG9003071700",
+          "nama": "O-ring 26500170 GB3452.1"
+        },
+        {
+          "pn": "WG9003073150",
+          "nama": "O-ring 35503150 GB3452.1"
+        },
+        {
+          "pn": "WG9003077100",
+          "nama": "O-ring 26507100 GB3452.1"
+        }
+      ]
+    },
+    "overhaul_tambahan": {
+      "bearing": [
+        {
+          "pn": "AZ9003320309",
+          "nama": "Cylindrical roller bearing NUP309E"
+        },
+        {
+          "pn": "AZ9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "AZ9003326213",
+          "nama": "Antifriction bearing 6213N - GB / T276"
+        },
+        {
+          "pn": "SPDC0000000002",
+          "nama": "Cylindrical roller bearings NUP 2206EN GB/T 283-2007 NUP 2206EN"
+        },
+        {
+          "pn": "SPDC0000000017",
+          "nama": "Conical roller bearings 32206E GB/T 297-1994 32206E"
+        },
+        {
+          "pn": "SPDC0000000019",
+          "nama": "Cone roller bearing 30209EGB/T 297-1994 30209E"
+        },
+        {
+          "pn": "SPDC0000000036",
+          "nama": "Needle roller bearing K16 22 17GB 5846-86 K16 22 17"
+        },
+        {
+          "pn": "WG9003320309",
+          "nama": "Cylindrical roller bearing NUP309E"
+        },
+        {
+          "pn": "WG9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "WG9003326020",
+          "nama": "Antifriction bearing 6020 GB / T276"
+        },
+        {
+          "pn": "WG9003326213",
+          "nama": "Antifriction bearing 6213N - GB / T276"
+        },
+        {
+          "pn": "WG9003326218",
+          "nama": "Antifriction bearing 6218 GB / T276"
+        },
+        {
+          "pn": "WG9003326322",
+          "nama": "Rolling bearing 63 / 22 GB / T276"
+        },
+        {
+          "pn": "WG9003329309",
+          "nama": "Cylindrical roller bearing NUP309E (With snap ring groove )"
+        },
+        {
+          "pn": "WG9003395320",
+          "nama": "Needle roller bearing K455320"
+        }
+      ],
+      "synchronizer": [
+        {
+          "pn": "WG2210100007",
+          "nama": "Range-gear synchronous gear block"
+        },
+        {
+          "pn": "WG2210100059",
+          "nama": "Range gear synchronous sliding sleeve"
+        },
+        {
+          "pn": "WG2210100109",
+          "nama": "Range gear synchronizer ring"
+        },
+        {
+          "pn": "WG2229020001",
+          "nama": "Synchronous pushing block"
+        }
+      ],
+      "snap_ring": [
+        {
+          "pn": "AZ2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "AZ9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "AZ9003991130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43112",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43120",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43145",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43160",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "SPDC0000000120",
+          "nama": "Circlip for shaft 30GB 894. 1-86 dangquan 30"
+        },
+        {
+          "pn": "WG1642930009",
+          "nama": "Circlip nut"
+        },
+        {
+          "pn": "WG2229040003",
+          "nama": "circlip"
+        },
+        {
+          "pn": "WG2229040420",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "WG9003991056",
+          "nama": "Elastic snap ring for hole"
+        },
+        {
+          "pn": "WG9003991065",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "WG9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG9003991130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "WG9003992065",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "WG9003993065",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "WG9003994065",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "WG9003995065",
+          "nama": "Elastic snap ring for shaft"
+        }
+      ]
+    }
+  },
+  "HW25712XACJ": {
+    "model": "HW25712XACJ",
+    "tipe": "12-speed",
+    "unit": [
+      "HOWO MAX 480 6X4 (LZZ1CLWB)"
+    ],
+    "assy_pn": [
+      "HW25712XACJ247029"
+    ],
+    "jumlah_seal_kit": 42,
+    "jumlah_overhaul_tambahan": 34,
+    "seal_kit": {
+      "oil_seal": [
+        {
+          "pn": "AZ900307000030",
+          "nama": "Composite oil seal"
+        },
+        {
+          "pn": "AZ900307000031",
+          "nama": "Composite oil seal"
+        }
+      ],
+      "gasket": [
+        {
+          "pn": "AZ2208020002",
+          "nama": "Input shaft bearing adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2208030003",
+          "nama": "Counter shaft bearing adjusting gasket unit (For helical tooth)"
+        },
+        {
+          "pn": "AZ2208040012",
+          "nama": "Adjusting gasket unit of main shaft"
+        },
+        {
+          "pn": "AZ2208100005",
+          "nama": "Adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "AZ2229230033",
+          "nama": "Split gear cylinder gasket"
+        },
+        {
+          "pn": "WG2203080020+016/1",
+          "nama": "VR115CT Gasket for fuel tank Cap (Voith)"
+        },
+        {
+          "pn": "WG2222100124",
+          "nama": "Rear end cover gasket of output shaft (Retarder)"
+        },
+        {
+          "pn": "WG2229000052",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229000187",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229050001",
+          "nama": "Gasket"
+        },
+        {
+          "pn": "WG2229060018",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229060115",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229100024",
+          "nama": "Sun gear gasket (Rear)"
+        },
+        {
+          "pn": "WG2229100115",
+          "nama": "Planetary gear gasket"
+        },
+        {
+          "pn": "WG2229100167",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229100179",
+          "nama": "Filter gasket"
+        },
+        {
+          "pn": "WG2229210145",
+          "nama": "Small cover gasket"
+        },
+        {
+          "pn": "WG2229230033",
+          "nama": "Split gear cylinder gasket"
+        },
+        {
+          "pn": "WG2229240180",
+          "nama": "Oil filter gasket"
+        }
+      ],
+      "o_ring": [
+        {
+          "pn": "AZ222923000001",
+          "nama": "Inner hole sealing ring of split gear rear housing"
+        },
+        {
+          "pn": "AZ9003070005",
+          "nama": "O-ring 13.2X1.8 GB3452"
+        },
+        {
+          "pn": "AZ9003071700",
+          "nama": "O-ring seal"
+        },
+        {
+          "pn": "WG2203080020+002/1",
+          "nama": "O-ring at the interface (Voith )"
+        },
+        {
+          "pn": "WG2203080020+003/1",
+          "nama": "Silencer O-Ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+008/1",
+          "nama": "Exhaust valve O-ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+018/1",
+          "nama": "Drain plug O-ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+020/1",
+          "nama": "O-ring Heat exchanger (Voith)"
+        },
+        {
+          "pn": "WG2203080020+022/1",
+          "nama": "Sealing ring (oil pool cap, damping plate, proportional valve)(Voith)"
+        },
+        {
+          "pn": "WG2203080020+033/1",
+          "nama": "Water pipe O-ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+034/1",
+          "nama": "Sealing ring (Temperature sensor)(Voith)"
+        },
+        {
+          "pn": "WG2203240204",
+          "nama": "Filter seal ring"
+        },
+        {
+          "pn": "WG2229060046",
+          "nama": "Transmission braking piston sealing ring"
+        },
+        {
+          "pn": "WG2229100040",
+          "nama": "Range gear piston O-ring"
+        },
+        {
+          "pn": "WG2229230009",
+          "nama": "Split gear piston O-ring"
+        },
+        {
+          "pn": "WG2229230010",
+          "nama": "Inner hole sealing ring of split gear rear housing"
+        },
+        {
+          "pn": "WG9003070005",
+          "nama": "O-ring 13.2X1.8 GB3452"
+        },
+        {
+          "pn": "WG9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "WG9003071700",
+          "nama": "O-ring 26500170 GB3452.1"
+        }
+      ]
+    },
+    "overhaul_tambahan": {
+      "bearing": [
+        {
+          "pn": "AZ222902000008",
+          "nama": "Thrust bearing race"
+        },
+        {
+          "pn": "AZ9003329213",
+          "nama": "Cylindrical roller bearing NUP213ENC3 (With snap ring groove)"
+        },
+        {
+          "pn": "WG2229020036",
+          "nama": "Thrust bearing shim"
+        },
+        {
+          "pn": "WG2229100112",
+          "nama": "Needle roller bearing outer ring"
+        },
+        {
+          "pn": "WG9003320309",
+          "nama": "Cylindrical roller bearing NUP309E"
+        },
+        {
+          "pn": "WG9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "WG9003323716",
+          "nama": "Quill bearing (K303716)"
+        },
+        {
+          "pn": "WG9003324824",
+          "nama": "Quill bearing (NA4824X1N / YA )"
+        },
+        {
+          "pn": "WG9003327018",
+          "nama": "Angular contact ball bearing 7018C / DB"
+        },
+        {
+          "pn": "WG9003329309",
+          "nama": "Cylindrical roller bearing NUP309E (With snap ring groove )"
+        },
+        {
+          "pn": "WG9003329835",
+          "nama": "Quill bearing (K909835)"
+        },
+        {
+          "pn": "WG9003395230",
+          "nama": "Rear tapered roller bearing of input shaft"
+        },
+        {
+          "pn": "WG9003395320",
+          "nama": "Needle roller bearing K455320"
+        },
+        {
+          "pn": "WG9003397145",
+          "nama": "Front tapered roller bearing of input shaft"
+        }
+      ],
+      "synchronizer": [
+        {
+          "pn": "WG2210100128",
+          "nama": "Synchronous gear block for range gear"
+        },
+        {
+          "pn": "WG2210100186",
+          "nama": "Range gear synchronous sliding sleeve"
+        },
+        {
+          "pn": "WG2210100199",
+          "nama": "Range gear synchronizer ring"
+        },
+        {
+          "pn": "WG2229020001",
+          "nama": "Synchronous pushing block"
+        },
+        {
+          "pn": "WG2229240041",
+          "nama": "In-box pipe 1 (For 12-gear synchronizer)"
+        }
+      ],
+      "snap_ring": [
+        {
+          "pn": "AZ2208020001",
+          "nama": "Optional part set of circlip"
+        },
+        {
+          "pn": "AZ222902000009",
+          "nama": "Connecting circlip"
+        },
+        {
+          "pn": "AZ2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "AZ9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "AZ9003991130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43072",
+          "nama": "Elastic snap ring for hole"
+        },
+        {
+          "pn": "Q43130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43145",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43378",
+          "nama": "Flattened round wire snap ring for shaft"
+        },
+        {
+          "pn": "WG2229040025",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG2229100114",
+          "nama": "Round wire snap ring"
+        },
+        {
+          "pn": "WG2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "WG9000361005",
+          "nama": "Circlip NG8"
+        },
+        {
+          "pn": "WG9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG9003991130",
+          "nama": "Elastic snap ring for shaft"
+        }
+      ]
+    }
+  },
+  "HW25712XST": {
+    "model": "HW25712XST",
+    "tipe": "12-speed",
+    "unit": [
+      "HOWO-380 6X4 (LZZ5DMSD)",
+      "HOWO-7 440 6X4 (LZZ1BLVJ)",
+      "NX430 8X4 (LZZ5EXSF)",
+      "NX440TH 4X2 (LZZ1CCND)",
+      "V7X440 8X4 (LZZ5BXVH)"
+    ],
+    "assy_pn": [
+      "HW25712XST210124",
+      "HW25712XST210245",
+      "HW25712XST210432",
+      "HW25712XST244065",
+      "HW25712XST245063"
+    ],
+    "jumlah_seal_kit": 70,
+    "jumlah_overhaul_tambahan": 58,
+    "seal_kit": {
+      "oil_seal": [
+        {
+          "pn": "1700N-306",
+          "nama": "Specification Drawing of Control Shaft Oil Seal"
+        },
+        {
+          "pn": "DG1700N-306",
+          "nama": "Specification Drawing of Control Shaft Oil Seal"
+        },
+        {
+          "pn": "SPDC0000000025",
+          "nama": "Oil seal FB 45 × 65 × 12GB 9877.1-88 FB 45 × 65 × 12"
+        },
+        {
+          "pn": "SPDC0000000062",
+          "nama": "Oil seal FB 55 × 80 × 10GB 9877.1-88 FB 55 × 80 × 10"
+        },
+        {
+          "pn": "WG9003070055",
+          "nama": "Frame oil seal PS 55 75 12"
+        },
+        {
+          "pn": "WG9003071105",
+          "nama": "Combination frame oil seal ( Inner oil seal , Outer oil seal)"
+        },
+        {
+          "pn": "WG9003072501",
+          "nama": "Inner oil seal of end cover"
+        },
+        {
+          "pn": "WG9003072502",
+          "nama": "Outer oil seal of end cover"
+        },
+        {
+          "pn": "WG9003073001",
+          "nama": "Frame oil seal PS 30 45 8"
+        }
+      ],
+      "gasket": [
+        {
+          "pn": "AZ2208020002",
+          "nama": "Input shaft bearing adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2208030003",
+          "nama": "Counter shaft bearing adjusting gasket unit (For helical tooth)"
+        },
+        {
+          "pn": "AZ2208100003",
+          "nama": "Adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2208100005",
+          "nama": "Adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2222100124",
+          "nama": "Rear end cover gasket of output shaft (Retarder)"
+        },
+        {
+          "pn": "AZ2229000187",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "AZ2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "AZ2229100184",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "AZ2229211926",
+          "nama": "Small cover input gasket"
+        },
+        {
+          "pn": "AZ2229230033",
+          "nama": "Split gear cylinder gasket"
+        },
+        {
+          "pn": "SPDC0000000023",
+          "nama": "Adjust gasket group AZ9708290010"
+        },
+        {
+          "pn": "SPDC0000000038",
+          "nama": "Combination sealing gasket 14JB 982-77 gasket 14"
+        },
+        {
+          "pn": "SPDC0000000043",
+          "nama": "Lodilao NL12 Carbon Steel Gasket Lodilao NL12"
+        },
+        {
+          "pn": "SPDC0000000081",
+          "nama": "Power take-off gasket AZ9722291008"
+        },
+        {
+          "pn": "SPDC0000000089",
+          "nama": "Lodilao NL10 Carbon Steel Gasket Lodilao NL10"
+        },
+        {
+          "pn": "WG2203080020+016/1",
+          "nama": "VR115CT Gasket for fuel tank Cap (Voith)"
+        },
+        {
+          "pn": "WG2222100124",
+          "nama": "Rear end cover gasket of output shaft (Retarder)"
+        },
+        {
+          "pn": "WG2229000052",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229000187",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229050001",
+          "nama": "Gasket"
+        },
+        {
+          "pn": "WG2229100024",
+          "nama": "Sun gear gasket (Rear)"
+        },
+        {
+          "pn": "WG2229100115",
+          "nama": "Planetary gear gasket"
+        },
+        {
+          "pn": "WG2229100141",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "WG2229100167",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229100179",
+          "nama": "Filter gasket"
+        },
+        {
+          "pn": "WG2229100184",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "WG2229210143",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210144",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210145",
+          "nama": "Small cover gasket"
+        },
+        {
+          "pn": "WG2229210213",
+          "nama": "Window cover gasket"
+        },
+        {
+          "pn": "WG2229210630",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210928",
+          "nama": "Gasket"
+        },
+        {
+          "pn": "WG2229210931",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229211926",
+          "nama": "Small cover input gasket"
+        },
+        {
+          "pn": "WG2229230033",
+          "nama": "Split gear cylinder gasket"
+        },
+        {
+          "pn": "WG2229240180",
+          "nama": "Oil filter gasket"
+        },
+        {
+          "pn": "WG2229250138",
+          "nama": "Dual H-valve gasket"
+        },
+        {
+          "pn": "WG2229250140",
+          "nama": "Pneumatic control valve gasket"
+        }
+      ],
+      "o_ring": [
+        {
+          "pn": "AZ9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "AZ9003071700",
+          "nama": "O-ring seal"
+        },
+        {
+          "pn": "SPDC0000000040",
+          "nama": "O-Ring 21.2 x 3.55GB 3452. 1-82 O-Ring 21.2 x 3.55"
+        },
+        {
+          "pn": "SPDC0000000042",
+          "nama": "O-ring 8x1.8GB 3452.1-82 O-ring 8x1.8"
+        },
+        {
+          "pn": "SPDC0000000058",
+          "nama": "O-Ring 33.5 x 2.65GB 3452. 1-82 O-Ring 33.5 x 2.65"
+        },
+        {
+          "pn": "SPDC0000000088",
+          "nama": "O-Ring 25 x 2.5GB 3452.1-82 O-Ring 25 x 2.5"
+        },
+        {
+          "pn": "SPDC0000000093",
+          "nama": "O-Ring 11.8 × 1.8GB 3452. 1-82 O-Ring 11.8 × 1.8"
+        },
+        {
+          "pn": "WG2203080020+002/1",
+          "nama": "O-ring at the interface (Voith )"
+        },
+        {
+          "pn": "WG2203080020+003/1",
+          "nama": "Silencer O-Ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+008/1",
+          "nama": "Exhaust valve O-ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+018/1",
+          "nama": "Drain plug O-ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+020/1",
+          "nama": "O-ring Heat exchanger (Voith)"
+        },
+        {
+          "pn": "WG2203080020+022/1",
+          "nama": "Sealing ring (oil pool cap, damping plate, proportional valve)(Voith)"
+        },
+        {
+          "pn": "WG2203080020+033/1",
+          "nama": "Water pipe O-ring (Voith)"
+        },
+        {
+          "pn": "WG2203080020+034/1",
+          "nama": "Sealing ring (Temperature sensor)(Voith)"
+        },
+        {
+          "pn": "WG2203240204",
+          "nama": "Filter seal ring"
+        },
+        {
+          "pn": "WG2229100040",
+          "nama": "Range gear piston O-ring"
+        },
+        {
+          "pn": "WG2229230010",
+          "nama": "Inner hole sealing ring of split gear rear housing"
+        },
+        {
+          "pn": "WG9003070031",
+          "nama": "O-ring 26501120 GB3452.1 ( Fluororubber)"
+        },
+        {
+          "pn": "WG9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "WG9003071500",
+          "nama": "O-ring 26501500 GB3452"
+        },
+        {
+          "pn": "WG9003071700",
+          "nama": "O-ring 26500170 GB3452.1"
+        }
+      ]
+    },
+    "overhaul_tambahan": {
+      "bearing": [
+        {
+          "pn": "AZ9003320309",
+          "nama": "Cylindrical roller bearing NUP309E"
+        },
+        {
+          "pn": "AZ9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "AZ9003329213",
+          "nama": "Cylindrical roller bearing NUP213ENC3 (With snap ring groove)"
+        },
+        {
+          "pn": "AZ9003336218",
+          "nama": "Antifriction bearing 6218 / YA GB / T276"
+        },
+        {
+          "pn": "SPDC0000000002",
+          "nama": "Cylindrical roller bearings NUP 2206EN GB/T 283-2007 NUP 2206EN"
+        },
+        {
+          "pn": "SPDC0000000017",
+          "nama": "Conical roller bearings 32206E GB/T 297-1994 32206E"
+        },
+        {
+          "pn": "SPDC0000000019",
+          "nama": "Cone roller bearing 30209EGB/T 297-1994 30209E"
+        },
+        {
+          "pn": "SPDC0000000036",
+          "nama": "Needle roller bearing K16 22 17GB 5846-86 K16 22 17"
+        },
+        {
+          "pn": "SPDC0000000060",
+          "nama": "Deep groove ball bearing 6307GB/T 276-1994 6307"
+        },
+        {
+          "pn": "SPDC0000000065",
+          "nama": "Cylindrical roller bearing NUP 2209EN (with stop groove) GB /T 283-2007 NUP 2209EN"
+        },
+        {
+          "pn": "SPDC0000000074",
+          "nama": "Cylindrical roller bearing NUP 307EN (with stop groove) GB/ T 283-2007 NUP 307EN"
+        },
+        {
+          "pn": "SPDC0000000075",
+          "nama": "Cylindrical roller bearing NJ2206EGB/T 283-2007 NJ2206E"
+        },
+        {
+          "pn": "SPDC0000000084",
+          "nama": "Needle roller bearing K42 47 27GB 5846-86 K42 47 27"
+        },
+        {
+          "pn": "SPDC0000000092",
+          "nama": "Needle roller bearing K42 47 17GB 5846-86 K42 47 17"
+        },
+        {
+          "pn": "WG2229020035",
+          "nama": "Thrust bearing race"
+        },
+        {
+          "pn": "WG2229020036",
+          "nama": "Thrust bearing shim"
+        },
+        {
+          "pn": "WG2229100112",
+          "nama": "Needle roller bearing outer ring"
+        },
+        {
+          "pn": "WG9003320309",
+          "nama": "Cylindrical roller bearing NUP309E"
+        },
+        {
+          "pn": "WG9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "WG9003323012",
+          "nama": "Gear selection bearing 22X30X12"
+        },
+        {
+          "pn": "WG9003323716",
+          "nama": "Quill bearing (K303716)"
+        },
+        {
+          "pn": "WG9003324824",
+          "nama": "Quill bearing (NA4824X1N / YA )"
+        },
+        {
+          "pn": "WG9003327018",
+          "nama": "Angular contact ball bearing 7018C / DB"
+        },
+        {
+          "pn": "WG9003329309",
+          "nama": "Cylindrical roller bearing NUP309E (With snap ring groove )"
+        },
+        {
+          "pn": "WG9003329835",
+          "nama": "Quill bearing (K909835)"
+        },
+        {
+          "pn": "WG9003336218",
+          "nama": "Antifriction bearing 6218 / YA GB / T276"
+        },
+        {
+          "pn": "WG9003395230",
+          "nama": "Rear tapered roller bearing of input shaft"
+        },
+        {
+          "pn": "WG9003395320",
+          "nama": "Needle roller bearing K455320"
+        },
+        {
+          "pn": "WG9003397145",
+          "nama": "Front tapered roller bearing of input shaft"
+        }
+      ],
+      "synchronizer": [
+        {
+          "pn": "WG2203040041",
+          "nama": "Synchronizer assembly"
+        },
+        {
+          "pn": "WG2210100128",
+          "nama": "Synchronous gear block for range gear"
+        },
+        {
+          "pn": "WG2210100186",
+          "nama": "Range gear synchronous sliding sleeve"
+        },
+        {
+          "pn": "WG2210100199",
+          "nama": "Range gear synchronizer ring"
+        },
+        {
+          "pn": "WG2229020001",
+          "nama": "Synchronous pushing block"
+        }
+      ],
+      "snap_ring": [
+        {
+          "pn": "AZ2208020001",
+          "nama": "Optional part set of circlip"
+        },
+        {
+          "pn": "AZ2229040150",
+          "nama": "circlip"
+        },
+        {
+          "pn": "AZ2229100114",
+          "nama": "Round wire snap ring"
+        },
+        {
+          "pn": "AZ2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "AZ9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "AZ9003991130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43072",
+          "nama": "Elastic snap ring for hole"
+        },
+        {
+          "pn": "Q43112",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43145",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43378",
+          "nama": "Flattened round wire snap ring for shaft"
+        },
+        {
+          "pn": "SPDC0000000005",
+          "nama": "Elastic retaining ring for shaft 30GB 894.1-86 Retaining ring 30"
+        },
+        {
+          "pn": "SPDC0000000094",
+          "nama": "Elastic retaining ring for shaft 35GB 894.1-86 Retaining ring 35"
+        },
+        {
+          "pn": "WG1642930009",
+          "nama": "Circlip nut"
+        },
+        {
+          "pn": "WG2211040115;WG2229040241;WG2229040150",
+          "nama": "Second-speed gear of main shaft ;Outer spline block slice ;circlip"
+        },
+        {
+          "pn": "WG2211040116;WG2229040241;WG2229040150",
+          "nama": "Third-speed gear of main shaft ;Outer spline block slice ; circlip"
+        },
+        {
+          "pn": "WG2211040129;WG2229040241;WG2229040150",
+          "nama": "Reverse gear of main shaft ; Outer spline block slice ; circlip"
+        },
+        {
+          "pn": "WG2229020047",
+          "nama": "Input shaft , Main shaft connecting circlip"
+        },
+        {
+          "pn": "WG2229040025",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG2229040150",
+          "nama": "circlip"
+        },
+        {
+          "pn": "WG2229100114",
+          "nama": "Round wire snap ring"
+        },
+        {
+          "pn": "WG2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "WG9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG9003991130",
+          "nama": "Elastic snap ring for shaft"
+        }
+      ]
+    }
+  },
+  "HW25712XSTC": {
+    "model": "HW25712XSTC",
+    "tipe": "12-speed",
+    "unit": [
+      "HOWO-7 440 6X6 (LJVA8PDK)",
+      "HOWO-7 440 6X6 (LJVA8PDL)",
+      "NX440TH 6X4 (LZZ1CLVB)"
+    ],
+    "assy_pn": [
+      "HW25712XSTC201121",
+      "HW25712XSTC256159"
+    ],
+    "jumlah_seal_kit": 67,
+    "jumlah_overhaul_tambahan": 68,
+    "seal_kit": {
+      "oil_seal": [
+        {
+          "pn": "SPDC0000000062",
+          "nama": "Oil seal FB 55 × 80 × 10GB 9877.1-88 FB 55 × 80 × 10"
+        },
+        {
+          "pn": "SPZC0000000080",
+          "nama": "Skeleton oil seal 3533400026"
+        },
+        {
+          "pn": "SPZC0000000081",
+          "nama": "Skeleton oil seal 3533400027"
+        },
+        {
+          "pn": "SPZC0000000146",
+          "nama": "Skeleton oil seal 3533400016"
+        },
+        {
+          "pn": "SPZC0000000147",
+          "nama": "Skeleton oil seal 3533400017"
+        },
+        {
+          "pn": "WG9003070055",
+          "nama": "Frame oil seal PS 55 75 12"
+        },
+        {
+          "pn": "WG9003071105",
+          "nama": "Combination frame oil seal ( Inner oil seal , Outer oil seal)"
+        },
+        {
+          "pn": "WG9003072501",
+          "nama": "Inner oil seal of end cover"
+        },
+        {
+          "pn": "WG9003072502",
+          "nama": "Outer oil seal of end cover"
+        },
+        {
+          "pn": "WG9003073001",
+          "nama": "Frame oil seal PS 30 45 8"
+        }
+      ],
+      "gasket": [
+        {
+          "pn": "AZ2208020002",
+          "nama": "Input shaft bearing adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2208030003",
+          "nama": "Counter shaft bearing adjusting gasket unit (For helical tooth)"
+        },
+        {
+          "pn": "AZ2208100003",
+          "nama": "Adjusting gasket unit"
+        },
+        {
+          "pn": "AZ2229000187",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "AZ2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "AZ2229211926",
+          "nama": "Small cover input gasket"
+        },
+        {
+          "pn": "AZ2229230033",
+          "nama": "Split gear cylinder gasket"
+        },
+        {
+          "pn": "SPDC0000000038",
+          "nama": "Combination sealing gasket 14JB 982-77 gasket 14"
+        },
+        {
+          "pn": "SPDC0000000043",
+          "nama": "Lodilao NL12 Carbon Steel Gasket Lodilao NL12"
+        },
+        {
+          "pn": "SPDC0000000081",
+          "nama": "Power take-off gasket AZ9722291008"
+        },
+        {
+          "pn": "SPDC0000000089",
+          "nama": "Lodilao NL10 Carbon Steel Gasket Lodilao NL10"
+        },
+        {
+          "pn": "SPZC0000000045",
+          "nama": "Sealing gasket 3533100237"
+        },
+        {
+          "pn": "SPZC0000000048",
+          "nama": "Sealing gasket 3562100007"
+        },
+        {
+          "pn": "SPZC0000000050",
+          "nama": "Sealing gasket 3533100222"
+        },
+        {
+          "pn": "SPZC0000000053",
+          "nama": "Sharp corner sealing gasket 3569900005"
+        },
+        {
+          "pn": "SPZC0000000154",
+          "nama": "Cylinder end gasket 3086000367"
+        },
+        {
+          "pn": "SPZC0000000165",
+          "nama": "Sealing gasket 3562100008"
+        },
+        {
+          "pn": "SPZC0000000195",
+          "nama": "Adjust gasket group 3086001140"
+        },
+        {
+          "pn": "WG2222100124",
+          "nama": "Rear end cover gasket of output shaft (Retarder)"
+        },
+        {
+          "pn": "WG2229000052",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229000187",
+          "nama": "Counter shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229020125",
+          "nama": "Input shaft end cover gasket"
+        },
+        {
+          "pn": "WG2229050001",
+          "nama": "Gasket"
+        },
+        {
+          "pn": "WG2229100024",
+          "nama": "Sun gear gasket (Rear)"
+        },
+        {
+          "pn": "WG2229100115",
+          "nama": "Planetary gear gasket"
+        },
+        {
+          "pn": "WG2229100141",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "WG2229100167",
+          "nama": "Cover plate gasket"
+        },
+        {
+          "pn": "WG2229100179",
+          "nama": "Filter gasket"
+        },
+        {
+          "pn": "WG2229100184",
+          "nama": "Rear end cover gasket of output shaft"
+        },
+        {
+          "pn": "WG2229210143",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210144",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210145",
+          "nama": "Small cover gasket"
+        },
+        {
+          "pn": "WG2229210213",
+          "nama": "Window cover gasket"
+        },
+        {
+          "pn": "WG2229210630",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229210928",
+          "nama": "Gasket"
+        },
+        {
+          "pn": "WG2229210931",
+          "nama": "End cover gasket"
+        },
+        {
+          "pn": "WG2229211926",
+          "nama": "Small cover input gasket"
+        },
+        {
+          "pn": "WG2229230033",
+          "nama": "Split gear cylinder gasket"
+        },
+        {
+          "pn": "WG2229240180",
+          "nama": "Oil filter gasket"
+        },
+        {
+          "pn": "WG2229250138",
+          "nama": "Dual H-valve gasket"
+        },
+        {
+          "pn": "WG2229250140",
+          "nama": "Pneumatic control valve gasket"
+        }
+      ],
+      "o_ring": [
+        {
+          "pn": "AZ9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "AZ9003071700",
+          "nama": "O-ring seal"
+        },
+        {
+          "pn": "SPDC0000000042",
+          "nama": "O-ring 8x1.8GB 3452.1-82 O-ring 8x1.8"
+        },
+        {
+          "pn": "SPDC0000000058",
+          "nama": "O-Ring 33.5 x 2.65GB 3452. 1-82 O-Ring 33.5 x 2.65"
+        },
+        {
+          "pn": "SPDC0000000088",
+          "nama": "O-Ring 25 x 2.5GB 3452.1-82 O-Ring 25 x 2.5"
+        },
+        {
+          "pn": "SPDC0000000093",
+          "nama": "O-Ring 11.8 × 1.8GB 3452. 1-82 O-Ring 11.8 × 1.8"
+        },
+        {
+          "pn": "SPZC0000000118",
+          "nama": "Sealing ring 3086001212"
+        },
+        {
+          "pn": "SPZC0000000126",
+          "nama": "Sealing ring 3086001596"
+        },
+        {
+          "pn": "SPZC0000000130",
+          "nama": "Sealing ring 3086001581"
+        },
+        {
+          "pn": "WG2203240204",
+          "nama": "Filter seal ring"
+        },
+        {
+          "pn": "WG2229100040",
+          "nama": "Range gear piston O-ring"
+        },
+        {
+          "pn": "WG2229230010",
+          "nama": "Inner hole sealing ring of split gear rear housing"
+        },
+        {
+          "pn": "WG9003070031",
+          "nama": "O-ring 26501120 GB3452.1 ( Fluororubber)"
+        },
+        {
+          "pn": "WG9003070800",
+          "nama": "O-ring 18000800 GB3452.1"
+        },
+        {
+          "pn": "WG9003071500",
+          "nama": "O-ring 26501500 GB3452"
+        },
+        {
+          "pn": "WG9003071700",
+          "nama": "O-ring 26500170 GB3452.1"
+        }
+      ]
+    },
+    "overhaul_tambahan": {
+      "bearing": [
+        {
+          "pn": "AZ9003320309",
+          "nama": "Cylindrical roller bearing NUP309E"
+        },
+        {
+          "pn": "AZ9003329213",
+          "nama": "Cylindrical roller bearing NUP213ENC3 (With snap ring groove)"
+        },
+        {
+          "pn": "SPDC0000000060",
+          "nama": "Deep groove ball bearing 6307GB/T 276-1994 6307"
+        },
+        {
+          "pn": "SPDC0000000065",
+          "nama": "Cylindrical roller bearing NUP 2209EN (with stop groove) GB /T 283-2007 NUP 2209EN"
+        },
+        {
+          "pn": "SPDC0000000074",
+          "nama": "Cylindrical roller bearing NUP 307EN (with stop groove) GB/ T 283-2007 NUP 307EN"
+        },
+        {
+          "pn": "SPDC0000000075",
+          "nama": "Cylindrical roller bearing NJ2206EGB/T 283-2007 NJ2206E"
+        },
+        {
+          "pn": "SPDC0000000084",
+          "nama": "Needle roller bearing K42 47 27GB 5846-86 K42 47 27"
+        },
+        {
+          "pn": "SPDC0000000092",
+          "nama": "Needle roller bearing K42 47 17GB 5846-86 K42 47 17"
+        },
+        {
+          "pn": "SPZC0000000044",
+          "nama": "Input shaft rear bearing cover 3086000683"
+        },
+        {
+          "pn": "SPZC0000000082",
+          "nama": "Input shaft front bearing cover 3086000652"
+        },
+        {
+          "pn": "SPZC0000000093",
+          "nama": "Conical roller bearing 3530109125"
+        },
+        {
+          "pn": "SPZC0000000103",
+          "nama": "Roller bearing 3530109126"
+        },
+        {
+          "pn": "SPZC0000000142",
+          "nama": "Front output bearing cover 3086000659"
+        },
+        {
+          "pn": "SPZC0000000148",
+          "nama": "Self aligning bearing 3530109120"
+        },
+        {
+          "pn": "SPZC0000000172",
+          "nama": "Rear output bearing cover 3086000682"
+        },
+        {
+          "pn": "SPZC0000000174",
+          "nama": "Self aligning bearing 3530109093"
+        },
+        {
+          "pn": "SPZC0000000175",
+          "nama": "Bearing seat 3086000806"
+        },
+        {
+          "pn": "SPZC0000000176",
+          "nama": "Conical roller bearing 3530109124"
+        },
+        {
+          "pn": "SPZC0000000181",
+          "nama": "Roller bearing 3530109123"
+        },
+        {
+          "pn": "SPZC0000000189",
+          "nama": "Needle roller bearing 3530109127"
+        },
+        {
+          "pn": "SPZC0000000194",
+          "nama": "Conical roller bearing 3530109113"
+        },
+        {
+          "pn": "WG2229020035",
+          "nama": "Thrust bearing race"
+        },
+        {
+          "pn": "WG2229020036",
+          "nama": "Thrust bearing shim"
+        },
+        {
+          "pn": "WG2229100112",
+          "nama": "Needle roller bearing outer ring"
+        },
+        {
+          "pn": "WG9003320309",
+          "nama": "Cylindrical roller bearing NUP309E"
+        },
+        {
+          "pn": "WG9003321820",
+          "nama": "Antifriction bearing 61820 GB / T276"
+        },
+        {
+          "pn": "WG9003323716",
+          "nama": "Quill bearing (K303716)"
+        },
+        {
+          "pn": "WG9003324824",
+          "nama": "Quill bearing (NA4824X1N / YA )"
+        },
+        {
+          "pn": "WG9003329309",
+          "nama": "Cylindrical roller bearing NUP309E (With snap ring groove )"
+        },
+        {
+          "pn": "WG9003329835",
+          "nama": "Quill bearing (K909835)"
+        },
+        {
+          "pn": "WG9003336218",
+          "nama": "Antifriction bearing 6218 / YA GB / T276"
+        },
+        {
+          "pn": "WG9003395230",
+          "nama": "Rear tapered roller bearing of input shaft"
+        },
+        {
+          "pn": "WG9003395320",
+          "nama": "Needle roller bearing K455320"
+        },
+        {
+          "pn": "WG9003397145",
+          "nama": "Front tapered roller bearing of input shaft"
+        }
+      ],
+      "synchronizer": [
+        {
+          "pn": "WG2203040041",
+          "nama": "Synchronizer assembly"
+        },
+        {
+          "pn": "WG2210100128",
+          "nama": "Synchronous gear block for range gear"
+        },
+        {
+          "pn": "WG2210100186",
+          "nama": "Range gear synchronous sliding sleeve"
+        },
+        {
+          "pn": "WG2210100199",
+          "nama": "Range gear synchronizer ring"
+        },
+        {
+          "pn": "WG2229020001",
+          "nama": "Synchronous pushing block"
+        }
+      ],
+      "snap_ring": [
+        {
+          "pn": "AZ220802000001",
+          "nama": "Optional part set of circlip"
+        },
+        {
+          "pn": "AZ2208020001",
+          "nama": "Optional part set of circlip"
+        },
+        {
+          "pn": "AZ2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "AZ9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "AZ9003991130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43072",
+          "nama": "Elastic snap ring for hole"
+        },
+        {
+          "pn": "Q43112",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43145",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "SPDC0000000094",
+          "nama": "Elastic retaining ring for shaft 35GB 894.1-86 Retaining ring 35"
+        },
+        {
+          "pn": "SPZC0000000091",
+          "nama": "Retaining ring 3086000702"
+        },
+        {
+          "pn": "SPZC0000000098",
+          "nama": "Elastic retaining ring for shaft 3532400082"
+        },
+        {
+          "pn": "SPZC0000000106",
+          "nama": "Elastic retaining ring 3532400085 for shaft"
+        },
+        {
+          "pn": "SPZC0000000115",
+          "nama": "Wire retaining ring 3532400036 for holes"
+        },
+        {
+          "pn": "SPZC0000000125",
+          "nama": "Elastic retaining ring 3532400153 for shaft"
+        },
+        {
+          "pn": "SPZC0000000149",
+          "nama": "Elastic retaining ring 3532400172 for holes"
+        },
+        {
+          "pn": "SPZC0000000179",
+          "nama": "Flat steel wire retaining ring for holes 3532400175"
+        },
+        {
+          "pn": "WG1642930009",
+          "nama": "Circlip nut"
+        },
+        {
+          "pn": "WG2211040115;WG2229040241;WG2229040150",
+          "nama": "Second-speed gear of main shaft ;Outer spline block slice ;circlip"
+        },
+        {
+          "pn": "WG2211040116;WG2229040241;WG2229040150",
+          "nama": "Third-speed gear of main shaft ;Outer spline block slice ; circlip"
+        },
+        {
+          "pn": "WG2211040129;WG2229040241;WG2229040150",
+          "nama": "Reverse gear of main shaft ; Outer spline block slice ; circlip"
+        },
+        {
+          "pn": "WG2211040206;WG2229040241;WG2229040150",
+          "nama": "Fifth-speed gear of main shaft (Overspeed gear);Outer spline block slice ;circlip"
+        },
+        {
+          "pn": "WG2229020047",
+          "nama": "Input shaft , Main shaft connecting circlip"
+        },
+        {
+          "pn": "WG2229040025",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG2229040150",
+          "nama": "circlip"
+        },
+        {
+          "pn": "WG2229100114",
+          "nama": "Round wire snap ring"
+        },
+        {
+          "pn": "WG2229100125",
+          "nama": "Flattened round wire snap ring for hole (For inner gear ring )"
+        },
+        {
+          "pn": "WG9003991125",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG9003991130",
+          "nama": "Elastic snap ring for shaft"
+        }
+      ]
+    }
+  },
+  "HW95508STC": {
+    "model": "HW95508STC",
+    "tipe": "Fast 8-speed",
+    "unit": [
+      "HOMAN 4X2 190HP (LEZAB1D)"
+    ],
+    "assy_pn": [
+      "HW95508STC24B803"
+    ],
+    "jumlah_seal_kit": 19,
+    "jumlah_overhaul_tambahan": 35,
+    "seal_kit": {
+      "oil_seal": [
+        {
+          "pn": "DC6J65T-156SA",
+          "nama": "Combination oil seal of output shaft"
+        },
+        {
+          "pn": "DG6J65T-156SA",
+          "nama": "Combination oil seal of output shaft"
+        },
+        {
+          "pn": "WG9003070430",
+          "nama": "Input shaft oil seal"
+        },
+        {
+          "pn": "WG9003072548",
+          "nama": "Dust-proof frame oil seal"
+        }
+      ],
+      "gasket": [
+        {
+          "pn": "AZ2208028001",
+          "nama": "Optional part set of adjusting gasket"
+        },
+        {
+          "pn": "AZ2208038001",
+          "nama": "Adjusting gasket unit of counter shaft"
+        },
+        {
+          "pn": "AZ2208040010",
+          "nama": "Gear block spring adjusting gasket unit"
+        },
+        {
+          "pn": "WG2229019002",
+          "nama": "Shift rocker arm shaft cover plate gasket"
+        },
+        {
+          "pn": "WG2229029005",
+          "nama": "First axle bearing cap gasket"
+        },
+        {
+          "pn": "WG2229100918",
+          "nama": "Front bearing cap gasket of auxiliary intermediate shaft"
+        },
+        {
+          "pn": "WG2229100929",
+          "nama": "Sealing gasket"
+        },
+        {
+          "pn": "WG2229100934",
+          "nama": "Sealing gasket"
+        }
+      ],
+      "o_ring": [
+        {
+          "pn": "AZ9003079000",
+          "nama": "Rear auxiliary box fork shaft O-ring"
+        },
+        {
+          "pn": "AZ9003079006",
+          "nama": "O-ring"
+        },
+        {
+          "pn": "FG9604241640",
+          "nama": "Shift cable through hole sealing ring assembly"
+        },
+        {
+          "pn": "WG9003074335",
+          "nama": "Piston O-ring (43.7X3.55 - G - N - GB / T3452.1 - 2005)"
+        },
+        {
+          "pn": "WG9003079000",
+          "nama": "Rear auxiliary box fork shaft O-ring"
+        },
+        {
+          "pn": "WG9003079002",
+          "nama": "Fork shaft O-ring"
+        },
+        {
+          "pn": "WG9003079006",
+          "nama": "O-ring"
+        }
+      ]
+    },
+    "overhaul_tambahan": {
+      "bearing": [
+        {
+          "pn": "AZ220326000007",
+          "nama": "Automatic self-aligning clutch release bearing assembly"
+        },
+        {
+          "pn": "WG2203260218",
+          "nama": "Release bearing lubrication hose assembly"
+        },
+        {
+          "pn": "WG2220024041",
+          "nama": "Bearing cap of the first axle"
+        },
+        {
+          "pn": "WG2222100092",
+          "nama": "Front bearing cap of auxiliary intermediate shaft"
+        },
+        {
+          "pn": "WG2222100094",
+          "nama": "Gearbox rear bearing cap"
+        },
+        {
+          "pn": "WG2229108101",
+          "nama": "Auxiliary box bearing positioning plate"
+        },
+        {
+          "pn": "WG9003310420",
+          "nama": "First axle bearing with stop ring"
+        },
+        {
+          "pn": "WG9003316015",
+          "nama": "Ball bearing (With stop ring) GB / T276 - 94|6015NR"
+        },
+        {
+          "pn": "WG9003316212",
+          "nama": "Ball bearing (With stop ring) GB / T276 - 94|6212N"
+        },
+        {
+          "pn": "WG9003321430",
+          "nama": "Intermediate shaft rear bearing"
+        },
+        {
+          "pn": "WG9003323070",
+          "nama": "Cylindrical roller bearing GB / T283 - 94|NJ307E"
+        },
+        {
+          "pn": "WG9003323216",
+          "nama": "Quill bearing K25X32X16"
+        },
+        {
+          "pn": "WG9003326100",
+          "nama": "Front bearing of auxiliary second axle"
+        },
+        {
+          "pn": "WG9003326650",
+          "nama": "Front bearing of auxiliary intermediate shaft"
+        },
+        {
+          "pn": "WG9003329430",
+          "nama": "Counter shaft front bearing with stop ring"
+        },
+        {
+          "pn": "WG9003344550",
+          "nama": "Specification Drawing of Sixth-gear Needle Roller Bearing"
+        },
+        {
+          "pn": "WG9003392616",
+          "nama": "Quill bearing HK20X26X16 - K1"
+        }
+      ],
+      "synchronizer": [
+        {
+          "pn": "AZ221010008002",
+          "nama": "High-gear conical synchronizer ring of auxiliary box"
+        },
+        {
+          "pn": "AZ221010008003",
+          "nama": "High-gear synchronizer ring of auxiliary box"
+        },
+        {
+          "pn": "AZ2229040945",
+          "nama": "Synchronizer spring"
+        },
+        {
+          "pn": "WG2203048201",
+          "nama": "Synchronizer assembly"
+        },
+        {
+          "pn": "WG2203101303",
+          "nama": "Auxiliary box low-gear synchronizer assembly ( Molybdenum spraying)"
+        },
+        {
+          "pn": "WG2210100312",
+          "nama": "Rear auxiliary box low-gear synchronizer conical ring"
+        },
+        {
+          "pn": "WG2229040945",
+          "nama": "Synchronizer spring"
+        },
+        {
+          "pn": "WG2229100937",
+          "nama": "Synchronizer lock pin"
+        },
+        {
+          "pn": "WG2229100938",
+          "nama": "Synchronizer lock pin holder"
+        }
+      ],
+      "snap_ring": [
+        {
+          "pn": "AZ2208020008",
+          "nama": "Optional part set of circlip"
+        },
+        {
+          "pn": "AZ2229049002",
+          "nama": "circlip"
+        },
+        {
+          "pn": "Q43130",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "Q43135",
+          "nama": "Elastic snap ring for shaft"
+        },
+        {
+          "pn": "WG2229028002",
+          "nama": "Gear lock ring"
+        },
+        {
+          "pn": "WG2229039005",
+          "nama": "circlip"
+        },
+        {
+          "pn": "WG2229040088",
+          "nama": "Flattened round wire snap ring for hole"
+        },
+        {
+          "pn": "WG2229049002",
+          "nama": "circlip"
+        },
+        {
+          "pn": "WG2229100916",
+          "nama": "Snap ring fixing ring"
+        }
+      ]
+    }
+  },
+  "ZF16S2531TO": {
+    "model": "ZF16S2531TO",
+    "tipe": "16-speed (ZF)",
+    "unit": [
+      "SITRAK 480 6X6 (LZZ8CUWD)",
+      "SITRAK 480 6X6 (LZZ8CVWD)",
+      "SITRAK 540 6X4 (LZZ7CLXB)"
+    ],
+    "assy_pn": [
+      "WG9725220376",
+      "WG9725220376/1"
+    ],
+    "jumlah_seal_kit": 102,
+    "jumlah_overhaul_tambahan": 66,
+    "seal_kit": {
+      "gasket": [
+        {
+          "pn": "712W32620-0113",
+          "nama": "Control sealing gasket"
+        },
+        {
+          "pn": "712W32620-0114",
+          "nama": "Control sealing gasket"
+        },
+        {
+          "pn": "712W32620-0123",
+          "nama": "Control sealing gasket"
+        },
+        {
+          "pn": "712W32620-0124",
+          "nama": "Control sealing gasket"
+        },
+        {
+          "pn": "SPZF0000000137",
+          "nama": "Gasket"
+        },
+        {
+          "pn": "WG9725220273+050/1",
+          "nama": "1315 307 013 Gasket"
+        },
+        {
+          "pn": "WG9725220376+008/1",
+          "nama": "0501.331.587 Sealing gasket"
+        },
+        {
+          "pn": "WG9725220376+052/1",
+          "nama": "0501.322.776 Sealing gasket"
+        },
+        {
+          "pn": "WG9725220376+068/1",
+          "nama": "2050.309.094 Gasket"
+        },
+        {
+          "pn": "WG9725220376+069/1",
+          "nama": "0730.007.489 Gasket"
+        },
+        {
+          "pn": "WG9725220376+070/1",
+          "nama": "0730.007.488 Gasket"
+        },
+        {
+          "pn": "WG9725220376+071/1",
+          "nama": "0730.007.487 Gasket"
+        },
+        {
+          "pn": "WG9725220376+072/1",
+          "nama": "0730.007.486 Gasket"
+        },
+        {
+          "pn": "WG9725220376+073/1",
+          "nama": "0730.007.485 Gasket"
+        },
+        {
+          "pn": "WG9725220376+074/1",
+          "nama": "0730.007.484 Gasket"
+        },
+        {
+          "pn": "WG9725220376+075/1",
+          "nama": "0730.007.483 Gasket"
+        },
+        {
+          "pn": "WG9725220376+076/1",
+          "nama": "0730.007.482 Gasket"
+        },
+        {
+          "pn": "WG9725220376+077/1",
+          "nama": "0730.007.481 Gasket"
+        },
+        {
+          "pn": "WG9725220376+078/1",
+          "nama": "0730.007.480 Gasket"
+        },
+        {
+          "pn": "WG9725220376+079/1",
+          "nama": "0730.007.479 Gasket"
+        },
+        {
+          "pn": "WG9725220376+080/1",
+          "nama": "0730.007.136 Gasket"
+        },
+        {
+          "pn": "WG9725220376+081/1",
+          "nama": "0730.007.135 Gasket"
+        },
+        {
+          "pn": "WG9725220376+082/1",
+          "nama": "0730.007.134 Gasket"
+        },
+        {
+          "pn": "WG9725220376+083/1",
+          "nama": "0730.007.133 Gasket"
+        },
+        {
+          "pn": "WG9725220376+084/1",
+          "nama": "0730.007.132 Gasket"
+        },
+        {
+          "pn": "WG9725220376+085/1",
+          "nama": "0730.007.131 Gasket"
+        },
+        {
+          "pn": "WG9725220376+086/1",
+          "nama": "0730.007.130 Gasket"
+        },
+        {
+          "pn": "WG9725220376+087/1",
+          "nama": "0730.007.129 Gasket"
+        },
+        {
+          "pn": "WG9725220376+088/1",
+          "nama": "2050.309.034 Gasket"
+        },
+        {
+          "pn": "WG9725220376+089/1",
+          "nama": "0730.007.128 Gasket"
+        },
+        {
+          "pn": "WG9725220376+090/1",
+          "nama": "0730.007.127 Gasket"
+        },
+        {
+          "pn": "WG9725220376+091/1",
+          "nama": "0730.007.126 Gasket"
+        },
+        {
+          "pn": "WG9725220376+092/1",
+          "nama": "2050.309.065 Gasket"
+        },
+        {
+          "pn": "WG9725220376+093/1",
+          "nama": "0730.005.749 Gasket"
+        },
+        {
+          "pn": "WG9725220376+094/1",
+          "nama": "0730.005.748 Gasket"
+        },
+        {
+          "pn": "WG9725220376+095/1",
+          "nama": "0730.301.503 Gasket"
+        },
+        {
+          "pn": "WG9725220376+096/1",
+          "nama": "0730.301.504 Gasket"
+        },
+        {
+          "pn": "WG9725220376+097/1",
+          "nama": "0730.301.505 Gasket"
+        },
+        {
+          "pn": "WG9725220376+098/1",
+          "nama": "0730.301.506 Gasket"
+        },
+        {
+          "pn": "WG9725220376+099/1",
+          "nama": "0730.112.938 Gasket"
+        },
+        {
+          "pn": "WG9725220376+100/1",
+          "nama": "0730.112.937 Gasket"
+        },
+        {
+          "pn": "WG9725220376+101/1",
+          "nama": "0730.112.936 Gasket"
+        },
+        {
+          "pn": "WG9725220376+102/1",
+          "nama": "0730.112.935 Gasket"
+        },
+        {
+          "pn": "WG9725220376+103/1",
+          "nama": "0730.106.860 Gasket"
+        },
+        {
+          "pn": "WG9725220376+104/1",
+          "nama": "0730.106.917 Gasket"
+        },
+        {
+          "pn": "WG9725220376+105/1",
+          "nama": "0730.106.916 Gasket"
+        },
+        {
+          "pn": "WG9725220376+106/1",
+          "nama": "0730.106.915 Gasket"
+        },
+        {
+          "pn": "WG9725220376+107/1",
+          "nama": "0730.106.914 Gasket"
+        },
+        {
+          "pn": "WG9725220376+108/1",
+          "nama": "0730.106.913 Gasket"
+        },
+        {
+          "pn": "WG9725220376+109/1",
+          "nama": "0730.106.912 Gasket"
+        },
+        {
+          "pn": "WG9725220376+110/1",
+          "nama": "0730.106.911 Gasket"
+        },
+        {
+          "pn": "WG9725220376+111/1",
+          "nama": "0730.106.910 Gasket"
+        },
+        {
+          "pn": "WG9725220376+112/1",
+          "nama": "0730.106.909 Gasket"
+        },
+        {
+          "pn": "WG9725220376+113/1",
+          "nama": "0730.106.908 Gasket"
+        },
+        {
+          "pn": "WG9725220376+114/1",
+          "nama": "0730.100.799 Gasket"
+        },
+        {
+          "pn": "WG9725220376+115/1",
+          "nama": "0730.100.800 Gasket"
+        },
+        {
+          "pn": "WG9725220376+116/1",
+          "nama": "0730.100.801 Gasket"
+        },
+        {
+          "pn": "WG9725220376+117/1",
+          "nama": "0730.100.802 Gasket"
+        },
+        {
+          "pn": "WG9725220376+118/1",
+          "nama": "0730.100.803 Gasket"
+        },
+        {
+          "pn": "WG9725220376+119/1",
+          "nama": "0730.101.466 Gasket"
+        },
+        {
+          "pn": "WG9725220376+120/1",
+          "nama": "0730.101.467 Gasket"
+        },
+        {
+          "pn": "WG9725220376+121/1",
+          "nama": "0730.101.468 Gasket"
+        },
+        {
+          "pn": "WG9725220376+122/1",
+          "nama": "0730.101.469 Gasket"
+        },
+        {
+          "pn": "WG9725220376+123/1",
+          "nama": "0730.101.470 Gasket"
+        },
+        {
+          "pn": "WG9725220376+124/1",
+          "nama": "0730.101.471 Gasket"
+        },
+        {
+          "pn": "WG9725220376+125/1",
+          "nama": "0730.106.907 Gasket"
+        },
+        {
+          "pn": "WG9725220376+126/1",
+          "nama": "0730.106.906 Gasket"
+        },
+        {
+          "pn": "WG9725220376+127/1",
+          "nama": "0730.106.905 Gasket"
+        },
+        {
+          "pn": "WG9725220376+128/1",
+          "nama": "0501.324.454 Gasket"
+        },
+        {
+          "pn": "WG9725220376+394/1",
+          "nama": "6090.301.009 Sealing gasket"
+        },
+        {
+          "pn": "WG9725220382+410/1",
+          "nama": "Gasket 0501.301.258"
+        },
+        {
+          "pn": "WG9725220383+411/1",
+          "nama": "Gasket 0501.301.259"
+        },
+        {
+          "pn": "WG9725220384+412/1",
+          "nama": "Gasket 0501.301.260"
+        },
+        {
+          "pn": "WG9725220385+413/1",
+          "nama": "Gasket 0501.301.261"
+        },
+        {
+          "pn": "WG9725220536+361/1",
+          "nama": "6093 304 135 Sealing gasket"
+        },
+        {
+          "pn": "WG9725220536+362/1",
+          "nama": "6093 304 136 sealing gasket"
+        },
+        {
+          "pn": "WG9725220613+077/1",
+          "nama": "1238 310 015 gasket"
+        }
+      ],
+      "o_ring": [
+        {
+          "pn": "SPZF0000000152",
+          "nama": "O-ring"
+        },
+        {
+          "pn": "SPZF0000000474",
+          "nama": "O-ring"
+        },
+        {
+          "pn": "SPZF0000000487",
+          "nama": "O-ring"
+        },
+        {
+          "pn": "SPZF0000000627",
+          "nama": "O-ring 0634.900.074"
+        },
+        {
+          "pn": "SPZF0000000836",
+          "nama": "Seal ring 0634.801.331"
+        },
+        {
+          "pn": "WG9725220376+048/1",
+          "nama": "0730.008.637 Seal ring"
+        },
+        {
+          "pn": "WG9725220376+050/1",
+          "nama": "0634.801.249 Seal ring"
+        },
+        {
+          "pn": "WG9725220376+232/1",
+          "nama": "0730.009.515 Seal ring"
+        },
+        {
+          "pn": "WG9725220376+251/1",
+          "nama": "0634.801.062 Seal ring"
+        },
+        {
+          "pn": "WG9725220376+286/1",
+          "nama": "0730.008.604 Seal ring"
+        },
+        {
+          "pn": "WG9725220376+293/1",
+          "nama": "0730.008.055 Seal ring"
+        },
+        {
+          "pn": "WG9725220399+010/1",
+          "nama": "0501.331.851 O-ring"
+        },
+        {
+          "pn": "WG9725220399+012/1",
+          "nama": "0501.331.849 O-ring"
+        },
+        {
+          "pn": "WG9725220399+014/1",
+          "nama": "0501.331.850 O-ring"
+        },
+        {
+          "pn": "WG9725220399+016/1",
+          "nama": "0501.331.852 O-ring"
+        },
+        {
+          "pn": "WG9725220536+008/1",
+          "nama": "0634 349 854 O-ring"
+        },
+        {
+          "pn": "WG9725220536+304/1",
+          "nama": "0634 349 856 O-ring"
+        },
+        {
+          "pn": "WG9725220536+306/1",
+          "nama": "0634 316 699 O-ring"
+        },
+        {
+          "pn": "WG9725220536+307/1",
+          "nama": "0634 316 700 O-ring"
+        },
+        {
+          "pn": "WG9725220536+312/1",
+          "nama": "0634 349 855 O-ring"
+        },
+        {
+          "pn": "WG9725220536+321/1",
+          "nama": "0634 349 857 O-ring"
+        },
+        {
+          "pn": "WG9725220536+327/1",
+          "nama": "0634 349 853 O-ring"
+        },
+        {
+          "pn": "WG9725220536+331/1",
+          "nama": "0634 349 858 O-ring"
+        },
+        {
+          "pn": "WG9725220536+355/1",
+          "nama": "0634 349 849 O-ring"
+        },
+        {
+          "pn": "WG9725290031+103/1",
+          "nama": "0634.313.135 O-ring"
+        }
+      ]
+    },
+    "overhaul_tambahan": {
+      "bearing": [
+        {
+          "pn": "SPZF0000000477",
+          "nama": "Ball bearing 0635.332.034"
+        },
+        {
+          "pn": "SPZF0000000480",
+          "nama": "Ball bearing 0750.116.233"
+        },
+        {
+          "pn": "WG9725220318+300/1",
+          "nama": "Needle roller bearing 0735. 301.912"
+        },
+        {
+          "pn": "WG9725220359+004/1",
+          "nama": "0750.117.009 Tapered roller bearing"
+        },
+        {
+          "pn": "WG9725220376+062/1",
+          "nama": "0750.117.732 Tapered roller bearing"
+        },
+        {
+          "pn": "WG9725220376+156/1",
+          "nama": "0750.115.598 Needle bearing"
+        },
+        {
+          "pn": "WG9725220376+163/1",
+          "nama": "0750.117.678 Tapered roller bearing"
+        },
+        {
+          "pn": "WG9725220376+193/1",
+          "nama": "0750.120.342 Tapered roller bearing"
+        },
+        {
+          "pn": "WG9725220376+203/1",
+          "nama": "0750.115.596 Needle bearing"
+        },
+        {
+          "pn": "WG9725220376+311/1",
+          "nama": "0735.298.169 Axial roller bearing"
+        },
+        {
+          "pn": "WG9725220376+353/1",
+          "nama": "0501.323.199 Bearing bushing"
+        },
+        {
+          "pn": "WG9725220388+416/1",
+          "nama": "0735.301.936 bearing inner ring"
+        },
+        {
+          "pn": "WG9725220390+418/1",
+          "nama": "0735.301.947 Needle bearing"
+        },
+        {
+          "pn": "WG9725220391+419/1",
+          "nama": "0735.301.948 Needle bearing"
+        },
+        {
+          "pn": "WG9725220392+420/1",
+          "nama": "0735.301.949 Needle bearing"
+        },
+        {
+          "pn": "WG9725220393+421/1",
+          "nama": "0735.301.950 Needle bearing"
+        },
+        {
+          "pn": "WG9725220394+422/1",
+          "nama": "0735.303.330 圆锥滚子轴承"
+        },
+        {
+          "pn": "WG9725220395+423/1",
+          "nama": "0735.303.331 Roller bearing"
+        },
+        {
+          "pn": "WG9725220396+424/1",
+          "nama": "0735.303.332 Roller bearing"
+        },
+        {
+          "pn": "WG9725220397+425/1",
+          "nama": "0735.303.550 Needle bearing"
+        },
+        {
+          "pn": "WG9725220419+443/1",
+          "nama": "1356.304.035 Main bearing"
+        },
+        {
+          "pn": "WG9725220536+234/1",
+          "nama": "0750 116 394 Ball bearing"
+        },
+        {
+          "pn": "WG9725220536+300/1",
+          "nama": "0735 303 081 Needle roller bearing"
+        },
+        {
+          "pn": "WG9725220536+324/1",
+          "nama": "0735 303 082 Needle roller bearing"
+        },
+        {
+          "pn": "WG9725220536+351/1",
+          "nama": "6093 204 008 tapered roller bearings"
+        },
+        {
+          "pn": "WG9725220536+352/1",
+          "nama": "0735 372 115 tapered roller bearing"
+        },
+        {
+          "pn": "WG9725220536+353/1",
+          "nama": "0735 300 376 tapered roller bearing"
+        },
+        {
+          "pn": "WG9725220613+084/1",
+          "nama": "0735 320 120 needle roller bearing"
+        }
+      ],
+      "synchronizer": [
+        {
+          "pn": "AZ972522000013+112/1",
+          "nama": "0769.186.295 Synchronous Ring"
+        },
+        {
+          "pn": "WG9725220376+316/1",
+          "nama": "1313.333.001 Synchronous body"
+        },
+        {
+          "pn": "WG9725220376+319/1",
+          "nama": "1297.333.137 Synchronizer ring"
+        }
+      ],
+      "snap_ring": [
+        {
+          "pn": "SPZF0000000481",
+          "nama": "Retainer ring 0630.531.055"
+        },
+        {
+          "pn": "WG9000361002",
+          "nama": "Circlip NG6"
+        },
+        {
+          "pn": "WG9725220273+074/1",
+          "nama": "0630 501 175 Circlip"
+        },
+        {
+          "pn": "WG9725220376+055/1",
+          "nama": "0630.502.027 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+063/1",
+          "nama": "0730.501.598 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+131/1",
+          "nama": "0730.303.174 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+132/1",
+          "nama": "0730.303.173 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+133/1",
+          "nama": "0730.303.172 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+134/1",
+          "nama": "0730.303.171 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+135/1",
+          "nama": "0730.303.170 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+136/1",
+          "nama": "0730.303.169 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+137/1",
+          "nama": "0730.303.168 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+138/1",
+          "nama": "0730.303.167 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+139/1",
+          "nama": "0730.303.166 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+140/1",
+          "nama": "0730.303.165 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+141/1",
+          "nama": "0730.302.599 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+142/1",
+          "nama": "0730.302.598 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+143/1",
+          "nama": "0730.302.597 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+164/1",
+          "nama": "0730.303.186 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+165/1",
+          "nama": "0730.303.185 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+166/1",
+          "nama": "0730.303.184 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+167/1",
+          "nama": "0730.303.183 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+168/1",
+          "nama": "0730.303.182 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+169/1",
+          "nama": "0730.303.181 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+170/1",
+          "nama": "0730.303.180 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+171/1",
+          "nama": "0730.303.179 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+172/1",
+          "nama": "0730.303.178 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+173/1",
+          "nama": "0730.303.187 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+174/1",
+          "nama": "0730.303.188 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+175/1",
+          "nama": "0730.303.189 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+200/1",
+          "nama": "0730.062.781 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+223/1",
+          "nama": "0630.501.006 Retainer ring"
+        },
+        {
+          "pn": "WG9725220376+273/1",
+          "nama": "0630.502.022 Retainer ring"
+        },
+        {
+          "pn": "WG9725220536+325/1",
+          "nama": "0630 502 010 retaining ring"
+        },
+        {
+          "pn": "WG9725220536+363/1",
+          "nama": "0630 502 030 retaining ring"
+        }
+      ]
+    }
+  }
+}

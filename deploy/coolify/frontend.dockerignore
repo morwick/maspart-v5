@@ -1,0 +1,5 @@
+# Disalin ke /opt/maspart/frontend/.dockerignore sebelum build (agar context kecil).
+node_modules/
+.next/
+.env.local
+.git

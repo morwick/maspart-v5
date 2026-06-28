@@ -1,0 +1,8 @@
+# Disalin ke /opt/maspart/backend/.dockerignore sebelum build (agar context kecil).
+venv/
+.cache/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.git

@@ -1,0 +1,63 @@
+# MASPART — Docker Compose untuk deploy via Coolify.
+#
+# Strategi: image di-BUILD di server (maspart-backend / maspart-frontend), bukan
+# ditarik dari registry. data/ dan backend/.env yang sudah ada di /opt/maspart
+# di-BIND-MOUNT (tidak ikut image) — termasuk galeri Cari-by-Foto ~300MB.
+#
+# Routing meniru nginx lama lewat label Traefik (Traefik = coolify-proxy):
+#   - backend  : /api/* dan /health   (priority lebih tinggi)
+#   - frontend : sisanya (catch-all)
+# TLS pakai certResolver "letsencrypt" yang sudah ada (acme.json).
+#
+# Saat cutover, file manual /data/coolify/proxy/dynamic/maspart.yaml DIHAPUS agar
+# router lama (file-provider) tidak bentrok dengan router container ini.
+
+services:
+  backend:
+    image: maspart-backend:latest
+    pull_policy: never
+    restart: unless-stopped
+    # Kredensial sekarang dikelola sbg Environment Variables di Coolify (di-inject
+    # ke container), TIDAK lagi mount file .env dari host. Edit lewat dashboard
+    # Coolify → service maspart → Environment Variables.
+    volumes:
+      # read-write: backend perlu MENULIS file katalog hasil upload admin ke /data.
+      - /opt/maspart/data:/app/data:rw
+    networks:
+      - coolify
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - "traefik.http.routers.maspart-be.rule=(Host(`maspart.tech`) || Host(`www.maspart.tech`)) && (PathPrefix(`/api`) || Path(`/health`))"
+      - traefik.http.routers.maspart-be.entrypoints=https
+      - traefik.http.routers.maspart-be.tls=true
+      - traefik.http.routers.maspart-be.tls.certresolver=letsencrypt
+      - traefik.http.routers.maspart-be.priority=20
+      - traefik.http.services.maspart-be.loadbalancer.server.port=8001
+
+  frontend:
+    image: maspart-frontend:latest
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - coolify
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - "traefik.http.routers.maspart-fe.rule=Host(`maspart.tech`) || Host(`www.maspart.tech`)"
+      - traefik.http.routers.maspart-fe.entrypoints=https
+      - traefik.http.routers.maspart-fe.tls=true
+      - traefik.http.routers.maspart-fe.tls.certresolver=letsencrypt
+      - traefik.http.routers.maspart-fe.priority=10
+      - traefik.http.services.maspart-fe.loadbalancer.server.port=3000
+      # Redirect http → https
+      - traefik.http.routers.maspart-fe-http.rule=Host(`maspart.tech`) || Host(`www.maspart.tech`)
+      - traefik.http.routers.maspart-fe-http.entrypoints=http
+      - traefik.http.routers.maspart-fe-http.middlewares=maspart-redir
+      - traefik.http.middlewares.maspart-redir.redirectscheme.scheme=https
+
+networks:
+  coolify:
+    external: true

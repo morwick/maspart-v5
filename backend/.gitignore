@@ -1,0 +1,11 @@
+# Rahasia & lokal
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Disk cache index part (pickle per-file)
+.cache/

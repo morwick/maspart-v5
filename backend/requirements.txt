@@ -1,0 +1,18 @@
+# MASPART API (FastAPI)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic-settings>=2.4
+PyJWT>=2.8
+bcrypt>=4.1
+requests>=2.31
+pandas>=2.0
+openpyxl>=3.1
+python-multipart>=0.0.9
+
+# Dependensi modul root yang di-reuse + Cari by Foto
+# (part_compare, sims_fetcher, sims_price_fetcher, image_search/DINOv2)
+numpy>=1.24
+Pillow>=10.0
+pycryptodome>=3.20
+torch>=2.2
+torchvision>=0.17
