@@ -877,11 +877,16 @@ def _t_repair_kit_transmisi(args: dict, user: dict) -> dict:
             "total_model": len(models),
             "total_unit_tercatat": len(unit_tercatat),
             "unit_tercatat": unit_tercatat,
-            "catatan": "SEMUA unit di 'unit_tercatat' PUNYA transmisi assy + repair kit "
-                       "(ini sumber kebenaran). JANGAN mengklaim suatu unit tidak punya "
-                       "transmisi assy tanpa mengeceknya di sini. Sebutkan model/PN/unit "
-                       "(mis. 'HW19709', 'ZF16S2531TO', '8JS85', PN gearbox assy, atau nama "
-                       "unit) untuk melihat repair kit-nya.",
+            "catatan": "'unit_tercatat' = unit yang PUNYA transmisi assy + DATA repair kit "
+                       "(khusus truk Sinotruk/HOWO — ini sumber kebenaran repair kit). "
+                       "PENTING: daftar ini BUKAN daftar lengkap semua unit ber-transmisi. "
+                       "Unit di LUAR daftar ini (mis. Shantui SD16/SG21/L55, varian Wechai) "
+                       "BISA tetap punya transmisi/gearbox assy di katalog walau tanpa data "
+                       "repair kit — untuk unit spesifik, JANGAN klaim 'tidak punya transmisi "
+                       "assy' dari daftar ini; cek dulu via cari_part(query='transmisi', "
+                       "unit=<nama unit>). Sebutkan model/PN/unit (mis. 'HW19709', "
+                       "'ZF16S2531TO', '8JS85', PN gearbox assy, atau nama unit) untuk "
+                       "melihat repair kit-nya.",
         }
     hits = repairkit.find(q)
     if not hits:
@@ -1036,9 +1041,13 @@ def _system_prompt(user: dict) -> str:
         "tebakan. Tiap unit Sinotruk punya sheet gearbox (05变速箱) & Part Number transmisi "
         "assy — selain pola HW…huruf, ADA juga assy ber-PN `HW19710…` (tanpa huruf), Fast "
         "`FZ…` (8JS85TE), & ZF `WG…` (ZF16S2531TO) yang TETAP transmisi assy. Untuk pertanyaan "
-        "'unit apa saja yang punya / tidak punya transmisi/repair kit', panggil "
-        "repair_kit_transmisi dengan argumen KOSONG dan jawab HANYA dari field 'unit_tercatat' "
-        "— jangan mengarang atau menghitung sendiri dari ingatan."
+        "umum 'unit apa saja yang punya repair kit transmisi', panggil repair_kit_transmisi "
+        "dengan argumen KOSONG dan jawab dari field 'unit_tercatat' (itu daftar unit dengan "
+        "DATA repair kit, khusus truk Sinotruk) — jangan mengarang dari ingatan. TAPI bila "
+        "user tanya transmisi/gearbox assy suatu unit SPESIFIK (terutama Shantui mis. SD16/"
+        "SG21/L55 atau varian Wechai) yang TIDAK ada di 'unit_tercatat', JANGAN langsung "
+        "bilang 'tidak punya' — panggil cari_part(query='transmisi', unit=<unit>) dulu, sebab "
+        "banyak unit ini tetap punya gearbox assy di katalog meski tanpa data repair kit."
     )
 
     # ── Konteks model/unit yang benar-benar ada (anti-ngarang unit) ──
