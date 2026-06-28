@@ -546,13 +546,16 @@ def search_part_name(term: str) -> list[dict]:
                 for sw in search_words:
                     if sw in word or word in sw:
                         matching_indices.update(pni[word])
-            # Fallback keyword pendek (≤3 huruf) — cek nama DAN keterangan (remark).
-            if not matching_indices and len(kw_up) <= 3:
-                for idx, row in df.iterrows():
-                    pname = str(row["part_name"]) if pd.notna(row["part_name"]) else ""
-                    remark = str(row["remark"]) if pd.notna(row.get("remark")) else ""
-                    if kw_up in pname.upper() or kw_up in remark.upper():
-                        matching_indices.add(idx)
+            # Fallback keyword SANGAT pendek (1-2 huruf) yang TIDAK terindeks (index
+            # hanya menyimpan kata >2 huruf). Kata ≥3 huruf — termasuk istilah China
+            # 3-karakter spt '变速器'/'变速箱' — sudah tertangani word-loop di atas, jadi
+            # JANGAN jalankan fallback untuknya. Pakai str.contains (vektor) BUKAN
+            # df.iterrows() yang O(baris) & sangat lambat (penyebab query transmisi ~40s).
+            if not matching_indices and len(kw_up) < 3:
+                pn_up = df["part_name"].fillna("").astype(str).str.upper()
+                rm_up = df["remark"].fillna("").astype(str).str.upper()
+                mask = pn_up.str.contains(kw_up, regex=False) | rm_up.str.contains(kw_up, regex=False)
+                matching_indices.update(int(i) for i in df.index[mask])
 
         for idx in matching_indices:
             row = df.iloc[idx]
