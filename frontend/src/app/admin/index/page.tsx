@@ -5,10 +5,13 @@ import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import {
   ApiError,
+  getCatalogBomStatus,
   getIndexStatus,
   indexBulk,
   indexPart,
+  rebuildCatalogBom,
   reloadGallery,
+  type CatalogBomStatus,
   type IndexResult,
   type IndexStatusInfo,
 } from "@/lib/api";
@@ -25,12 +28,20 @@ export default function AdminIndexPage() {
   const [error, setError] = useState<string | null>(null);
   const [reloading, setReloading] = useState(false);
   const [reloadMsg, setReloadMsg] = useState<string | null>(null);
+  const [bomStatus, setBomStatus] = useState<CatalogBomStatus | null>(null);
+  const [bomBusy, setBomBusy] = useState(false);
+  const [bomMsg, setBomMsg] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
     const token = getToken();
     if (!token) return;
     try {
       setStatus(await getIndexStatus(token));
+    } catch {
+      /* ignore */
+    }
+    try {
+      setBomStatus(await getCatalogBomStatus(token));
     } catch {
       /* ignore */
     }
@@ -88,6 +99,26 @@ export default function AdminIndexPage() {
       fail(e);
     } finally {
       setReloading(false);
+    }
+  }
+
+  async function runRebuildBom() {
+    const token = getToken();
+    if (!token) return;
+    setBomBusy(true);
+    setError(null);
+    setBomMsg(null);
+    try {
+      const r = await rebuildCatalogBom(token);
+      setBomMsg(
+        `BOM dibangun ulang: ${r.unit_berkategori} unit · ${r.kategori} kategori · ` +
+          `${r.assy_terindeks} assy · ${r.total_baris_part.toLocaleString("id-ID")} baris part (${r.ukuran_kb} KB).`,
+      );
+      await loadStatus();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBomBusy(false);
     }
   }
 
@@ -152,6 +183,40 @@ export default function AdminIndexPage() {
             {error}
           </p>
         )}
+
+        <section className="mb-5 rounded-xl bg-white p-4 ring-1 ring-zinc-200">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">
+                📚 Catalog BOM <span className="font-normal text-zinc-500">— banding part per kategori &amp; per assy</span>
+              </h3>
+              <p className="mt-0.5 text-xs text-zinc-500">
+                {bomStatus?.available
+                  ? `Terindeks: ${bomStatus.unit} unit · ${bomStatus.kategori} kategori. `
+                  : "Belum ada data. "}
+                Klik <b>Rebuild</b> setelah menambah / mengubah katalog agar fitur banding Asisten AI ikut ter-update.
+              </p>
+            </div>
+            <button
+              onClick={runRebuildBom}
+              disabled={bomBusy}
+              title="Bangun ulang data Catalog BOM dari sheet kategori semua katalog. Langsung aktif tanpa restart."
+              className="rounded-lg border border-brand px-3 py-1.5 text-sm font-semibold text-brand hover:bg-green-50 disabled:opacity-50"
+            >
+              {bomBusy ? "Membangun…" : "↻ Rebuild BOM"}
+            </button>
+          </div>
+          {bomBusy && (
+            <p className="mt-2 text-xs text-zinc-400">
+              Memindai sheet kategori semua file katalog — bisa beberapa detik.
+            </p>
+          )}
+          {bomMsg && (
+            <p className="mt-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700 ring-1 ring-green-100">
+              {bomMsg}
+            </p>
+          )}
+        </section>
 
         <label className="mb-3 flex items-center gap-2 text-sm text-zinc-600">
           <input type="checkbox" checked={reindex} onChange={(e) => setReindex(e.target.checked)} />

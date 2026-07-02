@@ -617,6 +617,25 @@ export async function getPartPhotos(pn: string, token: string): Promise<PartPhot
   return res.json();
 }
 
+// ── Spesifikasi fisik part (berat/dimensi resmi SIMS) ───────────────
+export type PartSpec = {
+  berat_bersih_kg?: number;
+  berat_kirim_kg?: number;
+  dimensi_cm?: string;
+  satuan?: string;
+  kemasan_minimum?: number;
+  merek?: string;
+};
+export type PartSpecResponse = { part_number: string; spec: PartSpec; berat_gram: number };
+
+export async function getPartSpec(pn: string, token: string): Promise<PartSpecResponse> {
+  const res = await fetch(`${API_BASE}/api/parts/spec?pn=${encodeURIComponent(pn)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 // ── Permissions (menu + kolom + sub-tab harga) ──────────────────────
 export type MyPermissions = {
   menus: string[];
@@ -803,6 +822,34 @@ export async function reloadGallery(token: string): Promise<ReloadGalleryResult>
   return res.json();
 }
 
+export type CatalogBomStatus = { available: boolean; unit: number; kategori: number };
+export type CatalogBomRebuildResult = {
+  ok: boolean;
+  file_katalog_dipindai: number;
+  unit_berkategori: number;
+  kategori: number;
+  assy_terindeks: number;
+  total_baris_part: number;
+  ukuran_kb: number;
+};
+
+export async function getCatalogBomStatus(token: string): Promise<CatalogBomStatus> {
+  const res = await fetch(`${API_BASE}/api/admin/catalog-bom/status`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function rebuildCatalogBom(token: string): Promise<CatalogBomRebuildResult> {
+  const res = await fetch(`${API_BASE}/api/admin/catalog-bom/rebuild`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 export async function indexPart(token: string, pn: string, reindex = false): Promise<IndexResult> {
   const res = await fetch(`${API_BASE}/api/admin/index`, {
     method: "POST",
@@ -924,6 +971,7 @@ export type MonitoringActivity = {
 export type MonitoringData = {
   online_count: number;
   total_users: number;
+  online_window_minutes?: number;
   users: MonitoringUser[];
   recent_activity: MonitoringActivity[];
 };
@@ -1178,13 +1226,38 @@ export type AIPhotoCandidate = {
   similarity: number;
   sims_url: string;
 };
+export type AIBandingExport = {
+  rangka_1: string;
+  rangka_2: string;
+  kategori: string;
+  kategori_nama: string;
+};
 export type AIChatResult = {
   reply: string;
   tools_used: string[];
   photo_candidates?: AIPhotoCandidate[];
   /** Model transmisi yg dibahas → tampilkan tombol unduh Excel repair kit. */
   repairkit_models?: string[];
+  /** Perbandingan rangka → kartu unduh Excel hasil perbandingan. */
+  banding_exports?: AIBandingExport[];
 };
+
+/** Unduh Excel hasil perbandingan part dua unit (banding_rangka). */
+export async function exportBandingRangka(
+  token: string,
+  p: { rangka_1: string; rangka_2: string; kategori?: string },
+): Promise<Blob> {
+  const qs = new URLSearchParams({
+    rangka_1: p.rangka_1,
+    rangka_2: p.rangka_2,
+    kategori: p.kategori || "",
+  });
+  const res = await fetch(`${API_BASE}/api/ai/banding-rangka/export?${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.blob();
+}
 
 export async function getAiStatus(token: string): Promise<{ available: boolean }> {
   const res = await fetch(`${API_BASE}/api/ai/status`, {
@@ -1200,6 +1273,71 @@ export async function aiChat(token: string, messages: AIChatTurn[]): Promise<AIC
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ messages }),
   });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+// ── Umpan balik Asisten AI (👍/👎) ──────────────────────────────────
+export type AIFeedbackInput = {
+  rating: "up" | "down";
+  question: string;
+  answer: string;
+  tools?: string[];
+  note?: string;
+  context?: AIChatTurn[];
+};
+
+export async function submitAiFeedback(token: string, fb: AIFeedbackInput): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/api/ai/feedback`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(fb),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export type AIFeedbackRow = {
+  id: number;
+  created_at: string;
+  username: string | null;
+  role: string | null;
+  rating: "up" | "down";
+  question: string | null;
+  answer: string | null;
+  tools: string | null;
+  note: string | null;
+  resolved: boolean;
+};
+export type AIFeedbackList = {
+  ringkasan: { total: number; up: number; down: number; down_belum_ditangani: number };
+  jumlah: number;
+  feedback: AIFeedbackRow[];
+};
+
+export async function listAiFeedback(
+  token: string,
+  opts?: { rating?: "up" | "down"; onlyOpen?: boolean },
+): Promise<AIFeedbackList> {
+  const qs = new URLSearchParams();
+  if (opts?.rating) qs.set("rating", opts.rating);
+  if (opts?.onlyOpen) qs.set("only_open", "true");
+  const res = await fetch(`${API_BASE}/api/ai/feedback?${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function resolveAiFeedback(
+  token: string,
+  id: number,
+  resolved = true,
+): Promise<{ ok: boolean }> {
+  const res = await fetch(
+    `${API_BASE}/api/ai/feedback/${id}/resolve?resolved=${resolved}`,
+    { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+  );
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
 }
