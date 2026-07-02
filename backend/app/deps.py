@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .core.security import decode_access_token
-from .services import gudang
+from .services import gudang, presence
 from .services import supabase_client as sb
 
 _bearer = HTTPBearer(auto_error=True)
@@ -48,6 +48,8 @@ def get_current_user(
         )
     username = str(payload["sub"]).strip().lower()
     resolved = _resolve_user(username, payload.get("role", "user"))
+    if resolved is not None:
+        presence.touch(resolved["username"])  # catat aktivitas utk panel Monitoring
     if resolved is None:
         # Akun dinonaktifkan/dihapus setelah token diterbitkan → tolak.
         raise HTTPException(

@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import gudang, gudang_config, harga, image_search, orders, part_index, permissions, populasi, reservations
+from ..services import catalog_bom, gudang, gudang_config, harga, image_search, orders, part_index, permissions, populasi, presence, reservations
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -221,27 +221,40 @@ def list_users(_admin: dict = Depends(require_admin)):
 
 @router.get("/monitoring")
 def monitoring(_admin: dict = Depends(require_admin)):
-    """Ringkasan user untuk panel Monitoring. Status online & aktivitas belum
-    dilacak (butuh kolom last_login_at/last_active_at + tabel aktivitas) — untuk
-    sekarang kembalikan daftar user dengan online=false dan aktivitas kosong."""
+    """Panel Monitoring: status ONLINE/OFFLINE + aktivitas terakhir tiap user.
+
+    Online = ada request terautentikasi dalam `presence.ONLINE_WINDOW_SEC` (5 mnt)
+    terakhir (dilacak in-memory di `services/presence`, di-update tiap request &
+    saat login). Roster user diambil dari Supabase; kolom DB last_login/last_active
+    dipakai sebagai fallback bila presence belum punya data (mis. setelah restart)."""
     users = sb.list_users_full()
-    out_users = [
-        {
-            "username": u.get("username", ""),
+    out_users: list[dict] = []
+    online_count = 0
+    for u in users:
+        uname = (u.get("username") or "").strip()
+        if not uname:
+            continue
+        p = presence.get(uname)
+        if p["online"]:
+            online_count += 1
+        out_users.append({
+            "username": uname,
             "role": u.get("role") or "user",
-            "online": False,
+            "online": p["online"],
             "is_active": bool(u.get("is_active", True)),
-            "last_login_at": u.get("last_login_at"),
-            "last_active_at": u.get("last_active_at"),
-        }
-        for u in users
-        if u.get("username")
-    ]
+            "last_login_at": p["last_login_at"] or u.get("last_login_at"),
+            "last_active_at": p["last_active_at"] or u.get("last_active_at"),
+        })
+    # Online dulu, lalu alfabet — yang penting di atas.
+    out_users.sort(key=lambda x: (not x["online"], x["username"]))
+    # Aktivitas terbaru dari presence (login); fallback ke DB user_activity.
+    activity = presence.recent(50) or sb.fetch_recent_activity(50)
     return {
-        "online_count": 0,
+        "online_count": online_count,
         "total_users": len(out_users),
+        "online_window_minutes": presence.ONLINE_WINDOW_SEC // 60,
         "users": out_users,
-        "recent_activity": [],
+        "recent_activity": activity,
     }
 
 
@@ -451,6 +464,28 @@ def index_reload_gallery(_admin: dict = Depends(require_admin)):
     """Muat ulang galeri Cari-by-Foto dari file CSV (setelah CSV diperbarui),
     tanpa perlu restart server."""
     return image_search.reload_local_index()
+
+
+@router.get("/catalog-bom/status")
+def catalog_bom_status(_admin: dict = Depends(require_admin)):
+    """Status data Catalog BOM (banding part per kategori & per assy, §3.5.5b)."""
+    cats = catalog_bom.categories()
+    return {
+        "available": catalog_bom.available(),
+        "unit": len(catalog_bom.list_units()),
+        "kategori": len(cats),
+    }
+
+
+@router.post("/catalog-bom/rebuild")
+def catalog_bom_rebuild(_admin: dict = Depends(require_admin)):
+    """Bangun ulang data Catalog BOM dari sheet kategori semua file katalog
+    (setelah menambah/ubah katalog). In-process, tanpa restart — fitur banding/
+    isi kategori langsung pakai data baru. Lihat §3.5.5b."""
+    try:
+        return catalog_bom.rebuild()
+    except Exception as e:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Gagal rebuild BOM: {e}")
 
 
 @router.post("/index")

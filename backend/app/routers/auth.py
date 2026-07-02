@@ -9,7 +9,7 @@ from ..core.security import create_access_token
 from ..deps import get_current_user
 from ..schemas import LoginRequest, TokenResponse, UserOut
 from ..services.auth import authenticate
-from ..services import permissions
+from ..services import permissions, presence
 from ..services import supabase_client as sb
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -27,7 +27,9 @@ def login(body: LoginRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Username atau password salah",
         )
-    # Catat login untuk monitoring (best-effort).
+    # Catat login untuk monitoring: presence in-memory (sumber online/offline)
+    # + DB best-effort (histori, bila kolom/tabel tersedia).
+    presence.mark_login(user["username"])
     sb.mark_login(user["username"])
     sb.log_activity(user["username"], "login")
     token = create_access_token(user["username"], user["role"])
