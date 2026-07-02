@@ -3605,11 +3605,27 @@ def _finish_reason(data: dict) -> str | None:
     return ((data.get("choices") or [{}])[0] or {}).get("finish_reason")
 
 
+# Jawaban final kosong (model hanya menulis nalar [PIKIR] / terpotong): pesan aman
+# ini HANYA dipakai setelah retry habis — chat() lebih dulu memaksa model menulis
+# ulang jawaban finalnya (lihat _EMPTY_REPLY_CORRECTION di chat()).
+_EMPTY_FINAL_MSG = ("Maaf, jawabannya belum lengkap diproses. Coba ulangi pertanyaannya "
+                    "ya — atau persempit (mis. sebutkan nomor rangka / PN).")
+_MAX_EMPTY_RETRIES = 2
+_EMPTY_REPLY_CORRECTION = (
+    "[SISTEM — KOREKSI WAJIB] Respons terakhirmu TIDAK berisi jawaban final untuk "
+    "user (hanya blok [PIKIR] / kosong / terpotong). Tulis SEKARANG jawaban final "
+    "yang rapi berdasarkan hasil tool & nalar sebelumnya: mulai dengan [PIKIR] "
+    "SINGKAT, tutup [/PIKIR], lalu jawaban final lengkap. ⚠️ Jangan minta maaf dan "
+    "jangan menyebut koreksi ini ke user."
+)
+
+
 def _strip_reasoning(text: str) -> str:
     """Buang blok alur-pikir internal [PIKIR]...[/PIKIR] agar user hanya melihat
     jawaban final. Tahan banting terhadap kasus tak ideal:
       - tag tidak lengkap (hanya pembuka/penutup),
-      - model lupa menulis jawaban setelah [/PIKIR] (fallback: jangan kirim kosong)."""
+      - model lupa menulis jawaban setelah [/PIKIR] → return "" (pemanggil yang
+        memutuskan retry / pesan fallback; JANGAN bocorkan isi nalar)."""
     s = text or ""
     # 1) Buang pasangan [PIKIR]...[/PIKIR] yang lengkap.
     s = _REASON_RE.sub("", s)
@@ -3623,13 +3639,9 @@ def _strip_reasoning(text: str) -> str:
     if m:
         s = s[: m.start()]
     s = s.strip()
-    # 4) Fallback: kalau jadi kosong (model cuma menulis NALAR tanpa jawaban final,
-    #    mis. balasan terpotong di tengah blok [PIKIR]), JANGAN bocorkan isi nalar —
-    #    kirim pesan aman generik. Membocorkan chain-of-thought = melanggar desain.
     if not s:
-        return ("Maaf, jawabannya belum lengkap diproses. Coba ulangi pertanyaannya "
-                "ya — atau persempit (mis. sebutkan nomor rangka / PN).")
-    # 5) Jaring pengaman: buang markup pemanggilan tool yang bocor sebagai teks.
+        return ""
+    # Jaring pengaman: buang markup pemanggilan tool yang bocor sebagai teks.
     return _strip_tool_markup(s)
 
 
@@ -3700,6 +3712,43 @@ def _extract_pns(text: str) -> set[str]:
 def _ungrounded_pns(reply: str, grounded: set[str]) -> list[str]:
     """PN di jawaban yang TIDAK ada di data mana pun (grounded) → dugaan karangan."""
     return sorted(p for p in _extract_pns(reply) if p and p not in grounded)
+
+
+# Kode NAMA UNIT/SERI katalog yang bentuknya mirip PN (mis. 'NX400HP', 'HOWO400',
+# 'LZZ5EXSF', 'SG21-C6') — BUKAN part number, jadi TIDAK boleh disamarkan guard
+# sebagai "PN karangan" (kasus nyata: 'unit NX400HP' berubah jadi
+# '⟨PN tak terverifikasi⟩'). Di-cache; sumber: index katalog + catalog BOM.
+_UNIT_TOKEN_CACHE: dict = {"at": 0.0, "tokens": set()}
+_UNIT_TOKEN_TTL_SEC = 600
+
+
+def _unit_name_tokens() -> set[str]:
+    now = time.time()
+    if _UNIT_TOKEN_CACHE["tokens"] and now - _UNIT_TOKEN_CACHE["at"] < _UNIT_TOKEN_TTL_SEC:
+        return _UNIT_TOKEN_CACHE["tokens"]
+    toks: set[str] = set()
+    try:
+        for m in part_index.unit_models():
+            toks |= _extract_pns(f"{m.get('unit', '')} {m.get('kategori', '')}")
+    except Exception:
+        pass
+    try:
+        toks |= _extract_pns(" ".join(catalog_bom.list_units()))
+    except Exception:
+        pass
+    if toks:
+        _UNIT_TOKEN_CACHE["tokens"] = toks
+        _UNIT_TOKEN_CACHE["at"] = now
+    return toks
+
+
+def _drop_unit_tokens(bad: list[str]) -> list[str]:
+    """Keluarkan kode unit/seri sah dari daftar dugaan PN karangan. Dipanggil
+    HANYA saat ada dugaan (lazy) agar tak membangun index di jalur bersih."""
+    if not bad:
+        return bad
+    unit_toks = _unit_name_tokens()
+    return [p for p in bad if p not in unit_toks]
 
 
 def _guard_correction_msg(bad: list[str]) -> str:
@@ -3805,6 +3854,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     for _m in history:
         grounded |= _extract_pns((_m or {}).get("content") or "")
     guard_retries = 0
+    empty_retries = 0  # model hanya menulis [PIKIR]/kosong → paksa tulis ulang
 
     for _round in range(_MAX_TOOL_ROUNDS):
         data = _post_chat(messages, tools)
@@ -3837,11 +3887,22 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 continue
 
             reply = _strip_reasoning(content)
-            if reply and _finish_reason(data) == "length":
+            # Jawaban final KOSONG (model berhenti di [PIKIR] / terpotong / hanya
+            # markup): jangan langsung menyerah dgn pesan generik — paksa model
+            # menulis ulang jawaban finalnya dulu (kasus nyata: repairkit-hw19710).
+            if not reply:
+                if empty_retries < _MAX_EMPTY_RETRIES:
+                    empty_retries += 1
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "user", "content": _EMPTY_REPLY_CORRECTION})
+                    continue
+                reply = _EMPTY_FINAL_MSG
+            elif _finish_reason(data) == "length":
                 reply += _TRUNCATED_NOTE
             # GUARD anti-halusinasi: SELALU cek (termasuk follow-up TANPA tool) —
             # PN di jawaban wajib ada di riwayat (user/asisten lolos) atau hasil tool.
-            bad = _ungrounded_pns(reply, grounded)
+            # Kode unit/seri sah (NX400HP dll) dikeluarkan dari dugaan karangan.
+            bad = _drop_unit_tokens(_ungrounded_pns(reply, grounded))
             if bad and guard_retries < _MAX_GUARD_RETRIES:
                 guard_retries += 1
                 messages.append({"role": "assistant", "content": content})
@@ -3879,9 +3940,11 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     final = _post_chat(messages, [])
     msg = (final.get("choices") or [{}])[0].get("message") or {}
     reply = _strip_reasoning(msg.get("content") or "")
-    if reply and _finish_reason(final) == "length":
+    if not reply:
+        reply = _EMPTY_FINAL_MSG
+    elif _finish_reason(final) == "length":
         reply += _TRUNCATED_NOTE
-    bad = _ungrounded_pns(reply, grounded)
+    bad = _drop_unit_tokens(_ungrounded_pns(reply, grounded))
     if bad:
         reply = _sanitize_ungrounded(reply, bad)
     return {"reply": reply, "tools_used": tools_used,

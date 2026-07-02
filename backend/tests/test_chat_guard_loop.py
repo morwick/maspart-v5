@@ -11,18 +11,22 @@ USER = {"username": "tester", "role": "user"}
 
 @pytest.fixture(autouse=True)
 def _hermetik(monkeypatch):
-    # Hindari membangun system prompt besar / daftar tool nyata — bukan fokus test.
+    # Hindari membangun system prompt besar / daftar tool / index nyata — bukan fokus test.
     monkeypatch.setattr(ai, "_system_prompt", lambda user: "system uji")
     monkeypatch.setattr(ai, "_tool_specs", lambda user: [])
+    monkeypatch.setattr(ai, "_unit_name_tokens", lambda: set())
 
 
-def _stub_model(monkeypatch, content: str):
-    """_post_chat palsu: selalu jawab teks yang sama, tanpa tool_calls."""
+def _stub_model(monkeypatch, content):
+    """_post_chat palsu tanpa tool_calls. `content` = str (selalu sama) atau
+    list[str] (jawaban berurutan; elemen terakhir dipakai seterusnya)."""
+    seq = [content] if isinstance(content, str) else list(content)
     calls = {"n": 0}
 
     def fake(messages, tools):
+        c = seq[min(calls["n"], len(seq) - 1)]
         calls["n"] += 1
-        return {"choices": [{"message": {"content": content}, "finish_reason": "stop"}]}
+        return {"choices": [{"message": {"content": c}, "finish_reason": "stop"}]}
 
     monkeypatch.setattr(ai, "_post_chat", fake)
     return calls
@@ -62,3 +66,57 @@ def test_jawaban_tanpa_pn_lolos_apa_adanya(monkeypatch):
     out = ai.chat(USER, [{"role": "user", "content": "halo"}])
     assert out["reply"].startswith("Halo!")
     assert out["tools_used"] == []
+
+
+# ── Jawaban final kosong (model berhenti di [PIKIR]) → paksa tulis ulang ─────
+
+def test_jawaban_kosong_diretry_lalu_dapat_jawaban(monkeypatch):
+    calls = _stub_model(monkeypatch, [
+        "[PIKIR] mikir panjang tapi lupa nulis jawaban final",       # kosong stlh strip
+        "[PIKIR] oke [/PIKIR] Repair kit HW tersedia, mau tingkat apa?",
+    ])
+    out = ai.chat(USER, [{"role": "user", "content": "repair kit hw19710?"}])
+    assert calls["n"] == 2                                # 1 gagal + 1 retry sukses
+    assert out["reply"] == "Repair kit HW tersedia, mau tingkat apa?"
+
+
+def test_jawaban_kosong_membandel_berujung_pesan_aman(monkeypatch):
+    calls = _stub_model(monkeypatch, "[PIKIR] nalar terus tanpa jawaban")
+    out = ai.chat(USER, [{"role": "user", "content": "halo"}])
+    assert calls["n"] == 1 + ai._MAX_EMPTY_RETRIES
+    assert out["reply"] == ai._EMPTY_FINAL_MSG
+    assert "nalar" not in out["reply"]                    # isi [PIKIR] tak bocor
+
+
+# ── Kode unit/seri sah tidak disamarkan guard ────────────────────────────────
+
+def test_kode_seri_unit_tidak_disamarkan(monkeypatch):
+    # 'NX400HP' mirip PN (7 char huruf+angka) tapi itu nama seri katalog — guard
+    # tidak boleh menyamarkannya (kasus nyata isi-kategori-kopling-nx400).
+    monkeypatch.setattr(ai, "_unit_name_tokens", lambda: {"NX400HP", "HOWO400"})
+    calls = _stub_model(monkeypatch, "Unit seri NX400HP dan HOWO400 tersedia di katalog.")
+    out = ai.chat(USER, [{"role": "user", "content": "seri nx400 ada?"}])
+    assert calls["n"] == 1                                # tanpa retry guard
+    assert "NX400HP" in out["reply"] and "HOWO400" in out["reply"]
+    assert "tak terverifikasi" not in out["reply"]
+
+
+def test_pn_karangan_tetap_tertangkap_meski_ada_unit_token(monkeypatch):
+    # Filter unit token TIDAK boleh meloloskan PN karangan sungguhan.
+    monkeypatch.setattr(ai, "_unit_name_tokens", lambda: {"NX400HP"})
+    _stub_model(monkeypatch, "Di NX400HP pakai part AZ9998887776 stok 3.")
+    out = ai.chat(USER, [{"role": "user", "content": "part kopling nx400hp?"}])
+    assert "AZ9998887776" not in out["reply"]
+
+
+# ── _strip_reasoning: perilaku baru return "" ────────────────────────────────
+
+def test_strip_reasoning_kosong_bila_hanya_nalar():
+    assert ai._strip_reasoning("[PIKIR] cuma nalar tanpa penutup") == ""
+    assert ai._strip_reasoning("[PIKIR] nalar [/PIKIR]") == ""
+    assert ai._strip_reasoning("") == ""
+
+
+def test_strip_reasoning_ambil_jawaban_setelah_penutup():
+    assert ai._strip_reasoning("[PIKIR] a [/PIKIR] Jawaban.") == "Jawaban."
+    assert ai._strip_reasoning("nalar bocor [/PIKIR] Jawaban.") == "Jawaban."
