@@ -319,8 +319,16 @@ Integrasi ke **EPC Sinotruk resmi** agar Asisten menjawab dari data pabrik PERSI
   `<parameter>`) bukan via field `tool_calls` API, `ai_assistant` mem-parse & MENJALANKANNYA
   (`_parse_leaked_tool_calls`) + strip markup di semua jalur reply (`_strip_tool_markup`).
 - **Belum diintegrasi:** report part aus/servis (`report/wearingParts`) → data kosong utk unit
-  diuji; supersession (`partAlternateSale/replacementRelationship`). (Parts Atlas terstruktur &
-  internal mesin Weichai → SUDAH, lihat §3.5.5d–e.)
+  diuji. (Parts Atlas terstruktur & internal mesin Weichai → SUDAH, lihat §3.5.5d–e.)
+- **Supersession (`partAlternateSale/replacementRelationship`) — DIVERIFIKASI BUNTU 2026-07-03:**
+  endpoint ADA (`POST /api/rest/partAlternateSale/replacementRelationship`, body
+  `{replacementType: [], beforeTh, afterTh}` — `replacementType` WAJIB array, kalau string →
+  500) dan menjawab `success:true`, TAPI **selalu 0 baris** untuk semua PN dicoba. Bundle JS
+  UI resmi menunjukkan menunya disembunyikan utk user eksternal (`notOutUser`) & filter tipe
+  hanya utk `isAdminRole/isInnerRole` (`yfbgth`=研发变更 / `yfqjth`=全局 / `shqjth`=售后, admin-only)
+  → data digerbang role; akun dealer SIMS melihat tabel kosong. `originalPartCode` di SIMS
+  partInfo BUKAN supersession (itu nomor gambar asli, mis. `Q5280514/9`). JANGAN kejar ulang
+  kecuali dapat akun internal Sinotruk.
 
 ### 3.5.5d Pohon KATEGORI EPC per-VIN + Dekomposisi ASSEMBLY — sejak 2026-07-01
 
