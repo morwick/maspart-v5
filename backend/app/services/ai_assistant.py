@@ -2805,7 +2805,16 @@ def _t_repair_kit_mesin(args: dict, user: dict) -> dict:
     res = epc_weichai.repair_kit(rangka)
     if not res.get("found"):
         reason = res.get("reason")
-        if reason in ("no_kit", "no_link", "no_engine", "no_order"):
+        if reason == "no_kit":
+            # Mesin Weichai valid tapi pabrik tak mendefinisikan 维修包 utk mesin ini —
+            # jangan buntu: komponennya tetap bisa diuraikan per bagian.
+            return {"found": False, "error": res.get("message") or
+                    "Mesin unit ini tidak punya repair kit terdefinisi di EPC Weichai.",
+                    "saran": "Sampaikan apa adanya, lalu TAWARKAN menguraikan mesin per "
+                             "bagian via tool uraikan_mesin (rangka sama) — mis. piston/"
+                             "ring, liner, cylinder head, gasket — agar user tetap dapat "
+                             "daftar komponen servisnya."}
+        if reason in ("no_link", "no_engine", "no_order"):
             return {"found": False, "error": res.get("message") or
                     "Tidak ada repair kit mesin Weichai untuk unit ini."}
         return {"found": False, "error": res.get("message") or "Gagal mengambil repair kit."}

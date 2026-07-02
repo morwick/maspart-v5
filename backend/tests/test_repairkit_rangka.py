@@ -94,3 +94,23 @@ def test_tanpa_rangka_perilaku_lama_utuh():
     assert out["jumlah_model_cocok"] >= 1
     assert out["hasil"][0]["model"] == "HW19710"
     assert "resolusi_epc" not in out
+
+
+# ── repair_kit_mesin: mesin tanpa 维修包 → sarankan uraikan_mesin ─────────────
+
+def test_repair_kit_mesin_no_kit_menyarankan_uraikan_mesin(monkeypatch):
+    monkeypatch.setattr(ai.epc_weichai, "repair_kit",
+                        lambda r: {"found": False, "reason": "no_kit",
+                                   "message": "Mesin unit ini tidak punya repair kit terdefinisi di EPC Weichai."})
+    out = ai._t_repair_kit_mesin({"rangka": "SJ346500"}, {"role": "user"})
+    assert out["found"] is False
+    assert "uraikan_mesin" in out.get("saran", "")
+
+
+def test_repair_kit_mesin_bukan_weichai_tanpa_saran(monkeypatch):
+    monkeypatch.setattr(ai.epc_weichai, "repair_kit",
+                        lambda r: {"found": False, "reason": "no_engine",
+                                   "message": "Unit ini bukan bermesin Weichai."})
+    out = ai._t_repair_kit_mesin({"rangka": "XX000000"}, {"role": "user"})
+    assert out["found"] is False
+    assert "saran" not in out          # uraikan_mesin tak akan membantu di sini
