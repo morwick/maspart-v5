@@ -172,6 +172,16 @@
       "expect": { "tools_any": ["isi_assy", "banding_assy", "cari_part", "detail_part"], "pn_any": ["HW19709XST237036"] }
     },
     {
+      "id": "repairkit-per-rangka",
+      "tags": ["epc"],
+      "question": "apa saja isi repair kit transmisi truk saya? nomor rangka RT108966",
+      "_catatan": "Gearbox unit ini menurut EPC = HW25712XST (+PTO HW50 & retarder). Tool wajib dipanggil dengan arg rangka.",
+      "expect": {
+        "tools_any": ["repair_kit_transmisi"],
+        "reply_any": ["HW25712XST"]
+      }
+    },
+    {
       "id": "epc-cek-kendaraan",
       "tags": ["epc"],
       "question": "cek kendaraan dengan nomor rangka SJ346500, konfigurasinya apa saja?",

@@ -325,9 +325,12 @@ def _tool_specs(user: dict) -> list[dict]:
                     "(oil seal + gasket + O-ring) dan opsional OVERHAUL (bearing + "
                     "synchronizer + snap ring). Identifikasi model dari kode (mis. HW19709, "
                     "HW25712, ZF16S2531TO, 8JS85), dari Part Number gearbox assy, ATAU dari "
-                    "nama UNIT (mis. 'HOWO-371', 'SITRAK 540'). Pakai untuk pertanyaan "
-                    "'repair kit / perpak / seal kit / paking transmisi', 'apa saja diganti "
-                    "saat overhaul gearbox', dll. Kosongkan 'transmisi' untuk daftar model."
+                    "nama UNIT (mis. 'HOWO-371', 'SITRAK 540'). ⭐ Bila user menyebut NOMOR "
+                    "RANGKA/VIN, isi 'rangka' — sistem menanyakan gearbox PERSIS unit itu ke "
+                    "EPC pabrik (lebih akurat daripada menebak dari nama unit; dua unit "
+                    "'sama' bisa beda gearbox). Pakai untuk pertanyaan 'repair kit / perpak "
+                    "/ seal kit / paking transmisi', 'apa saja diganti saat overhaul "
+                    "gearbox', dll. Kosongkan 'transmisi' & 'rangka' untuk daftar model."
                 ),
                 "parameters": {
                     "type": "object",
@@ -335,6 +338,10 @@ def _tool_specs(user: dict) -> list[dict]:
                         "transmisi": {
                             "type": "string",
                             "description": "Model gearbox (HW19709 / ZF16S2531TO / 8JS85), PN gearbox assy, ATAU nama unit. Kosongkan untuk daftar model yang tersedia.",
+                        },
+                        "rangka": {
+                            "type": "string",
+                            "description": "Nomor rangka/VIN unit (bila user menyebutnya) — gearbox di-resolve PERSIS dari EPC Sinotruk per-VIN, mengalahkan 'transmisi'.",
                         },
                         "tingkat": {
                             "type": "string",
@@ -1372,11 +1379,56 @@ def _t_cek_populasi(args: dict, user: dict) -> dict:
     return res
 
 
+def _gearbox_from_rangka(rangka: str) -> tuple[str, dict]:
+    """Resolve MODEL GEARBOX persis sebuah unit dari nomor rangka via EPC config.
+    gearboxModelCode EPC berupa string deskriptif (mis. 'HW25712XST变速箱+HW50
+    直联式取力器(带液力缓速器)') — kode model = token Latin/angka di AWAL string
+    (bagian '+…取力器' adalah PTO, bukan gearbox). Return (kode, info); kode ''
+    bila EPC tak menemukan rangka / tak mencantumkan gearbox / EPC down."""
+    v = epc.lookup(rangka)
+    gb_raw = (v.get("gearbox") or "").strip() if v.get("found") else ""
+    m = re.match(r"[A-Za-z0-9\-]+", gb_raw)
+    kode = (m.group(0) if m else "").strip("-")
+    if kode:
+        return kode, {
+            "rangka": v.get("frame_number") or rangka,
+            "gearbox_epc": gb_raw,
+            "model_gearbox": kode,
+            "sumber": "EPC Sinotruk — konfigurasi pabrik PER-VIN (pasti untuk unit ini, "
+                      "bukan perkiraan per-model)",
+        }
+    return "", {
+        "rangka": rangka,
+        "gearbox_epc": None,
+        "catatan_epc": "EPC tidak menemukan rangka ini / tidak mencantumkan gearbox "
+                       "(atau EPC sedang tidak terjangkau). Hasil di bawah (bila ada) "
+                       "di-resolve dari teks user — perkiraan per-model, BUKAN kepastian "
+                       "per-unit; sampaikan itu ke user.",
+    }
+
+
 def _t_repair_kit_transmisi(args: dict, user: dict) -> dict:
     if not repairkit.available():
         return {"error": "Data repair kit transmisi belum tersedia di server."}
     q = (args.get("transmisi") or "").strip()
     tingkat = (args.get("tingkat") or "seal_kit").strip().lower()
+    rangka = (args.get("rangka") or "").strip()
+
+    # Nomor rangka disebut → tanya EPC gearbox PERSIS unit itu (config pabrik
+    # menang atas tebakan dari nama unit; dua unit 'sama' bisa beda gearbox).
+    resolusi_epc: dict | None = None
+    if rangka:
+        kode, resolusi_epc = _gearbox_from_rangka(rangka)
+        if kode:
+            q = kode
+        elif not q:
+            return {
+                "resolusi_epc": resolusi_epc,
+                "jumlah_model_cocok": 0,
+                "catatan": "Gearbox unit ini tidak bisa dipastikan dari EPC dan user tidak "
+                           "menyebut model/unit. Minta user cek ulang nomor rangkanya, atau "
+                           "sebutkan kode model gearbox / nama unit — JANGAN menebak.",
+            }
     if not q:
         models = repairkit.list_models()
         unit_tercatat = sorted({u for m in models for u in m.get("unit", [])})
@@ -1399,8 +1451,19 @@ def _t_repair_kit_transmisi(args: dict, user: dict) -> dict:
     hits = repairkit.find(q)
     if not hits:
         models = ", ".join(m["model"] for m in repairkit.list_models())
-        return {"jumlah_model_cocok": 0,
-                "catatan": f"Tidak ada repair kit transmisi untuk '{q}'. Model tersedia: {models}."}
+        out = {"jumlah_model_cocok": 0,
+               "catatan": f"Tidak ada repair kit transmisi untuk '{q}'. Model tersedia: {models}."}
+        if resolusi_epc and resolusi_epc.get("model_gearbox"):
+            out["resolusi_epc"] = resolusi_epc
+            out["catatan"] = (
+                f"Menurut EPC, gearbox unit ini adalah '{resolusi_epc['model_gearbox']}' — "
+                f"tapi TIDAK ada data repair kit untuk model itu. Sampaikan apa adanya; "
+                f"⛔ JANGAN menawarkan kit model lain seolah-olah cocok. Model dengan data "
+                f"kit: {models}."
+            )
+        elif resolusi_epc:
+            out["resolusi_epc"] = resolusi_epc
+        return out
     hasil = []
     for mk, entry in hits[:4]:
         hasil.append({
@@ -1411,7 +1474,7 @@ def _t_repair_kit_transmisi(args: dict, user: dict) -> dict:
             "tingkat": tingkat,
             **repairkit.kit(entry, tingkat),
         })
-    return {
+    out = {
         "jumlah_model_cocok": len(hits),
         "tingkat": tingkat,
         "catatan": ("Repair kit disusun dari sheet gearbox katalog. 'seal_kit' = perpak "
@@ -1420,6 +1483,12 @@ def _t_repair_kit_transmisi(args: dict, user: dict) -> dict:
                     "panjang, tampilkan per kategori beserta jumlahnya & tawarkan rincian/Excel."),
         "hasil": hasil,
     }
+    if resolusi_epc:
+        out["resolusi_epc"] = resolusi_epc
+        if resolusi_epc.get("model_gearbox"):
+            out["catatan"] += (" Model gearbox di-RESOLVE dari EPC per-VIN — awali jawaban "
+                               "dengan menyebut gearbox terpasang unit ini menurut data pabrik.")
+    return out
 
 
 def _assy_seri(pn: str, name: str, tipe: str | None) -> str:
@@ -2907,9 +2976,13 @@ def _system_prompt(user: dict) -> str:
         "- REPAIR KIT / PERPAK / SEAL KIT TRANSMISI: untuk pertanyaan 'repair kit / perpak / "
         "seal kit / paking transmisi', atau 'apa saja yang diganti saat overhaul gearbox', "
         "panggil tool repair_kit_transmisi (identifikasi model dari kode HW/ZF/JS, PN gearbox, "
-        "atau nama unit). Default 'seal_kit' (perpak); pakai 'overhaul' bila user minta turun-"
-        "mesin lengkap. Sajikan dikelompokkan per kategori (oil seal / gasket / O-ring / "
-        "bearing / synchronizer / snap ring) dengan PN + nama.\n"
+        "atau nama unit). ⭐ Bila user MENYEBUT NOMOR RANGKA/VIN (atau bilang 'truk saya' dan "
+        "rangkanya sudah ada di percakapan), WAJIB isi argumen 'rangka' — gearbox di-resolve "
+        "PERSIS dari EPC pabrik per-VIN; JANGAN menebak model gearbox dari nama unit bila "
+        "rangka tersedia. Saat hasil memuat 'resolusi_epc', awali jawaban dengan gearbox "
+        "terpasang unit itu menurut EPC. Default 'seal_kit' (perpak); pakai 'overhaul' bila "
+        "user minta turun-mesin lengkap. Sajikan dikelompokkan per kategori (oil seal / "
+        "gasket / O-ring / bearing / synchronizer / snap ring) dengan PN + nama.\n"
         "- ⚠️ JANGAN PERNAH menyatakan suatu unit 'tidak punya transmisi assy' dari ingatan/"
         "tebakan. Tiap unit Sinotruk punya sheet gearbox (05变速箱) & Part Number transmisi "
         "assy — selain pola HW…huruf, ADA juga assy ber-PN `HW19710…` (tanpa huruf), Fast "

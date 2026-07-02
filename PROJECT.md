@@ -236,6 +236,15 @@ Fitur untuk menjawab "apa saja isi repair kit transmisi X?" dan mengunduhnya seb
 - **AI tool:** `repair_kit_transmisi` (lihat tabel §3.5.5). Saat tool ini dipanggil,
   `ai_assistant.chat()` mengembalikan field tambahan **`repairkit_models: [..]`** (kode model
   yang dibahas) di hasil chat.
+- **Resolve per-VIN via EPC (sejak 2026-07-02):** argumen opsional **`rangka`** — bila user
+  menyebut nomor rangka/VIN, tool bertanya ke EPC config (`epc.lookup`, port 18080 publik)
+  gearbox PERSIS unit itu, lalu kit di-resolve dari kode itu (mengalahkan tebakan dari nama
+  unit; dua unit "sama" bisa beda gearbox). `gearboxModelCode` EPC = string deskriptif China
+  (mis. `HW25712XST变速箱+HW50直联式取力器(带液力缓速器)`) → kode model diambil dari token
+  Latin di AWAL string (`_gearbox_from_rangka`; bagian `+…取力器` = PTO, bukan gearbox).
+  Hasil memuat `resolusi_epc` (gearbox terpasang + sumber); EPC gagal → fallback perilaku
+  lama + catatan jujur "perkiraan per-model". Isi kit tetap dari data lokal terkurasi
+  (EPC tidak punya konsep repair kit).
 - **Frontend:** tombol **⬇️ Excel `<model>`** tampil **di dalam balasan Asisten AI** (komponen
   `RepairKitDownloads` di `app/asisten/page.tsx`) tiap kali `repairkit_models` terisi —
   klik → `exportRepairKit(token, model)` (di `lib/api.ts`) → unduh xlsx. **Tidak ada halaman
