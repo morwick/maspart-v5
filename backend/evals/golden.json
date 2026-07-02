@@ -1,0 +1,205 @@
+{
+  "_keterangan": [
+    "Golden questions untuk eval regresi Asisten AI. Jalankan: cd backend && python evals/run_evals.py",
+    "Field per kasus:",
+    "  id         : nama unik kasus (untuk --only).",
+    "  tags       : ['lokal'] = hanya katalog lokal (default dijalankan);",
+    "               ['epc'|'weichai'] = butuh jaringan EPC (di-skip kecuali --net).",
+    "  question   : pertanyaan user (1 giliran). ATAU pakai 'turns' utk multi-giliran.",
+    "  turns      : riwayat penuh [{role, content}, ...] diakhiri pesan user.",
+    "  expect     : kombinasi cek (semua harus lolos):",
+    "    tools_any  : minimal SATU tool ini terpakai.",
+    "    tools_none : tool ini TIDAK boleh terpakai.",
+    "    reply_any  : jawaban memuat minimal SATU substring ini (case-insensitive).",
+    "    reply_all  : jawaban memuat SEMUA substring ini.",
+    "    pn_any     : jawaban memuat minimal SATU PN ini.",
+    "    pn_all     : jawaban memuat SEMUA PN ini.",
+    "    no_new_pn  : true = jawaban TIDAK boleh memuat PN di luar yang user sebut",
+    "                 ATAU yang keluar dari hasil tool turn ini (runner me-spy _run_tool)",
+    "                 — uji guard anti-halusinasi untuk kasus 'tidak ditemukan'.",
+    "  expect_alt : daftar blok expect ALTERNATIF — kasus lolos bila expect utama",
+    "               ATAU salah satu alternatif lolos. Dipakai krn asisten boleh memilih",
+    "               minta VIN dulu (aturan domain 'part per-unit wajib cek EPC').",
+    "ATURAN EMAS saat menambah kasus: verifikasi anchor (PN/nama unit/istilah) benar-benar",
+    "ada di data (catalog_bom.json / sinonim.json / repairkit) — kalau tidak, kasusnya",
+    "menguji halusinasi runner, bukan asisten."
+  ],
+  "cases": [
+    {
+      "id": "sinonim-kampas-kopling",
+      "tags": ["lokal"],
+      "question": "cari kampas kopling untuk NX400",
+      "expect": { "tools_any": ["cari_part", "isi_kategori"], "reply_any": ["disc", "plate", "kopling"] },
+      "expect_alt": [{ "reply_any": ["rangka", "vin"] }]
+    },
+    {
+      "id": "sinonim-laher",
+      "tags": ["lokal"],
+      "question": "ada laher apa saja untuk transmisi NX400?",
+      "expect": { "tools_any": ["cari_part", "isi_kategori"], "reply_any": ["bearing"] }
+    },
+    {
+      "id": "sinonim-seher",
+      "tags": ["lokal"],
+      "question": "seher untuk HOWO ada tidak?",
+      "expect": { "tools_any": ["cari_part"], "reply_any": ["piston"] }
+    },
+    {
+      "id": "sinonim-dinamo-cas",
+      "tags": ["lokal"],
+      "question": "dinamo cas untuk HOWO ada?",
+      "expect": { "tools_any": ["cari_part"], "reply_any": ["generator", "alternator"] }
+    },
+    {
+      "id": "detail-pn-sliding-sleeve",
+      "tags": ["lokal"],
+      "question": "detail part WG2210040097 dong, stok dan harganya",
+      "expect": { "tools_any": ["detail_part", "cari_part"], "pn_any": ["WG2210040097"] }
+    },
+    {
+      "id": "daftar-unit",
+      "tags": ["lokal"],
+      "question": "unit atau model truk apa saja yang tersedia di katalog?",
+      "expect": { "tools_any": ["daftar_unit", "info_aplikasi"], "reply_any": ["NX400", "HOWO", "HOMAN"] }
+    },
+    {
+      "id": "daftar-transmisi-assy",
+      "tags": ["lokal"],
+      "question": "sebutkan SEMUA transmisi assy yang ada di katalog beserta jumlahnya",
+      "expect": { "tools_any": ["daftar_transmisi_assy"] }
+    },
+    {
+      "id": "repairkit-hw19710",
+      "tags": ["lokal"],
+      "question": "apa saja isi repair kit transmisi HW19710?",
+      "expect": { "tools_any": ["repair_kit_transmisi"], "reply_any": ["seal", "perpak", "gasket", "o-ring"] }
+    },
+    {
+      "id": "repairkit-zf",
+      "tags": ["lokal"],
+      "question": "ada repair kit untuk gearbox ZF16S2531TO?",
+      "expect": { "tools_any": ["repair_kit_transmisi"] }
+    },
+    {
+      "id": "banding-assy-satu-keluarga",
+      "tags": ["lokal"],
+      "question": "bandingkan isi dalam HW19709XST201136 dengan HW19709XST237036, sama atau beda?",
+      "expect": {
+        "tools_any": ["banding_assy"],
+        "pn_all": ["HW19709XST201136", "HW19709XST237036"],
+        "reply_any": ["mirip", "keluarga", "beda"]
+      }
+    },
+    {
+      "id": "isi-assy-gearbox-nx400",
+      "tags": ["lokal"],
+      "question": "apa saja isi dalam (komponen) dari assy HW19709XST237036?",
+      "expect": {
+        "tools_any": ["isi_assy"],
+        "pn_any": ["WG2210040137", "WG2210040097", "WG2210040136", "Q5280514", "WG2229040226"]
+      }
+    },
+    {
+      "id": "banding-kategori-rem-berbeda",
+      "tags": ["lokal"],
+      "question": "bandingkan part rem NX400 dengan V7X400, sama tidak?",
+      "expect": { "tools_any": ["banding_kategori"], "reply_any": ["berbeda", "beda"] }
+    },
+    {
+      "id": "isi-kategori-kopling-nx400",
+      "tags": ["lokal"],
+      "question": "part kopling apa saja yang ada di unit NX400?",
+      "expect": { "tools_any": ["isi_kategori", "cari_part"] }
+    },
+    {
+      "id": "isi-kategori-gardan-belakang",
+      "tags": ["lokal"],
+      "question": "sebutkan part gardan belakang untuk NX400",
+      "expect": { "tools_any": ["isi_kategori", "cari_part"] },
+      "expect_alt": [{ "reply_any": ["rangka", "vin"] }]
+    },
+    {
+      "id": "banding-kategori-kelistrikan",
+      "tags": ["lokal"],
+      "question": "bandingkan kelistrikan HOWO MAX 480 dengan NX400",
+      "expect": { "tools_any": ["banding_kategori"] }
+    },
+    {
+      "id": "fault-code-spn-fmi",
+      "tags": ["lokal"],
+      "question": "kode kesalahan SPN 1551 FMI 5 di HOWO artinya apa?",
+      "expect": { "tools_any": ["cari_kode_kesalahan"], "reply_any": ["P0645", "1551"] }
+    },
+    {
+      "id": "fault-code-pcode",
+      "tags": ["lokal"],
+      "question": "apa arti kode P0645?",
+      "expect": { "tools_any": ["cari_kode_kesalahan"] }
+    },
+    {
+      "id": "info-aplikasi",
+      "tags": ["lokal"],
+      "question": "berapa banyak part dan unit yang terindeks di aplikasi ini?",
+      "expect": { "tools_any": ["info_aplikasi", "daftar_unit"] }
+    },
+    {
+      "id": "guard-pn-fiktif",
+      "tags": ["lokal"],
+      "question": "berapa stok dan harga part number ZZ9876543210XYZ?",
+      "expect": { "reply_any": ["tidak"], "no_new_pn": true }
+    },
+    {
+      "id": "guard-unit-fiktif",
+      "tags": ["lokal"],
+      "question": "sebutkan part number lampu sein untuk unit SUPERMEGA 9000 lengkap dengan stoknya",
+      "expect": { "no_new_pn": true }
+    },
+    {
+      "id": "guard-repairkit-fiktif",
+      "tags": ["lokal"],
+      "question": "apa saja isi repair kit transmisi model QQ111ZZ99?",
+      "_catatan": "no_new_pn aman: runner me-spy hasil tool, jadi saran model nyata (HW19710 dll) dianggap bersumber.",
+      "expect": { "tools_any": ["repair_kit_transmisi", "daftar_transmisi_assy"], "reply_any": ["tidak"], "no_new_pn": true }
+    },
+    {
+      "id": "followup-stok-dari-konteks",
+      "tags": ["lokal"],
+      "turns": [
+        { "role": "user", "content": "detail part WG2210040097" },
+        { "role": "assistant", "content": "Part **WG2210040097** (Main shaft sliding sleeve) ada di katalog. Dipakai antara lain di gearbox HW19709XST237036 (unit NX400 6X4)." },
+        { "role": "user", "content": "kalau assy induknya tadi, isinya apa saja?" }
+      ],
+      "expect": { "tools_any": ["isi_assy", "banding_assy", "cari_part", "detail_part"], "pn_any": ["HW19709XST237036"] }
+    },
+    {
+      "id": "epc-cek-kendaraan",
+      "tags": ["epc"],
+      "question": "cek kendaraan dengan nomor rangka SJ346500, konfigurasinya apa saja?",
+      "expect": { "tools_any": ["cek_kendaraan"] }
+    },
+    {
+      "id": "epc-bom-kabin",
+      "tags": ["epc"],
+      "question": "berapa jumlah part kabin di unit dengan rangka SJ346500?",
+      "expect": { "tools_any": ["bom_dari_rangka", "kategori_unit"] }
+    },
+    {
+      "id": "epc-reverse-pn",
+      "tags": ["epc"],
+      "question": "unit apa saja yang memakai part WG9725529213?",
+      "expect": { "tools_any": ["unit_dari_part"] }
+    },
+    {
+      "id": "epc-uraikan-assembly",
+      "tags": ["epc"],
+      "question": "apa saja karet dan seal di v-stay unit rangka SJ346500?",
+      "expect": { "tools_any": ["uraikan_assembly"] }
+    },
+    {
+      "id": "weichai-piston",
+      "tags": ["weichai"],
+      "question": "urai bagian piston mesin unit rangka SJ346500",
+      "expect": { "tools_any": ["uraikan_mesin"], "reply_any": ["piston"] }
+    }
+  ]
+}

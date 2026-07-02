@@ -459,6 +459,30 @@ npm install
 npm run dev                          # http://localhost:3000
 ```
 
+### Test & Eval (sejak 2026-07-02)
+
+```bash
+cd backend
+pip install -r requirements-dev.txt        # pytest
+
+# 1) UNIT TEST logika murni — cepat (<2 dtk), TANPA network/API. Jalankan tiap ubah kode.
+python -m pytest tests/ -q
+#    Cakupan: guard anti-halusinasi PN (_extract_pns/_sanitize_ungrounded + loop chat()
+#    dgn DeepSeek di-mock), anti-bocor tool-call, ekspansi sinonim, catalog_bom
+#    (resolve/verdict/compare).
+
+# 2) EVAL REGRESI Asisten AI — golden questions lewat chat() NYATA (DeepSeek + tool asli).
+#    Jalankan SEBELUM deploy perubahan prompt/tool. Ada biaya API kecil per run.
+python evals/run_evals.py                  # semua kasus 'lokal' (default; ~22 kasus)
+python evals/run_evals.py --net            # + kasus EPC/Weichai (butuh jaringan EPC)
+python evals/run_evals.py --only guard     # subset via substring id
+python evals/run_evals.py --list           # daftar kasus tanpa API
+#    Kasus di evals/golden.json — cek tool yang wajib terpakai, substring jawaban,
+#    PN wajib/haram, dan 'no_new_pn' (uji guard). ATURAN EMAS menambah kasus:
+#    verifikasi anchor (PN/unit/istilah) benar-benar ada di data. Hasil detail run
+#    terakhir: evals/last_run.json (di-gitignore).
+```
+
 ### Env penting (backend/.env)
 `APP_ENV` (dev/prod), `SUPABASE_URL/KEY/SERVICE_KEY`, `JWT_SECRET` (WAJIB 32+ char
 acak di prod), `JWT_EXPIRE_MINUTES` (720 = 12 jam), `DATA_DIR` (default `../data`),

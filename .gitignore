@@ -44,3 +44,6 @@ frontend/.env.local
 Thumbs.db
 *.tsbuildinfo
 frontend/tsconfig.tsbuildinfo
+
+# Hasil run eval AI (regeneratable)
+backend/evals/last_run.json
