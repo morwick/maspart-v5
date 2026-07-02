@@ -4,11 +4,25 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-06-25** (oleh inspeksi langsung repo lokal + SSH ke server).
+> Terakhir diverifikasi: **2026-06-29** (oleh inspeksi langsung repo lokal + SSH ke server).
 > Ditambah **§3.5 — Cara Kerja Aplikasi (deep-dive fungsional)** pada 2026-06-25 agar AI/dev
 > langsung paham domain, alur data, logika pencarian + sinonim, AI tools, API & frontend.
 > Update **2026-06-27**: tambah fitur **Repair Kit Transmisi** (data + tool AI + endpoint +
 > tombol download Excel di Admin) — lihat §3.5.5a.
+> Update **2026-06-29**: tambah fitur **Catalog BOM** — Asisten AI bisa **bandingkan isi part
+> per KATEGORI antar unit & per PN ASSY** (4 tool AI baru: `banding_assy`/`isi_assy`/
+> `banding_kategori`/`isi_kategori`) — lihat §3.5.5b. Menggantikan `transmisi_bom.json` lama.
+> Update **2026-06-29 (EPC)**: integrasi **EPC Sinotruk resmi** — BOM pabrik PERSIS per-VIN
+> (`cek_kendaraan`, `bom_dari_rangka` + breakdown kategori per-unit), **reverse PN→unit**
+> (`unit_dari_part`), dan **auto-refresh token EPC** via SSO SimsCloud (tanpa captcha/manual).
+> Lihat **§3.5.5c**.
+> Update **2026-07-01**: (a) **Pohon KATEGORI EPC per-VIN + dekomposisi ASSEMBLY** — tool
+> `kategori_unit` (semua kategori/assembly unit + turunannya) & `uraikan_assembly` (isi/komponen
+> 1 assembly, mis. karet/seal v-stay) — §3.5.5d. (b) **Integrasi EPC WEICHAI** untuk part INTERNAL
+> MESIN (unit bermesin Weichai) — tool `uraikan_mesin`, rantai SSO+BOM otomatis per-VIN — §3.5.5e.
+> (c) **Guard anti-halusinasi PN** (jawaban dipatok ke data tool/riwayat; PN karangan diblokir/
+> diganti "tidak ditemukan", termasuk follow-up) — §3.5.5f. (d) Menu admin **Monitoring User**
+> (online/offline in-memory) — §3.5.11.
 
 ---
 
@@ -72,6 +86,7 @@ maspart-main/
 │   ├── gudang_config.json
 │   ├── sinonim/sinonim.json
 │   ├── repairkit/transmisi.json        # repair kit per model transmisi assy (§3.5.5a)
+│   ├── catalog_bom.json                # BOM per unit×kategori + assy_index (§3.5.5b, ~7.5MB)
 │   └── manuals/                        # PDF manual
 │
 ├── migrations/         # SQL migrations (Supabase/Postgres) 003..014
@@ -178,6 +193,17 @@ kamus sinonim **juga disuntikkan ke system prompt** ("KAMUS ISTILAH LAPANGAN"). 
 | `daftar_unit` | daftar unit/model truk tersedia | semua |
 | `cari_kode_kesalahan` | DTC/fault code Sinotruk-HOWO (ECU Bosch) via SPN+FMI / P-code / kata kunci | semua |
 | `repair_kit_transmisi` | komponen repair kit per **transmisi assy** (seal kit perpak / overhaul / semua), resolve via kode model · assy PN · nama unit | semua |
+| `daftar_transmisi_assy` | daftar LENGKAP & pasti semua transmisi/gearbox assy di katalog (anti-undercount) | semua |
+| `banding_assy` | **bandingkan ISI DALAM 2 PN assembly** (transmisi/kopling/gardan/mesin/kabin) → part sama/beda + % + verdict (§3.5.5b) | semua |
+| `isi_assy` | isi dalam (BOM lengkap) 1 part assembly per PN | semua |
+| `banding_kategori` | **bandingkan 1 KATEGORI antar 2 unit** (mis. rem NX400 vs V7X400) → part sama/beda + % + verdict (§3.5.5b) | semua |
+| `isi_kategori` | daftar part 1 kategori untuk 1 unit (mis. "part rem di NX400") | semua |
+| `cek_kendaraan` | spesifikasi/konfigurasi unit dari NOMOR RANGKA/VIN (gearbox/axle/engine/Euro) — EPC resmi (§3.5.5c) | semua |
+| `bom_dari_rangka` | **BOM pabrik PERSIS per-VIN** dari EPC + `kategori_breakdown` (jumlah part per kategori unit ini) + filter `kategori`/`kata_kunci` (§3.5.5c) | semua |
+| `unit_dari_part` | **REVERSE: PN → daftar model/unit yang memakainya** (EPC global, lintas semua model) (§3.5.5c) | semua |
+| `kategori_unit` | **pohon KATEGORI EPC per-VIN** — semua kategori/assembly unit + turunannya (drill berlapis) (§3.5.5d) | semua |
+| `uraikan_assembly` | **urai 1 ASSEMBLY → komponennya** (karet/seal/pin dari v-stay dll), per PN/nama, per-VIN (§3.5.5d) | semua |
+| `uraikan_mesin` | **part INTERNAL MESIN Weichai per-VIN** (piston/kruk as/liner/cylinder head…) — EPC Weichai auto-SSO (§3.5.5e) | semua |
 | `pesanan_saya`, `detail_pesanan` | pesanan milik buyer | `pembeli` |
 | `rekap_penjualan`, `daftar_pesanan` | rekap & daftar pesanan (cabang auto-scoped) | `admin` / cabang |
 | `harga_sims` | harga modal SIMS live (CNY→IDR) | `admin` / `SEE_ALL` |
@@ -214,6 +240,128 @@ Fitur untuk menjawab "apa saja isi repair kit transmisi X?" dan mengunduhnya seb
   `RepairKitDownloads` di `app/asisten/page.tsx`) tiap kali `repairkit_models` terisi —
   klik → `exportRepairKit(token, model)` (di `lib/api.ts`) → unduh xlsx. **Tidak ada halaman
   admin terpisah** (sengaja dihapus; download menyatu dengan alur tanya-jawab asisten).
+
+### 3.5.5b Catalog BOM — bandingkan isi part per KATEGORI & per ASSY — sejak 2026-06-29
+
+Fitur agar Asisten AI **paham isi part tiap kategori tiap unit** dan bisa menjawab "apakah
+isi A dan B sama/beda?". Generalisasi dari fitur transmisi (§3.5.5a) ke **semua kategori**.
+
+- **Sumber & data:** tiap file unit Sinotruk/HOWO punya **12 sheet = 12 KATEGORI** (`01驾驶室
+  Driver's cab` … `12上装`). Build script `backend/tools/build_catalog_bom.py` memindai SEMUA
+  sheet berawalan 2-digit (`^\d{2}`) tiap unit → menghasilkan **`data/catalog_bom.json`** (~7.5MB):
+  `{kategori: {kode→nama}, units: {unit→{kategori: {kode→{assy_pn, jumlah, parts[]}}}}, assy_index}`.
+  Saat ini **40 unit · 12 kategori · ~108k baris part · 123 PN assy terindeks**. ⚠️ Kategori
+  bernomor **hanya ada di truk Sinotruk/HOWO**; brand lain (Shantui/Sany/Wechai) pakai sheet
+  tunggal tanpa nomor → tidak masuk fitur ini. Baris pertama tiap sheet "assembly" (kode
+  01/02/04/05/06/07) = **PN assy** kategori itu → masuk `assy_index`.
+- **Service:** `services/catalog_bom.py` — **di-cache per-mtime** (file besar; parse sekali,
+  reload otomatis bila `scp` ulang). Fungsi: `resolve_kategori` (sinonim lapangan ID: rem,
+  kopling, gardan depan=06/belakang=07, kelistrikan, sasis, kabin, mesin, karoseri…),
+  `resolve_unit`, `compare_units(u1,u2,kat)`, `category_parts(u,kat)`, `resolve_assy`,
+  `compare_assy(pn1,pn2)`, `assy_detail(pn)`. Verdict **terkalibrasi** via Jaccard: `identik` /
+  `praktis_identik` (≥95%) / `sangat_mirip` (≥75%) / `mirip_satu_keluarga` (≥45%) / `berbeda`.
+- **Opsi B (unit patokan):** bila 1 PN assy dipakai banyak unit (isi sedikit beda karena versi
+  katalog), perbandingan memakai **SATU unit patokan = yang part-nya terlengkap** (bukan union)
+  → adil 1-unit-lawan-1-unit. Field `unit_patokan` diekspos agar AI bisa sebut "menurut katalog
+  unit Y". Noise ~10-30 part antar-versi diingatkan di prompt agar tak salah simpul.
+- **AI tools (4):** `banding_assy`, `isi_assy`, `banding_kategori`, `isi_kategori` (lihat §3.5.5).
+  Diajarkan di `domain_block` kapan pakai yang mana (2 PN assy → `banding_assy`; kategori antar
+  2 unit → `banding_kategori`). Contoh nyata: `HW19709XST201136` vs `HW19709XST237036` → 250 part
+  sama, 67% → "mirip satu keluarga 9-speed"; **rem** NX400 vs V7X400 → 11.6% → "berbeda" (wajar).
+- **Tanpa endpoint REST baru** (murni tool AI). Update data-saja = `scp data/catalog_bom.json`
+  ke `/opt/maspart/data/` (cache mtime auto-reload, tanpa rebuild). **Menggantikan** fitur
+  `transmisi_bom.json` lama (file + tool `banding_transmisi`/`isi_transmisi` dihapus; logikanya
+  pindah ke `catalog_bom.py` sbg satu sumber kebenaran).
+
+### 3.5.5c Integrasi EPC Sinotruk (BOM per-VIN, reverse PN→unit, auto-token) — sejak 2026-06-29
+
+Integrasi ke **EPC Sinotruk resmi** agar Asisten menjawab dari data pabrik PERSIS per-unit
+(bukan asumsi katalog per-model). HANYA unit Sinotruk/HOWO/SITRAK/HOMAN.
+
+- **Dua portal EPC:**
+  - **Port 18080** (`services/epc.py`, tool `cek_kendaraan`) — endpoint config **publik tanpa
+    token**. Hanya KONFIGURASI unit (model engine/gearbox/axle/Euro), bukan part.
+  - **Port 7001** (`services/epc_bom.py`) — base `http://epc.sinotruk.com:7001/api/rest`,
+    **butuh token** (`header token: Bearer <hex>`, disimpan `data/epc_token.txt`, dibaca segar
+    tiap panggil). Dipakai `bom_dari_rangka` & `unit_dari_part`.
+- **`bom_dari_rangka(rangka, kata_kunci?, kategori?)`** — `otherDoc/loadingList?vin=<frame>` =
+  **Loading List / 工单BOM** (work-order BOM) = part yang BENAR-BENAR terpasang saat unit dirakit
+  (per-VIN). Tiap PN disilang ke katalog lokal (nama Inggris + stok + harga via `part_index`).
+  Hasil **selalu** memuat `kategori_breakdown` (jumlah part per kategori 01..12 PERSIS unit ini —
+  via `catalog_bom.pn_category_map()`); arg `kategori` memfilter daftar per kategori. Pakai untuk
+  "berapa/part apa di kabin unit ini" (angka exact-unit, bukan per-model `isi_kategori`).
+- **`unit_dari_part(part_number)`** (REVERSE) — `epc_bom.reverse_part`: `home/match/part?t=global&
+  k=<pn>` (validasi + nama Inggris) → `home/reverse/part?t=global&v=<pn>&k=<pn>` (daftar model
+  kendaraan yang memakai PN). Lintas SEMUA model EPC (lebih lengkap dari `varian_unit` lokal).
+- **⚠️ DUA DATABASE EPC BERBEDA** (sumber bingung "PN salah"): Loading List (7001) = part fisik
+  per-VIN; **Parts Atlas terstruktur (18080 `/struct`)** = katalog standar model — *database
+  berbeda*, sebagian PN work-BOM tak terindeks di Parts Atlas → search di sana bisa "暂无数据"
+  walau PN itu benar terpasang. **Keputusan: pakai Loading List** (paling presisi per-VIN) + field
+  `sumber` & prompt menjelaskan beda ini agar tak dikira PN salah.
+- **🔑 AUTO-REFRESH TOKEN EPC (tanpa manusia, tanpa captcha)** — `epc_bom.refresh_token()` +
+  `_get_auto()`: saat token mati (`_err` token_expired/no_token; dikenali via code `110025`
+  "Not has role!" ATAU message "Login expired!" lewat `_TOKEN_ERR_RE`), sistem **login SIMS
+  otomatis** (`shared/sims_fetcher` — captcha SimsCloud tak diverifikasi server) → **tukar token
+  via SSO 云桥/yunqiao**: `GET :7001/api/integrate/getUserInfoByIcmcpToken?icmcpToken=<JWT SIMS>&
+  sysCode=intl` → `data.token` = token EPC → tulis ke `data/epc_token.txt` → retry. Endpoint &
+  `sysCode=intl` ini sama yang dipakai tombol "EPC" di SimsCloud (`simscloud.cnhtcerp.com:8082`).
+  **Tak perlu refresh token manual lagi**; fallback manual (`scp` token) tetap ada bila SIMS down.
+- **Anti-bocor tool-call**: bila model menulis pemanggilan tool sebagai TEKS (markup `<invoke>`/
+  `<parameter>`) bukan via field `tool_calls` API, `ai_assistant` mem-parse & MENJALANKANNYA
+  (`_parse_leaked_tool_calls`) + strip markup di semua jalur reply (`_strip_tool_markup`).
+- **Belum diintegrasi:** report part aus/servis (`report/wearingParts`) → data kosong utk unit
+  diuji; supersession (`partAlternateSale/replacementRelationship`). (Parts Atlas terstruktur &
+  internal mesin Weichai → SUDAH, lihat §3.5.5d–e.)
+
+### 3.5.5d Pohon KATEGORI EPC per-VIN + Dekomposisi ASSEMBLY — sejak 2026-07-01
+
+Agar Asisten **paham SEMUA kategori/assembly sebuah unit BESERTA turunannya** (sub-assembly
+berlapis) dan bisa **menguraikan 1 PN assembly jadi komponennya** (persis view "Spare Part List"
+bergambar di EPC). Sumber: **EPC Parts Atlas 7001** (`part/tree/node` + `part/tree/item`), per-VIN,
+memakai endpoint yang sama & stabil dgn `part_aus_dari_rangka`. Di `services/epc_bom.py` +
+tool di `ai_assistant.py`.
+
+- **`kategori_unit(rangka[, kategori])`** — tanpa `kategori`: daftar LENGKAP kategori tingkat-atas
+  unit (mis. 117 assembly: gardan, transmisi, mesin, kabin, rem…). Dengan `kategori`: buka kategori
+  itu → turunan (sub-kategori) + part langsung + stok/harga lokal. Bisa drill berlapis. Backing:
+  `category_top` (node@rootId, cache), `category_open` (drill 1 level, cache), `resolve_category`
+  (cocok nama EN/CN + sinonim; index tumbuh tiap buka).
+- **`uraikan_assembly(rangka, assembly)`** — assembly disebut via **PN** (mis. `AZ000052000229`)
+  atau **nama/istilah** ('v stay', 'thrust rod'). Walk SELURUH node pohon unit SEKALI (`_walk_all_nodes`,
+  paralel+cache), temukan node assembly, ambil `_atlas_items` = komponennya (disilang stok/harga).
+  Contoh: V-type thrust rod → 11 komponen (karet/球面销 `WG9725529213`, seal, dudukan…). Berlaku
+  utk SEMUA assembly ber-turunan di pohon unit (~278/284 node pd unit uji). Aturan domain: pertanyaan
+  komponen-DALAM-assembly (karet/bos/seal/pin dari X) DILARANG dijawab dgn PN assembly-nya.
+
+### 3.5.5e Integrasi EPC WEICHAI — part INTERNAL MESIN per-VIN (OTOMATIS) — sejak 2026-07-01
+
+Unit Sinotruk bermesin **Weichai** (mis. WP12/WP13): part internal mesin (blok, kruk as, piston,
+ring, liner, cylinder head, klep, injector…) **TIDAK ada di EPC Sinotruk** (berhenti di level engine
+assembly) — ada di **EPC Weichai terpisah** (`epc-cloud.weichai.com`). Service `services/epc_weichai.py`
+menempuh SELURUH jembatan SSO + BOM **otomatis, cukup dari nomor rangka** (token Weichai auto-mint,
+tanpa file):
+
+1. `getParam(type=frameNo, code=<frame>)` [Sinotruk `:18080`, header token Sinotruk — sama & auto-refresh spt epc_bom] → `{param}` (parms terenkripsi)
+2. `checkJumpParams(jumpParams=<parms>)` [`epc-cloud/Api/integration-api/…/externalepc`, Authorization `Weichai null` — ini proses login] → `{accessToken (token Weichai), serialCode (nomor mesin)}`
+3. `getOrderNumber(serialNumber=<serial>)` [`…/business-api/…/etl-install-bom-header`] → `{dhhNumber (order), id (=root)}`
+4. `findBomTree(dhhNumber)` → ~50 GROUP mesin · `findBomList(dhhNumber, dhhId)` → part tiap group (nama EN)
+
+- **Tool AI `uraikan_mesin(rangka[, part])`** — tanpa `part`: daftar GROUP mesin; dengan `part`
+  (piston/liner/kruk as/cylinder head/injector…): komponen + stok/harga lokal. Hanya unit bermesin
+  Weichai (kalau bukan, tool balas apa adanya). Terbukti: unit `SJ346500` → WP12S400E201, 50 group,
+  339 part; "piston" → Piston `1000076563`, Piston Ring Set `612600030054`, dst.
+- Bridge & BOM di-cache per-frame. Auth Weichai `Authorization: Weichai <token>` + `tenant-id:1`.
+  Aturan domain: internal mesin unit Weichai WAJIB `uraikan_mesin`, DILARANG `part_aus`/`bom_dari_rangka`.
+
+### 3.5.5f Guard anti-halusinasi Part Number — sejak 2026-07-01
+
+Model kadang MENGARANG PN saat tool `found=False` (PN berurutan rapi + stok/harga palsu). Guard di
+`ai_assistant.chat()`: tiap PN di jawaban WAJIB berasal dari **hasil tool turn ini** ATAU **riwayat**
+(pesan user + jawaban asisten yg sudah lolos guard) — token mirip-PN diambil via `_PN_TOKEN_RE`
+(huruf+angka ≥7 char; harga/qty diabaikan). PN tak bersumber = karangan → model dipaksa koreksi (maks
+2×); bila tetap: SEMUA PN karangan → jawaban diganti pesan jujur "tidak ditemukan"; sebagian → PN
+palsu disamarkan. Guard **selalu jalan** (termasuk follow-up tanpa panggil tool). Nomor rangka/VIN
+yang user sebut otomatis ikut "grounded". Melengkapi anti-bocor tool-call (§3.5.5c).
 
 ### 3.5.6 Cari by Foto
 
@@ -274,6 +422,17 @@ Hasil diagregasi per `part_number` + confidence boost. Foto part di-proxy via
   `CORS_ORIGINS`, `RAJAONGKIR_API_KEY`, `PAYMENT_API_KEY/SANDBOX/CALLBACK_SECRET/BASE_URL`,
   `PUBLIC_BASE_URL`, `DEEPSEEK_API_KEY/BASE_URL/MODEL`.
 - **Selftest tanpa server/network**: `cd backend && python selftest.py <PN>`.
+
+### 3.5.11 Monitoring User (online/offline) — sejak 2026-07-01
+
+Panel admin **Monitoring User** (`/admin/monitoring`, menu di sidebar admin) — status **online/offline**
++ aktivitas terakhir tiap user. Pelacakan **in-memory** (tanpa migrasi DB, tanpa tulis DB per request):
+`services/presence.py` — `touch(username)` dipanggil di `deps.get_current_user` tiap request
+terautentikasi; `mark_login` saat login. **Online = aktif ≤ 5 menit** (`ONLINE_WINDOW_SEC`). Endpoint
+`GET /api/admin/monitoring` menggabung `list_users_full()` + presence → online_count/urut online dulu +
+aktivitas terbaru. Frontend `admin/monitoring/page.tsx` (auto-refresh 15 dtk, filter online). Reset saat
+container restart (wajar utk "siapa online sekarang"; setup 1 container backend). Menu didaftarkan di
+`AppShell` `NAV_ADMIN`.
 
 ---
 
@@ -590,6 +749,17 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       tool AI `repair_kit_transmisi`, endpoint `/api/repairkit/*`, dan tombol **Download Excel
       di dalam jawaban Asisten AI** (via field `repairkit_models`). Backend live + kedua image
       (backend/frontend) sudah di-`build.sh`. **Perlu klik Redeploy** di Coolify agar frontend live.
+- [x] **Fitur Catalog BOM (banding part per kategori & per assy)** — SELESAI 2026-06-29
+      (§3.5.5b): data `data/catalog_bom.json` (40 unit×12 kategori, 123 assy), service
+      `catalog_bom.py`, 4 tool AI (`banding_assy`/`isi_assy`/`banding_kategori`/`isi_kategori`).
+      Backend live (hot-swap) + image backend sudah di-`build.sh` & terverifikasi. Menggantikan
+      `transmisi_bom.json` lama. Tanpa endpoint/ frontend baru → Redeploy tidak wajib.
+- [x] **Integrasi EPC Sinotruk** — SELESAI 2026-06-29 (§3.5.5c): `cek_kendaraan` (config
+      18080), `bom_dari_rangka` (Loading List per-VIN + `kategori_breakdown` exact-unit),
+      `unit_dari_part` (reverse PN→model), **auto-refresh token EPC via SSO SimsCloud**
+      (云桥, sysCode=intl — tanpa captcha/manual), deteksi "Login expired!", anti-bocor
+      tool-call. Backend live (hot-swap) + image di-`build.sh`. Tanpa frontend baru → Redeploy
+      tidak wajib. Catatan: Loading List ≠ Parts Atlas terstruktur (database EPC berbeda).
 - [ ] **Revoke API token Coolify** yang dipakai untuk migrasi (di dashboard →
       Keys & Tokens) setelah yakin stabil — token = kontrol penuh.
 - [ ] Setelah Coolify stabil beberapa hari, pertimbangkan beresihkan fallback systemd
