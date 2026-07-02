@@ -56,7 +56,8 @@
     ],
     "keywords": [
       "fuel filter",
-      "diesel filter"
+      "diesel filter",
+      "燃油滤清器"
     ]
   },
   {
@@ -66,7 +67,9 @@
       "filter oli"
     ],
     "keywords": [
-      "oil filter"
+      "oil filter",
+      "机油滤芯",
+      "机油滤"
     ]
   },
   {
@@ -79,7 +82,9 @@
     ],
     "keywords": [
       "air filter",
-      "air filter assembly"
+      "air filter assembly",
+      "空滤器",
+      "空滤"
     ]
   },
   {
@@ -105,7 +110,8 @@
     ],
     "keywords": [
       "connecting rod",
-      "Linkage assembly"
+      "Linkage assembly",
+      "连杆"
     ]
   },
   {
@@ -116,7 +122,8 @@
       "zuiger"
     ],
     "keywords": [
-      "piston"
+      "piston",
+      "活塞"
     ]
   },
   {
@@ -140,7 +147,10 @@
     "keywords": [
       "valve",
       "intake valve",
-      "exhaust valve"
+      "exhaust valve",
+      "气门",
+      "进气门",
+      "排气门"
     ]
   },
   {
@@ -155,7 +165,9 @@
     "keywords": [
       "injector",
       "nozzle",
-      "fuel injector"
+      "fuel injector",
+      "喷油器",
+      "喷嘴"
     ]
   },
   {
@@ -168,7 +180,9 @@
     ],
     "keywords": [
       "fuel injection pump",
-      "fuel delivery pump"
+      "fuel delivery pump",
+      "喷油泵",
+      "输油泵"
     ]
   },
   {
@@ -179,7 +193,8 @@
     ],
     "keywords": [
       "turbocharger",
-      "turbo"
+      "turbo",
+      "增压器"
     ]
   },
   {
@@ -194,7 +209,9 @@
       "paking set"
     ],
     "keywords": [
-      "gasket"
+      "gasket",
+      "垫片",
+      "衬垫"
     ]
   },
   {
@@ -215,7 +232,8 @@
     ],
     "keywords": [
       "main bearing",
-      "main bearing bush"
+      "main bearing bush",
+      "主轴瓦"
     ]
   },
   {
@@ -226,7 +244,8 @@
     ],
     "keywords": [
       "oil pan",
-      "oil pan assembly"
+      "oil pan assembly",
+      "油底壳"
     ]
   },
   {
@@ -250,7 +269,9 @@
       "radiator"
     ],
     "keywords": [
-      "radiator"
+      "radiator",
+      "散热器",
+      "水箱"
     ]
   },
   {
@@ -271,7 +292,8 @@
       "water pump"
     ],
     "keywords": [
-      "water pump"
+      "water pump",
+      "水泵"
     ]
   },
   {
@@ -284,7 +306,8 @@
     ],
     "keywords": [
       "thermostat",
-      "thermostat housing"
+      "thermostat housing",
+      "节温器"
     ]
   },
   {
@@ -295,7 +318,8 @@
     ],
     "keywords": [
       "fan",
-      "fan clutch"
+      "fan clutch",
+      "风扇"
     ]
   },
   {
@@ -310,7 +334,9 @@
       "brake pad",
       "brake shoe assembly",
       "friction plate",
-      "brake lining"
+      "brake lining",
+      "制动摩擦片",
+      "摩擦片"
     ]
   },
   {
@@ -320,7 +346,8 @@
     ],
     "keywords": [
       "brake shoe assembly",
-      "brake shoe"
+      "brake shoe",
+      "制动蹄"
     ]
   },
   {
@@ -330,7 +357,8 @@
       "tromol rem"
     ],
     "keywords": [
-      "brake drum"
+      "brake drum",
+      "制动鼓"
     ]
   },
   {
@@ -342,7 +370,8 @@
     "keywords": [
       "master brake valve",
       "hand brake valve",
-      "brake valve"
+      "brake valve",
+      "制动阀"
     ]
   },
   {
@@ -369,7 +398,8 @@
     ],
     "keywords": [
       "clutch pressure plate",
-      "pressure plate"
+      "pressure plate",
+      "压盘"
     ]
   },
   {
@@ -393,7 +423,8 @@
     "keywords": [
       "differential",
       "axle",
-      "rear axle"
+      "rear axle",
+      "差速器"
     ]
   },
   {
@@ -431,7 +462,8 @@
     ],
     "keywords": [
       "universal joint",
-      "cross"
+      "cross",
+      "十字轴"
     ]
   },
   {
@@ -444,7 +476,9 @@
       "bevel gear",
       "driving bevel gear",
       "driven bevel gear",
-      "main reducer"
+      "main reducer",
+      "锥齿轮",
+      "主减速器"
     ]
   },
   {
@@ -458,7 +492,8 @@
     ],
     "keywords": [
       "leaf spring",
-      "spring"
+      "spring",
+      "钢板弹簧"
     ]
   },
   {
@@ -473,7 +508,8 @@
       "sok breker"
     ],
     "keywords": [
-      "shock absorber"
+      "shock absorber",
+      "减振器"
     ]
   },
   {
@@ -496,7 +532,8 @@
       "tie rod",
       "steering tie rod",
       "steering tie rod arm",
-      "tie rod arm"
+      "tie rod arm",
+      "横拉杆"
     ]
   },
   {
@@ -508,7 +545,8 @@
     ],
     "keywords": [
       "bushing",
-      "bush"
+      "bush",
+      "衬套"
     ]
   },
   {
@@ -563,7 +601,8 @@
       "dinamo cas"
     ],
     "keywords": [
-      "generator"
+      "generator",
+      "发电机"
     ]
   },
   {
@@ -587,7 +626,9 @@
     "keywords": [
       "headlight",
       "headlamp",
-      "front combination light"
+      "front combination light",
+      "前组合灯",
+      "前照灯"
     ]
   },
   {
@@ -670,7 +711,8 @@
     ],
     "keywords": [
       "oil seal",
-      "seal"
+      "seal",
+      "油封"
     ]
   },
   {
@@ -682,7 +724,8 @@
       "bearing"
     ],
     "keywords": [
-      "bearing"
+      "bearing",
+      "轴承"
     ]
   },
   {
@@ -691,7 +734,8 @@
       "selang"
     ],
     "keywords": [
-      "hose"
+      "hose",
+      "软管"
     ]
   },
   {
@@ -700,7 +744,8 @@
       "baut"
     ],
     "keywords": [
-      "bolt"
+      "bolt",
+      "螺栓"
     ]
   },
   {
@@ -709,7 +754,8 @@
       "mur"
     ],
     "keywords": [
-      "nut"
+      "nut",
+      "螺母"
     ]
   },
   {
@@ -722,7 +768,8 @@
     "keywords": [
       "clamp",
       "hose clamp",
-      "pipe clamp"
+      "pipe clamp",
+      "卡箍"
     ]
   },
   {
@@ -734,7 +781,9 @@
     "keywords": [
       "flat washer",
       "washer",
-      "large washer"
+      "large washer",
+      "垫圈",
+      "平垫圈"
     ]
   },
   {
@@ -744,7 +793,8 @@
       "ring pegas"
     ],
     "keywords": [
-      "spring washer"
+      "spring washer",
+      "弹簧垫圈"
     ]
   },
   {
@@ -755,7 +805,8 @@
     ],
     "keywords": [
       "pin",
-      "axis pin"
+      "axis pin",
+      "销"
     ]
   },
   {
@@ -780,7 +831,8 @@
     ],
     "keywords": [
       "snap ring",
-      "circlip"
+      "circlip",
+      "挡圈"
     ]
   },
   {
@@ -792,7 +844,8 @@
       "grease nipple"
     ],
     "keywords": [
-      "grease nipple"
+      "grease nipple",
+      "滑脂嘴"
     ]
   },
   {
@@ -802,7 +855,8 @@
       "rivet"
     ],
     "keywords": [
-      "rivet"
+      "rivet",
+      "铆钉"
     ]
   },
   {
@@ -814,7 +868,8 @@
     ],
     "keywords": [
       "plug",
-      "screw plug"
+      "screw plug",
+      "螺塞"
     ]
   },
   {
@@ -827,7 +882,8 @@
     ],
     "keywords": [
       "bracket",
-      "support"
+      "support",
+      "支架"
     ]
   },
   {
@@ -842,7 +898,8 @@
       "nok as"
     ],
     "keywords": [
-      "camshaft"
+      "camshaft",
+      "凸轮轴"
     ]
   },
   {
@@ -855,7 +912,8 @@
       "poros engkol"
     ],
     "keywords": [
-      "crankshaft"
+      "crankshaft",
+      "曲轴"
     ]
   },
   {
@@ -878,7 +936,8 @@
       "cop mesin"
     ],
     "keywords": [
-      "cylinder head"
+      "cylinder head",
+      "气缸盖"
     ]
   },
   {
@@ -902,7 +961,8 @@
       "fly wheel"
     ],
     "keywords": [
-      "flywheel"
+      "flywheel",
+      "飞轮"
     ]
   },
   {
@@ -913,7 +973,8 @@
       "pully"
     ],
     "keywords": [
-      "pulley"
+      "pulley",
+      "皮带轮"
     ]
   },
   {
@@ -926,7 +987,8 @@
       "timing chain"
     ],
     "keywords": [
-      "timing gear"
+      "timing gear",
+      "正时齿轮"
     ]
   },
   {
@@ -948,7 +1010,8 @@
       "inter cooler"
     ],
     "keywords": [
-      "intercooler"
+      "intercooler",
+      "中冷器"
     ]
   },
   {
@@ -961,7 +1024,9 @@
     ],
     "keywords": [
       "manifold",
-      "exhaust manifold"
+      "exhaust manifold",
+      "排气歧管",
+      "歧管"
     ]
   },
   {
@@ -1011,7 +1076,8 @@
     "keywords": [
       "muffler",
       "silencer",
-      "exhaust"
+      "exhaust",
+      "消声器"
     ]
   },
   {
@@ -1021,7 +1087,8 @@
       "exhaust pipe"
     ],
     "keywords": [
-      "exhaust pipe"
+      "exhaust pipe",
+      "排气管"
     ]
   },
   {
@@ -1032,7 +1099,8 @@
       "fuel tank"
     ],
     "keywords": [
-      "fuel tank"
+      "fuel tank",
+      "油箱"
     ]
   },
   {
@@ -1043,7 +1111,8 @@
       "fuel pipe"
     ],
     "keywords": [
-      "fuel pipe"
+      "fuel pipe",
+      "燃油管"
     ]
   },
   {
@@ -1066,7 +1135,8 @@
       "kompresor rem"
     ],
     "keywords": [
-      "air compressor"
+      "air compressor",
+      "空压机"
     ]
   },
   {
@@ -1079,7 +1149,8 @@
       "buster rem"
     ],
     "keywords": [
-      "brake chamber"
+      "brake chamber",
+      "制动气室"
     ]
   },
   {
@@ -1110,7 +1181,8 @@
       "brake pipe"
     ],
     "keywords": [
-      "brake pipe"
+      "brake pipe",
+      "制动管"
     ]
   },
   {
@@ -1133,7 +1205,8 @@
       "garpu gigi"
     ],
     "keywords": [
-      "shift fork"
+      "shift fork",
+      "拨叉"
     ]
   },
   {
@@ -1157,7 +1230,8 @@
     ],
     "keywords": [
       "synchronizer",
-      "synchronous"
+      "synchronous",
+      "同步器"
     ]
   },
   {
@@ -1186,7 +1260,8 @@
     ],
     "keywords": [
       "power take-off",
-      "PTO"
+      "PTO",
+      "取力器"
     ]
   },
   {
@@ -1198,7 +1273,8 @@
       "steering"
     ],
     "keywords": [
-      "steering"
+      "steering",
+      "转向"
     ]
   },
   {
@@ -1223,7 +1299,8 @@
     ],
     "keywords": [
       "king pin",
-      "kingpin"
+      "kingpin",
+      "主销"
     ]
   },
   {
@@ -1320,7 +1397,8 @@
     ],
     "keywords": [
       "wheel hub",
-      "hub"
+      "hub",
+      "轮毂"
     ]
   },
   {
@@ -1333,7 +1411,9 @@
     "keywords": [
       "wheel bolt",
       "wheel nut",
-      "hub bolt"
+      "hub bolt",
+      "车轮螺栓",
+      "车轮螺母"
     ]
   },
   {
@@ -1358,7 +1438,8 @@
     ],
     "keywords": [
       "wiring harness",
-      "harness"
+      "harness",
+      "线束"
     ]
   },
   {
@@ -1369,7 +1450,8 @@
       "sakelar"
     ],
     "keywords": [
-      "switch"
+      "switch",
+      "开关"
     ]
   },
   {
@@ -1378,7 +1460,8 @@
       "sensor"
     ],
     "keywords": [
-      "sensor"
+      "sensor",
+      "传感器"
     ]
   },
   {
@@ -1411,7 +1494,8 @@
     ],
     "keywords": [
       "turn signal",
-      "combination lamp"
+      "combination lamp",
+      "转向灯"
     ]
   },
   {
@@ -1420,11 +1504,19 @@
       "lampu belakang",
       "lampu rem",
       "stop lamp",
-      "lampu stop"
+      "lampu stop",
+      "lampu kombinasi belakang"
     ],
     "keywords": [
       "tail lamp",
-      "brake lamp"
+      "brake lamp",
+      "rear combination lamp",
+      "combination rear lamp",
+      "rear lamp",
+      "组合后灯",
+      "后组合灯",
+      "后灯",
+      "尾灯"
     ]
   },
   {
@@ -1448,7 +1540,8 @@
     ],
     "keywords": [
       "connector",
-      "socket"
+      "socket",
+      "插接件"
     ]
   },
   {
@@ -1497,7 +1590,8 @@
       "jok sopir"
     ],
     "keywords": [
-      "seat"
+      "seat",
+      "座椅"
     ]
   },
   {
@@ -1601,7 +1695,8 @@
     ],
     "keywords": [
       "air conditioner compressor",
-      "compressor"
+      "compressor",
+      "压缩机"
     ]
   },
   {
@@ -1718,7 +1813,8 @@
     "keywords": [
       "transmission",
       "gear shift",
-      "gearbox"
+      "gearbox",
+      "变速器"
     ]
   },
   {
@@ -1732,7 +1828,8 @@
     "keywords": [
       "rocker arm",
       "engine rocker arm",
-      "steering rocker arm"
+      "steering rocker arm",
+      "摇臂"
     ]
   },
   {
@@ -1769,7 +1866,8 @@
       "oil pump"
     ],
     "keywords": [
-      "oil pump"
+      "oil pump",
+      "机油泵"
     ]
   },
   {
@@ -1793,7 +1891,8 @@
     ],
     "keywords": [
       "common rail",
-      "common rail pipe"
+      "common rail pipe",
+      "共轨"
     ]
   },
   {
@@ -1840,7 +1939,8 @@
       "rem retarder"
     ],
     "keywords": [
-      "retarder"
+      "retarder",
+      "缓速器"
     ]
   },
   {
@@ -1851,7 +1951,8 @@
       "relay rem"
     ],
     "keywords": [
-      "relay valve"
+      "relay valve",
+      "继动阀"
     ]
   },
   {
@@ -1887,7 +1988,8 @@
     ],
     "keywords": [
       "diaphragm",
-      "diaphragm spring brake chamber"
+      "diaphragm spring brake chamber",
+      "膜片"
     ]
   },
   {
@@ -1901,7 +2003,9 @@
     "keywords": [
       "reducer",
       "main reducer",
-      "wheel rim reducer"
+      "wheel rim reducer",
+      "减速器",
+      "主减速器"
     ]
   },
   {
@@ -1926,7 +2030,8 @@
       "gardan lock"
     ],
     "keywords": [
-      "differential lock"
+      "differential lock",
+      "差速锁"
     ]
   },
   {
@@ -1937,7 +2042,8 @@
       "spline shaft"
     ],
     "keywords": [
-      "spline"
+      "spline",
+      "花键"
     ]
   },
   {
@@ -1952,7 +2058,8 @@
     "keywords": [
       "steering knuckle",
       "knuckle arm",
-      "knuckle"
+      "knuckle",
+      "转向节"
     ]
   },
   {
@@ -1973,11 +2080,20 @@
       "thrust rod",
       "batang reaksi",
       "stang reaksi",
-      "torque rod"
+      "torque rod",
+      "tintong",
+      "tintongan",
+      "batang tintong",
+      "v stay",
+      "vstay",
+      "v-stay",
+      "v type thrust rod",
+      "tintong v"
     ],
     "keywords": [
       "thrust rod",
-      "V-type thrust rod"
+      "V-type thrust rod",
+      "Straight thrust rod"
     ]
   },
   {
@@ -2076,7 +2192,9 @@
       "lampu samping"
     ],
     "keywords": [
-      "marker light"
+      "marker light",
+      "示廓灯",
+      "标志灯"
     ]
   },
   {
@@ -2148,7 +2266,8 @@
     "keywords": [
       "spacer",
       "spacer ring",
-      "spacer bushing"
+      "spacer bushing",
+      "隔套"
     ]
   },
   {
@@ -2159,7 +2278,8 @@
       "bos sleeve"
     ],
     "keywords": [
-      "sleeve"
+      "sleeve",
+      "套管"
     ]
   },
   {
@@ -3124,7 +3244,8 @@
     ],
     "keywords": [
       "fog lamp",
-      "fog light"
+      "fog light",
+      "雾灯"
     ]
   },
   {
@@ -3221,7 +3342,8 @@
       "tromol roda"
     ],
     "keywords": [
-      "brake drum"
+      "brake drum",
+      "制动鼓"
     ]
   },
   {
@@ -3289,7 +3411,8 @@
       "panci oli"
     ],
     "keywords": [
-      "oil pan"
+      "oil pan",
+      "油底壳"
     ]
   },
   {
@@ -3332,7 +3455,8 @@
       "klep in"
     ],
     "keywords": [
-      "intake valve"
+      "intake valve",
+      "进气门"
     ]
   },
   {
@@ -3342,7 +3466,8 @@
       "klep ex"
     ],
     "keywords": [
-      "exhaust valve"
+      "exhaust valve",
+      "排气门"
     ]
   },
   {
@@ -3401,7 +3526,8 @@
     ],
     "keywords": [
       "steering lamp",
-      "turn signal"
+      "turn signal",
+      "转向灯"
     ]
   },
   {
@@ -3413,7 +3539,8 @@
     "keywords": [
       "head lamp",
       "headlamp",
-      "front combination lamp"
+      "front combination lamp",
+      "前组合灯"
     ]
   },
   {
@@ -3422,7 +3549,8 @@
       "kabel bodi"
     ],
     "keywords": [
-      "wiring harness"
+      "wiring harness",
+      "线束"
     ]
   },
   {
@@ -3518,7 +3646,8 @@
     ],
     "keywords": [
       "universal joint",
-      "cross joint"
+      "cross joint",
+      "十字轴"
     ]
   },
   {
@@ -3587,7 +3716,8 @@
       "gajah duduk"
     ],
     "keywords": [
-      "tie rod"
+      "tie rod",
+      "横拉杆"
     ]
   },
   {
@@ -3615,7 +3745,8 @@
       "tanki solar"
     ],
     "keywords": [
-      "fuel tank"
+      "fuel tank",
+      "油箱"
     ]
   },
   {
