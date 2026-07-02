@@ -4,7 +4,7 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-06-29** (oleh inspeksi langsung repo lokal + SSH ke server).
+> Terakhir diverifikasi: **2026-07-03** (oleh inspeksi langsung repo lokal + SSH ke server).
 > Ditambah **§3.5 — Cara Kerja Aplikasi (deep-dive fungsional)** pada 2026-06-25 agar AI/dev
 > langsung paham domain, alur data, logika pencarian + sinonim, AI tools, API & frontend.
 > Update **2026-06-27**: tambah fitur **Repair Kit Transmisi** (data + tool AI + endpoint +
@@ -23,6 +23,17 @@
 > (c) **Guard anti-halusinasi PN** (jawaban dipatok ke data tool/riwayat; PN karangan diblokir/
 > diganti "tidak ditemukan", termasuk follow-up) — §3.5.5f. (d) Menu admin **Monitoring User**
 > (online/offline in-memory) — §3.5.11.
+> Update **2026-07-02**: (a) **Suite pengujian** — unit test `backend/tests/` (76 test, tanpa
+> network) + **eval regresi AI** `backend/evals/` (golden questions via `chat()` nyata) — §4
+> "Test & Eval". (b) **Repair kit transmisi PER-VIN** — arg `rangka`: gearbox di-resolve PERSIS
+> dari EPC pabrik — §3.5.5a. (c) Fix guard: jawaban yang berhenti di [PIKIR] di-RETRY (bukan
+> pesan gagal); kode seri unit (NX400HP dll) tak lagi disamarkan — §3.5.5f. (d) Umpan balik
+> 👍/👎 + kartu unduh Excel banding rangka — §3.5.5g. (e) Berat/dimensi resmi SIMS + auto-berat
+> ongkir — §3.5.4. (f) Seluruh pekerjaan dikomit per-fitur & di-push (branch `snapshot-clean`).
+> Update **2026-07-03**: supersession part sasis Sinotruk diverifikasi **BUNTU** (endpoint ada,
+> data role-gated internal — §3.5.5c; utk part MESIN Weichai SUDAH ada tool `pengganti_part`);
+> `repair_kit_mesin` kasus tanpa 维修包 kini menyarankan `uraikan_mesin`; tabel tool §3.5.5
+> dilengkapi 8 tool yang belum tercatat.
 
 ---
 
@@ -44,7 +55,11 @@ Fitur utama (berdasarkan halaman frontend & router backend):
 - **Populasi** — data populasi unit
 - **Orders / Pesanan / Keranjang** — alur jual-beli + pembayaran + ongkir
 - **Chat** — chat order & gudang
-- **Asisten AI** — chatbot (DeepSeek, OpenAI-compatible)
+- **Asisten AI** — chatbot (DeepSeek, OpenAI-compatible) dengan ~30 tool (katalog, EPC
+  per-VIN, banding, repair kit, fault code, populasi) + guard anti-halusinasi
+- **Umpan balik AI** — 👍/👎 per jawaban asisten (tabel Supabase `ai_feedback`,
+  review admin di `/admin/feedback`) — §3.5.5g
+- **Monitoring User** — online/offline in-memory di `/admin/monitoring` — §3.5.11
 - **Repair Kit Transmisi** — daftar komponen repair kit per **transmisi assy** (seal kit
   perpak + overhaul tambahan); ditanyakan ke **Asisten AI** dan tombol **unduh Excel muncul
   langsung di jawaban chat** untuk model yang dibahas
@@ -66,10 +81,14 @@ maspart-main/
 │   │   │                   #   chat, geo, ai, admin, populasi, repairkit
 │   │   └── services/       # logika bisnis (part_index, catalog, gudang, harga,
 │   │                       #   orders, payments, shipping, image_search, ai_assistant,
-│   │                       #   repairkit, dll)
+│   │                       #   repairkit, catalog_bom, epc, epc_bom, epc_weichai,
+│   │                       #   ai_feedback, ai_export, presence, sims, dll)
 │   ├── shared/         # part_compare, sims_fetcher, sims_price_fetcher (di-reuse dari versi Streamlit)
-│   ├── tools/          # append_gallery.py
+│   ├── tools/          # append_gallery.py, build_catalog_bom.py, reconcile_catalog_epc.py
+│   ├── tests/          # unit test pytest (guard, sinonim, leak, catalog_bom, repairkit-rangka)
+│   ├── evals/          # eval regresi Asisten AI (golden.json + run_evals.py) — lihat §4
 │   ├── requirements.txt
+│   ├── requirements-dev.txt  # pytest (dev only)
 │   ├── railway.toml    # config deploy Railway (alternatif)
 │   ├── .env.example    # template env — SALIN ke .env
 │   └── selftest.py     # test logika index+search tanpa server/network
@@ -87,6 +106,8 @@ maspart-main/
 │   ├── sinonim/sinonim.json
 │   ├── repairkit/transmisi.json        # repair kit per model transmisi assy (§3.5.5a)
 │   ├── catalog_bom.json                # BOM per unit×kategori + assy_index (§3.5.5b, ~7.5MB)
+│   ├── epc_dict/cn_en.json             # kamus CN→EN swadaya dari EPC (§3.5.5c)
+│   ├── epc_token.txt                   # token sesi EPC (di-gitignore; auto-refresh via SSO)
 │   └── manuals/                        # PDF manual
 │
 ├── migrations/         # SQL migrations (Supabase/Postgres) 003..014
@@ -178,6 +199,11 @@ Pemetaan akun→gudang ada di `services/gudang.py` (`ACCOUNT_GUDANG`, mis. `jaka
   yang masih ada stok** (haversine pakai koordinat di `gudang_config`). Admin/SEE_ALL → semua.
 - **Harga**: `data/harga/harga.xlsx` → `{PN: "Rp x"}`. Plus **harga SIMS live** (CNY→IDR
   pakai kurs terkini) khusus admin/SEE_ALL (`services/sims.py`, `harga.py`).
+- **Berat & dimensi resmi SIMS (sejak 2026-07-02)**: `sims.get_part_spec/get_part_info` =
+  berat (kg), dimensi (cm), satuan, kemasan minimum per PN dari SIMS. Dipakai (a) halaman
+  `part/[pn]` (blok "Spesifikasi Fisik", via `GET /api/parts/spec`), (b) **auto-berat ongkir**:
+  `harga.weight_for(pn, allow_remote=True)` di `create_order` — bila kolom berat manual kosong,
+  berat resmi SIMS mengisi otomatis → part tak lagi tertolak "tanpa berat".
 - **Populasi**: data populasi unit (`services/populasi.py`).
 
 ### 3.5.5 Asisten AI (DeepSeek, tool-calling)
@@ -192,7 +218,7 @@ kamus sinonim **juga disuntikkan ke system prompt** ("KAMUS ISTILAH LAPANGAN"). 
 | `info_aplikasi` | ringkasan index/stok/harga/gudang/kurs | semua |
 | `daftar_unit` | daftar unit/model truk tersedia | semua |
 | `cari_kode_kesalahan` | DTC/fault code Sinotruk-HOWO (ECU Bosch) via SPN+FMI / P-code / kata kunci | semua |
-| `repair_kit_transmisi` | komponen repair kit per **transmisi assy** (seal kit perpak / overhaul / semua), resolve via kode model · assy PN · nama unit | semua |
+| `repair_kit_transmisi` | komponen repair kit per **transmisi assy** (seal kit perpak / overhaul / semua), resolve via kode model · assy PN · nama unit · **nomor rangka (gearbox PERSIS per-VIN via EPC, §3.5.5a)** | semua |
 | `daftar_transmisi_assy` | daftar LENGKAP & pasti semua transmisi/gearbox assy di katalog (anti-undercount) | semua |
 | `banding_assy` | **bandingkan ISI DALAM 2 PN assembly** (transmisi/kopling/gardan/mesin/kabin) → part sama/beda + % + verdict (§3.5.5b) | semua |
 | `isi_assy` | isi dalam (BOM lengkap) 1 part assembly per PN | semua |
@@ -204,6 +230,14 @@ kamus sinonim **juga disuntikkan ke system prompt** ("KAMUS ISTILAH LAPANGAN"). 
 | `kategori_unit` | **pohon KATEGORI EPC per-VIN** — semua kategori/assembly unit + turunannya (drill berlapis) (§3.5.5d) | semua |
 | `uraikan_assembly` | **urai 1 ASSEMBLY → komponennya** (karet/seal/pin dari v-stay dll), per PN/nama, per-VIN (§3.5.5d) | semua |
 | `uraikan_mesin` | **part INTERNAL MESIN Weichai per-VIN** (piston/kruk as/liner/cylinder head…) — EPC Weichai auto-SSO (§3.5.5e) | semua |
+| `repair_kit_mesin` | **repair kit (维修包) MESIN Weichai per-VIN** — paket komponen servis/overhaul mesin dari nomor rangka; bila mesin tak punya kit terdefinisi → jujur + sarankan `uraikan_mesin` | semua |
+| `pengganti_part` | **PERSAMAAN/SUPERSESSION part MESIN Weichai** — 'PN ini diganti nomor berapa?' (data 替换/ECN resmi, per PN, global) + silang stok/harga lokal | semua |
+| `part_aus_dari_rangka` | **part servis/aus persis per-VIN** dari EPC Parts Atlas — auto pilih modul (rem/kopling/filter/dll); WAJIB utk part aus per-rangka, jangan cari_part lokal | semua |
+| `assembly_utama_unit` | daftar **ASSEMBLY UTAMA terpasang** satu unit per-VIN ('four-assembly': kabin, gardan, mesin, transmisi, kopling — PN assy nyata) | semua |
+| `banding_rangka` | **bandingkan part DUA unit via dua nomor rangka** (Loading List per-VIN) — part sama/beda per kategori; memicu kartu unduh Excel di UI (§3.5.5g) | semua |
+| `part_termasuk_assy` | REVERSE: PN komponen kecil → **termasuk di assembly mana saja** (gearbox/kopling/gardan/mesin yang memuatnya) | semua |
+| `cari_filter_shantui` | cari **FILTER alat berat SHANTUI** (hidrolik, oli, solar, udara, water separator, AC) per model excavator/dozer/roller/grader | semua |
+| `cek_populasi` | data **populasi unit** (armada terdaftar: model, tipe, lokasi kerja, tahun, Euro, nopol) | `admin` / `SEE_ALL` |
 | `pesanan_saya`, `detail_pesanan` | pesanan milik buyer | `pembeli` |
 | `rekap_penjualan`, `daftar_pesanan` | rekap & daftar pesanan (cabang auto-scoped) | `admin` / cabang |
 | `harga_sims` | harga modal SIMS live (CNY→IDR) | `admin` / `SEE_ALL` |
@@ -380,6 +414,31 @@ Model kadang MENGARANG PN saat tool `found=False` (PN berurutan rapi + stok/harg
 palsu disamarkan. Guard **selalu jalan** (termasuk follow-up tanpa panggil tool). Nomor rangka/VIN
 yang user sebut otomatis ikut "grounded". Melengkapi anti-bocor tool-call (§3.5.5c).
 
+**Perbaikan 2026-07-02** (temuan eval, commit `5c226c4`):
+- **Jawaban kosong di-RETRY**: model kadang berhenti di blok `[PIKIR]` tanpa jawaban final →
+  dulu user melihat "Maaf, jawabannya belum lengkap diproses". Kini `_strip_reasoning` return
+  `""` dan `chat()` MEMAKSA model menulis ulang jawaban final (maks 2×,
+  `_EMPTY_REPLY_CORRECTION`) sebelum jatuh ke pesan aman. Isi nalar tetap tak pernah bocor.
+- **Kode seri unit tak disamarkan**: token mirip-PN yang sebenarnya NAMA SERI/UNIT katalog
+  (`NX400HP`, `HOWO400`, `LZZ5EXSF`, `SG21-C6`) dulu bisa jadi "⟨PN tak terverifikasi⟩".
+  Kini `_drop_unit_tokens()` (sumber `part_index.unit_models()` + `catalog_bom.list_units()`,
+  cache 10 mnt, lazy) mengeluarkannya dari dugaan karangan; PN karangan asli tetap tertangkap.
+
+### 3.5.5g Umpan balik 👍/👎 & kartu unduh Excel di jawaban asisten — sejak 2026-07-01
+
+- **Umpan balik:** tombol 👍/👎 per jawaban asisten (`app/asisten/page.tsx`) →
+  `POST /api/ai/feedback` (`services/ai_feedback.py`) → tabel Supabase **`ai_feedback`**
+  (⚠️ **WAJIB dibuat manual** — belum ada file migrasi). Review admin di halaman
+  **`/admin/feedback`** (ringkasan, filter rating, tandai selesai via
+  `POST /api/ai/feedback/{id}/resolve`). Semua user login boleh memberi feedback;
+  list/resolve khusus admin.
+- **Export Excel banding rangka:** saat asisten menjawab perbandingan dua unit
+  (`banding_rangka`), `chat()` mengembalikan field **`banding_exports`** → frontend
+  menampilkan **kartu unduh Excel** (komponen `ExcelCard`) → `GET
+  /api/ai/banding-rangka/export?rangka_1=&rangka_2=&kategori=` (`services/ai_export.py`,
+  openpyxl) = perbandingan LENGKAP tanpa cap. Pola sama dgn tombol Excel repair kit
+  (§3.5.5a, field `repairkit_models`).
+
 ### 3.5.6 Cari by Foto
 
 `services/image_search.py` — embedding **DINOv2-base** (torch CPU). Galeri dari **CSV lokal**
@@ -400,7 +459,7 @@ Hasil diagregasi per `part_number` + confidence boost. Foto part di-proxy via
 | Router (prefix) | Endpoint utama |
 |---|---|
 | **auth** `/api/auth` | `POST /login`, `GET /me`, `GET /permissions` |
-| **parts** `/api/parts` | `GET /search` (PN), `GET /search-name`, `POST /search-image`, `GET /compare`, `GET /photos`, `GET /image-proxy`, `GET /batch-template`, `POST /batch-catalog`, `GET/POST /index/status·refresh` |
+| **parts** `/api/parts` | `GET /search` (PN), `GET /search-name`, `POST /search-image`, `GET /compare`, `GET /photos`, `GET /spec` (berat/dimensi SIMS), `GET /image-proxy`, `GET /batch-template`, `POST /batch-catalog`, `GET/POST /index/status·refresh` |
 | **harga** `/api/harga` | `GET /list·/list/export·/rate·/cari`, `POST /batch·/batch/export·/refresh` |
 | **opname** `/api/opname` | `GET /draft·/history`, `POST /draft/from-upload·/finalize`, `PUT/DELETE /draft`, `DELETE /history/{id}` |
 | **populasi** `/api/populasi` | `GET ""·/export`, `POST /refresh` |
@@ -409,9 +468,9 @@ Hasil diagregasi per `part_number` + confidence boost. Foto part di-proxy via
 | **branch** `/api/branch` | `GET /orders·/orders/count·/orders/{code}·/sales`, `PUT /orders/{code}/status` |
 | **chat** `/api` | `GET/POST /orders/{code}/chat`, `/chat/buyer/threads`, `/chat/gudang/{key}`, `/chat/branch/...` |
 | **geo** `/api/geo` | `GET /reverse·/search` |
-| **ai** `/api/ai` | `GET /status`, `POST /chat` |
+| **ai** `/api/ai` | `GET /status`, `POST /chat`, `POST /feedback`, `GET /feedback` (admin), `POST /feedback/{id}/resolve` (admin), `GET /banding-rangka/export` |
 | **repairkit** `/api/repairkit` | `GET /transmisi`, `GET /transmisi/export` |
-| **admin** `/api/admin` | users, perms, gudang, `upload/{kind}`, `upload-catalog`, monitoring, sales, photos, `index*` (reload galeri/bulk) |
+| **admin** `/api/admin` | users, perms, gudang, `upload/{kind}`, `upload-catalog`, monitoring, sales, photos, `index*` (reload galeri/bulk), `catalog-bom/status·rebuild` |
 | **meta** | `GET /health` |
 
 ### 3.5.9 Peta halaman frontend (Next.js App Router, `frontend/src/app/`)
@@ -419,7 +478,7 @@ Hasil diagregasi per `part_number` + confidence boost. Foto part di-proxy via
 `login` · `/` (search PN) · `search` · `search-image` · `compare` · `part/[pn]` · `harga` ·
 `batch` · `opname` · `populasi` · `download` · `asisten` (AI) · `keranjang` · `pesanan` +
 `pesanan/[code]` + invoice · `pilih-lokasi` · `chat` · `cabang/*` (pesanan/penjualan/chat) ·
-`admin/*` (menu, users, gudang, upload, monitoring, index, foto, orders, penjualan).
+`admin/*` (menu, users, gudang, upload, monitoring, index, foto, orders, penjualan, **feedback**).
 
 ### 3.5.10 Konvensi & "jebakan" yang WAJIB diketahui AI
 
@@ -748,7 +807,12 @@ ssh root@maspart.tech 'docker exec backend-jmmamc7kvqr6nlev97r79j5q python3 -c "
 ## 7. Git
 
 - Remote: **https://github.com/morwick/maspart-v5.git** (`origin`)
-- Branch utama: `main`
+- Branch utama: `main` — ⚠️ **TERTINGGAL**: seluruh pekerjaan sejak 2026-06-28 ada di branch
+  **`snapshot-clean`** (aktif, ter-push ke `origin/snapshot-clean`, dikomit per-fitur sejak
+  2026-07-02). TODO: fast-forward/merge `main` ke `snapshot-clean` agar clone baru dapat kode
+  terkini.
+- Konvensi commit: per-fitur (`feat(epc):`, `fix(ai):`, `test:`, `docs:` …), pesan Bahasa
+  Indonesia. Sebelum push perubahan AI: `python -m pytest tests/ -q` + `python evals/run_evals.py`.
 
 ---
 
@@ -801,6 +865,31 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       (云桥, sysCode=intl — tanpa captcha/manual), deteksi "Login expired!", anti-bocor
       tool-call. Backend live (hot-swap) + image di-`build.sh`. Tanpa frontend baru → Redeploy
       tidak wajib. Catatan: Loading List ≠ Parts Atlas terstruktur (database EPC berbeda).
+- [x] **Suite pengujian** — SELESAI 2026-07-02: unit test `backend/tests/` (76 test murni,
+      <2 dtk) + eval regresi AI `backend/evals/` (golden questions, `run_evals.py`). Lihat §4.
+- [x] **Semua pekerjaan dikomit per-fitur & di-push** — SELESAI 2026-07-02 (10+ commit di
+      `snapshot-clean` → `origin/snapshot-clean`; sebelumnya menggantung tak terkomit).
+- [x] **Fix guard (jawaban tertelan [PIKIR] + kode seri disamarkan)** — SELESAI 2026-07-02
+      (§3.5.5f), LIVE di server (hot-swap + image + Redeploy).
+- [x] **Repair kit transmisi per-VIN (arg `rangka` via EPC)** — SELESAI 2026-07-02 (§3.5.5a),
+      LIVE. `repair_kit_mesin` no_kit → saran `uraikan_mesin` (2026-07-03), LIVE.
+- [x] **Supersession part sasis Sinotruk** — DIVERIFIKASI BUNTU 2026-07-03 (§3.5.5c):
+      endpoint ada tapi data role-gated internal; JANGAN kejar tanpa akun internal.
+      (Part mesin Weichai → sudah ada `pengganti_part`.)
+- [ ] **Fast-forward/merge `main` ke `snapshot-clean`** — `main` di GitHub tertinggal jauh;
+      clone baru dapat kode lama (lihat §7).
+- [ ] **`migrations/015_ai_feedback.sql`** — tabel `ai_feedback` masih dibuat manual (§3.5.5g);
+      buat file migrasi agar konsisten dgn tabel lain.
+- [ ] **Backup otomatis `/opt/maspart/data`** — berisi upload admin + token; tidak semua di
+      git. Cron tar harian / rclone.
+- [ ] **Migrasi password plaintext** — `auth.py` masih fallback kolom `password` legacy;
+      hash semua lalu hapus jalur fallback.
+- [ ] **Kandidat fitur berikut** (dipertimbangkan 2026-07-03): harga jual otomatis dari modal
+      SIMS utk part tanpa harga (stok ada tapi tak bisa dibeli), saran restock AI
+      (penjualan×stok), loop feedback→eval, auto-refresh index setelah upload-catalog
+      (sekarang TIDAK otomatis), log pencarian nihil → umpan sinonim, foto part di jawaban
+      asisten, CI GitHub Actions (pytest), pecah `ai_assistant.py` (±4.300 baris), ONNX
+      pengganti torch.
 - [ ] **Revoke API token Coolify** yang dipakai untuk migrasi (di dashboard →
       Keys & Tokens) setelah yakin stabil — token = kontrol penuh.
 - [ ] Setelah Coolify stabil beberapa hari, pertimbangkan beresihkan fallback systemd
