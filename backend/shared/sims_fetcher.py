@@ -263,9 +263,28 @@ def fetch_sims_part_info(part_number: str, force_refresh: bool = False) -> dict:
             row = rows[0] if isinstance(rows[0], dict) else {}
             part_name = row.get("partName") or ""
             hs_code   = row.get("hsCode") or row.get("isHsc") or ""
+
+            def _f(v):
+                """Coerce ke float; None bila kosong/non-numerik."""
+                try:
+                    return float(v) if v is not None and str(v).strip() != "" else None
+                except Exception:
+                    return None
+
             info = {
                 "partName": str(part_name).strip(),
                 "hsCode":   str(hs_code).strip(),
+                # Berat & dimensi resmi pabrik (kg & cm). Dipakai untuk ongkir
+                # (berat + volumetrik) dan ditampilkan di detail part. Data ini
+                # sudah ikut di response pageDealer — sebelumnya tidak diambil.
+                "netWeightKg":   _f(row.get("partNetWeight")),
+                "roughWeightKg": _f(row.get("partRoughWeight")),
+                "lengthCm":      _f(row.get("partLength")),
+                "widthCm":       _f(row.get("partWidth")),
+                "heightCm":      _f(row.get("partHeight")),
+                "partUnit":      str(row.get("partUnit") or "").strip(),
+                "minPackNum":    row.get("minPackNum"),
+                "brandName":     str(row.get("brandName") or "").strip(),
                 "raw":      row,
             }
             print(f"[sims_fetcher] Part info OK: {pn_key} -> {info['partName']}")

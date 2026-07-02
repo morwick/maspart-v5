@@ -65,16 +65,89 @@ def get_images(part_number: str, force_refresh: bool = False) -> list[str]:
         return []
 
 
-def get_part_info(part_number: str) -> dict:
-    """Return info part dari SIMS (mis. {'partName': ...}) atau {} bila gagal."""
+def get_part_info(part_number: str, force_refresh: bool = False) -> dict:
+    """Return info part dari SIMS (mis. {'partName': ..., 'roughWeightKg': ...})
+    atau {} bila gagal. `force_refresh` melewati cache part_info.json."""
     pn = (part_number or "").strip()
     if not _SIMS_OK or not pn:
         return {}
     try:
-        info, _err = _sf.get_sims_part_info(pn)
+        info, _err = _sf.get_sims_part_info(pn, force_refresh=force_refresh)
         return info or {}
     except Exception:
         return {}
+
+
+def get_part_weight_grams(part_number: str) -> int:
+    """Berat KIRIM (gram) part dari SIMS — pakai berat KOTOR (rough) bila ada,
+    jatuh ke berat bersih. 0 bila tak tersedia. Hasil ikut ter-cache di
+    part_info.json (lewat get_part_info)."""
+    info = get_part_info(part_number)
+    # Cache lama (sebelum field berat ditambah) tak punya kunci ini → segarkan sekali.
+    if info and "roughWeightKg" not in info:
+        info = get_part_info(part_number, force_refresh=True)
+    if not info:
+        return 0
+    kg = info.get("roughWeightKg") or info.get("netWeightKg")
+    try:
+        g = int(round(float(kg) * 1000)) if kg else 0
+    except Exception:
+        g = 0
+    return g if g > 0 else 0
+
+
+def _part_info_cached(part_number: str) -> dict:
+    """Baca part_info.json TANPA jaringan (cache-only). {} bila miss / cache lama."""
+    if not _SIMS_OK:
+        return {}
+    key = (part_number or "").strip().upper()
+    if not key:
+        return {}
+    try:
+        return _sf._load_part_info_json().get(key) or {}
+    except Exception:
+        return {}
+
+
+def get_part_weight_grams_cached(part_number: str) -> int:
+    """Seperti get_part_weight_grams tapi HANYA dari cache (tanpa login/fetch) →
+    0 bila belum ter-cache. Dipakai di jalur cepat (daftar pencarian) agar tak
+    memicu fetch SIMS per baris."""
+    info = _part_info_cached(part_number)
+    if not info or "roughWeightKg" not in info:
+        return 0
+    kg = info.get("roughWeightKg") or info.get("netWeightKg")
+    try:
+        g = int(round(float(kg) * 1000)) if kg else 0
+    except Exception:
+        g = 0
+    return g if g > 0 else 0
+
+
+def get_part_spec(part_number: str) -> dict:
+    """Spesifikasi fisik resmi SIMS untuk ditampilkan: berat (kg), dimensi (cm),
+    satuan, kemasan minimum, merek. {} bila tak ada data."""
+    info = get_part_info(part_number)
+    if info and "roughWeightKg" not in info:
+        info = get_part_info(part_number, force_refresh=True)
+    if not info:
+        return {}
+    out: dict = {}
+    net, rough = info.get("netWeightKg"), info.get("roughWeightKg")
+    if net is not None:
+        out["berat_bersih_kg"] = net
+    if rough is not None:
+        out["berat_kirim_kg"] = rough  # berat kotor — dipakai untuk ongkir
+    l, w, h = info.get("lengthCm"), info.get("widthCm"), info.get("heightCm")
+    if l and w and h:
+        out["dimensi_cm"] = f"{l} x {w} x {h}"
+    if info.get("partUnit"):
+        out["satuan"] = info["partUnit"]
+    if info.get("minPackNum"):
+        out["kemasan_minimum"] = info["minPackNum"]
+    if info.get("brandName"):
+        out["merek"] = info["brandName"]
+    return out
 
 
 def price_available() -> bool:

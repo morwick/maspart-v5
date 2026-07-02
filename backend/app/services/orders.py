@@ -96,7 +96,8 @@ def create_order(
             no_price.append(pn)
             continue
         # Part tanpa berat (belum ditetapkan admin) juga tidak boleh dibeli.
-        if harga.weight_for(pn) <= 0:
+        # allow_remote: fetch berat resmi SIMS bila kolom manual kosong.
+        if harga.weight_for(pn, allow_remote=True) <= 0:
             no_weight.append(pn)
             continue
         lt = price * qty

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { ApiError, getPartPhotos, getBuyerLocations, partImageUrl, searchParts, type BuyerLocation, type PartResult } from "@/lib/api";
+import { ApiError, getPartPhotos, getPartSpec, getBuyerLocations, partImageUrl, searchParts, type BuyerLocation, type PartResult, type PartSpec } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { ensurePerms } from "@/lib/perms";
 import { addToCart, hasPrice, hasWeight } from "@/lib/cart";
@@ -20,6 +20,8 @@ export default function PartDetailPage() {
   const [units, setUnits] = useState<PartResult[]>([]);
   const [photos, setPhotos] = useState<string[]>([]);
   const [photoSource, setPhotoSource] = useState("");
+  const [spec, setSpec] = useState<PartSpec | null>(null);
+  const [specBeratGram, setSpecBeratGram] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingPhotos, setLoadingPhotos] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +92,17 @@ export default function PartDetailPage() {
       })
       .catch(() => active && setPhotos([]))
       .finally(() => active && setLoadingPhotos(false));
+
+    // Spesifikasi fisik resmi (berat/dimensi dari SIMS) — non-blocking.
+    setSpec(null);
+    setSpecBeratGram(0);
+    getPartSpec(pn, token)
+      .then((r) => {
+        if (!active) return;
+        setSpec(r.spec && Object.keys(r.spec).length ? r.spec : null);
+        setSpecBeratGram(r.berat_gram || 0);
+      })
+      .catch(() => {});
 
     return () => {
       active = false;
@@ -168,12 +181,12 @@ export default function PartDetailPage() {
               <span className="pill pill-danger" title="Stok habis di lokasimu">Stok habis</span>
             ) : !hasPrice(main.harga) ? (
               <span className="pill pill-warn" title="Harga belum tersedia — belum bisa dibeli">Tanpa harga</span>
-            ) : !hasWeight(main.berat) ? (
+            ) : !hasWeight(main.berat || specBeratGram) ? (
               <span className="pill pill-warn" title="Berat belum ditetapkan admin — belum bisa dibeli">Tanpa berat</span>
             ) : (
               <button
                 className="btn btn-primary btn-sm"
-                onClick={() => addToCart({ part_number: main.part_number, name: main.part_name, harga: main.harga, berat: main.berat })}
+                onClick={() => addToCart({ part_number: main.part_number, name: main.part_name, harga: main.harga, berat: main.berat || specBeratGram })}
               >
                 + 🛒 Keranjang
               </button>
@@ -305,6 +318,55 @@ export default function PartDetailPage() {
                       </div>
                     )}
                   </>
+                )}
+
+                {/* Spesifikasi fisik resmi (berat/dimensi) dari SIMS */}
+                {spec && (
+                  <div className="surface" style={{ overflow: "hidden" }}>
+                    <div className="px-4 py-2.5 flex items-center gap-2" style={{ fontSize: 13, fontWeight: 600, borderBottom: "1px solid var(--ink-150)" }}>
+                      Spesifikasi <span className="pill">sumber: SIMS</span>
+                    </div>
+                    <table className="tbl">
+                      <tbody>
+                        {spec.berat_kirim_kg != null && (
+                          <tr>
+                            <td style={{ color: "var(--ink-600)" }}>Berat (kirim)</td>
+                            <td className="num" style={{ fontWeight: 550 }}>{spec.berat_kirim_kg} kg</td>
+                          </tr>
+                        )}
+                        {spec.berat_bersih_kg != null && spec.berat_bersih_kg !== spec.berat_kirim_kg && (
+                          <tr>
+                            <td style={{ color: "var(--ink-600)" }}>Berat (bersih)</td>
+                            <td className="num" style={{ fontWeight: 550 }}>{spec.berat_bersih_kg} kg</td>
+                          </tr>
+                        )}
+                        {spec.dimensi_cm && (
+                          <tr>
+                            <td style={{ color: "var(--ink-600)" }}>Dimensi (P×L×T)</td>
+                            <td className="num" style={{ fontWeight: 550 }}>{spec.dimensi_cm} cm</td>
+                          </tr>
+                        )}
+                        {spec.satuan && (
+                          <tr>
+                            <td style={{ color: "var(--ink-600)" }}>Satuan</td>
+                            <td className="num" style={{ fontWeight: 550 }}>{spec.satuan}</td>
+                          </tr>
+                        )}
+                        {spec.kemasan_minimum != null && (
+                          <tr>
+                            <td style={{ color: "var(--ink-600)" }}>Kemasan minimum</td>
+                            <td className="num" style={{ fontWeight: 550 }}>{spec.kemasan_minimum}</td>
+                          </tr>
+                        )}
+                        {spec.merek && (
+                          <tr>
+                            <td style={{ color: "var(--ink-600)" }}>Merek</td>
+                            <td className="num" style={{ fontWeight: 550 }}>{spec.merek}</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
 
                 {units.length > 0 && (

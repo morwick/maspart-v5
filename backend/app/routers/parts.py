@@ -228,6 +228,20 @@ def photos(
     return PartPhotos(part_number=pn.strip(), photos=fetch_part_photos(pn), source="part_photos")
 
 
+@router.get("/spec")
+def part_spec(
+    pn: str = Query(..., min_length=1, description="Part number"),
+    _user: dict = Depends(get_current_user),
+):
+    """Spesifikasi fisik resmi dari SIMS untuk satu PN: berat (kg), dimensi (cm),
+    satuan, kemasan minimum, merek. Ikut menghangatkan cache part_info → berat
+    untuk ongkir tersedia setelahnya. {} bila SIMS tak punya data / tak aktif."""
+    pn = (pn or "").strip()
+    spec = sims.get_part_spec(pn) if sims.available() else {}
+    berat_gram = sims.get_part_weight_grams_cached(pn)
+    return {"part_number": pn.upper(), "spec": spec, "berat_gram": berat_gram}
+
+
 # Host SIMS yang boleh di-proxy (cegah open-proxy / SSRF).
 _PROXY_ALLOWED_HOSTS = {"simscloud.cnhtcerp.com"}
 

@@ -100,8 +100,10 @@ def price_for(pn: str) -> tuple[int, str]:
 _weight_map: dict[str, int] | None = None
 
 
-def weight_for(pn: str) -> int:
-    """Berat part (gram) dari kolom Berat di harga.xlsx. 0 bila tak ada."""
+def weight_for(pn: str, allow_remote: bool = False) -> int:
+    """Berat part (gram). Prioritas: kolom Berat manual di harga.xlsx → lalu berat
+    resmi SIMS. `allow_remote=False` (default) HANYA baca cache SIMS (cepat — untuk
+    daftar pencarian); `True` boleh login/fetch SIMS (alur pesanan/ongkir/detail)."""
     global _weight_map
     df = _ensure()
     if _weight_map is None:
@@ -117,19 +119,31 @@ def weight_for(pn: str) -> int:
                     g = 0
                 if g > 0:
                     _weight_map[key] = g
-    return _weight_map.get((pn or "").strip().upper(), 0)
+    g = _weight_map.get((pn or "").strip().upper(), 0)
+    if g > 0:
+        return g
+    # Fallback: berat resmi pabrik dari SIMS (kg→gram), bila admin belum mengisi
+    # kolom Berat di harga.xlsx. Membuka blokir pembelian & ongkir akurat tanpa
+    # input manual. Non-fatal bila SIMS down → 0.
+    try:
+        return sims.get_part_weight_grams(pn) if allow_remote \
+            else sims.get_part_weight_grams_cached(pn)
+    except Exception:
+        return 0
 
 
-def total_weight_grams(items: list[tuple[str, int]], default_each: int) -> int:
+def total_weight_grams(items: list[tuple[str, int]], default_each: int,
+                       allow_remote: bool = True) -> int:
     """Total berat (gram) dari daftar (part_number, qty). Part tanpa berat → pakai
-    estimasi `default_each` gram per item. Minimal `default_each`."""
+    estimasi `default_each` gram per item. Minimal `default_each`. `allow_remote`
+    boleh fetch berat SIMS (dipakai utk ongkir; item sedikit)."""
     total = 0
     for pn, qty in items:
         try:
             q = max(1, int(qty or 1))
         except Exception:
             q = 1
-        w = weight_for(pn)
+        w = weight_for(pn, allow_remote=allow_remote)
         total += (w if w > 0 else default_each) * q
     return max(default_each, total) if items else default_each
 
