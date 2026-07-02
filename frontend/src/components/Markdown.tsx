@@ -31,6 +31,7 @@ function renderInline(text: string, keyBase: string): ReactNode[] {
             borderRadius: 4,
             padding: "1px 5px",
             fontSize: "0.88em",
+            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
           }}
         >
           {tok.slice(1, -1)}
@@ -53,6 +54,11 @@ function splitRow(line: string): string[] {
 }
 
 const isTableSep = (line: string) => /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(line) && line.includes("-");
+
+// Sel tabel yang berupa Part Number/kode (huruf besar+angka, boleh . / + -) →
+// ditampilkan dengan font mono agar mudah dibaca & disalin persis.
+const isPnCell = (s: string) =>
+  /^[A-Z0-9][A-Z0-9./+\-]{4,}$/.test(s.replace(/\*\*/g, "").trim());
 
 export default function Markdown({ content }: { content: string }) {
   const lines = content.replace(/\r\n/g, "\n").split("\n");
@@ -116,18 +122,30 @@ export default function Markdown({ content }: { content: string }) {
             <tbody>
               {rows.map((r, ri) => (
                 <tr key={ri} style={{ background: ri % 2 ? "var(--ink-50)" : "transparent" }}>
-                  {header.map((_, ci) => (
-                    <td
-                      key={ci}
-                      style={{
-                        padding: "6px 10px",
-                        borderBottom: "1px solid var(--ink-150)",
-                        verticalAlign: "top",
-                      }}
-                    >
-                      {renderInline(r[ci] ?? "", `td-${ri}-${ci}`)}
-                    </td>
-                  ))}
+                  {header.map((_, ci) => {
+                    const cell = r[ci] ?? "";
+                    const pn = isPnCell(cell);
+                    return (
+                      <td
+                        key={ci}
+                        style={{
+                          padding: "6px 10px",
+                          borderBottom: "1px solid var(--ink-150)",
+                          verticalAlign: "top",
+                          ...(pn
+                            ? {
+                                fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+                                fontSize: 12,
+                                whiteSpace: "nowrap",
+                                color: "var(--ink-900)",
+                              }
+                            : null),
+                        }}
+                      >
+                        {renderInline(cell, `td-${ri}-${ci}`)}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>

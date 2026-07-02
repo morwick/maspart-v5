@@ -36,6 +36,7 @@ const I = {
   receipt: <Ic d={<><path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2zM8 7h8M8 11h8M8 15h5" /></>} />,
   chat: <Ic d={<><path d="M4 5h16v11H9l-5 4z" /><path d="M8 9h8M8 12h5" /></>} />,
   ai: <Ic d={<><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /><rect x="6" y="6" width="12" height="12" rx="3" /><path d="M9.5 11h.01M14.5 11h.01M9.5 14h5" /></>} />,
+  pulse: <Ic d={<><path d="M3 12h4l2 6 4-14 2 8h6" /></>} />,
 };
 
 type NavItem = { key?: string; href: string; label: string; icon: ReactNode };
@@ -55,7 +56,9 @@ const NAV_DATA: NavItem[] = [
 const NAV_ADMIN: NavItem[] = [
   { href: "/admin/orders", label: "Pesanan", icon: I.cart },
   { href: "/admin/penjualan", label: "Laporan Penjualan", icon: I.chart },
+  { href: "/admin/feedback", label: "Umpan Balik AI", icon: I.ai },
   { href: "/admin/menu", label: "Menu Control", icon: I.shield },
+  { href: "/admin/monitoring", label: "Monitoring User", icon: I.pulse },
   { href: "/admin/upload", label: "Upload Data", icon: I.upload },
   { href: "/admin/users", label: "Manajemen User", icon: I.user },
   { href: "/admin/gudang", label: "Lokasi Gudang", icon: I.truck },
