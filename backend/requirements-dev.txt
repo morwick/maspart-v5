@@ -1,0 +1,2 @@
+# Dependensi development (test) — tidak dipakai di produksi
+pytest>=8
