@@ -20,6 +20,12 @@ data/embeddings.parquet
 data/manuals/
 *MC_BOSCHECU*.pdf
 
+# Token sesi EPC Sinotruk (kredensial, kedaluwarsa berkala — JANGAN di-commit)
+data/epc_token.txt
+
+# Output rekonsiliasi katalog↔EPC (laporan, regeneratable)
+reconcile_*.csv
+
 # Backend
 backend/.env
 backend/.cache/
