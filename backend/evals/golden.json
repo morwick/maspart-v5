@@ -48,7 +48,8 @@
       "id": "sinonim-dinamo-cas",
       "tags": ["lokal"],
       "question": "dinamo cas untuk HOWO ada?",
-      "expect": { "tools_any": ["cari_part"], "reply_any": ["generator", "alternator"] }
+      "expect": { "tools_any": ["cari_part"], "reply_any": ["generator", "alternator"] },
+      "expect_alt": [{ "reply_any": ["rangka", "vin"] }]
     },
     {
       "id": "detail-pn-sliding-sleeve",
@@ -210,6 +211,13 @@
       "tags": ["weichai"],
       "question": "urai bagian piston mesin unit rangka SJ346500",
       "expect": { "tools_any": ["uraikan_mesin"], "reply_any": ["piston"] }
+    },
+    {
+      "id": "weichai-air-compressor",
+      "tags": ["weichai"],
+      "_kenapa": "Regresi 2026-07-03: 'air compressor' dulu jatuh ke modul poros Atlas → cuma pipa outlet, model simpulkan 'terintegrasi di engine assembly'. Aksesori terpasang di mesin = domain Weichai (Air Compressor Group; Assy 1013133963 & compressor 1013133966 terverifikasi live utk RJ345233).",
+      "question": "cek part air compressor unit RJ345233",
+      "expect": { "tools_any": ["uraikan_mesin"], "pn_any": ["1013133963", "1013133966"] }
     }
   ]
 }

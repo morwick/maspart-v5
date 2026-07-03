@@ -90,7 +90,11 @@ def _check_expect(case: dict, exp: dict, reply: str, tools_used: list[str],
         for t in case.get("turns") or [{"role": "user", "content": case.get("question", "")}]:
             if (t.get("role") or "") == "user":
                 allowed |= ai_assistant._extract_pns(t.get("content") or "")
-        new = sorted(ai_assistant._extract_pns(reply) - allowed)
+        # Kode nama unit/seri (HOWO-380, NX400HP, SG21-C6) BUKAN PN — guard produksi
+        # juga mengecualikannya (_drop_unit_tokens); tanpa ini eval false-positive
+        # saat model menyebut daftar unit yang tersedia.
+        new = ai_assistant._drop_unit_tokens(
+            sorted(ai_assistant._extract_pns(reply) - allowed))
         if new:
             fails.append(f"no_new_pn: jawaban memuat PN tak bersumber (dugaan karangan lolos guard): {new}")
 
