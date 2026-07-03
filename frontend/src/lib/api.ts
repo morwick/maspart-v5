@@ -1232,6 +1232,12 @@ export type AIBandingExport = {
   kategori: string;
   kategori_nama: string;
 };
+export type AIExcelExport = {
+  id: string;
+  filename: string;
+  judul: string;
+  jumlah_baris: number;
+};
 export type AIChatResult = {
   reply: string;
   tools_used: string[];
@@ -1240,6 +1246,8 @@ export type AIChatResult = {
   repairkit_models?: string[];
   /** Perbandingan rangka → kartu unduh Excel hasil perbandingan. */
   banding_exports?: AIBandingExport[];
+  /** Export generik (tool buat_excel) → kartu unduh Excel dinamis. */
+  excel_exports?: AIExcelExport[];
 };
 
 /** Unduh Excel hasil perbandingan part dua unit (banding_rangka). */
@@ -1253,6 +1261,15 @@ export async function exportBandingRangka(
     kategori: p.kategori || "",
   });
   const res = await fetch(`${API_BASE}/api/ai/banding-rangka/export?${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.blob();
+}
+
+/** Unduh Excel generik yang dibuat asisten via tool buat_excel (per export id). */
+export async function exportAiExcel(token: string, id: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/api/ai/excel/${encodeURIComponent(id)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new ApiError(res.status, await parseError(res));

@@ -213,6 +213,17 @@
       "expect": { "tools_any": ["uraikan_mesin"], "reply_any": ["piston"] }
     },
     {
+      "id": "excel-dinamis",
+      "tags": ["lokal"],
+      "_kenapa": "Fitur buat_excel (2026-07-03): 'buatkan excelnya' atas data yang dibahas → tool buat_excel → kartu unduh dinamis. Anchor WG2210040097 ada di katalog.",
+      "turns": [
+        { "role": "user", "content": "detail part WG2210040097 dong, stok dan harganya" },
+        { "role": "assistant", "content": "Part **WG2210040097** (Sliding Sleeve / selongsong geser) ada di katalog. Stok total: 4 pcs." },
+        { "role": "user", "content": "buatkan excelnya" }
+      ],
+      "expect": { "tools_any": ["buat_excel"] }
+    },
+    {
       "id": "weichai-air-compressor",
       "tags": ["weichai"],
       "_kenapa": "Regresi 2026-07-03: 'air compressor' dulu jatuh ke modul poros Atlas → cuma pipa outlet, model simpulkan 'terintegrasi di engine assembly'. Aksesori terpasang di mesin = domain Weichai (Air Compressor Group; Assy 1013133963 & compressor 1013133966 terverifikasi live utk RJ345233).",

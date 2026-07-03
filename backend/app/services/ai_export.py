@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import io
 import re
+import threading
+import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 from openpyxl import Workbook
@@ -218,3 +221,83 @@ def banding_rangka_excel(rangka_1: str, rangka_2: str, kategori: str = "") -> tu
     kat_sfx = "" if kat == "SEMUA part" else "_" + re.sub(r"[^A-Za-z0-9]+", "", kat)[:20]
     fname = f"Perbandingan_{f1}_vs_{f2}{kat_sfx}.xlsx"
     return buf.getvalue(), fname
+
+
+# ── Export GENERIK dari asisten (tool AI `buat_excel`) ──────────────────────
+# Asisten menyusun judul+kolom+baris dari HASIL TOOL percakapan; payload disimpan
+# in-memory ber-TTL di sini, frontend mengunduh via GET /api/ai/excel/{id}.
+# Uvicorn berjalan 1 worker (lihat Dockerfile) → dict module-level aman.
+_STASH_TTL_SEC = 24 * 3600.0
+_STASH_MAX = 200               # plafon entri (jaga memori)
+_stash_lock = threading.Lock()
+_stash: dict[str, dict] = {}   # id -> {at, judul, kolom, baris, filename}
+
+# Header kolom yang isinya kode/PN → font mono di Excel.
+_MONO_HEAD_RE = re.compile(r"\b(part\s*number|part\s*no|pn|nomor\s*part|kode)\b", re.IGNORECASE)
+
+
+def stash_export(judul: str, kolom: list[str], baris: list[list[str]]) -> tuple[str, str]:
+    """Simpan payload export → (export_id, filename). Entri kedaluwarsa dibersihkan."""
+    now = time.monotonic()
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", judul).strip("_")[:60] or "Data_MASPART"
+    filename = f"{slug}.xlsx"
+    export_id = uuid.uuid4().hex
+    with _stash_lock:
+        for k in [k for k, v in _stash.items() if now - v["at"] > _STASH_TTL_SEC]:
+            _stash.pop(k, None)
+        while len(_stash) >= _STASH_MAX:   # buang paling tua
+            _stash.pop(min(_stash, key=lambda k: _stash[k]["at"]), None)
+        _stash[export_id] = {"at": now, "judul": judul, "kolom": kolom,
+                             "baris": baris, "filename": filename}
+    return export_id, filename
+
+
+def generic_excel(export_id: str) -> tuple[bytes | None, str]:
+    """Bangun workbook dari payload tersimpan. (bytes, filename) atau (None, pesan)."""
+    with _stash_lock:
+        d = _stash.get(export_id)
+        if d and time.monotonic() - d["at"] > _STASH_TTL_SEC:
+            _stash.pop(export_id, None)
+            d = None
+    if not d:
+        return None, ("File sudah kedaluwarsa / tidak ditemukan. Minta asisten "
+                      "buatkan Excel-nya lagi.")
+
+    kolom: list[str] = d["kolom"]
+    baris: list[list[str]] = d["baris"]
+    mono_cols = {j for j, h in enumerate(kolom, start=1) if _MONO_HEAD_RE.search(h or "")}
+    # Lebar kolom mengikuti isi (min 8, maks 60).
+    widths = []
+    for j, h in enumerate(kolom):
+        w = max([len(h or "")] + [len(r[j]) for r in baris if j < len(r)] or [0])
+        widths.append(max(8, min(60, w + 4)))
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.sheet_view.showGridLines = False
+    start = _title(ws, d["judul"],
+                   f"{len(baris)} baris · MASPART Asisten AI", max(2, len(kolom)))
+    for j, (h, w) in enumerate(zip(kolom, widths), start=1):
+        c = ws.cell(row=start, column=j, value=h)
+        c.fill = _HEAD_FILL
+        c.font = _WHITE
+        c.alignment = _CENTER
+        c.border = _BORDER
+        ws.column_dimensions[get_column_letter(j)].width = w
+    r = start + 1
+    for i, row in enumerate(baris):
+        for j in range(1, len(kolom) + 1):
+            val = row[j - 1] if j - 1 < len(row) else ""
+            c = ws.cell(row=r, column=j, value=val)
+            c.border = _BORDER
+            c.alignment = _CENTER if j == 1 or j in mono_cols else _LEFT
+            c.font = _MONO if j in mono_cols else _INK
+            if i % 2:
+                c.fill = _ZEBRA
+        r += 1
+    ws.freeze_panes = ws.cell(row=start + 1, column=1)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue(), d["filename"]

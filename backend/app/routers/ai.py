@@ -120,6 +120,20 @@ def export_banding_rangka(
     )
 
 
+@router.get("/excel/{export_id}")
+def export_ai_excel(export_id: str, _user: dict = Depends(get_current_user)):
+    """Excel generik hasil tool AI `buat_excel` — dipicu kartu 'Unduh' di bawah
+    jawaban asisten. Payload disimpan sementara (TTL) saat tool dijalankan."""
+    data, fname = ai_export.generic_excel(export_id)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, fname)
+    return Response(
+        content=data,
+        media_type=_XLSX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @router.post("/chat-image", dependencies=[Depends(limit("ai_image", 20, 60))])
 async def ai_chat_image(
     messages: str = Form("[]", description="Riwayat chat (JSON list {role, content})."),

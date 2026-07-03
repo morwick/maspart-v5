@@ -9,12 +9,14 @@ import {
   aiChat,
   aiChatImage,
   downloadBlob,
+  exportAiExcel,
   exportBandingRangka,
   exportRepairKit,
   getAiStatus,
   submitAiFeedback,
   type AIBandingExport,
   type AIChatTurn,
+  type AIExcelExport,
 } from "@/lib/api";
 import { clearSession, getToken } from "@/lib/auth";
 
@@ -23,6 +25,7 @@ type Msg = AIChatTurn & {
   photo?: string;
   repairkitModels?: string[];
   bandingExports?: AIBandingExport[];
+  excelExports?: AIExcelExport[];
   at?: number; // epoch ms — jam pesan
   rating?: "up" | "down"; // umpan balik user atas jawaban ini
 };
@@ -65,6 +68,7 @@ const TOOL_LABELS: Record<string, string> = {
   rekap_penjualan: "Rekap penjualan",
   daftar_pesanan: "Daftar pesanan",
   harga_sims: "Harga SIMS",
+  buat_excel: "Export Excel",
 };
 
 // Kunci penyimpanan chat agar tidak hilang saat pindah menu lalu kembali.
@@ -232,6 +236,7 @@ export default function AsistenPage() {
           tools: res.tools_used,
           repairkitModels: res.repairkit_models,
           bandingExports: res.banding_exports,
+          excelExports: res.excel_exports,
           at: Date.now(),
         },
       ]);
@@ -280,6 +285,7 @@ export default function AsistenPage() {
           tools: res.tools_used,
           repairkitModels: res.repairkit_models,
           bandingExports: res.banding_exports,
+          excelExports: res.excel_exports,
           at: Date.now(),
         },
       ]);
@@ -584,31 +590,20 @@ export default function AsistenPage() {
 }
 
 // Kartu file gaya Claude: ikon spreadsheet + nama file + tombol Unduh.
-function ExcelCard({ exp }: { exp: AIBandingExport }) {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const kat = exp.kategori_nama && exp.kategori_nama !== "semua part" ? ` · ${exp.kategori_nama}` : "";
-  const fname = `Perbandingan ${exp.rangka_1} vs ${exp.rangka_2}`;
-
-  async function download() {
-    const token = getToken();
-    if (!token) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const blob = await exportBandingRangka(token, {
-        rangka_1: exp.rangka_1,
-        rangka_2: exp.rangka_2,
-        kategori: exp.kategori,
-      });
-      downloadBlob(blob, `${fname.replace(/\s+/g, "_")}.xlsx`);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Gagal mengunduh Excel");
-    } finally {
-      setBusy(false);
-    }
-  }
-
+// Shell dipakai bersama ExcelCard (banding rangka) & AiExcelCard (export generik).
+function ExcelCardShell({
+  fname,
+  sub,
+  busy,
+  err,
+  onDownload,
+}: {
+  fname: string;
+  sub: string;
+  busy: boolean;
+  err: string | null;
+  onDownload: () => void;
+}) {
   return (
     <div style={{ marginTop: 8 }}>
       <div
@@ -652,15 +647,81 @@ function ExcelCard({ exp }: { exp: AIBandingExport }) {
           >
             {fname}
           </div>
-          <div style={{ fontSize: 11, color: "var(--ink-500)" }}>Spreadsheet · XLSX{kat}</div>
+          <div style={{ fontSize: 11, color: "var(--ink-500)" }}>{sub}</div>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={download} disabled={busy} style={{ gap: 5 }}>
+        <button className="btn btn-secondary btn-sm" onClick={onDownload} disabled={busy} style={{ gap: 5 }}>
           <Icon d={IC.download} size={13} />
           {busy ? "Menyiapkan…" : "Unduh"}
         </button>
       </div>
       {err && <div style={{ fontSize: 11.5, color: "var(--danger-600)", marginTop: 4 }}>{err}</div>}
     </div>
+  );
+}
+
+function ExcelCard({ exp }: { exp: AIBandingExport }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const kat = exp.kategori_nama && exp.kategori_nama !== "semua part" ? ` · ${exp.kategori_nama}` : "";
+  const fname = `Perbandingan ${exp.rangka_1} vs ${exp.rangka_2}`;
+
+  async function download() {
+    const token = getToken();
+    if (!token) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const blob = await exportBandingRangka(token, {
+        rangka_1: exp.rangka_1,
+        rangka_2: exp.rangka_2,
+        kategori: exp.kategori,
+      });
+      downloadBlob(blob, `${fname.replace(/\s+/g, "_")}.xlsx`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Gagal mengunduh Excel");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ExcelCardShell fname={fname} sub={`Spreadsheet · XLSX${kat}`} busy={busy} err={err} onDownload={download} />
+  );
+}
+
+// Kartu unduh Excel DINAMIS — file yang disusun asisten via tool buat_excel
+// (mis. user bilang "buatkan excelnya" atas data yang barusan dibahas).
+function AiExcelCard({ exp }: { exp: AIExcelExport }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function download() {
+    const token = getToken();
+    if (!token) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const blob = await exportAiExcel(token, exp.id);
+      downloadBlob(blob, exp.filename || "Data_MASPART.xlsx");
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        setErr("File sudah kedaluwarsa — minta asisten buatkan Excel-nya lagi.");
+      } else {
+        setErr(e instanceof Error ? e.message : "Gagal mengunduh Excel");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ExcelCardShell
+      fname={exp.judul || exp.filename}
+      sub={`Spreadsheet · XLSX · ${exp.jumlah_baris} baris`}
+      busy={busy}
+      err={err}
+      onDownload={download}
+    />
   );
 }
 
@@ -909,6 +970,9 @@ function Bubble({
         )}
         {m.bandingExports?.map((exp, i) => (
           <ExcelCard key={i} exp={exp} />
+        ))}
+        {m.excelExports?.map((exp, i) => (
+          <AiExcelCard key={exp.id || i} exp={exp} />
         ))}
         {(tools.length > 0 || time || onFeedback) && (
           <div

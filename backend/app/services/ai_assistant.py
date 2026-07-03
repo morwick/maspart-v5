@@ -19,8 +19,8 @@ import time
 import requests
 
 from ..core.config import get_settings
-from . import (catalog_bom, epc, epc_bom, epc_weichai, fault_codes, filter_ref, gudang,
-               harga, orders, part_index, populasi, repairkit, sims)
+from . import (ai_export, catalog_bom, epc, epc_bom, epc_weichai, fault_codes, filter_ref,
+               gudang, harga, orders, part_index, populasi, repairkit, sims)
 
 logger = logging.getLogger("maspart.ai")
 
@@ -751,6 +751,31 @@ def _tool_specs(user: dict) -> list[dict]:
                         "part_number": {"type": "string", "description": "Part Number yang mau dicek dipakai di unit/model apa (mis. AZ1646901003)."},
                     },
                     "required": ["part_number"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "buat_excel",
+                "description": (
+                    "BUAT FILE EXCEL (kartu unduh) dari data yang SUDAH dibahas — panggil saat user "
+                    "minta 'buatkan excelnya', 'export ke excel/xlsx/spreadsheet', 'unduh sebagai "
+                    "excel', 'bikin filenya'. Isi 'baris' WAJIB disalin PERSIS dari hasil tool di "
+                    "percakapan ini (PN/nama/qty/stok/harga apa adanya) — ⛔ JANGAN mengarang/"
+                    "menambah data; PN yang tak pernah muncul dari tool akan DITOLAK. Bila datanya "
+                    "belum pernah diambil tool, panggil tool datanya DULU, baru buat_excel. Setelah "
+                    "sukses, kartu unduh muncul OTOMATIS di bawah jawaban — jawab singkat saja "
+                    "(konfirmasi isi file), JANGAN tulis ulang tabelnya & JANGAN membuat link."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "judul": {"type": "string", "description": "Judul file/tabel, spesifik (mis. 'Part Air Compressor Unit RJ345233')."},
+                        "kolom": {"type": "array", "items": {"type": "string"}, "description": "Judul kolom berurutan (mis. ['No','Part Number','Nama Part','Qty','Stok','Harga'])."},
+                        "baris": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "description": "Baris data; tiap baris = array string seurut 'kolom'. Salin PERSIS dari hasil tool."},
+                    },
+                    "required": ["judul", "kolom", "baris"],
                 },
             },
         },
@@ -2912,6 +2937,53 @@ def _t_repair_kit_mesin(args: dict, user: dict) -> dict:
     }
 
 
+_EXCEL_MAX_ROWS = 1000
+
+
+def _t_buat_excel(args: dict, user: dict) -> dict:
+    """EXPORT EXCEL GENERIK — model menyusun judul+kolom+baris dari hasil tool
+    percakapan; payload disimpan (ai_export.stash_export) dan frontend memunculkan
+    kartu unduh. PN dalam isi WAJIB grounded (hasil tool/riwayat) — anti-karangan."""
+    judul = str(args.get("judul") or "").strip() or "Data MASPART"
+    kolom = [str(k).strip() for k in (args.get("kolom") or []) if str(k).strip()]
+    baris_raw = args.get("baris") or []
+    if not kolom or not isinstance(baris_raw, list) or not baris_raw:
+        return {"error": "Isi 'kolom' (judul kolom) dan 'baris' (data) — disalin PERSIS "
+                         "dari hasil tool yang sudah ada di percakapan ini."}
+
+    baris: list[list[str]] = []
+    for r in baris_raw[:_EXCEL_MAX_ROWS]:
+        if isinstance(r, (list, tuple)):
+            row = ["" if v is None else str(v) for v in r]
+        elif isinstance(r, dict):   # model kadang mengirim object per baris
+            row = ["" if r.get(k) is None else str(r.get(k)) for k in kolom]
+        else:
+            row = [str(r)]
+        baris.append((row + [""] * len(kolom))[:len(kolom)])
+
+    # Anti-halusinasi: token mirip-PN di isi file wajib pernah muncul dari tool /
+    # riwayat percakapan (set 'grounded' disuntik chat() via _grounded).
+    grounded = args.get("_grounded")
+    if isinstance(grounded, set):
+        toks: set[str] = set()
+        for row in baris:
+            for v in row:
+                toks |= _extract_pns(v)
+        bad = _drop_unit_tokens(sorted(t for t in toks if t not in grounded))
+        if bad:
+            return {"error": ("PN berikut TIDAK pernah muncul dari hasil tool/riwayat "
+                              "percakapan (dugaan karangan): " + ", ".join(bad[:10]) +
+                              ". ⛔ Isi Excel hanya dengan data PERSIS dari hasil tool — "
+                              "panggil tool datanya dulu bila perlu, lalu ulangi buat_excel.")}
+
+    export_id, filename = ai_export.stash_export(judul, kolom, baris)
+    return {"found": True, "export_id": export_id, "filename": filename,
+            "judul": judul, "jumlah_baris": len(baris),
+            "catatan": ("File Excel siap — KARTU UNDUH otomatis muncul di bawah jawabanmu. "
+                        "Jawab SINGKAT (sebut judul + jumlah baris). ⛔ JANGAN tulis ulang "
+                        "tabelnya, JANGAN membuat link/URL unduhan sendiri.")}
+
+
 _DISPATCH = {
     "cari_part": _t_cari_part,
     "kategori_unit": _t_kategori_unit,
@@ -2943,6 +3015,7 @@ _DISPATCH = {
     "detail_pesanan": _t_detail_pesanan,
     "rekap_penjualan": _t_rekap_penjualan,
     "daftar_pesanan": _t_daftar_pesanan,
+    "buat_excel": _t_buat_excel,
 }
 
 
@@ -3259,6 +3332,15 @@ def _system_prompt(user: dict) -> str:
         "lalu baca 'part_pengganti'. Bila user TIDAK menyebut rangka, JANGAN menebak persamaannya — "
         "minta nomor rangka unit itu dulu ('biar kuambil persamaan resmi dari EPC'). JANGAN "
         "mengarang PN pengganti dari kemiripan kode. (SIMS tidak menyediakan data persamaan.)\n"
+        "- 📥 EXPORT EXCEL (kartu unduh): bila user minta file Excel dari data yang dibahas "
+        "('buatkan excelnya', 'export ke excel/xlsx/spreadsheet', 'bikin filenya', 'unduh "
+        "sebagai excel') → panggil buat_excel(judul, kolom, baris). Isi 'baris' disalin PERSIS "
+        "dari HASIL TOOL percakapan ini — ⛔ JANGAN mengarang/menambah; bila datanya belum "
+        "diambil tool, panggil tool datanya DULU baru buat_excel. Setelah sukses, KARTU UNDUH "
+        "muncul otomatis di bawah jawaban: jawab SINGKAT (judul + jumlah baris), JANGAN tulis "
+        "ulang tabel panjang, JANGAN membuat link/URL sendiri. Pengecualian: perbandingan dua "
+        "rangka (banding_rangka) & repair kit transmisi sudah punya kartu unduh OTOMATIS — "
+        "tak perlu buat_excel untuk itu kecuali user minta susunan lain.\n"
         "- 🎯 AKURASI PER-UNIT (UTAMAKAN RANGKA): katalog lokal tersimpan PER-MODEL/varian — "
         "menyimpan kira-kira SATU PN per varian. Padahal dua unit nyata dengan model+tipe SAMA "
         "bisa BEDA PN (transmisi/axle/engine/part lain). Maka untuk pertanyaan part SPESIFIK-UNIT "
@@ -3981,10 +4063,16 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     tools_used: list[str] = []
     repairkit_models: list[str] = []  # model transmisi yg dibahas → tombol unduh Excel di UI
     banding_exports: list[dict] = []  # perbandingan rangka → kartu unduh Excel di UI
+    excel_exports: list[dict] = []    # buat_excel (export generik) → kartu unduh di UI
 
     def _capture_meta(name: str, args: dict, result: dict) -> None:
         """Kumpulkan metadata untuk tombol/kartu unduh di frontend."""
-        if name == "repair_kit_transmisi":
+        if name == "buat_excel" and result.get("found"):
+            item = {"id": result.get("export_id"), "filename": result.get("filename"),
+                    "judul": result.get("judul"), "jumlah_baris": result.get("jumlah_baris")}
+            if item["id"] and item not in excel_exports:
+                excel_exports.append(item)
+        elif name == "repair_kit_transmisi":
             for h in (result.get("hasil") or []):
                 mk = h.get("model")
                 if mk and mk not in repairkit_models:
@@ -4027,7 +4115,10 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 messages.append({"role": "assistant", "content": _strip_tool_markup(content)})
                 for lc in leaked:
                     name = lc["name"]
-                    result = _run_tool(name, lc["arguments"], user)
+                    lc_args = dict(lc["arguments"] or {})
+                    if name == "buat_excel":   # pagar anti-karangan isi Excel
+                        lc_args["_grounded"] = grounded
+                    result = _run_tool(name, lc_args, user)
                     tools_used.append(name)
                     grounded |= _extract_pns(json.dumps(result, ensure_ascii=False, default=str))
                     _capture_meta(name, lc["arguments"] or {}, result)
@@ -4067,7 +4158,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             if bad:
                 reply = _sanitize_ungrounded(reply, bad)
             return {"reply": reply, "tools_used": tools_used,
-                    "repairkit_models": repairkit_models, "banding_exports": banding_exports}
+                    "repairkit_models": repairkit_models, "banding_exports": banding_exports,
+                    "excel_exports": excel_exports}
 
         # Catat pesan assistant (yang berisi tool_calls) lalu jalankan tiap tool.
         messages.append({
@@ -4082,6 +4174,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 args = json.loads(fn.get("arguments") or "{}")
             except Exception:
                 args = {}
+            if name == "buat_excel":   # pagar anti-karangan isi Excel
+                args = {**args, "_grounded": grounded}
             result = _run_tool(name, args, user)
             tools_used.append(name)
             grounded |= _extract_pns(json.dumps(result, ensure_ascii=False, default=str))
@@ -4104,4 +4198,5 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     if bad:
         reply = _sanitize_ungrounded(reply, bad)
     return {"reply": reply, "tools_used": tools_used,
-            "repairkit_models": repairkit_models, "banding_exports": banding_exports}
+            "repairkit_models": repairkit_models, "banding_exports": banding_exports,
+            "excel_exports": excel_exports}
