@@ -874,8 +874,11 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       (云桥, sysCode=intl — tanpa captcha/manual), deteksi "Login expired!", anti-bocor
       tool-call. Backend live (hot-swap) + image di-`build.sh`. Tanpa frontend baru → Redeploy
       tidak wajib. Catatan: Loading List ≠ Parts Atlas terstruktur (database EPC berbeda).
-- [x] **Suite pengujian** — SELESAI 2026-07-02: unit test `backend/tests/` (76 test murni,
+- [x] **Suite pengujian** — SELESAI 2026-07-02: unit test `backend/tests/` (81 test murni,
       <2 dtk) + eval regresi AI `backend/evals/` (golden questions, `run_evals.py`). Lihat §4.
+- [x] **Aksesori mesin (air compressor dll) rute ke Weichai + urutan komponen utama** —
+      SELESAI 2026-07-03 (§3.5.5e), LIVE (hot-swap + image). Eval `weichai-air-compressor`
+      pass; checker `no_new_pn` kini kecualikan kode unit (samakan guard produksi).
 - [x] **Semua pekerjaan dikomit per-fitur & di-push** — SELESAI 2026-07-02 (10+ commit di
       `snapshot-clean` → `origin/snapshot-clean`; sebelumnya menggantung tak terkomit).
 - [x] **Fix guard (jawaban tertelan [PIKIR] + kode seri disamarkan)** — SELESAI 2026-07-02
