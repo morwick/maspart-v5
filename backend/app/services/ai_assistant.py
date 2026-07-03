@@ -2780,12 +2780,39 @@ def _t_uraikan_mesin(args: dict, user: dict) -> dict:
             row["harga_lokal"] = lr.get("harga")
             row["stok_per_gudang"] = lr.get("gudang") or {}
         rows.append(row)
+
+    # Urutkan: KOMPONEN UTAMANYA dulu, baris penyerta (pipa/selang/bracket/gear-nya)
+    # belakangan. Kasus nyata: cari 'air compressor' → model menonjolkan 'Compressor
+    # Air-outlet Assembly' (bagian intercooler) sbg kompresornya & melewatkan
+    # 'Air Compressor Assembly'. Heuristik: nama diawali frasa dicari > memuat frasa
+    # > sisanya; kata penyerta (pipe/hose/bracket/…) selalu turun.
+    _ANCILLARY = ("pipe", "hose", "bracket", "clamp", "bolt", "washer", "gasket",
+                  "tube", "joint", "connector", "支架", "管")
+    pl = part.lower()
+
+    def _rank(r: dict) -> tuple:
+        nm = (r.get("nama") or "").lower()
+        ancillary = any(w in nm for w in _ANCILLARY)
+        if nm.startswith(pl):
+            phrase = 0
+        elif pl in nm:
+            phrase = 1
+        else:
+            phrase = 2
+        return (ancillary, phrase, len(nm))
+
+    rows.sort(key=_rank)
     return {
         "found": True, "mesin": engine_info, "dicari": part,
         "jumlah_cocok": len(rows), "komponen": rows,
         "sumber": ("EPC Weichai resmi — komponen internal mesin PERSIS unit ini (disilang stok/harga "
                    "katalog lokal). Sistem terpisah dari EPC Sinotruk."),
-        "catatan": "Tampilkan PN + nama + group + stok/harga. ⛔ JANGAN mengarang PN/stok/harga.",
+        "catatan": (f"Daftar sudah DIURUTKAN: baris teratas = komponen '{part}' itu SENDIRI "
+                    "(assembly/unit utuhnya); baris berisi pipe/hose/bracket/gear = part PENYERTA. "
+                    "Saat menjawab, SEBUT komponen utamanya DULU dengan PN-nya — ⛔ JANGAN "
+                    "menyebut pipa/bracket/penyerta sebagai komponen utamanya. Tampilkan SEMUA "
+                    "baris (utama + penyerta) dengan PN + nama + group + stok/harga. "
+                    "⛔ JANGAN mengarang PN/stok/harga."),
     }
 
 
