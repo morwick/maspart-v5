@@ -403,6 +403,15 @@ tanpa file):
   339 part; "piston" → Piston `1000076563`, Piston Ring Set `612600030054`, dst.
 - Bridge & BOM di-cache per-frame. Auth Weichai `Authorization: Weichai <token>` + `tenant-id:1`.
   Aturan domain: internal mesin unit Weichai WAJIB `uraikan_mesin`, DILARANG `part_aus`/`bom_dari_rangka`.
+- **AKSESORI TERPASANG DI MESIN juga domain Weichai** (2026-07-03): kompresor angin/air compressor,
+  alternator, dinamo starter, turbo — di Atlas Sinotruk paling banter cuma PIPA/BRACKET penghubungnya.
+  Kasus nyata: "air compressor unit `RJ345233`" dulu jatuh ke modul poros → cuma pipa outlet
+  `YZ952536000194`, padahal Air Compressor Group lengkap ada di Weichai (Assy `1013133963`, compressor
+  `1013133966`, gear `612630030032`). Fix: (a) trigger aksesori masuk `_ATLAS_MODULE_MAP` FDJ +
+  `_AUS_KEYWORDS` (istilah China 空压机/发电机/起动机); (b) hasil `part_aus_dari_rangka` domain mesin
+  membawa `catatan_mesin_weichai` (arahan lanjut `uraikan_mesin` bila komponen yg diminta tak ada di
+  daftar), cabang kosong domain mesin → `jawaban_wajib` panggil `uraikan_mesin`; (c) prompt & deskripsi
+  tool menyebut aksesori eksplisit. Test: `tests/test_atlas_routing.py`.
 
 ### 3.5.5f Guard anti-halusinasi Part Number — sejak 2026-07-01
 

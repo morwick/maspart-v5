@@ -670,20 +670,23 @@ def _tool_specs(user: dict) -> list[dict]:
             "function": {
                 "name": "uraikan_mesin",
                 "description": (
-                    "PART INTERNAL MESIN dari NOMOR RANGKA/VIN — untuk unit Sinotruk yang MESINNYA "
+                    "PART MESIN dari NOMOR RANGKA/VIN — untuk unit Sinotruk yang MESINNYA "
                     "WEICHAI (mis. WP12/WP13). Part internal mesin (blok, kruk as/crankshaft, piston, "
                     "ring, liner/cylinder liner, kepala silinder/cylinder head, klep, noken, pompa "
-                    "oli/air, injector, dll) TIDAK ADA di EPC Sinotruk — ADA di EPC WEICHAI terpisah. "
+                    "oli/air, injector, dll) DAN AKSESORI YANG MENEMPEL DI MESIN (kompresor angin/"
+                    "air compressor, alternator/dinamo ampere, dinamo starter, turbocharger, pompa "
+                    "injeksi, flywheel) TIDAK ADA di EPC Sinotruk — ADA di EPC WEICHAI terpisah. "
                     "Tool ini mengambilnya OTOMATIS (SSO+BOM). TANPA 'part' → daftar GROUP mesin; "
-                    "DENGAN 'part' → cari komponen itu + stok/harga. ⛔ Untuk part internal mesin unit "
+                    "DENGAN 'part' → cari komponen itu + stok/harga. ⛔ Untuk part mesin unit "
                     "bermesin Weichai, JANGAN pakai part_aus_dari_rangka/bom_dari_rangka (itu EPC "
-                    "Sinotruk, berhenti di engine assembly) — pakai tool INI. HANYA unit mesin Weichai."
+                    "Sinotruk, berhenti di engine assembly — paling banter menemukan pipa/bracket "
+                    "penghubungnya) — pakai tool INI. HANYA unit mesin Weichai."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number 8 digit."},
-                        "part": {"type": "string", "description": "Opsional. Komponen mesin yang dicari, istilah Indonesia/Inggris (mis. 'piston', 'ring piston', 'cylinder liner/boring', 'crankshaft/kruk as', 'cylinder head', 'klep/valve', 'injector'). Kosongkan untuk daftar semua group mesin."},
+                        "part": {"type": "string", "description": "Opsional. Komponen mesin yang dicari, istilah Indonesia/Inggris (mis. 'piston', 'ring piston', 'cylinder liner/boring', 'crankshaft/kruk as', 'cylinder head', 'klep/valve', 'injector', 'air compressor/kompresor angin', 'alternator', 'starter', 'turbocharger'). Kosongkan untuk daftar semua group mesin."},
                     },
                     "required": ["rangka"],
                 },
@@ -2144,6 +2147,15 @@ _AUS_KEYWORDS = {
     "klep": ["valve", "气门"],
     "noken": ["camshaft", "凸轮轴"],
     "kruk as": ["crankshaft", "曲轴"],
+    # AKSESORI TERPASANG DI MESIN — di EPC Weichai punya group sendiri; di Atlas
+    # Sinotruk paling banter cuma pipa/bracket penghubungnya. Key frasa SPESIFIK
+    # ('air compressor', bukan 'kompresor' polos) agar 'kompresor ac' tak ikut.
+    "air compressor": ["air compressor", "空压机"],
+    "alternator": ["alternator", "发电机"],
+    "dinamo ampere": ["alternator", "发电机"],
+    "dinamo starter": ["starter", "starting motor", "起动机"],
+    "starter": ["starter", "starting motor", "起动机"],
+    "turbo": ["turbocharger", "supercharger", "增压器"],
 }
 
 # Pemetaan DOMAIN query → modul Atlas yang di-walk + apakah posisi (depan/belakang)
@@ -2159,7 +2171,10 @@ _ATLAS_MODULE_MAP = [
       "connecting rod", "stang seher", "连杆", "rocker", "pelatuk", "摇臂",
       "fuel filter", "filter solar", "燃油滤", "oil filter", "filter oli", "机油滤",
       "air filter", "filter udara", "空滤", "intercooler", "中冷", "seher", "cylinder head",
-      "kepala silinder"],
+      "kepala silinder",
+      # aksesori terpasang di mesin (kompresor angin, alternator, starter):
+      "air compressor", "kompresor angin", "kompresor rem", "空压机",
+      "alternator", "dinamo ampere", "发电机", "starter", "起动机"],
      ("FDJ", "FDJFJ"), False),
     (["clutch", "kopling", "离合器", "压盘", "matahari kopling", "dekrup", "plat kopling"],
      ("LHQ",), False),
@@ -2313,6 +2328,19 @@ def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:
                     "error": "Penelusuran EPC Parts Atlas untuk unit ini belum tuntas "
                              "(sebagian data EPC gagal diambil/ terpotong). JANGAN simpulkan "
                              f"part '{query}' tidak ada — minta user coba lagi sebentar."}
+        if "FDJ" in modules:
+            # Domain MESIN kosong di Atlas ≠ part tak ada: unit bermesin Weichai
+            # menyimpan komponen mesinnya di EPC Weichai (Atlas berhenti di assembly).
+            return {"found": False, "frame_number": res.get("frame_number"),
+                    "order_no": res.get("order_no"), "_atlas": True,
+                    "error": f"Part '{query}' tidak ketemu di EPC Parts Atlas Sinotruk unit ini.",
+                    "jawaban_wajib": (
+                        "⛔ JANGAN simpulkan part tidak ada / 'terintegrasi di engine assembly'. "
+                        "Atlas Sinotruk berhenti di ENGINE ASSEMBLY — komponen mesin & aksesori "
+                        "yang menempel di mesin (kompresor angin, alternator, starter, turbo, "
+                        "piston, dll) pada unit bermesin WEICHAI ada di EPC Weichai. WAJIB "
+                        f"panggil uraikan_mesin(rangka, part='{query}') SEKARANG sebelum "
+                        "menjawab. JANGAN mengarang PN.")}
         return {"found": False, "frame_number": res.get("frame_number"),
                 "order_no": res.get("order_no"),
                 "error": f"Tidak ada part cocok '{query}' di poros "
@@ -2403,6 +2431,15 @@ def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:
         base["peringatan_posisi"] = (
             "Part ini BUKAN di modul poros (mesin/kopling/gearbox) → tidak ada pemisahan "
             "depan/belakang. Sebut apa adanya.")
+        if "FDJ" in modules:
+            base["catatan_mesin_weichai"] = (
+                "⚠️ Atlas Sinotruk berhenti di ENGINE ASSEMBLY. Untuk unit bermesin WEICHAI, "
+                "komponen mesin & aksesori yang menempel di mesin (kompresor angin/air "
+                "compressor, alternator, starter, turbocharger, pompa, piston, dll) TIDAK ada "
+                "di Atlas — daftar di atas bisa hanya PIPA/BRACKET penghubungnya. Bila komponen "
+                "yang DIMINTA user sendiri belum ada di daftar ini, WAJIB panggil "
+                "uraikan_mesin(rangka, part) untuk mengambilnya dari EPC Weichai — JANGAN "
+                "menyimpulkan 'terintegrasi di engine assembly' atau berhenti di sini.")
         return base
 
     # POROS: kelompokkan HASIL ke depan / belakang / tanpa_posisi (Loading List).
@@ -3100,13 +3137,19 @@ def _system_prompt(user: dict) -> str:
         "cocok (karet≈rubber/bushing/球面销/衬套, bos≈bushing, seal≈sealing ring). Butuh nomor "
         "rangka; bila user belum sebut di follow-up, pakai rangka dari konteks percakapan. Bila "
         "assembly tak ketemu / penelusuran belum tuntas, KATAKAN JUJUR — JANGAN mengarang PN.\n"
-        "- 🔧 PART INTERNAL MESIN (unit bermesin WEICHAI, mis. WP12/WP13): komponen DALAM mesin "
+        "- 🔧 PART MESIN (unit bermesin WEICHAI, mis. WP12/WP13): komponen DALAM mesin "
         "— blok, kruk as/crankshaft, piston, ring, liner/boring, kepala silinder/cylinder head, "
-        "klep, noken, pompa oli/air, injector, dsb — TIDAK ADA di EPC Sinotruk (berhenti di engine "
-        "assembly). Untuk unit yang mesinnya Weichai, WAJIB panggil uraikan_mesin(rangka[, part]). "
-        "Tanpa 'part' = daftar group mesin; dengan 'part' = komponen + stok/harga. Bila tool balas "
-        "unit bukan bermesin Weichai, sampaikan apa adanya. ⛔ JANGAN pakai part_aus_dari_rangka/"
-        "bom_dari_rangka untuk internal mesin Weichai, dan JANGAN mengarang PN.\n"
+        "klep, noken, pompa oli/air, injector, dsb — DAN AKSESORI YANG MENEMPEL DI MESIN — "
+        "kompresor angin/air compressor, alternator/dinamo ampere, dinamo starter, turbocharger, "
+        "pompa injeksi, flywheel — TIDAK ADA di EPC Sinotruk (berhenti di engine assembly; paling "
+        "banter cuma pipa/bracket penghubungnya). Untuk unit yang mesinnya Weichai, WAJIB panggil "
+        "uraikan_mesin(rangka[, part]). Tanpa 'part' = daftar group mesin; dengan 'part' = "
+        "komponen + stok/harga. Bila tool balas unit bukan bermesin Weichai, sampaikan apa adanya. "
+        "⚠️ Bila part_aus_dari_rangka/bom_dari_rangka untuk komponen mesin hanya menemukan pipa/"
+        "selang/bracket-nya (bukan komponen itu sendiri), itu TANDA part-nya ada di mesin Weichai "
+        "→ LANGSUNG panggil uraikan_mesin(rangka, part) — JANGAN berhenti / menyimpulkan "
+        "'terintegrasi di engine assembly'. ⛔ JANGAN pakai part_aus_dari_rangka/bom_dari_rangka "
+        "untuk part mesin Weichai, dan JANGAN mengarang PN.\n"
         "- PERSAMAAN/PENGGANTI part MESIN Weichai (supersession): 'PN <nomor> diganti nomor "
         "berapa', 'part X diskontinu gantinya apa', 'persamaan PN Y' untuk part MESIN (PN numerik "
         "Weichai) -> panggil pengganti_part(part_number). Sebut 'digantikan_oleh' (PN pengganti "
@@ -3145,11 +3188,15 @@ def _system_prompt(user: dict) -> str:
         "cari_part(query=<part>, unit=<huruf awal rangka>) TAPI tegaskan itu katalog per-model "
         "(perkiraan, bisa beda varian) & sarankan cek token EPC.\n"
         "   • PART MESIN & KOPLING/GEARBOX (injector, common rail, pompa injeksi, piston, ring, klep, "
-        "noken/kruk as, pompa oli/air, turbo, filter mesin / kampas-plat kopling / sinkromes-garpu "
-        "persneling): JUGA pakai part_aus_dari_rangka(rangka, query=<part>) — tool itu OTOMATIS walk "
-        "modul yang tepat (mesin=FDJ/FDJFJ, kopling=LHQ, gearbox=BSX) & beri PN PERSIS per-VIN. JANGAN "
-        "pakai cari_part lokal bila rangka ADA, dan JANGAN simpulkan 'tak ada' dari bom_dari_rangka "
-        "(internal mesin terbungkus assembly di Loading List, tapi terurai di Atlas).\n"
+        "noken/kruk as, pompa oli/air, turbo, kompresor angin, alternator, starter, filter mesin / "
+        "kampas-plat kopling / sinkromes-garpu persneling): JUGA pakai part_aus_dari_rangka(rangka, "
+        "query=<part>) — tool itu OTOMATIS walk modul yang tepat (mesin=FDJ/FDJFJ, kopling=LHQ, "
+        "gearbox=BSX) & beri PN PERSIS per-VIN. JANGAN pakai cari_part lokal bila rangka ADA, dan "
+        "JANGAN simpulkan 'tak ada' dari bom_dari_rangka (internal mesin terbungkus assembly di "
+        "Loading List, tapi terurai di Atlas). ⚠️ KHUSUS UNIT BERMESIN WEICHAI: bila hasil Atlas utk "
+        "komponen mesin KOSONG atau hanya pipa/bracket-nya (bukan komponen yang diminta), WAJIB "
+        "LANJUT uraikan_mesin(rangka, part) — komponen mesin unit Weichai ada di EPC Weichai, bukan "
+        "Atlas. JANGAN berhenti dgn simpulan 'terintegrasi di engine assembly'.\n"
         "   • SELAIN part aus (assembly/struktural: transmisi, axle, engine assy, gearbox, harness, "
         "bracket, pipa, brake drum/chamber/valve): tool PERTAMA yang dipanggil HARUS "
         "bom_dari_rangka(rangka, kata_kunci=<nama komponen>) — itu BOM persis unit. cari_part hanya "
