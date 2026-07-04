@@ -10,7 +10,6 @@ import {
   getIndexStatus,
   getMonitoring,
   getSalesRecap,
-  getBranchOrdersCount,
   type MonitoringActivity,
 } from "@/lib/api";
 
@@ -63,12 +62,10 @@ function StatCard({ st }: { st: Stat }) {
 export default function DashboardPage() {
   const router = useRouter();
   const [uname, setUname] = useState("");
-  const [role, setRole] = useState("");
   const [aiOn, setAiOn] = useState<boolean | null>(null);
   const [online, setOnline] = useState<number | null>(null);
   const [omzet, setOmzet] = useState<number | null>(null);
   const [indexed, setIndexed] = useState<number | null>(null);
-  const [branchN, setBranchN] = useState<number | null>(null);
   const [activity, setActivity] = useState<MonitoringActivity[]>([]);
 
   useEffect(() => {
@@ -78,22 +75,17 @@ export default function DashboardPage() {
       router.replace("/login");
       return;
     }
-    if (u?.role === "pembeli") {
+    // Dashboard khusus admin — role lain diarahkan ke Cari Part.
+    if (u?.role !== "admin") {
       router.replace("/search");
       return;
     }
     setUname(u?.username ?? "");
-    setRole(u?.role ?? "");
-    const admin = u?.role === "admin";
 
     getAiStatus(token).then((d) => setAiOn(d.available)).catch(() => setAiOn(null));
-    if (admin) {
-      getMonitoring(token).then((d) => { setOnline(d.online_count); setActivity(d.recent_activity?.slice(0, 6) ?? []); }).catch(() => {});
-      getSalesRecap(token).then((d) => setOmzet(d.summary?.omzet ?? 0)).catch(() => {});
-      getIndexStatus(token).then((d) => setIndexed(d.total_indexed)).catch(() => {});
-    } else {
-      getBranchOrdersCount(token).then((d) => setBranchN(d.count)).catch(() => {});
-    }
+    getMonitoring(token).then((d) => { setOnline(d.online_count); setActivity(d.recent_activity?.slice(0, 6) ?? []); }).catch(() => {});
+    getSalesRecap(token).then((d) => setOmzet(d.summary?.omzet ?? 0)).catch(() => {});
+    getIndexStatus(token).then((d) => setIndexed(d.total_indexed)).catch(() => {});
   }, [router]);
 
   const greeting = useMemo(() => {
@@ -111,23 +103,15 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const isAdmin = role === "admin";
-
   const stats: Stat[] = useMemo(() => {
     const val = (n: number | null) => (n == null ? "—" : new Intl.NumberFormat("id-ID").format(n));
-    if (isAdmin) {
-      return [
-        { label: "User online", value: online == null ? "—" : String(online), sub: "aktif ≤ 5 menit", icon: I.users, href: "/admin/monitoring" },
-        { label: "Omzet", value: omzet == null ? "—" : rupiah(omzet), sub: "total pesanan lunas", icon: I.money, href: "/admin/penjualan", tone: "brand" },
-        { label: "Part terindeks (foto)", value: val(indexed), sub: "galeri cari-by-foto", icon: I.grid, href: "/admin/index", tone: "info" },
-        { label: "Asisten AI", value: aiOn == null ? "—" : aiOn ? "Aktif" : "Nonaktif", sub: aiOn ? "DeepSeek + tool live" : "belum dikonfigurasi", icon: I.ai, href: "/asisten", tone: aiOn === false ? "warn" : "brand" },
-      ];
-    }
     return [
-      { label: "Pesanan masuk", value: branchN == null ? "—" : String(branchN), sub: "menunggu diproses", icon: I.cart, href: "/cabang/pesanan" },
+      { label: "User online", value: online == null ? "—" : String(online), sub: "aktif ≤ 5 menit", icon: I.users, href: "/admin/monitoring" },
+      { label: "Omzet", value: omzet == null ? "—" : rupiah(omzet), sub: "total pesanan lunas", icon: I.money, href: "/admin/penjualan", tone: "brand" },
+      { label: "Part terindeks (foto)", value: val(indexed), sub: "galeri cari-by-foto", icon: I.grid, href: "/admin/index", tone: "info" },
       { label: "Asisten AI", value: aiOn == null ? "—" : aiOn ? "Aktif" : "Nonaktif", sub: aiOn ? "DeepSeek + tool live" : "belum dikonfigurasi", icon: I.ai, href: "/asisten", tone: aiOn === false ? "warn" : "brand" },
     ];
-  }, [isAdmin, online, omzet, indexed, aiOn, branchN]);
+  }, [online, omzet, indexed, aiOn]);
 
   const quick = [
     { label: "Cari Part", desc: "Part number / nama", icon: I.search, href: "/search" },
@@ -183,42 +167,22 @@ export default function DashboardPage() {
           </div>
 
           <div className="surface" style={{ overflow: "hidden" }}>
-            <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--ink-150)", fontSize: 13.5, fontWeight: 650 }}>
-              {isAdmin ? "Aktivitas terbaru" : "Status sistem"}
-            </div>
-            {isAdmin ? (
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                {activity.length === 0 && <div style={{ padding: "16px 18px", fontSize: 12.5, color: "var(--ink-500)" }}>Belum ada aktivitas terbaru.</div>}
-                {activity.map((a, i) => (
-                  <div key={i} style={{ display: "flex", gap: 10, padding: "11px 18px", borderBottom: "1px solid var(--ink-100)", alignItems: "flex-start" }}>
-                    <span style={{ display: "inline-flex", width: 26, height: 26, borderRadius: 7, alignItems: "center", justifyContent: "center", flexShrink: 0, background: "var(--info-50)", color: "var(--info-600)", marginTop: 1 }}>{I.pulse}</span>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, color: "var(--ink-800)", lineHeight: 1.45 }}>{actionText(a)}</div>
-                      {a.created_at && <div style={{ fontSize: 11, color: "var(--ink-400)", marginTop: 2 }}>{new Date(a.created_at).toLocaleString("id-ID")}</div>}
-                    </div>
+            <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--ink-150)", fontSize: 13.5, fontWeight: 650 }}>Aktivitas terbaru</div>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {activity.length === 0 && <div style={{ padding: "16px 18px", fontSize: 12.5, color: "var(--ink-500)" }}>Belum ada aktivitas terbaru.</div>}
+              {activity.map((a, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, padding: "11px 18px", borderBottom: "1px solid var(--ink-100)", alignItems: "flex-start" }}>
+                  <span style={{ display: "inline-flex", width: 26, height: 26, borderRadius: 7, alignItems: "center", justifyContent: "center", flexShrink: 0, background: "var(--info-50)", color: "var(--info-600)", marginTop: 1 }}>{I.pulse}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, color: "var(--ink-800)", lineHeight: 1.45 }}>{actionText(a)}</div>
+                    {a.created_at && <div style={{ fontSize: 11, color: "var(--ink-400)", marginTop: 2 }}>{new Date(a.created_at).toLocaleString("id-ID")}</div>}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                <Row k="Akun" v={`${uname || "—"} · ${role || "user"}`} />
-                <Row k="Asisten AI" v={aiOn == null ? "…" : aiOn ? "Aktif" : "Nonaktif"} tone={aiOn === false ? "warn" : "brand"} />
-                <Row k="EPC Sinotruk" v="Live" tone="brand" />
-              </div>
-            )}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
     </AppShell>
-  );
-}
-
-function Row({ k, v, tone }: { k: string; v: string; tone?: "brand" | "warn" }) {
-  const color = tone === "warn" ? "var(--warn-600)" : tone === "brand" ? "var(--brand-700)" : "var(--ink-800)";
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "12px 18px", borderBottom: "1px solid var(--ink-100)", fontSize: 13 }}>
-      <span style={{ color: "var(--ink-500)" }}>{k}</span>
-      <span style={{ fontWeight: 600, color }}>{v}</span>
-    </div>
   );
 }

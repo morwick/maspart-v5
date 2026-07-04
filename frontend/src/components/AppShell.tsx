@@ -196,11 +196,13 @@ export default function AppShell({
   // Bangun daftar section sesuai peran & izin.
   const sections: NavSection[] = useMemo(() => {
     if (isBuyer) return [{ label: "Belanja", items: NAV_BUYER }];
-    const out: NavSection[] = [
-      { label: "Ringkasan", items: [NAV_DASHBOARD] },
+    const out: NavSection[] = [];
+    // Dashboard Command Center — khusus admin.
+    if (isAdmin) out.push({ label: "Ringkasan", items: [NAV_DASHBOARD] });
+    out.push(
       { label: "Pencarian", items: NAV_PRIMARY.filter(show) },
       { label: "Data", items: NAV_DATA.filter(show) },
-    ];
+    );
     if (branchLabel) {
       out.push({
         label: `Cabang ${branchLabel}`,

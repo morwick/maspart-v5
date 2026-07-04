@@ -58,11 +58,12 @@ export function getUser(): UserOut | null {
 }
 
 /** Halaman tujuan setelah login sesuai role. Pembeli wajib pilih lokasi dulu;
- *  pengguna internal (admin/cabang/user) mendarat di Dashboard Command Center. */
+ *  admin mendarat di Dashboard Command Center; internal lain (cabang/user) ke Cari Part. */
 export function landingPath(user: UserOut | null): string {
   if (!user) return "/login";
   if (user.role === "pembeli") return user.gudang ? "/search" : "/pilih-lokasi";
-  return "/dashboard";
+  if (user.role === "admin") return "/dashboard";
+  return "/search";
 }
 
 /** Perbarui lokasi gudang user tersimpan (akun pembeli setelah pilih lokasi). */
