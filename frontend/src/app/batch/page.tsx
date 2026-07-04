@@ -72,35 +72,26 @@ export default function BatchPage() {
 
   return (
     <AppShell active="/batch" title="Batch Download" sub="Unduh katalog Excel banyak part sekaligus">
-      <div className="mx-auto w-full max-w-3xl px-4 py-5 sm:px-6">
-        <h2 className="mb-1 text-base font-semibold">
-          📥 Batch <span className="text-brand">Download</span>
-        </h2>
-        <p className="mb-4 text-sm text-zinc-500">
-          Masukkan banyak part number sekaligus → unduh katalog Excel berisi
-          nama part & gambar (dari SIMS). Maksimum 300 PN per batch.
+      <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-7">
+        <p style={{ marginBottom: 16, fontSize: 13.5, color: "var(--ink-500)" }}>
+          Masukkan banyak part number sekaligus → unduh katalog Excel berisi nama part & gambar
+          (dari SIMS). Maksimum 300 PN per batch.
         </p>
 
-        <button
-          onClick={handleTemplate}
-          className="mb-5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-        >
+        <button onClick={handleTemplate} className="btn btn-secondary" style={{ marginBottom: 18 }}>
           📄 Download Template Input
         </button>
 
-        {error && (
-          <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-            {error}
-          </p>
-        )}
+        {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
 
         <div className="grid gap-5 sm:grid-cols-2">
           {/* Ketik manual */}
           <section>
-            <label className="mb-1 block text-sm font-medium text-zinc-700">
+            <label className="block" style={{ marginBottom: 6, fontSize: 13, fontWeight: 600, color: "var(--ink-700)" }}>
               Ketik manual (1 PN per baris)
             </label>
             <textarea
+              className="textarea mono"
               value={text}
               onChange={(e) => {
                 setText(e.target.value);
@@ -109,16 +100,15 @@ export default function BatchPage() {
               }}
               rows={10}
               placeholder={"WG1642821034\nWG9925520270\nAZ9100443082"}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
             />
             {lineCount > 0 && !file && (
-              <p className="mt-1 text-xs text-zinc-500">{lineCount} baris</p>
+              <p style={{ marginTop: 4, fontSize: 12, color: "var(--ink-500)" }}>{lineCount} baris</p>
             )}
           </section>
 
           {/* Atau upload file */}
           <section>
-            <label className="mb-1 block text-sm font-medium text-zinc-700">
+            <label className="block" style={{ marginBottom: 6, fontSize: 13, fontWeight: 600, color: "var(--ink-700)" }}>
               Atau unggah file (Excel/CSV, PN di kolom A)
             </label>
             <input
@@ -130,10 +120,11 @@ export default function BatchPage() {
                 setFile(f);
                 if (f) setText("");
               }}
-              className="block w-full text-sm text-zinc-600 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-2 file:text-sm file:font-medium hover:file:bg-zinc-200"
+              className="block w-full"
+              style={{ fontSize: 13, color: "var(--ink-600)" }}
             />
             {file && (
-              <p className="mt-1 text-xs text-zinc-500">Dipilih: {file.name}</p>
+              <p style={{ marginTop: 4, fontSize: 12, color: "var(--ink-500)" }}>Dipilih: {file.name}</p>
             )}
           </section>
         </div>
@@ -141,14 +132,14 @@ export default function BatchPage() {
         <button
           onClick={handleProcess}
           disabled={loading || (!file && !text.trim())}
-          className="mt-6 w-full rounded-lg bg-brand py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+          className="btn btn-primary btn-lg"
+          style={{ marginTop: 24, width: "100%" }}
         >
-          {loading ? "Memproses & mengunduh…" : "⬇️ Proses & Download Katalog"}
+          {loading ? "Memproses & mengunduh…" : "⬇ Proses & Download Katalog"}
         </button>
         {loading && (
-          <p className="mt-2 text-center text-xs text-zinc-400">
-            Mengambil gambar dari SIMS untuk tiap part — bisa beberapa menit untuk
-            banyak PN.
+          <p style={{ marginTop: 8, textAlign: "center", fontSize: 12, color: "var(--ink-400)" }}>
+            Mengambil gambar dari SIMS untuk tiap part — bisa beberapa menit untuk banyak PN.
           </p>
         )}
       </div>

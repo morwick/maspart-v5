@@ -26,9 +26,9 @@ const SUB_KEY: Record<Sub, string> = {
   batch: "subtab_batch_harga",
 };
 const SUB_TABS: [Sub, string][] = [
-  ["list", "📋 List Harga"],
-  ["cari", "🔍 Cari Harga (SIMS)"],
-  ["batch", "📥 Batch Cari Harga"],
+  ["list", "List Harga"],
+  ["cari", "Cari Harga (SIMS)"],
+  ["batch", "Batch Cari Harga"],
 ];
 const fmtRp = (n: number | null) =>
   n == null ? "—" : "Rp " + n.toLocaleString("id-ID");
@@ -57,7 +57,6 @@ export default function HargaPage() {
     ensurePerms().then((p) => {
       if (p) {
         setAllowedSubs(p.harga_subtabs);
-        // Kalau sub aktif tidak diizinkan, pindah ke yang pertama diizinkan.
         const firstAllowed = SUB_TABS.find(([k]) => p.harga_subtabs.includes(SUB_KEY[k]));
         if (firstAllowed && !p.harga_subtabs.includes(SUB_KEY[sub])) {
           setSub(firstAllowed[0]);
@@ -73,19 +72,20 @@ export default function HargaPage() {
 
   return (
     <AppShell active="/harga" title="Harga" sub="List, cari & batch harga sparepart">
-      <div className="mx-auto w-full max-w-5xl px-4 py-5 sm:px-6">
-        <h2 className="mb-4 text-base font-semibold">
-          💰 <span className="text-brand">Harga</span> Sparepart
-        </h2>
-
-        <div className="mb-5 inline-flex flex-wrap rounded-lg border border-zinc-300 p-0.5 text-sm">
+      <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-7">
+        {/* Segmented tabs */}
+        <div style={{ display: "inline-flex", background: "var(--ink-100)", borderRadius: 9, padding: 3, gap: 2, marginBottom: 18, flexWrap: "wrap" }}>
           {visibleTabs.map(([k, label]) => (
             <button
               key={k}
               onClick={() => setSub(k)}
-              className={`rounded-md px-3 py-1.5 font-medium transition-colors ${
-                sub === k ? "bg-brand text-white" : "text-zinc-600 hover:bg-zinc-100"
-              }`}
+              style={{
+                borderRadius: 7, padding: "7px 14px", fontSize: 13, fontWeight: 600,
+                border: "none", cursor: "pointer", fontFamily: "inherit",
+                background: sub === k ? "var(--paper)" : "transparent",
+                color: sub === k ? "var(--brand-700)" : "var(--ink-600)",
+                boxShadow: sub === k ? "var(--shadow-1)" : "none",
+              }}
             >
               {label}
             </button>
@@ -99,7 +99,7 @@ export default function HargaPage() {
             {sub === "batch" && <BatchHarga on401={on401} router={router} />}
           </>
         ) : (
-          <p className="text-sm text-zinc-500">
+          <p style={{ fontSize: 13, color: "var(--ink-500)" }}>
             Anda tidak memiliki akses ke sub-tab harga manapun.
           </p>
         )}
@@ -147,8 +147,6 @@ function ListHarga({
     load(1, "", "pn");
   }, [load]);
 
-  const cols = ["Part Number", "Part Name", "Harga (Rp)"];
-
   async function handleExport() {
     const token = getToken();
     if (!token) return;
@@ -162,7 +160,7 @@ function ListHarga({
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -170,72 +168,60 @@ function ListHarga({
             load(1, qInput, sort);
           }}
           className="flex flex-1 gap-2"
+          style={{ minWidth: 240 }}
         >
           <input
+            className="input mono"
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
             placeholder="Cari Part Number / Part Name…"
-            className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
           />
-          <button className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white hover:bg-green-700">
-            Cari
-          </button>
+          <button className="btn btn-primary">Cari</button>
         </form>
         <select
+          className="select"
+          style={{ width: "auto", minWidth: 150 }}
           value={sort}
           onChange={(e) => {
             setSort(e.target.value);
             load(1, q, e.target.value);
           }}
-          className="rounded-lg border border-zinc-300 px-2 py-2 text-sm outline-none focus:border-brand"
         >
-          <option value="pn">Part Number</option>
-          <option value="name">Part Name</option>
+          <option value="pn">Urut: Part Number</option>
+          <option value="name">Urut: Part Name</option>
           <option value="harga_asc">Harga ↑</option>
           <option value="harga_desc">Harga ↓</option>
         </select>
       </div>
 
-      {error && (
-        <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-          {error}
-        </p>
-      )}
+      {error && <div className="alert alert-error" style={{ marginTop: 12 }}>{error}</div>}
 
       {data && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-zinc-500">
+        <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginTop: 12, fontSize: 12.5, color: "var(--ink-500)" }}>
           <span>
-            Total <b className="text-zinc-700">{data.total}</b> · Hasil filter{" "}
-            <b className="text-zinc-700">{data.total_filtered}</b>
+            Total <b className="mono" style={{ color: "var(--ink-800)" }}>{data.total.toLocaleString("id-ID")}</b> · Hasil filter{" "}
+            <b className="mono" style={{ color: "var(--ink-800)" }}>{data.total_filtered.toLocaleString("id-ID")}</b>
           </span>
-          <button
-            onClick={handleExport}
-            disabled={data.total_filtered === 0}
-            className="rounded-lg border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-          >
-            ⬇️ Download Excel
-          </button>
+          <button className="btn btn-secondary btn-sm" onClick={handleExport} disabled={data.total_filtered === 0}>⬇ Export Excel</button>
         </div>
       )}
 
       {data && data.rows.length > 0 && (
-        <div className="overflow-x-auto rounded-xl ring-1 ring-zinc-200">
+        <div className="surface" style={{ marginTop: 12, overflow: "auto" }}>
           <table className="tbl">
-            <thead className="bg-zinc-50 text-left text-zinc-600">
+            <thead>
               <tr>
-                {cols.map((c) => (
-                  <th key={c} className="px-3 py-2 font-medium">
-                    {c}
-                  </th>
-                ))}
+                <th>Part Number</th>
+                <th>Part Name</th>
+                <th className="num">Harga (Rp)</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100 bg-white">
+            <tbody>
               {data.rows.map((r, i) => (
-                <tr key={i} className="hover:bg-zinc-50">
-                  <td className="px-3 py-2 font-mono">{r["Part Number"]}</td>
-                  <td className="px-3 py-2">{r["Part Name"]}</td>
-                  <td className="px-3 py-2 font-medium">{r["Harga (Rp)"]}</td>
+                <tr key={i}>
+                  <td className="pn">{r["Part Number"]}</td>
+                  <td style={{ fontWeight: 500 }}>{r["Part Name"]}</td>
+                  <td className="num mono">{r["Harga (Rp)"]}</td>
                 </tr>
               ))}
             </tbody>
@@ -281,7 +267,7 @@ function CariHarga({
 
   return (
     <div>
-      <p className="mb-3 text-sm text-zinc-500">
+      <p style={{ fontSize: 13, color: "var(--ink-500)", marginBottom: 12 }}>
         Ambil harga part langsung dari SIMS (CNY) dan konversi otomatis ke IDR.
       </p>
       <form
@@ -289,60 +275,42 @@ function CariHarga({
           e.preventDefault();
           search(false);
         }}
-        className="mb-4 flex gap-2"
+        className="flex gap-2"
       >
         <input
+          className="input mono"
           value={pn}
           onChange={(e) => setPn(e.target.value)}
           placeholder="Contoh: WG1641230025"
-          className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
         />
-        <button
-          disabled={loading}
-          className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-60"
-        >
-          {loading ? "Mengambil…" : "🔍 Cari"}
-        </button>
-        <button
-          type="button"
-          onClick={() => search(true)}
-          disabled={loading || !pn.trim()}
-          className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-        >
-          🔄
-        </button>
+        <button className="btn btn-primary" disabled={loading}>{loading ? "Mengambil…" : "Cari"}</button>
+        <button type="button" className="btn btn-secondary" onClick={() => search(true)} disabled={loading || !pn.trim()} title="Ambil ulang (abaikan cache)">🔄</button>
       </form>
 
-      {error && (
-        <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-          {error}
-        </p>
-      )}
+      {error && <div className="alert alert-error" style={{ marginTop: 12 }}>{error}</div>}
 
       {res &&
         (res.cny != null ? (
-          <div className="rounded-xl bg-green-50 p-5 ring-1 ring-green-100">
-            <p className="font-mono text-lg font-bold text-green-900">{res.pn}</p>
-            <div className="mt-3 flex flex-wrap gap-10">
+          <div className="surface" style={{ marginTop: 16, padding: 20, borderColor: "var(--brand-100)", background: "var(--brand-50)" }}>
+            <p className="mono" style={{ fontSize: 18, fontWeight: 700, color: "var(--brand-700)" }}>{res.pn}</p>
+            <div className="flex flex-wrap" style={{ gap: 40, marginTop: 12 }}>
               <div>
-                <p className="text-xs text-zinc-500">Harga SIMS (CNY)</p>
-                <p className="text-2xl font-extrabold text-blue-700">{fmtCny(res.cny)}</p>
+                <p style={{ fontSize: 11.5, color: "var(--ink-500)" }}>Harga SIMS (CNY)</p>
+                <p className="mono" style={{ fontSize: 24, fontWeight: 800, color: "var(--info-600)" }}>{fmtCny(res.cny)}</p>
               </div>
               <div>
-                <p className="text-xs text-zinc-500">Harga IDR</p>
-                <p className="text-2xl font-extrabold text-green-700">{fmtRp(res.idr)}</p>
+                <p style={{ fontSize: 11.5, color: "var(--ink-500)" }}>Harga IDR</p>
+                <p className="mono" style={{ fontSize: 24, fontWeight: 800, color: "var(--brand-700)" }}>{fmtRp(res.idr)}</p>
               </div>
             </div>
-            <p className="mt-2 text-xs text-zinc-400">
-              Kurs: 1 CNY = Rp {res.rate.toLocaleString("id-ID")}
-              {res.note ? ` · ${res.note}` : ""}
+            <p style={{ marginTop: 8, fontSize: 11.5, color: "var(--ink-400)" }}>
+              Kurs: 1 CNY = Rp {res.rate.toLocaleString("id-ID")}{res.note ? ` · ${res.note}` : ""}
             </p>
           </div>
         ) : (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-100">
-            Harga tidak ditemukan untuk <b>{res.pn}</b>
-            {res.note ? ` (${res.note})` : ""}.
-          </p>
+          <div className="alert" style={{ marginTop: 16, background: "var(--warn-50)", color: "var(--warn-600)", borderColor: "#f6d9a8" }}>
+            Harga tidak ditemukan untuk <b>{res.pn}</b>{res.note ? ` (${res.note})` : ""}.
+          </div>
         ))}
     </div>
   );
@@ -389,67 +357,52 @@ function BatchHarga({
 
   return (
     <div>
-      <p className="mb-3 text-sm text-zinc-500">
-        Masukkan banyak part number (1 per baris) → ambil harga dari SIMS sekaligus.
-        Maksimum 300 PN.
+      <p style={{ fontSize: 13, color: "var(--ink-500)", marginBottom: 12 }}>
+        Masukkan banyak part number (1 per baris) → ambil harga dari SIMS sekaligus. Maksimum 300 PN.
       </p>
       <textarea
+        className="textarea mono"
         value={text}
         onChange={(e) => setText(e.target.value)}
         rows={6}
         placeholder={"WG1641230025\nWG9725520274"}
-        className="w-full rounded-lg border border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
       />
-      <button
-        onClick={run}
-        disabled={loading || !text.trim()}
-        className="mt-3 rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
-      >
-        {loading ? "Mengambil harga…" : "🔍 Proses Batch"}
+      <button className="btn btn-primary btn-lg" style={{ marginTop: 12 }} onClick={run} disabled={loading || !text.trim()}>
+        {loading ? "Mengambil harga…" : "Proses Batch"}
       </button>
       {loading && (
-        <p className="mt-2 text-xs text-zinc-400">
+        <p style={{ marginTop: 8, fontSize: 11.5, color: "var(--ink-400)" }}>
           Mengambil dari SIMS per part — bisa beberapa menit untuk banyak PN.
         </p>
       )}
 
-      {error && (
-        <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-          {error}
-        </p>
-      )}
+      {error && <div className="alert alert-error" style={{ marginTop: 12 }}>{error}</div>}
 
       {data && (
         <>
-          <div className="mb-2 mt-5 flex flex-wrap items-center justify-between gap-2 text-sm text-zinc-500">
+          <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginTop: 20, marginBottom: 8, fontSize: 12.5, color: "var(--ink-500)" }}>
             <span>
-              {data.found}/{data.count} ditemukan · kurs 1 CNY = Rp{" "}
-              {data.rate.toLocaleString("id-ID")}
+              <b className="mono" style={{ color: "var(--ink-800)" }}>{data.found}/{data.count}</b> ditemukan · kurs 1 CNY = Rp {data.rate.toLocaleString("id-ID")}
             </span>
-            <button
-              onClick={handleExport}
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 hover:bg-zinc-50"
-            >
-              ⬇️ Download Excel
-            </button>
+            <button className="btn btn-secondary btn-sm" onClick={handleExport}>⬇ Export Excel</button>
           </div>
-          <div className="overflow-x-auto rounded-xl ring-1 ring-zinc-200">
+          <div className="surface" style={{ overflow: "auto" }}>
             <table className="tbl">
-              <thead className="bg-zinc-50 text-left text-zinc-600">
+              <thead>
                 <tr>
-                  <th className="px-3 py-2 font-medium">Part Number</th>
-                  <th className="px-3 py-2 font-medium">Harga (CNY)</th>
-                  <th className="px-3 py-2 font-medium">Harga (IDR)</th>
-                  <th className="px-3 py-2 font-medium">Ket.</th>
+                  <th>Part Number</th>
+                  <th className="num">Harga (CNY)</th>
+                  <th className="num">Harga (IDR)</th>
+                  <th>Ket.</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100 bg-white">
+              <tbody>
                 {data.results.map((r, i) => (
-                  <tr key={i} className="hover:bg-zinc-50">
-                    <td className="px-3 py-2 font-mono">{r.pn}</td>
-                    <td className="px-3 py-2">{fmtCny(r.cny)}</td>
-                    <td className="px-3 py-2 font-medium">{fmtRp(r.idr)}</td>
-                    <td className="px-3 py-2 text-xs text-zinc-500">
+                  <tr key={i}>
+                    <td className="pn">{r.pn}</td>
+                    <td className="num mono">{fmtCny(r.cny)}</td>
+                    <td className="num mono" style={{ fontWeight: 500 }}>{fmtRp(r.idr)}</td>
+                    <td style={{ fontSize: 12, color: "var(--ink-500)" }}>
                       {r.status === "ok" ? r.note ?? "✓" : "Tidak ditemukan"}
                     </td>
                   </tr>
@@ -476,24 +429,10 @@ function Pager({
   onGo: (p: number) => void;
 }) {
   return (
-    <div className="mt-4 flex items-center justify-center gap-2 text-sm">
-      <button
-        onClick={() => onGo(page - 1)}
-        disabled={page <= 1 || loading}
-        className="rounded-lg border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
-      >
-        ← Sebelumnya
-      </button>
-      <span className="px-2 text-zinc-500">
-        Halaman {page} / {totalPages}
-      </span>
-      <button
-        onClick={() => onGo(page + 1)}
-        disabled={page >= totalPages || loading}
-        className="rounded-lg border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
-      >
-        Berikutnya →
-      </button>
+    <div className="flex items-center justify-center gap-2" style={{ marginTop: 16, fontSize: 13 }}>
+      <button className="btn btn-secondary btn-sm" onClick={() => onGo(page - 1)} disabled={page <= 1 || loading}>← Sebelumnya</button>
+      <span style={{ color: "var(--ink-500)", padding: "0 8px" }}>Halaman {page} / {totalPages}</span>
+      <button className="btn btn-secondary btn-sm" onClick={() => onGo(page + 1)} disabled={page >= totalPages || loading}>Berikutnya →</button>
     </div>
   );
 }

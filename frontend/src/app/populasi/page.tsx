@@ -112,79 +112,64 @@ export default function PopulasiPage() {
   const fopts = data?.filter_options ?? {};
 
   return (
-    <AppShell active="/populasi" title="Populasi Unit" sub="Daftar unit & spesifikasi">
-      <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-6">
-        <h2 className="mb-4 text-base font-semibold">
-          🚛 Populasi <span className="text-brand">Unit</span>
-        </h2>
-
-        {/* Filter & cari */}
-        <div className="mb-4 rounded-xl bg-white p-4 ring-1 ring-zinc-200">
-          <form onSubmit={applySearch} className="mb-3 flex gap-2">
+    <AppShell active="/populasi" title="Populasi Unit" sub="Daftar unit & spesifikasi armada">
+      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-7">
+        {/* Toolbar: cari + filter + export */}
+        <form onSubmit={applySearch} className="flex flex-wrap items-center gap-2">
+          <div style={{ position: "relative", flex: 1, minWidth: 240 }}>
+            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-400)", display: "inline-flex" }}>
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            </span>
             <input
+              className="input"
               value={qInput}
               onChange={(e) => setQInput(e.target.value)}
-              placeholder="Cari (semua kolom)…"
-              className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+              placeholder="Cari customer, VIN, model…"
+              style={{ paddingLeft: 38 }}
             />
-            <button
-              type="submit"
-              disabled={loading}
-              className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-60"
+          </div>
+          {Object.entries(fopts).map(([col, opts]) => (
+            <select
+              key={col}
+              className="select"
+              value={filters[col] ?? "Semua"}
+              onChange={(e) => changeFilter(col, e.target.value)}
+              style={{ width: "auto", minWidth: 130 }}
+              title={col}
             >
-              Cari
-            </button>
-          </form>
-
-          {Object.keys(fopts).length > 0 && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {Object.entries(fopts).map(([col, opts]) => (
-                <label key={col} className="text-xs text-zinc-500">
-                  {col}
-                  <select
-                    value={filters[col] ?? "Semua"}
-                    onChange={(e) => changeFilter(col, e.target.value)}
-                    className="mt-1 block w-full rounded-lg border border-zinc-300 px-2 py-1.5 text-sm text-zinc-800 outline-none focus:border-brand"
-                  >
-                    <option value="Semua">Semua</option>
-                    {opts.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              <option value="Semua">{col}: Semua</option>
+              {opts.map((o) => (
+                <option key={o} value={o}>{o}</option>
               ))}
-            </div>
-          )}
-        </div>
+            </select>
+          ))}
+          <button type="submit" className="btn btn-primary" disabled={loading}>
+            {loading ? "Memuat…" : "Cari"}
+          </button>
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={!data || data.total_filtered === 0}
+            className="btn btn-secondary"
+          >
+            ⬇ Export
+          </button>
+        </form>
 
-        {error && (
-          <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-            {error}
-          </p>
-        )}
+        {error && <div className="alert alert-error" style={{ marginTop: 14 }}>{error}</div>}
 
         {data && (
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-zinc-500">
-            <span>
-              Total <b className="text-zinc-700">{data.total}</b> unit · Hasil
-              filter <b className="text-zinc-700">{data.total_filtered}</b>
-            </span>
-            <button
-              onClick={handleExport}
-              disabled={data.total_filtered === 0}
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-            >
-              ⬇️ Download Excel
-            </button>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1" style={{ marginTop: 14, fontSize: 12.5, color: "var(--ink-500)" }}>
+            <span>Total <b style={{ color: "var(--ink-800)" }} className="mono">{data.total.toLocaleString("id-ID")}</b> unit</span>
+            <span>·</span>
+            <span>Hasil filter <b style={{ color: "var(--ink-800)" }} className="mono">{data.total_filtered.toLocaleString("id-ID")}</b></span>
           </div>
         )}
 
         {data && data.rows.length > 0 ? (
-          <div className="overflow-x-auto rounded-xl ring-1 ring-zinc-200">
+          <div className="surface" style={{ marginTop: 12, overflow: "auto" }}>
             <table className="tbl">
-              <thead className="bg-zinc-50 text-left text-zinc-600">
+              <thead>
                 <tr>
                   {cols.map((c) => {
                     const active = sortCol === c;
@@ -193,58 +178,46 @@ export default function PopulasiPage() {
                         key={c}
                         onClick={() => changeSort(c)}
                         title="Klik untuk mengurutkan"
-                        className="cursor-pointer select-none whitespace-nowrap px-3 py-2 font-medium transition hover:bg-zinc-100"
+                        style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}
                       >
-                        <span className="inline-flex items-center gap-1">
-                          {c}
-                          <span className={active ? "text-brand" : "text-zinc-300"}>
-                            {active ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
-                          </span>
+                        {c}{" "}
+                        <span style={{ opacity: active ? 1 : 0.3, fontSize: 11, color: active ? "var(--brand-700)" : "inherit" }}>
+                          {active ? (sortDir === "asc" ? "▲" : "▼") : "▲▼"}
                         </span>
                       </th>
                     );
                   })}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100 bg-white">
+              <tbody>
                 {data.rows.map((row, i) => (
-                  <tr key={i} className="hover:bg-zinc-50">
-                    {cols.map((c) => (
-                      <td key={c} className="whitespace-nowrap px-3 py-2">
-                        {row[c] ?? ""}
-                      </td>
-                    ))}
+                  <tr key={i}>
+                    {cols.map((c) => {
+                      const isVin = /rangka|vin|mesin/i.test(c);
+                      return (
+                        <td key={c} className={isVin ? "pn" : undefined} style={{ whiteSpace: "nowrap", color: isVin ? undefined : "var(--ink-700)" }}>
+                          {row[c] ?? ""}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
-          data &&
-          !loading && (
-            <p className="text-sm text-zinc-500">Tidak ada data yang cocok.</p>
+          data && !loading && (
+            <div className="surface grid place-items-center" style={{ marginTop: 12, height: 160, color: "var(--ink-500)", fontSize: 13.5 }}>
+              Tidak ada data yang cocok.
+            </div>
           )
         )}
 
         {data && data.total_pages > 1 && (
-          <div className="mt-4 flex items-center justify-center gap-2 text-sm">
-            <button
-              onClick={() => goToPage(page - 1)}
-              disabled={page <= 1 || loading}
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
-            >
-              ← Sebelumnya
-            </button>
-            <span className="px-2 text-zinc-500">
-              Halaman {page} / {data.total_pages}
-            </span>
-            <button
-              onClick={() => goToPage(page + 1)}
-              disabled={page >= data.total_pages || loading}
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
-            >
-              Berikutnya →
-            </button>
+          <div className="flex items-center justify-center gap-2" style={{ marginTop: 16, fontSize: 13 }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => goToPage(page - 1)} disabled={page <= 1 || loading}>← Sebelumnya</button>
+            <span style={{ color: "var(--ink-500)", padding: "0 8px" }}>Halaman {page} / {data.total_pages}</span>
+            <button className="btn btn-secondary btn-sm" onClick={() => goToPage(page + 1)} disabled={page >= data.total_pages || loading}>Berikutnya →</button>
           </div>
         )}
       </div>

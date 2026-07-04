@@ -12,12 +12,12 @@ function ScoreBar({ label, value }: { label: string; value: number | null }) {
   const p = value == null ? 0 : pct(value);
   return (
     <div>
-      <div className="mb-0.5 flex justify-between text-xs text-zinc-500">
+      <div className="flex justify-between" style={{ marginBottom: 2, fontSize: 12, color: "var(--ink-500)" }}>
         <span>{label}</span>
-        <span className="font-medium text-zinc-700">{value == null ? "—" : `${p}%`}</span>
+        <span className="mono" style={{ fontWeight: 600, color: "var(--ink-700)" }}>{value == null ? "—" : `${p}%`}</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-zinc-100">
-        <div className="h-full bg-brand" style={{ width: `${p}%` }} />
+      <div style={{ height: 8, overflow: "hidden", borderRadius: 99, background: "var(--ink-100)" }}>
+        <div style={{ height: "100%", background: "var(--brand-600)", width: `${p}%`, transition: "width .3s" }} />
       </div>
     </div>
   );
@@ -26,8 +26,8 @@ function ScoreBar({ label, value }: { label: string; value: number | null }) {
 function Gallery({ pn, name, urls }: { pn: string; name: string; urls: string[] }) {
   return (
     <div>
-      <p className="font-mono text-sm font-bold">{pn}</p>
-      {name && <p className="mb-2 text-xs text-zinc-500">{name}</p>}
+      <p className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{pn}</p>
+      {name && <p style={{ marginBottom: 8, fontSize: 12, color: "var(--ink-500)" }}>{name}</p>}
       {urls.length > 0 ? (
         <div className="grid grid-cols-2 gap-2">
           {urls.map((u, i) => (
@@ -37,12 +37,13 @@ function Gallery({ pn, name, urls }: { pn: string; name: string; urls: string[] 
               src={partImageUrl(u)}
               alt={`${pn} ${i + 1}`}
               loading="lazy"
-              className="aspect-square w-full rounded-lg bg-white object-contain ring-1 ring-zinc-200"
+              className="aspect-square w-full object-contain"
+              style={{ borderRadius: 10, background: "var(--paper)", border: "1px solid var(--ink-200)" }}
             />
           ))}
         </div>
       ) : (
-        <p className="text-sm text-zinc-400">Tidak ada gambar.</p>
+        <p style={{ fontSize: 13, color: "var(--ink-400)" }}>Tidak ada gambar.</p>
       )}
     </div>
   );
@@ -92,87 +93,46 @@ export default function ComparePage() {
 
   return (
     <AppShell active="/compare" title="Bandingkan 2 Part" sub="Analisis interchange via foto SIMS + nama">
-      <div className="mx-auto w-full max-w-5xl px-4 py-5 sm:px-6">
-        <h2 className="mb-1 text-base font-semibold">
-          🔍 Bandingkan <span className="text-brand">2 Part</span>
-        </h2>
-        <p className="mb-4 text-sm text-zinc-500">
+      <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-7">
+        <p style={{ marginBottom: 16, fontSize: 13.5, color: "var(--ink-500)" }}>
           Analisis interchange berdasarkan foto SIMS (bentuk + warna) dan nama part.
         </p>
 
-        <form onSubmit={run} className="mb-5 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-          <input
-            value={pn1}
-            onChange={(e) => setPn1(e.target.value)}
-            placeholder="Part Number #1"
-            className="rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
-          />
-          <input
-            value={pn2}
-            onChange={(e) => setPn2(e.target.value)}
-            placeholder="Part Number #2"
-            className="rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
-          />
-          <button
-            disabled={loading}
-            className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-60"
-          >
-            {loading ? "Menganalisis…" : "🔬 Cek Interchange"}
-          </button>
+        <form onSubmit={run} className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr auto" }}>
+          <input className="input mono" value={pn1} onChange={(e) => setPn1(e.target.value)} placeholder="Part Number #1" />
+          <input className="input mono" value={pn2} onChange={(e) => setPn2(e.target.value)} placeholder="Part Number #2" />
+          <button className="btn btn-primary" disabled={loading}>{loading ? "Menganalisis…" : "Cek Interchange"}</button>
         </form>
         {loading && (
-          <p className="mb-3 text-xs text-zinc-400">
+          <p style={{ marginTop: 10, fontSize: 12, color: "var(--ink-400)" }}>
             Mengambil & menganalisis foto dari SIMS — mohon tunggu sebentar.
           </p>
         )}
 
-        {error && (
-          <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-            {error}
-          </p>
-        )}
+        {error && <div className="alert alert-error" style={{ marginTop: 14 }}>{error}</div>}
 
         {best && res && (
           <>
             {/* Verdict */}
-            <div
-              className="mb-5 rounded-xl p-4 text-white"
-              style={{ backgroundColor: best.color }}
-            >
-              <p className="text-lg font-bold">{best.verdict}</p>
-              <p className="mt-1 text-sm opacity-90">
-                Skor keseluruhan: {pct(best.overall)}%
-              </p>
+            <div style={{ margin: "20px 0", borderRadius: 12, padding: 16, color: "#fff", backgroundColor: best.color }}>
+              <p style={{ fontSize: 18, fontWeight: 700 }}>{best.verdict}</p>
+              <p style={{ marginTop: 4, fontSize: 13.5, opacity: 0.9 }}>Skor keseluruhan: {pct(best.overall)}%</p>
             </div>
 
             {/* Skor + pasangan terbaik */}
-            <div className="mb-6 grid gap-6 md:grid-cols-2">
-              <div className="space-y-3 rounded-xl bg-white p-4 ring-1 ring-zinc-200">
+            <div className="grid gap-4 md:grid-cols-2" style={{ marginBottom: 24 }}>
+              <div className="surface" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
                 <ScoreBar label="Bentuk (shape)" value={best.shape_score} />
                 <ScoreBar label="Nama part" value={best.name_score} />
                 <ScoreBar label="Warna" value={best.color_score} />
               </div>
-              <div className="rounded-xl bg-white p-4 ring-1 ring-zinc-200">
-                <p className="mb-2 text-sm font-semibold text-zinc-700">
-                  Pasangan foto termirip
-                </p>
+              <div className="surface" style={{ padding: 16 }}>
+                <p style={{ marginBottom: 8, fontSize: 13, fontWeight: 600, color: "var(--ink-700)" }}>Pasangan foto termirip</p>
                 <div className="grid grid-cols-2 gap-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  {bestImg1 && (
-                    <img
-                      src={partImageUrl(bestImg1)}
-                      alt={res.pn1}
-                      className="aspect-square w-full rounded-lg bg-white object-contain ring-1 ring-zinc-200"
-                    />
-                  )}
+                  {bestImg1 && <img src={partImageUrl(bestImg1)} alt={res.pn1} className="aspect-square w-full object-contain" style={{ borderRadius: 10, background: "var(--paper)", border: "1px solid var(--ink-200)" }} />}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  {bestImg2 && (
-                    <img
-                      src={partImageUrl(bestImg2)}
-                      alt={res.pn2}
-                      className="aspect-square w-full rounded-lg bg-white object-contain ring-1 ring-zinc-200"
-                    />
-                  )}
+                  {bestImg2 && <img src={partImageUrl(bestImg2)} alt={res.pn2} className="aspect-square w-full object-contain" style={{ borderRadius: 10, background: "var(--paper)", border: "1px solid var(--ink-200)" }} />}
                 </div>
               </div>
             </div>
