@@ -12,8 +12,11 @@ ENV PYTHONUNBUFFERED=1 \
     DATA_DIR=/app/data
 
 # libgomp1 dibutuhkan torch; build-essential untuk wheel yang perlu kompilasi.
+# fonts-liberation WAJIB utk render gambar exploded view EPC (resvg): angka balon
+# = elemen <text font-family='Arial'> di SVG — tanpa font sistem, teks DIBUANG
+# diam-diam dan gambar kehilangan semua nomornya (Liberation Sans ≈ metrik Arial).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends build-essential libgomp1 \
+ && apt-get install -y --no-install-recommends build-essential libgomp1 fonts-liberation \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./

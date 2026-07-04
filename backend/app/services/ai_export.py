@@ -236,8 +236,7 @@ _stash: dict[str, dict] = {}   # id -> {at, judul, kolom, baris, filename}
 _MONO_HEAD_RE = re.compile(r"\b(part\s*number|part\s*no|pn|nomor\s*part|kode)\b", re.IGNORECASE)
 
 
-def stash_export(judul: str, kolom: list[str], baris: list[list[str]]) -> tuple[str, str]:
-    """Simpan payload export → (export_id, filename). Entri kedaluwarsa dibersihkan."""
+def _stash_put(entry: dict, judul: str) -> tuple[str, str]:
     now = time.monotonic()
     slug = re.sub(r"[^A-Za-z0-9]+", "_", judul).strip("_")[:60] or "Data_MASPART"
     filename = f"{slug}.xlsx"
@@ -247,9 +246,19 @@ def stash_export(judul: str, kolom: list[str], baris: list[list[str]]) -> tuple[
             _stash.pop(k, None)
         while len(_stash) >= _STASH_MAX:   # buang paling tua
             _stash.pop(min(_stash, key=lambda k: _stash[k]["at"]), None)
-        _stash[export_id] = {"at": now, "judul": judul, "kolom": kolom,
-                             "baris": baris, "filename": filename}
+        _stash[export_id] = {"at": now, "judul": judul, "filename": filename, **entry}
     return export_id, filename
+
+
+def stash_export(judul: str, kolom: list[str], baris: list[list[str]]) -> tuple[str, str]:
+    """Simpan payload export tabel polos → (export_id, filename)."""
+    return _stash_put({"kolom": kolom, "baris": baris}, judul)
+
+
+def stash_builder(judul: str, builder: dict) -> tuple[str, str]:
+    """Simpan RESEP export yang dibangun SAAT DIUNDUH (mis. katalog bergambar —
+    berat, jadi dibangun ketika kartu diklik lalu bytes-nya di-cache di entri)."""
+    return _stash_put({"builder": builder}, judul)
 
 
 def generic_excel(export_id: str) -> tuple[bytes | None, str]:
@@ -262,6 +271,22 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
     if not d:
         return None, ("File sudah kedaluwarsa / tidak ditemukan. Minta asisten "
                       "buatkan Excel-nya lagi.")
+
+    # Entri ber-'builder' = dibangun saat diunduh (berat); bytes di-cache di entri
+    # supaya klik berikutnya instan.
+    if d.get("builder"):
+        cached = d.get("_bytes")
+        if cached:
+            return cached, d["filename"]
+        b = d["builder"]
+        if b.get("kind") == "katalog":
+            data, err = katalog_excel(b.get("rangka", ""), b.get("kategori", ""))
+            if data is None:
+                return None, err
+            with _stash_lock:
+                d["_bytes"] = data
+            return data, d["filename"]
+        return None, "Jenis export tidak dikenal."
 
     kolom: list[str] = d["kolom"]
     baris: list[list[str]] = d["baris"]
@@ -301,3 +326,215 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue(), d["filename"]
+
+
+# ── KATALOG BERGAMBAR per kategori (exploded view EPC) ──────────────────────
+# Plafon seksi figure — katalog LENGKAP unit besar bisa ~500 (PB087964: 477).
+_KATALOG_MAX_FIGURES = 800
+_KATALOG_IMG_WIDTH = 1400      # px render SVG→PNG (tajam saat di-zoom)
+_KATALOG_IMG_VIEW = 660        # px lebar tampil di sheet
+
+
+def _svg_to_png(svg: bytes, width: int = _KATALOG_IMG_WIDTH) -> bytes | None:
+    """Render SVG exploded view EPC (Creo Illustrate) → PNG via resvg.
+    resvg menolak width/height ber-satuan mm di tag root → buang atributnya
+    (viewBox tetap menjaga proporsi). None bila gagal/resvg tak terpasang."""
+    if not svg:
+        return None
+    try:
+        import resvg_py
+    except Exception:
+        return None
+    try:
+        i = svg.find(b"<svg")
+        if i < 0:
+            return None
+        txt = svg[i:].decode("utf-8", "replace")
+        head, rest = txt.split(">", 1)
+        head = re.sub(r'\s(width|height)="[^"]*"', "", head)
+        return bytes(resvg_py.svg_to_bytes(svg_string=head + ">" + rest, width=width))
+    except Exception:
+        return None
+
+
+def katalog_excel(rangka: str, kategori: str) -> tuple[bytes | None, str]:
+    """KATALOG PART BERGAMBAR satu kategori per-VIN: satu sheet per FIGURE
+    (gambar exploded view EPC + tabel part ber-nomor balon + stok/harga lokal)
+    + sheet Ringkasan. Return (bytes, filename) atau (None, pesan_error)."""
+    from . import epc_bom as _epc
+
+    d = _epc.catalog_walk(rangka, kategori)
+    if not d.get("found"):
+        return None, (d.get("message") or "Gagal mengambil katalog dari EPC. Coba lagi.")
+    figures = (d.get("figures") or [])[:_KATALOG_MAX_FIGURES]
+    if not figures:
+        return None, f"Tidak ada figure untuk kategori '{kategori}' di unit ini."
+    frame = d.get("frame_number") or ""
+
+    # 1) Unduh + render SEMUA gambar paralel (nama file → PNG bytes).
+    svg_names = list(dict.fromkeys(f["svg"] for f in figures if f.get("svg")))
+
+    def _render(name: str) -> tuple[str, bytes | None]:
+        return name, _svg_to_png(_epc.fetch_file(name))
+
+    pngs: dict[str, bytes] = {}
+    if svg_names:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for name, png in ex.map(_render, svg_names):
+                if png:
+                    pngs[name] = png
+
+    # 2) Stok/harga lokal utk SEMUA PN (sekali query).
+    all_pns = list({it["pn"] for f in figures for it in f["items"]})
+    local: dict[str, dict] = {}
+    for r in part_index.search_exact_pns(all_pns):
+        pn = (r.get("part_number") or "").upper()
+        if pn and pn not in local:
+            local[pn] = r
+
+    # ── SATU SHEET, alur vertikal per figure: bar seksi → GAMBAR → TABEL.
+    #    Plus DAFTAR ISI ber-hyperlink di atas & link "↑ Daftar Isi" di tiap seksi,
+    #    supaya 60+ seksi mudah dinavigasi dan urutan bacanya tak membingungkan. ──
+    from openpyxl.drawing.image import Image as XLImage
+    from openpyxl.worksheet.hyperlink import Hyperlink
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Katalog"
+    ws.sheet_view.showGridLines = False
+    n_part = sum(len(f["items"]) for f in figures)
+
+    headers = ["No. Balon", "Part Number", "Nama Part", "Qty", "Stok", "Harga", "Pengganti"]
+    widths = [10, 20, 52, 6, 8, 14, 20]
+    ncol = len(headers)
+    for j, wd in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(j)].width = wd
+
+    kat_title = ("Lengkap (Semua Kategori)" if d.get("lengkap") else kategori.title())
+    _title(ws, f"Katalog {kat_title} — Unit {frame}",
+           f"{len(figures)} figure · {n_part} part · gambar exploded view resmi EPC "
+           "(Parts Atlas per-VIN) · MASPART Asisten AI", ncol)
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=ncol)
+    note = ws.cell(row=3, column=1,
+                   value="ℹ️ Cara baca: tiap figure = GAMBAR lalu TABEL part-nya di bawah. "
+                         "Angka pada gambar = kolom 'No. Balon' — baris itulah Part Number-nya.")
+    note.font = Font(color=_BRAND_DK, size=10, bold=True)
+    note.fill = _SUB1_FILL
+    note.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.freeze_panes = "A4"   # judul + cara baca tetap terlihat saat scroll
+
+    _ROW_PX = 19.0    # tinggi baris default Excel ±19px — utk melewati tinggi gambar
+    _LINK_FONT = Font(color="0563C1", underline="single", size=10)
+
+    def _num(v):
+        """Angka murni ditulis sbg NUMBER (hindari segitiga hijau 'number as text')."""
+        if isinstance(v, (int, float)):
+            return v
+        s = str(v or "").strip()
+        return int(s) if s.isdigit() else (s or None)
+
+    # ── DAFTAR ISI (target hyperlink diisi setelah posisi seksi diketahui) ──
+    TOC_BAR = 5
+    ws.merge_cells(start_row=TOC_BAR, start_column=1, end_row=TOC_BAR, end_column=ncol)
+    tb = ws.cell(row=TOC_BAR, column=1,
+                 value="DAFTAR ISI — klik nama figure untuk melompat ke bagiannya")
+    tb.fill = _HEAD_FILL
+    tb.font = Font(color="FFFFFF", bold=True, size=12)
+    tb.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[TOC_BAR].height = 22
+    toc_first = TOC_BAR + 1
+    for i, f in enumerate(figures):
+        r = toc_first + i
+        cno = ws.cell(row=r, column=1, value=i + 1)
+        cno.alignment = _CENTER
+        cno.border = _BORDER
+        cno.font = _INK
+        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=3)
+        cn = ws.cell(row=r, column=2, value=f["nama"] + ("" if f.get("svg") else "  (tanpa gambar di EPC)"))
+        cn.font = _LINK_FONT
+        cn.alignment = _LEFT
+        cn.border = _BORDER
+        cq = ws.cell(row=r, column=4, value=len(f["items"]))
+        cq.alignment = _CENTER
+        cq.border = _BORDER
+        cq.font = _INK
+        # Kolom kelompok — penting utk katalog lengkap (kabin/sasis/kelistrikan/…).
+        ws.merge_cells(start_row=r, start_column=5, end_row=r, end_column=7)
+        ck = ws.cell(row=r, column=5, value=f.get("kategori") or "")
+        ck.font = Font(color="535B56", size=9)
+        ck.alignment = _LEFT
+        ck.border = _BORDER
+        if i % 2:
+            for j in range(1, 8):
+                ws.cell(row=r, column=j).fill = _ZEBRA
+    row = toc_first + len(figures) + 2
+
+    # ── Seksi per figure: bar → gambar → tabel ──
+    sec_rows: list[int] = []
+    for i, f in enumerate(figures):
+        sec_rows.append(row)
+        # Bar seksi: judul (A..F) + link kembali ke daftar isi (G).
+        kat_lbl = (f.get("kategori") or "").strip()
+        kat_sfx = f"  ·  {kat_lbl}" if kat_lbl and kat_lbl not in f["nama"] else ""
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncol - 1)
+        c = ws.cell(row=row, column=1,
+                    value=f"{i + 1:02d}. {f['nama']}  ·  Figure {f['kode']} · {len(f['items'])} part"
+                          + kat_sfx + ("" if f.get("svg") else "  ·  (tanpa gambar di EPC)"))
+        c.fill = _HEAD_FILL
+        c.font = Font(color="FFFFFF", bold=True, size=12)
+        c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        back = ws.cell(row=row, column=ncol, value="↑ Daftar Isi")
+        back.fill = _HEAD_FILL
+        back.font = Font(color="FFFFFF", underline="single", size=10)
+        back.alignment = _CENTER
+        back.hyperlink = Hyperlink(ref=f"{get_column_letter(ncol)}{row}",
+                                   location=f"Katalog!A{TOC_BAR}")
+        ws.row_dimensions[row].height = 22
+        row += 1
+
+        # GAMBAR tepat di bawah bar seksi (kolom B) — alur baca vertikal.
+        png = pngs.get(f.get("svg") or "")
+        if png:
+            img = XLImage(io.BytesIO(png))
+            ratio = img.height / img.width if img.width else 1
+            img.width = _KATALOG_IMG_VIEW
+            img.height = int(_KATALOG_IMG_VIEW * ratio)
+            ws.add_image(img, f"B{row}")
+            row += int(img.height / _ROW_PX) + 2
+
+        # TABEL part figure ini.
+        for j, h in enumerate(headers, start=1):
+            hc = ws.cell(row=row, column=j, value=h)
+            hc.fill = _SUB1_FILL
+            hc.font = Font(bold=True, color=_BRAND_DK, size=10)
+            hc.alignment = _CENTER
+            hc.border = _BORDER
+        row += 1
+        items = sorted(f["items"], key=lambda x: (x.get("balon") is None, x.get("balon") or 0))
+        for k, it in enumerate(items):
+            lr = local.get(it["pn"], {})
+            nama = " ".join((lr.get("part_name") or it["nama"] or it["nama_cn"]).split())
+            vals = [_num(it.get("balon")), it["pn"], nama, _num(it.get("qty")),
+                    _num(lr.get("stok")) if lr else None,
+                    (lr.get("harga") or None) if lr else None,
+                    ", ".join(it.get("pengganti") or []) or None]
+            for j, v in enumerate(vals, start=1):
+                dc = ws.cell(row=row, column=j, value=v)
+                dc.border = _BORDER
+                dc.font = _MONO if j == 2 else _INK
+                dc.alignment = _CENTER if j in (1, 4, 5) else _LEFT
+                if k % 2:
+                    dc.fill = _ZEBRA
+            row += 1
+        row += 2   # jeda antar seksi
+
+    # Isi hyperlink DAFTAR ISI → baris bar tiap seksi.
+    for i, target in enumerate(sec_rows):
+        r = toc_first + i
+        ws.cell(row=r, column=2).hyperlink = Hyperlink(
+            ref=f"B{r}", location=f"Katalog!A{target}")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    kat_slug = re.sub(r"[^A-Za-z0-9]+", "_", kategori).strip("_")[:24] or "Kategori"
+    return buf.getvalue(), f"Katalog_{kat_slug}_{frame}.xlsx"

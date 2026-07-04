@@ -757,6 +757,31 @@ def _tool_specs(user: dict) -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "katalog_kategori",
+                "description": (
+                    "KATALOG PART BERGAMBAR (exploded view) satu KATEGORI untuk SATU unit dari "
+                    "NOMOR RANGKA — panggil saat user minta 'berikan/buatkan katalog <kategori> "
+                    "<rangka>', 'katalog kabin unit X', 'catalog rem + gambar', 'buku part "
+                    "transmisi unit ini'. Menyusun SEMUA part kategori itu per-figure, LENGKAP "
+                    "dengan gambar exploded view resmi EPC + nomor balon + stok/harga lokal, "
+                    "menjadi FILE EXCEL (kartu unduh muncul otomatis). Kategori: kabin, mesin, "
+                    "kopling, transmisi, gardan depan/belakang, kelistrikan, rem, sasis, dll. "
+                    "Proses ±1 menit — HANYA untuk permintaan KATALOG/buku part; pertanyaan part "
+                    "biasa pakai tool lain. Hanya unit Sinotruk/HOWO/SITRAK."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number 8 digit."},
+                        "kategori": {"type": "string", "description": "Kategori yang mau dikatalogkan (mis. 'kabin', 'rem', 'transmisi', 'gardan belakang', 'kelistrikan', 'ac') — ATAU 'semua' untuk KATALOG LENGKAP seluruh kategori unit. HANYA diisi bila user MENYEBUTNYA; bila user belum menyebut kategori, KOSONGKAN (tool akan menyuruhmu menawarkan pilihan) — JANGAN menebak."},
+                    },
+                    "required": ["rangka"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "buat_excel",
                 "description": (
                     "BUAT FILE EXCEL (kartu unduh) dari data yang SUDAH dibahas — panggil saat user "
@@ -2984,6 +3009,69 @@ def _t_buat_excel(args: dict, user: dict) -> dict:
                         "tabelnya, JANGAN membuat link/URL unduhan sendiri.")}
 
 
+def _t_katalog_kategori(args: dict, user: dict) -> dict:
+    """KATALOG BERGAMBAR per kategori per-VIN — walk Atlas (epc_bom.catalog_walk,
+    di-cache), lalu stash RESEP export; Excel bergambar dibangun saat kartu
+    diunduh (ai_export.katalog_excel) agar chat tak menunggu render gambar."""
+    rangka = (args.get("rangka") or "").strip()
+    kategori = (args.get("kategori") or "").strip()
+    if not rangka:
+        return {"error": "Sebutkan nomor rangka/VIN unit yang mau dikatalogkan."}
+    if not kategori:
+        # User belum memilih kategori → JANGAN menebak; suruh model menawarkan pilihan.
+        return {
+            "found": False,
+            "pilihan_kategori": ["Kabin", "Mesin", "Kopling", "Transmisi", "Gardan depan",
+                                 "Gardan belakang", "Kelistrikan", "Rem", "Sasis", "AC",
+                                 "LENGKAP (semua kategori)"],
+            "jawaban_wajib": ("User belum menyebut kategori. TANYAKAN dulu — tampilkan "
+                              "daftar 'pilihan_kategori' di atas sebagai pilihan (boleh "
+                              "format daftar/bullet) dan minta user memilih SATU, atau "
+                              "'lengkap' untuk semua kategori sekaligus (file lebih besar, "
+                              "±2-3 menit). ⛔ JANGAN memanggil tool ini lagi sebelum user "
+                              "memilih, JANGAN menebak kategorinya."),
+        }
+
+    d = epc_bom.catalog_walk(rangka, kategori)
+    if not d.get("found"):
+        err = d.get("_err")
+        if err in ("token_expired", "no_token"):
+            return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
+        if err == "network":
+            return {"found": False, "error": "Gagal menghubungi server EPC (jaringan). Coba lagi."}
+        if err == "not_found":
+            return {"found": False, "error": "Nomor rangka tidak ditemukan di EPC Parts Atlas "
+                    "(cek ejaan VIN; hanya unit Sinotruk/HOWO/SITRAK)."}
+        if err == "no_category":
+            return {"found": False, "error": (d.get("message") or "Kategori tidak dikenal.") +
+                    " Coba nama kategori lain (kabin/mesin/kopling/transmisi/gardan/kelistrikan/rem/sasis)."}
+        return {"found": False, "error": "EPC Parts Atlas tidak mengembalikan data untuk unit ini."}
+
+    frame = d.get("frame_number") or rangka
+    if d.get("lengkap"):
+        kat_nama = "Lengkap (Semua Kategori)"
+    else:
+        kat_nama = catalog_bom.KATEGORI_NAMA.get(d.get("kategori_kode") or "", kategori.title())
+    judul = f"Katalog {kat_nama.split(' (')[0]} {frame}"
+    export_id, filename = ai_export.stash_builder(
+        judul, {"kind": "katalog", "rangka": rangka, "kategori": kategori})
+    durasi = "±2-3 menit" if d.get("lengkap") else "±1 menit"
+    return {
+        "found": True, "export_id": export_id, "filename": filename, "judul": judul,
+        "frame_number": frame, "katalog_lengkap": bool(d.get("lengkap")),
+        "jumlah_figure": d.get("jumlah_figure"), "jumlah_baris": d.get("jumlah_part"),
+        "kategori_cocok": (d.get("kategori_cocok") or [])[:20],
+        **({"peringatan_tidak_lengkap":
+            "⚠️ Sebagian data EPC gagal diambil — katalog bisa belum lengkap; sarankan coba lagi."}
+           if d.get("incomplete") else {}),
+        "catatan": ("Katalog siap — KARTU UNDUH Excel otomatis muncul di bawah jawabanmu. "
+                    "Jawab SINGKAT: sebut jumlah figure + jumlah part + bahwa tiap figure ada "
+                    "GAMBAR exploded view resmi EPC dengan nomor balon, dan UNDUHAN PERTAMA "
+                    f"butuh {durasi} (menyusun gambar). ⛔ JANGAN menulis daftar part/figure "
+                    "satu-satu, JANGAN membuat link/URL sendiri."),
+    }
+
+
 _DISPATCH = {
     "cari_part": _t_cari_part,
     "kategori_unit": _t_kategori_unit,
@@ -3016,6 +3104,7 @@ _DISPATCH = {
     "rekap_penjualan": _t_rekap_penjualan,
     "daftar_pesanan": _t_daftar_pesanan,
     "buat_excel": _t_buat_excel,
+    "katalog_kategori": _t_katalog_kategori,
 }
 
 
@@ -3332,6 +3421,20 @@ def _system_prompt(user: dict) -> str:
         "lalu baca 'part_pengganti'. Bila user TIDAK menyebut rangka, JANGAN menebak persamaannya — "
         "minta nomor rangka unit itu dulu ('biar kuambil persamaan resmi dari EPC'). JANGAN "
         "mengarang PN pengganti dari kemiripan kode. (SIMS tidak menyediakan data persamaan.)\n"
+        "- 📚 KATALOG BERGAMBAR (exploded view): bila user minta 'berikan/buatkan KATALOG "
+        "<kategori> <rangka>', 'katalog kabin unit X', 'buku part rem unit ini', 'catalog + "
+        "gambar' → WAJIB panggil katalog_kategori(rangka, kategori). Bila user minta KATALOG "
+        "LENGKAP/SEMUA KATEGORI ('katalog lengkap unit X', 'katalog semua kategori', 'full "
+        "catalog satu unit') → kategori='semua'. Hasilnya KARTU UNDUH Excel berisi part "
+        "per-figure + GAMBAR exploded view resmi EPC + nomor balon + stok/harga, per-VIN unit "
+        "APA PUN yang disebut. Jawab SINGKAT: jumlah figure & part, tiap figure bergambar, "
+        "unduhan pertama ±1 menit (katalog lengkap ±2-3 menit). ⚠️ Bila user minta katalog "
+        "TANPA menyebut kategori ('berikan katalog unit X', 'download katalognya') → JANGAN "
+        "menebak: TANYAKAN dulu mau kategori apa, tampilkan pilihannya (Kabin, Mesin, Kopling, "
+        "Transmisi, Gardan depan, Gardan belakang, Kelistrikan, Rem, Sasis, AC, atau LENGKAP "
+        "semua kategori) — baru panggil tool setelah user memilih. ⛔ JANGAN pakai buat_excel/"
+        "kategori_unit/bom_dari_rangka utk permintaan KATALOG, JANGAN tulis daftar part "
+        "satu-satu, JANGAN buat link sendiri. Butuh rangka — bila user tak menyebut, minta dulu.\n"
         "- 📥 EXPORT EXCEL (kartu unduh): bila user minta file Excel dari data yang dibahas "
         "('buatkan excelnya', 'export ke excel/xlsx/spreadsheet', 'bikin filenya', 'unduh "
         "sebagai excel') → panggil buat_excel(judul, kolom, baris). Isi 'baris' disalin PERSIS "
@@ -4067,7 +4170,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
 
     def _capture_meta(name: str, args: dict, result: dict) -> None:
         """Kumpulkan metadata untuk tombol/kartu unduh di frontend."""
-        if name == "buat_excel" and result.get("found"):
+        if name in ("buat_excel", "katalog_kategori") and result.get("found"):
             item = {"id": result.get("export_id"), "filename": result.get("filename"),
                     "judul": result.get("judul"), "jumlah_baris": result.get("jumlah_baris")}
             if item["id"] and item not in excel_exports:

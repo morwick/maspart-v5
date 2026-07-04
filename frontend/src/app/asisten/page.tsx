@@ -69,6 +69,7 @@ const TOOL_LABELS: Record<string, string> = {
   daftar_pesanan: "Daftar pesanan",
   harga_sims: "Harga SIMS",
   buat_excel: "Export Excel",
+  katalog_kategori: "EPC · katalog bergambar",
 };
 
 // Kunci penyimpanan chat agar tidak hilang saat pindah menu lalu kembali.

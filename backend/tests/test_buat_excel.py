@@ -51,3 +51,33 @@ def test_buat_excel_input_kosong():
 def test_generic_excel_id_tak_dikenal():
     data, msg = ai_export.generic_excel("tidak-ada")
     assert data is None and "kedaluwarsa" in msg.lower()
+
+
+# ── stash_builder (katalog bergambar): dibangun saat unduh + cache bytes ─────
+
+def test_stash_builder_katalog_dibangun_saat_unduh(monkeypatch):
+    calls = []
+
+    def _fake_katalog(rangka, kategori):
+        calls.append((rangka, kategori))
+        return b"XLSX-BYTES", "x.xlsx"
+
+    monkeypatch.setattr(ai_export, "katalog_excel", _fake_katalog)
+    eid, fname = ai_export.stash_builder(
+        "Katalog Kabin SJ346500", {"kind": "katalog", "rangka": "SJ346500", "kategori": "kabin"})
+    assert fname == "Katalog_Kabin_SJ346500.xlsx"
+
+    data, out_name = ai_export.generic_excel(eid)
+    assert data == b"XLSX-BYTES" and out_name == fname and calls == [("SJ346500", "kabin")]
+    # klik kedua: dari cache bytes, builder TIDAK dipanggil lagi
+    data2, _ = ai_export.generic_excel(eid)
+    assert data2 == data and len(calls) == 1
+
+
+def test_svg_to_png_buang_ukuran_mm():
+    # SVG gaya Creo (width/height ber-mm seperti file EPC asli) harus terkonversi.
+    svg = (b'<?xml version="1.0"?>\r<svg width="100mm" height="50mm" '
+           b'viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">'
+           b'<rect x="10" y="10" width="30" height="20" fill="black"/></svg>')
+    png = ai_export._svg_to_png(svg, width=200)
+    assert png and png[:8] == b"\x89PNG\r\n\x1a\n"

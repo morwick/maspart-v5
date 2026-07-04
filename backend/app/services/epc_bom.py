@@ -54,6 +54,11 @@ _ASSEMBLY_URL = f"{EPC_BOM_BASE}/part/tree/assembly"
 # Reverse lookup global: PN → kendaraan/model yang memakainya.
 _MATCH_URL = f"{EPC_BOM_BASE}/home/match/part"      # GET {t:global,k:<pn>} → [{code,name}]
 _REVERSE_URL = f"{EPC_BOM_BASE}/home/reverse/part"  # GET {t:global,v:<pn>,k:<pn>} → [{model,rootId,partCode,...}]
+# FILE EPC (gambar EXPLODED VIEW dll): respons item Atlas membawa 'd2s' = nama file
+# SVG gambar figure (Creo Illustrate; nomor balon = ballNum item) dan 'd3s' (.pvz 3D).
+# File diunduh GET /api/rest/file/<nama> — WAJIB header Referer+User-Agent
+# (tanpa itu server balas JSON 400 访问异常), ekstensi diabaikan server (selalu SVG).
+_FILE_URL = f"{EPC_BOM_BASE}/file/"
 
 # SSO 云桥/yunqiao: tukar token SimsCloud (ICMCP) → token EPC. Inilah yang dipakai
 # tombol "EPC" di SimsCloud. icmcpToken = JWT login SIMS (tanpa 'Bearer '),
@@ -1089,3 +1094,323 @@ def atlas_find_in_tree(rangka: str, keywords: list[str], max_nodes: int = 12) ->
     return {"found": bool(parts), "frame_number": frame, "jumlah": len(parts),
             "parts": parts, "jumlah_node_cocok": len(matched),
             "incomplete": walk.get("incomplete") or errbox[0]}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  KATALOG BERGAMBAR per KATEGORI (exploded view) — utk tool katalog_kategori
+# ═══════════════════════════════════════════════════════════════════════
+def fetch_file(name: str) -> bytes | None:
+    """Unduh FILE EPC (gambar exploded view .svg dari field d2s, dll) via
+    /api/rest/file/<nama>. None bila gagal. Auto-refresh token sekali bila
+    server balas JSON (tanda token/akses bermasalah)."""
+    if not name:
+        return None
+    headers = {
+        "token": _token(),
+        "Accept": "*/*",
+        "Referer": "http://epc.sinotruk.com:7001/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120 Safari/537.36",
+    }
+    for attempt in range(2):
+        try:
+            r = requests.get(_FILE_URL + name, headers=headers, timeout=45, verify=False)
+        except Exception:
+            time.sleep(1.0)
+            continue
+        ctype = (r.headers.get("Content-Type") or "").lower()
+        if r.status_code == 200 and "json" not in ctype:
+            return r.content
+        # JSON = error (token/akses). Refresh token lalu coba sekali lagi.
+        if attempt == 0 and refresh_token():
+            headers["token"] = _token()
+            continue
+        return None
+    return None
+
+
+# Kata kunci nama kategori Atlas per kode katalog. ⚠️ Segmen kode EPC 'ZZ-XX'
+# ≠ kode katalog lokal (audit SJ346500): ZZ-01=kabin, ZZ-02=SASIS (rem/suspensi/
+# bahan bakar/AC), ZZ-04=KELISTRIKAN, ZZ-05=POWERTRAIN (mesin/kopling/transmisi/
+# axle), ZZ-06=lain. Maka HANYA kabin yang boleh pakai prefix ZZ-01 — kategori
+# lain dijaring lewat KATA KUNCI nama (EN/CN) di bawah.
+_KATALOG_ZZ_PREFIX = {"01": "ZZ-01"}
+_KATALOG_KEYWORDS = {
+    # AC ikut KABIN (kenyamanan kabin; duct AC memang ZZ-01) — di EPC sistem/kompresor
+    # AC berkode ZZ-02 (sasis) sehingga tanpa kata kunci ini ia lolos dari semua jaring.
+    "01": ("cab", "驾驶室", "air conditioning", "air-conditioning", "空调"),
+    "02": ("engine", "发动机", "燃油发动机", "exhaust", "排气", "intake", "进气",
+           "air filter", "空滤", "cooling", "冷却", "radiator", "intercooler", "中冷"),
+    "04": ("clutch", "离合"),
+    "05": ("transmission", "gearbox", "变速"),
+    "06": ("front axle", "前轴", "从动桥", "steering", "转向"),
+    "07": ("drive axle", "驱动桥", "double axle", "main driving axle", "主传动轴"),
+    "08": ("electric", "电器", "电气", "电线", "wire", "harness", "lamp", "light",
+           "灯", "switch", "开关", "instrument", "仪表", "battery", "电瓶", "horn", "喇叭"),
+    "09": ("brak", "制动", "驻车", "abs"),
+    "10": ("chassis", "frame", "底盘", "车架", "suspension", "悬架", "stabilizer",
+           "稳定器", "leaf spring", "板簧", "shock absorber", "减振", "wheel", "车轮",
+           "tire", "轮胎", "towing", "牵引", "fuel", "燃油"),
+    "12": ("loading", "上装"),
+}
+
+# DAFTAR RESMI figure per MODUL per-VIN — endpoint yang sama dipakai pohon UI EPC
+# ("01 Driver's cab" dst): GET /workOrder/getAcOfType?cjh=<frame>&type=<modul>.
+# Kode modul dari app.js: JSS=cab, CDX=drive train, QHXJ=suspensi, QT=lainnya
+# (ZD/DQ/FDJ kosong utk unit AC). Dipakai sbg UNION dgn jaring kata kunci supaya
+# cakupan katalog DIJAMIN >= modul UI (kasus nyata: signboard & towing hook ada
+# di modul JSS tapi tak tertangkap kata kunci kabin).
+_AC_TYPE_URL = f"{EPC_BOM_BASE}/workOrder/getAcOfType"
+_KATALOG_MODULE_TYPES = {"01": ("JSS",)}
+
+
+def _ac_of_type_codes(frame: str, types: tuple) -> set:
+    """Kumpulan kode figure (fldFth) resmi utk modul2 tsb. Kosong bila gagal."""
+    codes: set = set()
+    for t in types:
+        r = _get_auto(_AC_TYPE_URL, {"cjh": frame, "type": t})
+        data = r.get("data")
+        if isinstance(data, list):
+            for row in data:
+                c = str(row.get("fldFth") or "").strip().upper()
+                if c:
+                    codes.add(c)
+    return codes
+
+
+# Istilah yang TIDAK terpetakan ke kode katalog (resolve_kategori gagal) tapi punya
+# arti jelas. Kata kunci ini MENGGANTIKAN term mentahnya — mis. 'ac' polos sebagai
+# substring akan salah cocok ke 'accessories'/'brake'.
+_KATALOG_TERM_KEYWORDS = {
+    "ac": ("air conditioning", "air-conditioning", "air conditioner", "空调"),
+    "air conditioner": ("air conditioning", "air-conditioning", "air conditioner", "空调"),
+    "aircon": ("air conditioning", "air-conditioning", "air conditioner", "空调"),
+    "pendingin kabin": ("air conditioning", "air-conditioning", "空调"),
+}
+
+_KATALOG_MAX_NODES = 600        # plafon node walk per kategori
+_KATALOG_MAX_NODES_ALL = 2000   # plafon utk katalog LENGKAP (seluruh unit)
+_KATALOG_TTL = 3600.0
+_katalog_cache: dict[str, dict] = {}
+_katalog_lock = threading.Lock()
+
+# Istilah yang berarti SEMUA kategori (katalog lengkap satu unit).
+_KATALOG_ALL_TERMS = {"semua", "semua kategori", "lengkap", "semuanya", "all",
+                      "full", "komplit", "komplet", "seluruh", "seluruhnya"}
+
+# Bab skema kode EPC → label kelompok (utk pengelompokan katalog lengkap).
+_ZZ_CHAPTER_LABEL = {
+    "ZZ-01": "Kabin (Driver's cab)",
+    "ZZ-02": "Sasis (rem, suspensi, bahan bakar, roda, AC)",
+    "ZZ-04": "Kelistrikan",
+    "ZZ-05": "Powertrain (mesin, kopling, transmisi, axle)",
+    "ZZ-06": "Lain-lain",
+}
+
+
+def _zz_chapter(kode_kategori: str) -> str:
+    return _ZZ_CHAPTER_LABEL.get((kode_kategori or "")[:5], "Lain-lain")
+
+
+def catalog_walk(rangka: str, kategori: str) -> dict:
+    """Kumpulkan SEMUA figure satu KATEGORI unit utk katalog bergambar:
+    tiap figure = satu view Spare Part List EPC = {nama, kode, svg (nama file
+    exploded view), items:[{balon, pn, nama, nama_cn, qty, pengganti}]}.
+    {found, frame_number, order_no, kategori_kode, kategori_cocok:[nama...],
+     jumlah_figure, jumlah_part, figures:[...], incomplete} atau {found:False,_err}."""
+    from . import catalog_bom  # impor lokal: hindari siklus saat import modul
+
+    frame = _frame(rangka)
+    term = " ".join((kategori or "").split()).lower()
+    if not frame or not term:
+        return {"found": False, "_err": "input"}
+    ckey = f"{frame}|{term}"
+    with _katalog_lock:
+        c = _katalog_cache.get(ckey)
+        if c and (time.monotonic() - c["at"] < _KATALOG_TTL):
+            return c["val"]
+
+    top = category_top(rangka)
+    if not top.get("found"):
+        return {"found": False, "frame_number": frame, "_err": top.get("_err") or "api"}
+    rid = top["root_id"]
+
+    # Pilih kategori TOP-LEVEL yang cocok: prefix kode ZZ-<kode katalog> ATAU
+    # kata kunci nama (EN/CN). Dedup per (id, part_list_id).
+    is_all = term in _KATALOG_ALL_TERMS
+    code = None if is_all else (catalog_bom.resolve_kategori(term) if catalog_bom.available() else None)
+    if is_all:
+        kws, prefix, mod_codes = [], None, set()
+    elif term in _KATALOG_TERM_KEYWORDS:
+        # Term khusus (mis. 'ac'): pakai kata kunci padanannya SAJA — term mentah
+        # terlalu pendek/umum utk pencocokan substring.
+        kws = list(_KATALOG_TERM_KEYWORDS[term])
+        code = None
+        prefix, mod_codes = None, set()
+    else:
+        kws = [term] + list(_KATALOG_KEYWORDS.get(code or "", ()))
+        # Prefix kode EPC hanya utk kategori yang skema ZZ-nya terpetakan (kabin).
+        prefix = _KATALOG_ZZ_PREFIX.get(code or "")
+        # Daftar figure RESMI modul UI (getAcOfType) — union dgn jaring kata kunci.
+        mod_codes = _ac_of_type_codes(frame, _KATALOG_MODULE_TYPES.get(code or "", ()))
+
+    def _match(c: dict) -> bool:
+        if is_all:
+            return True   # katalog LENGKAP: semua kategori top-level ikut
+        if (c.get("code") or "").strip().upper() in mod_codes:
+            return True
+        kode = (c.get("kode_kategori") or "").upper()
+        hay = ((c.get("nama") or "") + " " + (c.get("nama_cn") or "")).lower()
+        return bool(prefix and kode.startswith(prefix)) or any(k in hay for k in kws)
+
+    seen_top: set = set()
+    matched: list[dict] = []
+    for c in top.get("kategori") or []:
+        k = (c.get("id"), c.get("part_list_id"))
+        if _match(c) and k not in seen_top:
+            seen_top.add(k)
+            matched.append(c)
+    if not matched:
+        return {"found": False, "frame_number": frame, "_err": "no_category",
+                "message": f"Tidak ada kategori cocok '{kategori}' di Atlas unit ini."}
+
+    # Walk BFS paralel (pola _atlas_collect): tiap node dicek item+gambar-nya;
+    # node ber-item = satu FIGURE katalog.
+    figures: list[dict] = []
+    seen_nodes: set = set()
+    budget = [_KATALOG_MAX_NODES_ALL if is_all else _KATALOG_MAX_NODES]
+    errbox = [False]
+    wlock = threading.Lock()
+
+    def _figure_of(node: dict, kat_nama: str) -> list[tuple]:
+        nid, plid = node.get("id"), node.get("part_list_id")
+        with wlock:
+            if (nid, plid) in seen_nodes or budget[0] <= 0:
+                return []
+            seen_nodes.add((nid, plid))
+            budget[0] -= 1
+        res = _get_auto(_ATLAS_ITEM_URL, {
+            "id": plid, "partId": nid, "parentId": rid, "rootId": rid,
+            "partCode": node.get("code"), "type": "frameNo",
+            "isSearch": "false", "vin": frame,
+        })
+        if "_err" in res:
+            errbox[0] = True
+            d = {}
+        else:
+            d = res.get("data") if isinstance(res.get("data"), dict) else {}
+        raw_items = (d.get("items") or []) if d else []
+        rows: list[dict] = []
+        for p in raw_items:
+            pn = str(p.get("code") or "").strip().upper()
+            if not pn:
+                continue
+            alt = [str(a.get("afterTh") or "").strip().upper()
+                   for a in (p.get("partAlternates") or [])]
+            rows.append({
+                "balon": p.get("ballNum"),
+                "pn": pn,
+                "nama": " ".join(str(p.get("name") or "").split()),
+                "nama_cn": " ".join(str(p.get("originalName") or "").split()),
+                "qty": p.get("amount"),
+                "pengganti": [a for a in dict.fromkeys(alt) if a and a != pn],
+            })
+        if rows:
+            svgs = [s for s in (d.get("d2s") or []) if isinstance(s, str)]
+            fig = {
+                "kategori": kat_nama,
+                "nama": " ".join(str(d.get("partListName") or node.get("nama") or "").split()),
+                "kode": node.get("code") or "",
+                "kode_kategori": node.get("kode_kategori") or "",
+                "svg": svgs[0] if svgs else "",
+                "svg_lain": svgs[1:],
+                "items": rows,
+            }
+            with wlock:
+                figures.append(fig)
+        kids: list[tuple] = []
+        if not node.get("leaf"):
+            r2 = _tree_node(frame, rid, nid)
+            if "_err" in r2:
+                errbox[0] = True
+            for ch in (r2.get("data") or []):
+                kids.append((_norm_cat(ch), kat_nama))
+        return kids
+
+    pending = [0]
+    cnt_lock = threading.Lock()
+    done = threading.Event()
+
+    with ThreadPoolExecutor(max_workers=_ATLAS_WORKERS) as ex:
+        def _submit(task):
+            with cnt_lock:
+                pending[0] += 1
+            ex.submit(_run, task)
+
+        def _run(task):
+            try:
+                node, kat = task
+                for child in _figure_of(node, kat):
+                    _submit(child)
+            except Exception:
+                errbox[0] = True
+            finally:
+                with cnt_lock:
+                    pending[0] -= 1
+                    if pending[0] == 0:
+                        done.set()
+
+        for c in matched:
+            # Katalog lengkap: kelompokkan per BAB skema EPC (kabin/sasis/kelistrikan/
+            # powertrain) supaya daftar isi 100+ figure tetap terbaca.
+            label = (_zz_chapter(c.get("kode_kategori"))
+                     if is_all else (c.get("nama") or c.get("nama_cn") or ""))
+            _submit((c, label))
+        done.wait()
+
+    figures.sort(key=lambda f: (f.get("kode_kategori") or "", f.get("kode") or ""))
+
+    # PELENGKAP 100%: part TERPASANG kategori ini (Loading List per-VIN) yang tidak
+    # muncul di figure mana pun — umumnya baut/mur/ring work-BOM yang memang tak
+    # digambar di Parts Atlas. Masuk sbg seksi terakhir TANPA gambar, agar katalog
+    # mencakup SEMUA part terpasang kategori itu, bukan hanya yang ber-figure.
+    if code or is_all:
+        try:
+            ll = loading_list(rangka)
+            if ll.get("found") and not ll.get("partial"):
+                pncat = catalog_bom.pn_category_map() if catalog_bom.available() else {}
+                seen_pn = {it["pn"] for f in figures for it in f["items"]}
+                extra: list[dict] = []
+                for p in ll.get("parts", []):
+                    pn = (p.get("pn") or "").strip().upper()
+                    if not pn or pn in seen_pn:
+                        continue
+                    if not is_all and (pncat.get(catalog_bom._norm(pn)) or {}).get("kategori") != code:
+                        continue
+                    seen_pn.add(pn)
+                    extra.append({"balon": None, "pn": pn, "nama": "",
+                                  "nama_cn": " ".join(str(p.get("nama_cn") or "").split()),
+                                  "qty": p.get("qty"), "pengganti": []})
+                if extra:
+                    figures.append({
+                        "kategori": "Loading List",
+                        "nama": ("Part terpasang lainnya — baut/mur/pengencang dsb "
+                                 "(dari Loading List; tidak digambar di Parts Atlas)"),
+                        "kode": f"LL-{code or 'ALL'}", "kode_kategori": "ZZ-99",
+                        "svg": "", "svg_lain": [], "items": extra,
+                    })
+        except Exception:
+            pass   # pelengkap best-effort — jangan gagalkan katalog utama
+
+    incomplete = errbox[0] or budget[0] <= 0
+    val = {
+        "found": True, "frame_number": frame, "order_no": top.get("order_no"),
+        "kategori_kode": code, "lengkap": is_all,
+        "kategori_cocok": [c.get("nama") for c in matched],
+        "jumlah_figure": len(figures),
+        "jumlah_part": sum(len(f["items"]) for f in figures),
+        "figures": figures, "incomplete": incomplete,
+    }
+    if not incomplete:   # jangan cache hasil terdegradasi
+        with _katalog_lock:
+            _katalog_cache[ckey] = {"at": time.monotonic(), "val": val}
+    return val

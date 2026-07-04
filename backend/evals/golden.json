@@ -224,6 +224,21 @@
       "expect": { "tools_any": ["buat_excel"] }
     },
     {
+      "id": "katalog-tanpa-kategori",
+      "tags": ["lokal"],
+      "_kenapa": "Fitur pilihan kategori (2026-07-03): minta katalog TANPA kategori → asisten WAJIB menawarkan pilihan (kabin/mesin/.../lengkap), BUKAN menebak lalu membuat katalog.",
+      "question": "buatkan katalog untuk unit SJ346500",
+      "expect": { "reply_all": ["kabin", "lengkap"], "reply_any": ["kategori"] },
+      "expect_alt": [{ "tools_any": ["katalog_kategori"], "reply_any": ["kabin", "kategori"] }]
+    },
+    {
+      "id": "epc-katalog-kabin",
+      "tags": ["epc"],
+      "_kenapa": "Fitur katalog bergambar (2026-07-03): 'berikan katalog kabin <rangka>' → tool katalog_kategori → kartu unduh Excel per-figure + exploded view. SJ346500 terverifikasi live: 61 figure / 736 part.",
+      "question": "berikan katalog kabin SJ346500",
+      "expect": { "tools_any": ["katalog_kategori"], "reply_any": ["figure", "katalog"] }
+    },
+    {
       "id": "weichai-air-compressor",
       "tags": ["weichai"],
       "_kenapa": "Regresi 2026-07-03: 'air compressor' dulu jatuh ke modul poros Atlas → cuma pipa outlet, model simpulkan 'terintegrasi di engine assembly'. Aksesori terpasang di mesin = domain Weichai (Air Compressor Group; Assy 1013133963 & compressor 1013133966 terverifikasi live utk RJ345233).",
