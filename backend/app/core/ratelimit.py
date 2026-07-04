@@ -15,15 +15,30 @@ from collections import deque
 
 from fastapi import HTTPException, Request, status
 
+from .config import get_settings
+
 _lock = threading.Lock()
 _hits: dict[str, deque] = {}
 
 
 def _client_ip(request: Request) -> str:
-    # Hormati proxy umum (X-Forwarded-For) bila ada, fallback ke peer langsung.
+    """IP klien untuk kunci rate-limit.
+
+    ⚠️ `X-Forwarded-For` dapat dipalsukan klien: format `client, proxy1, proxy2`,
+    dan proxy tepercaya MENAMBAHKAN alamat peer di UJUNG KANAN. Maka entri yang
+    bisa dipercaya = entri ke-(TRUSTED_PROXIES) dari KANAN — BUKAN yang kiri
+    (kiri = nilai yang disuntik penyerang). Mengambil yang kiri membuat limiter
+    trivial dilewati dengan XFF acak per request (brute-force login/webhook).
+    """
     fwd = request.headers.get("x-forwarded-for", "")
     if fwd:
-        return fwd.split(",")[0].strip()
+        parts = [p.strip() for p in fwd.split(",") if p.strip()]
+        if parts:
+            n = max(1, get_settings().trusted_proxies)
+            # entri ke-n dari kanan; bila rantai lebih pendek dari klaim, pakai
+            # yang paling kiri yang tersedia (peer terdekat yang kita tahu).
+            idx = max(0, len(parts) - n)
+            return parts[idx]
     return request.client.host if request.client else "unknown"
 
 

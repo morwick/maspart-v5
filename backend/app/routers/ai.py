@@ -41,7 +41,7 @@ def ai_status(user: dict = Depends(get_current_user)):
     return {"available": get_settings().ai_configured}
 
 
-@router.post("/chat")
+@router.post("/chat", dependencies=[Depends(limit("ai_chat", 15, 60))])
 def ai_chat(body: AIChatRequest, user: dict = Depends(get_current_user)):
     history = [{"role": m.role, "content": m.content} for m in body.messages]
     if not any(m["role"] == "user" and m["content"].strip() for m in history):
@@ -101,7 +101,7 @@ def resolve_feedback(fb_id: int, resolved: bool = True,
     return {"ok": True, "id": fb_id, "resolved": resolved}
 
 
-@router.get("/banding-rangka/export")
+@router.get("/banding-rangka/export", dependencies=[Depends(limit("ai_export", 20, 60))])
 def export_banding_rangka(
     rangka_1: str = Query(..., description="Nomor rangka/VIN unit pertama"),
     rangka_2: str = Query(..., description="Nomor rangka/VIN unit kedua"),
@@ -120,7 +120,7 @@ def export_banding_rangka(
     )
 
 
-@router.get("/excel/{export_id}")
+@router.get("/excel/{export_id}", dependencies=[Depends(limit("ai_export", 20, 60))])
 def export_ai_excel(export_id: str, _user: dict = Depends(get_current_user)):
     """Excel generik hasil tool AI `buat_excel` — dipicu kartu 'Unduh' di bawah
     jawaban asisten. Payload disimpan sementara (TTL) saat tool dijalankan."""

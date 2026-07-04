@@ -18,19 +18,31 @@ _AUTH_TTL = 30.0
 _auth_cache: dict[str, tuple[float, dict | None]] = {}
 
 
+# Role yang MEMBERI hak istimewa — tak boleh diberikan hanya dari klaim token
+# yang belum terverifikasi ke DB (lihat _resolve_user, jalur fail-closed).
+_PRIVILEGED_ROLES = frozenset({"admin", "pembeli", "user_cabang"})
+
+
 def _resolve_user(username: str, token_role: str) -> dict | None:
     """Verifikasi user masih aktif & ambil role TERKINI dari DB (di-cache singkat).
     Return dict {username, role} bila boleh; None bila akun nonaktif/terhapus.
-    Saat DB tak terjangkau → fail-open ke klaim token (identitas sudah tertanda)."""
+
+    Saat DB tak terjangkau kita FAIL-CLOSED untuk hak istimewa: identitas tetap
+    dilayani (agar akses dasar jalan), tetapi role dari token yang belum
+    diverifikasi ulang TIDAK dipercaya untuk menaikkan privilege — role
+    diturunkan ke 'user'. Dengan begitu token admin yang basi/di-demote (atau
+    token palsu di skenario secret bocor) tak bisa dapat akses admin saat outage.
+    Role terverifikasi terakhir dari cache tetap dipakai bila ada."""
     now = time.time()
     hit = _auth_cache.get(username)
     if hit and (now - hit[0]) < _AUTH_TTL:
         return hit[1]
     res = sb.fetch_user_role(username)
-    if res is False:  # Supabase error → jangan kunci semua user
+    if res is False:  # Supabase error → jangan kunci semua user, tapi jangan naikkan privilege
         if hit:
-            return hit[1]
-        return {"username": username, "role": token_role}
+            return hit[1]  # role terverifikasi terakhir
+        safe_role = "user" if token_role in _PRIVILEGED_ROLES else (token_role or "user")
+        return {"username": username, "role": safe_role}
     resolved = None if res is None else {"username": username, "role": res.get("role") or token_role}
     _auth_cache[username] = (now, resolved)
     return resolved

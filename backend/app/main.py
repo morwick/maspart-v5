@@ -73,6 +73,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Header keamanan pada SEMUA respons API (HSTS bila https, anti-sniff, anti-frame).
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+}
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    for k, v in _SECURITY_HEADERS.items():
+        resp.headers.setdefault(k, v)
+    return resp
+
 app.include_router(auth.router)
 app.include_router(parts.router)
 app.include_router(populasi.router)

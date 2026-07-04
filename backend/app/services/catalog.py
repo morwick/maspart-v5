@@ -16,6 +16,18 @@ from . import part_index, sims
 
 _MAX_BATCH = 300  # batas PN per batch (jaga waktu/proses)
 
+# Cegah Excel/CSV formula injection: nama part dari SIMS/lokal bisa diawali
+# = + - @ → Excel menganggapnya FORMULA/DDE. Escape dgn prefiks ' → jadi teks.
+_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
+def _xlsafe(v):
+    if isinstance(v, str):
+        s = v.lstrip("﻿")
+        if s[:1] in _FORMULA_LEAD:
+            return "'" + v
+    return v
+
 
 def parse_part_numbers(text: str) -> tuple[list[str], list[str]]:
     """Dari teks (1 PN per baris) → (unik urut, duplikat). Header dilewati."""
@@ -162,7 +174,7 @@ def build_catalog_excel(part_numbers: list[str], on_progress=None) -> bytes:
         for ci, (val, aln) in enumerate(
             [(pn, center), (part_name, left), (kecocokan, left)], start=1
         ):
-            c = ws.cell(row=row_idx, column=ci, value=val)
+            c = ws.cell(row=row_idx, column=ci, value=_xlsafe(val))
             c.fill = fill
             c.border = border
             c.alignment = aln

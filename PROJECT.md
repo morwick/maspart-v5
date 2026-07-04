@@ -49,6 +49,17 @@
 > (kolom CUSTOMER + NOMOR RANGKA) → konfigurasi pabrik EPC per-VIN → kelompokkan unit
 > berkonfigurasi identik → cek part via EPC Atlas pada unit WAKIL tiap kelompok (paralel)
 > → verdict SAMA/BEDA dihitung SISTEM. Akses: admin/SEE_ALL (ikut populasi) — §3.5.5.
+> Update **2026-07-04 (audit keamanan)**: audit menyeluruh (5 review paralel) + perbaikan
+> Kritis/Tinggi/Menengah. Backend: rate-limit ambil IP dari X-Forwarded-For sisi KANAN
+> (anti-spoof, `trusted_proxies`); JWT_SECRET default/kosong = FATAL di env apa pun +
+> APP_ENV tak dikenal → fail-closed prod; DB down tak menaikkan privilege dari token
+> (turun ke 'user'); `/api/ai/chat` + export di-rate-limit; guard formula/CSV injection di
+> export Excel; password plaintext legacy di-upgrade ke bcrypt saat login; security headers
+> (HSTS/nosniff/X-Frame-Options) + cap upload batch. Frontend: SRI pin Leaflet CDN; token
+> ikut "Ingat saya" (sessionStorage bila tak dicentang); CSP + security headers di
+> `next.config.ts`. ⚠️ **BELUM diperbaiki (butuh Anda):** rotate kunci Supabase + scrub
+> `.streamlit/secrets.toml` dari commit `1be5c53` SEBELUM push `main` (service_key bocor);
+> TLS `verify=False` ke EPC/SIMS (sertifikat upstream invalid — perlu pin CA).
 
 ---
 

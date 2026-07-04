@@ -28,6 +28,7 @@ from ..services import catalog, compare, gudang, image_search, part_index, reser
 from ..services.supabase_client import fetch_part_photos, get_user_gudang
 
 _MAX_IMAGE_BYTES = 15 * 1024 * 1024  # 15 MB
+_MAX_UPLOAD_BYTES = 8 * 1024 * 1024   # 8 MB — cap upload Excel/CSV batch (anti zip-bomb/OOM)
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _SIMS_MIN_LEN = 4  # panjang minimum query untuk fallback SIMS (hindari lookup query pendek)
 
@@ -141,7 +142,14 @@ async def batch_catalog(
     if file is not None:
         try:
             data = await file.read()
+            if len(data) > _MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    f"File maksimal {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                )
             raw = catalog.parse_part_numbers_from_file(file.filename or "", data)
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Gagal membaca file: {e}")
         seen, part_numbers = set(), []

@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # ── CORS ──
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # ── Proxy tepercaya (untuk rate-limit / IP klien) ──
+    # Jumlah reverse-proxy tepercaya di depan app (mis. Traefik = 1). Dipakai
+    # untuk mengambil IP klien asli dari X-Forwarded-For dari sisi KANAN, supaya
+    # header XFF yang dipalsukan klien tak bisa melewati rate-limiter.
+    trusted_proxies: int = 1
+
     # ── Ongkir (RajaOngkir / Komerce) ──
     rajaongkir_api_key: str = ""             # key dari rajaongkir.komerce.id
     biteship_api_key: str = ""               # (opsional, tidak dipakai default)
@@ -136,9 +142,16 @@ class Settings(BaseSettings):
 
     _DEFAULT_JWT_SECRET: ClassVar[str] = "dev-secret-ganti-di-produksi"
 
+    # Nilai APP_ENV yang secara EKSPLISIT berarti non-produksi. Apa pun di luar ini
+    # (termasuk kosong / salah ketik / tak di-set) diperlakukan sebagai PRODUKSI →
+    # gerbang keamanan fail-CLOSED (lupa set APP_ENV tak boleh melonggarkan validasi).
+    _DEV_ENVS: ClassVar[frozenset] = frozenset(
+        {"dev", "development", "local", "test", "testing", "ci"}
+    )
+
     @property
     def is_production(self) -> bool:
-        return self.app_env.strip().lower() in ("prod", "production", "live")
+        return self.app_env.strip().lower() not in self._DEV_ENVS
 
     def security_issues(self) -> list[str]:
         """Daftar masalah keamanan konfigurasi (kosong = aman)."""
@@ -157,8 +170,17 @@ class Settings(BaseSettings):
         return issues
 
     def validate_security(self) -> list[str]:
-        """Di production: gagalkan startup jika ada masalah keamanan.
-        Di dev: hanya kembalikan daftar peringatan (caller yang mencetak)."""
+        """Gagalkan startup pada konfigurasi tak aman.
+        - JWT_SECRET default/kosong = FATAL di lingkungan APA PUN (jangan pernah
+          boot dengan secret yang diketahui publik — tak bergantung APP_ENV yang
+          mudah lupa di-set).
+        - Masalah lain (secret pendek, callback secret kosong) fatal hanya di
+          production; di dev dikembalikan sebagai peringatan."""
+        if not self.jwt_secret or self.jwt_secret == self._DEFAULT_JWT_SECRET:
+            raise RuntimeError(
+                "JWT_SECRET belum di-set (masih default/kosong). Server menolak "
+                "start: set env JWT_SECRET ke string acak minimal 32 karakter."
+            )
         issues = self.security_issues()
         if issues and self.is_production:
             raise RuntimeError(

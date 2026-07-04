@@ -38,6 +38,20 @@ _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 _CENTER = Alignment(horizontal="center", vertical="center")
 _LEFT = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
+# Cegah CSV/Excel FORMULA INJECTION: sel teks yang diawali = + - @ (atau kendali
+# tab/CR/LF) diperlakukan Excel sebagai FORMULA/DDE. Nama part/tabel di file ini
+# berasal dari EPC/SIMS/keluaran model (tak tepercaya) → escape dgn prefiks '
+# agar ditulis sebagai TEKS. Angka & non-string dibiarkan apa adanya.
+_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
+def _safe(v):
+    if isinstance(v, str):
+        s = v.lstrip("﻿")  # buang BOM di depan, jangan tertipu
+        if s[:1] in _FORMULA_LEAD:
+            return "'" + v
+    return v
+
 
 # ── Perbandingan PENUH dua VIN (tanpa cap) ──
 def compare_rangka(rangka_1: str, rangka_2: str, kategori: str = "") -> dict:
@@ -124,7 +138,7 @@ def _style_table(ws, start_row: int, headers: list[str], rows: list[list],
     r = start_row + 1
     for i, row in enumerate(rows):
         for j, val in enumerate(row, start=1):
-            c = ws.cell(row=r, column=j, value=val)
+            c = ws.cell(row=r, column=j, value=_safe(val))
             c.border = _BORDER
             c.alignment = _CENTER if j in (1, len(headers)) else _LEFT
             if j == 2:  # kolom PN → mono
@@ -301,10 +315,10 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
     ws = wb.active
     ws.title = "Data"
     ws.sheet_view.showGridLines = False
-    start = _title(ws, d["judul"],
+    start = _title(ws, _safe(d["judul"]),
                    f"{len(baris)} baris · MASPART Asisten AI", max(2, len(kolom)))
     for j, (h, w) in enumerate(zip(kolom, widths), start=1):
-        c = ws.cell(row=start, column=j, value=h)
+        c = ws.cell(row=start, column=j, value=_safe(h))
         c.fill = _HEAD_FILL
         c.font = _WHITE
         c.alignment = _CENTER
@@ -314,7 +328,7 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
     for i, row in enumerate(baris):
         for j in range(1, len(kolom) + 1):
             val = row[j - 1] if j - 1 < len(row) else ""
-            c = ws.cell(row=r, column=j, value=val)
+            c = ws.cell(row=r, column=j, value=_safe(val))
             c.border = _BORDER
             c.alignment = _CENTER if j == 1 or j in mono_cols else _LEFT
             c.font = _MONO if j in mono_cols else _INK
@@ -450,7 +464,7 @@ def katalog_excel(rangka: str, kategori: str) -> tuple[bytes | None, str]:
         cno.border = _BORDER
         cno.font = _INK
         ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=3)
-        cn = ws.cell(row=r, column=2, value=f["nama"] + ("" if f.get("svg") else "  (tanpa gambar di EPC)"))
+        cn = ws.cell(row=r, column=2, value=_safe(f["nama"] + ("" if f.get("svg") else "  (tanpa gambar di EPC)")))
         cn.font = _LINK_FONT
         cn.alignment = _LEFT
         cn.border = _BORDER
@@ -460,7 +474,7 @@ def katalog_excel(rangka: str, kategori: str) -> tuple[bytes | None, str]:
         cq.font = _INK
         # Kolom kelompok — penting utk katalog lengkap (kabin/sasis/kelistrikan/…).
         ws.merge_cells(start_row=r, start_column=5, end_row=r, end_column=7)
-        ck = ws.cell(row=r, column=5, value=f.get("kategori") or "")
+        ck = ws.cell(row=r, column=5, value=_safe(f.get("kategori") or ""))
         ck.font = Font(color="535B56", size=9)
         ck.alignment = _LEFT
         ck.border = _BORDER
@@ -519,7 +533,7 @@ def katalog_excel(rangka: str, kategori: str) -> tuple[bytes | None, str]:
                     (lr.get("harga") or None) if lr else None,
                     ", ".join(it.get("pengganti") or []) or None]
             for j, v in enumerate(vals, start=1):
-                dc = ws.cell(row=row, column=j, value=v)
+                dc = ws.cell(row=row, column=j, value=_safe(v))
                 dc.border = _BORDER
                 dc.font = _MONO if j == 2 else _INK
                 dc.alignment = _CENTER if j in (1, 4, 5) else _LEFT
