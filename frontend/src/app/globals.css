@@ -628,6 +628,16 @@ main > div.mx-auto[class*="max-w-"] {
   background: #0f1411;
   color: #c5cac6;
 }
+/* Sembunyikan scrollbar (scroll tetap berfungsi) — dipakai nav sidebar. */
+.cc-noscroll {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge lama */
+}
+.cc-noscroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none; /* Chrome/Safari/Edge */
+}
 .cc-side-label {
   font-size: 10px;
   text-transform: uppercase;

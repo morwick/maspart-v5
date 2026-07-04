@@ -257,7 +257,7 @@ export default function AppShell({
   const sidebarExpanded = (
     <aside className="cc-side flex w-56 shrink-0 flex-col">
       {BrandBlock}
-      <nav className="flex-1 overflow-auto px-3 pb-4">
+      <nav className="cc-noscroll flex-1 overflow-auto px-3 pb-4">
         {sections.map((sec) => (
           <div key={sec.label}>
             <div className="cc-side-label">{sec.label}</div>
@@ -286,7 +286,7 @@ export default function AppShell({
   const sidebarRail = (
     <aside className="cc-side flex w-16 shrink-0 flex-col items-center py-3.5">
       <div className="mono grid place-items-center" style={{ width: 32, height: 32, borderRadius: 8, background: "var(--brand-600)", color: "#fff", fontWeight: 700, fontSize: 15, marginBottom: 14 }}>M</div>
-      <nav className="flex-1 overflow-auto flex flex-col gap-1 items-center w-full py-1">
+      <nav className="cc-noscroll flex-1 overflow-auto flex flex-col gap-1 items-center w-full py-1">
         {flatItems.map((it) => (
           <Link key={it.href} href={it.href} title={it.label} className={"cc-rail-item" + (it.href === active ? " active" : "")}>
             <span style={{ display: "inline-flex", opacity: it.href === active ? 1 : 0.75 }}>{it.icon}</span>
