@@ -163,21 +163,22 @@ export default function SearchImagePage() {
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="grid aspect-square w-full place-items-center overflow-hidden rounded-xl border-2 border-dashed border-zinc-300 bg-white text-sm text-zinc-500 hover:border-brand"
+              className="grid aspect-square w-full place-items-center overflow-hidden"
+              style={{ borderRadius: 12, border: "2px dashed var(--ink-300)", background: "var(--paper)", fontSize: 13.5, color: "var(--ink-500)", cursor: "pointer" }}
             >
               {preview ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={preview} alt="preview" className="h-full w-full object-contain" />
               ) : (
-                <span className="px-4 text-center">
+                <span style={{ padding: "0 16px", textAlign: "center" }}>
                   📷 Klik untuk pilih foto
                   <br />
-                  <span className="text-xs text-zinc-400">atau tempel (Ctrl+V)</span>
+                  <span style={{ fontSize: 12, color: "var(--ink-400)" }}>atau tempel (Ctrl+V)</span>
                 </span>
               )}
             </button>
 
-            <label className="mt-3 flex items-center gap-2 text-sm text-zinc-600">
+            <label className="flex items-center gap-2" style={{ marginTop: 12, fontSize: 13.5, color: "var(--ink-600)" }}>
               <input
                 type="checkbox"
                 checked={useTta}
@@ -186,11 +187,11 @@ export default function SearchImagePage() {
               Mode akurat (TTA, lebih lambat)
             </label>
 
-            <button onClick={handleSearch} disabled={!file || loading} className="btn btn-primary mt-3" style={{ width: "100%" }}>
+            <button onClick={handleSearch} disabled={!file || loading} className="btn btn-primary" style={{ width: "100%", marginTop: 12 }}>
               {loading ? "Mencari…" : "🔍 Cari Part Mirip"}
             </button>
             {loading && (
-              <p className="mt-2 text-xs text-zinc-400">
+              <p style={{ marginTop: 8, fontSize: 12, color: "var(--ink-400)" }}>
                 Pencarian pertama bisa lebih lama (memuat model AI).
               </p>
             )}
@@ -201,7 +202,7 @@ export default function SearchImagePage() {
             {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
 
             {searched && !error && (
-              <p className="mb-3 text-sm text-zinc-500">
+              <p style={{ marginBottom: 12, fontSize: 13.5, color: "var(--ink-500)" }}>
                 {results.length > 0
                   ? `${results.length} part mirip ditemukan`
                   : "Tidak ada part mirip yang ditemukan."}
@@ -223,9 +224,10 @@ export default function SearchImagePage() {
                         }
                         router.push(`/part/${encodeURIComponent(r.part_number)}?from=image`);
                       }}
-                      className="overflow-hidden rounded-xl bg-white text-left ring-1 ring-zinc-200 transition hover:ring-brand"
+                      className="surface overflow-hidden text-left"
+                      style={{ padding: 0, cursor: "pointer" }}
                     >
-                      <div className="aspect-square w-full bg-zinc-50">
+                      <div className="aspect-square w-full" style={{ background: "var(--ink-50)" }}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={partImageUrl(r.sims_url)}
@@ -234,23 +236,20 @@ export default function SearchImagePage() {
                           className="h-full w-full object-contain"
                         />
                       </div>
-                      <div className="p-2">
+                      <div style={{ padding: 8 }}>
                         {r.part_name && (
-                          <p className="truncate text-xs font-semibold" title={r.part_name}>
+                          <p className="truncate" style={{ fontSize: 12, fontWeight: 600 }} title={r.part_name}>
                             {r.part_name}
                           </p>
                         )}
-                        <p className="truncate font-mono text-xs text-zinc-500">
+                        <p className="truncate mono" style={{ fontSize: 12, color: "var(--ink-500)" }}>
                           {r.part_number}
                         </p>
-                        <div className="mt-1 flex items-center gap-1.5">
-                          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100">
-                            <div
-                              className="h-full bg-brand"
-                              style={{ width: `${pct}%` }}
-                            />
+                        <div className="flex items-center" style={{ gap: 6, marginTop: 4 }}>
+                          <div style={{ height: 6, flex: 1, overflow: "hidden", borderRadius: 99, background: "var(--ink-100)" }}>
+                            <div style={{ height: "100%", background: "var(--brand-600)", width: `${pct}%` }} />
                           </div>
-                          <span className="text-xs font-medium text-zinc-600">{pct}%</span>
+                          <span className="mono" style={{ fontSize: 11.5, fontWeight: 600, color: "var(--ink-600)" }}>{pct}%</span>
                         </div>
                       </div>
                     </button>
@@ -260,7 +259,7 @@ export default function SearchImagePage() {
             )}
 
             {!searched && !error && (
-              <div className="grid h-56 place-items-center rounded-xl bg-zinc-50 text-sm text-zinc-400">
+              <div className="surface grid place-items-center" style={{ height: 224, color: "var(--ink-400)", fontSize: 13.5 }}>
                 Hasil pencarian akan muncul di sini.
               </div>
             )}
