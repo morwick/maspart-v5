@@ -12,6 +12,11 @@ declare global {
 }
 
 const LEAFLET_VER = "1.9.4";
+// Subresource Integrity: hash SHA-384 dari byte file resmi leaflet 1.9.4 di CDN.
+// Browser MENOLAK mengeksekusi kalau byte tak cocok → CDN/paket npm yang
+// dikompromikan atau MITM tak bisa menyuntik JS ke origin terautentikasi.
+const LEAFLET_JS_SRI = "sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH";
+const LEAFLET_CSS_SRI = "sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H";
 const DEFAULT_CENTER: [number, number] = [-6.2088, 106.8456]; // Jakarta
 
 function loadLeaflet(): Promise<any> {
@@ -23,6 +28,8 @@ function loadLeaflet(): Promise<any> {
       link.id = "leaflet-css";
       link.rel = "stylesheet";
       link.href = `https://unpkg.com/leaflet@${LEAFLET_VER}/dist/leaflet.css`;
+      link.integrity = LEAFLET_CSS_SRI;
+      link.crossOrigin = "anonymous";
       document.head.appendChild(link);
     }
     const existing = document.getElementById("leaflet-js") as HTMLScriptElement | null;
@@ -35,6 +42,8 @@ function loadLeaflet(): Promise<any> {
     const s = document.createElement("script");
     s.id = "leaflet-js";
     s.src = `https://unpkg.com/leaflet@${LEAFLET_VER}/dist/leaflet.js`;
+    s.integrity = LEAFLET_JS_SRI;
+    s.crossOrigin = "anonymous";
     s.async = true;
     s.onload = () => resolve(window.L);
     s.onerror = reject;

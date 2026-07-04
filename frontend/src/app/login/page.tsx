@@ -41,7 +41,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await login(username.trim(), password);
-      saveSession(res.access_token, res.user);
+      saveSession(res.access_token, res.user, remember);
       router.replace(landingPath(res.user));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal login");
