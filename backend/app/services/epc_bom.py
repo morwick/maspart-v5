@@ -1009,10 +1009,18 @@ def assembly_components(rangka: str, terms: list[str], pn: str = "") -> dict:
         for n in nodes:
             hay = ((n.get("nama") or "") + " " + (n.get("nama_cn") or "")).lower()
             score = sum(1 for k in kws if k in hay)
-            if score:
-                scored.append((score, n))
-        scored.sort(key=lambda x: -x[0])
-        target = scored[0][1] if scored else None
+            if not score:
+                continue
+            # Node 'X assembly'/'X总成' = ASSEMBLY UTAMA yang biasanya dimaksud user
+            # ('urai retarder' → 'Retarder assembly' 缓速器总成), bukan node wiring/
+            # bracket/housing yang kebetulan menyebut kata itu. Beri bobot lebih;
+            # antar-seri, nama lebih ringkas (lebih spesifik) diprioritaskan.
+            if "assembly" in hay or "总成" in hay:
+                score += 2
+            scored.append((score, len(hay), n))
+        # skor tertinggi dulu; lalu nama TERPENDEK (paling spesifik) dulu
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        target = scored[0][2] if scored else None
 
     if target is None:
         return {"found": False, "frame_number": frame,
