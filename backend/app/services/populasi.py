@@ -8,6 +8,7 @@ data/populasi/). Mirror app.py::_load_populasi_data + render_populasi_tab.
 from __future__ import annotations
 
 import io
+import re
 import threading
 
 import pandas as pd
@@ -142,6 +143,63 @@ def _multi_query(df: pd.DataFrame, q: str) -> pd.DataFrame:
             m |= df[col].astype(str).str.upper().str.contains(w, na=False, regex=False)
         mask &= m
     return df[mask].reset_index(drop=True)
+
+
+def _norm_name(s: str) -> str:
+    """Normalisasi nama customer utk pencocokan: uppercase, tanda baca → spasi
+    ('PT.ARGCIO  JAYA' == 'PT ARGCIO JAYA')."""
+    return " ".join(re.sub(r"[^A-Z0-9]+", " ", str(s).upper()).split())
+
+
+def units_for_customer(q: str, limit: int = 300) -> dict:
+    """Daftar UNIT MILIK SATU CUSTOMER/PT dari data populasi (dipakai Asisten
+    utk banding part antar unit armada). Cocokkan per-kata pada kolom CUSTOMER
+    setelah normalisasi tanda baca; kata badan usaha (PT/CV/TBK) tidak wajib.
+    Bila nihil, sertakan 'kandidat' (customer yang memuat salah satu kata)."""
+    df = _ensure()
+    if df is None or df.empty:
+        return {"available": False, "units": []}
+    if "CUSTOMER" not in df.columns:
+        return {"available": True, "units": [],
+                "error": "kolom CUSTOMER tidak ada di data populasi"}
+
+    qn = _norm_name(q)
+    words = [w for w in qn.split() if w not in ("PT", "CV", "TBK", "PERSERO")] or qn.split()
+    if not words:
+        return {"available": True, "units": [], "error": "nama customer kosong"}
+    cust = df["CUSTOMER"].fillna("").astype(str)
+    normed = cust.map(_norm_name)
+    mask = pd.Series(True, index=df.index)
+    for w in words:
+        mask &= normed.str.contains(w, na=False, regex=False)
+    res = df[mask]
+
+    def _val(row, col: str) -> str:
+        v = row.get(col)
+        return "" if v is None or pd.isna(v) else str(v).strip()
+
+    units = []
+    for _, r in res.head(limit).iterrows():
+        units.append({
+            "customer": _val(r, "CUSTOMER"),
+            "model": _val(r, "MODEL"),
+            "jenis": _val(r, "JENIS"),
+            "tipe_unit": _val(r, "TIPE UNIT"),
+            "tahun": _val(r, "TAHUN"),
+            "rangka": _val(r, "NOMOR RANGKA"),
+        })
+    out = {
+        "available": True,
+        "jumlah_unit": int(mask.sum()),
+        "customers": sorted({u["customer"] for u in units if u["customer"]}),
+        "units": units,
+    }
+    if not units:
+        any_mask = pd.Series(False, index=df.index)
+        for w in words:
+            any_mask |= normed.str.contains(w, na=False, regex=False)
+        out["kandidat"] = sorted({v.strip() for v in cust[any_mask] if v.strip()})[:12]
+    return out
 
 
 def search_summary(q: str = "", limit: int = 15) -> dict:

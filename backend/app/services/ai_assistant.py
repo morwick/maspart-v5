@@ -837,6 +837,32 @@ def _tool_specs(user: dict) -> list[dict]:
                 },
             },
         })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "banding_part_armada",
+                "description": (
+                    "BANDINGKAN SATU PART ANTAR SEMUA UNIT MILIK SATU CUSTOMER/PT "
+                    "(armada) — panggil saat user tanya 'apakah <part> SAMA untuk semua "
+                    "unit PT X?', 'cek kampas kopling unit PT Y sama semua atau beda?'. "
+                    "Otomatis: data populasi → nomor rangka tiap unit → konfigurasi "
+                    "pabrik EPC per-VIN → kelompokkan unit berkonfigurasi identik → cek "
+                    "part via EPC Parts Atlas pada unit WAKIL tiap kelompok → verdict "
+                    "SAMA/BEDA dihitung SISTEM (bukan tebakan). Hanya unit Sinotruk/"
+                    "HOWO/SITRAK yang dikenali EPC. JANGAN menjawab pertanyaan seperti "
+                    "ini dgn cek_populasi lalu menebak dari nama model."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "customer": {"type": "string", "description": "Nama customer/PT persis seperti user menyebutnya (mis. 'PT ARGCIO')."},
+                        "part": {"type": "string", "description": "Part yang dibandingkan (mis. 'kampas kopling', 'kampas rem', 'filter oli')."},
+                        "posisi": {"type": "string", "description": "Opsional, khusus part poros/rem: 'depan' atau 'belakang'."},
+                    },
+                    "required": ["customer", "part"],
+                },
+            },
+        })
 
     if role == "pembeli":
         specs.append({
@@ -1430,6 +1456,185 @@ def _t_cek_populasi(args: dict, user: dict) -> dict:
         "jangan dump semua baris."
     )
     return res
+
+
+# Batas kerja banding_part_armada: unit yang di-lookup config-nya & kelompok
+# konfigurasi yang di-walk part-nya (walk Atlas per unit wakil itu mahal).
+_ARMADA_MAX_UNITS = 80
+_ARMADA_MAX_GROUPS = 5
+
+
+def _t_banding_part_armada(args: dict, user: dict) -> dict:
+    """BANDING SATU PART ANTAR SEMUA UNIT SATU CUSTOMER (armada): populasi →
+    rangka tiap unit → konfigurasi pabrik EPC per-VIN (murah, di-cache) →
+    kelompokkan unit per konfigurasi komponen terkait → walk EPC Parts Atlas
+    HANYA pada satu unit WAKIL per kelompok (unit sekelompok = konfigurasi
+    komponen identik) → verdict SAMA/BEDA dihitung di kode, bukan oleh model."""
+    if not _can_populasi(user):
+        return {"denied": True, "error": "Data populasi unit hanya untuk admin & akun 'mas'."}
+    customer = (args.get("customer") or "").strip()
+    part = (args.get("part") or "").strip()
+    posisi = (args.get("posisi") or "").strip()
+    if not customer:
+        return {"error": "Sebutkan nama customer/PT pemilik armada."}
+    if not part:
+        return {"error": "Sebutkan part yang mau dibandingkan (mis. 'kampas kopling')."}
+
+    try:
+        pop = populasi.units_for_customer(customer)
+    except Exception as e:  # pragma: no cover
+        return {"error": f"gagal baca data populasi: {e}"}
+    if not pop.get("available"):
+        return {"available": False,
+                "error": "Data populasi unit belum tersedia (file populasi.xlsx belum diunggah admin)."}
+    units = [u for u in (pop.get("units") or []) if u.get("rangka")]
+    tanpa_rangka = max(0, (pop.get("jumlah_unit") or 0) - len(units))
+    if not units:
+        out = {"found": False,
+               "error": f"Tidak ada unit ber-nomor-rangka untuk customer '{customer}' di data populasi."}
+        if pop.get("kandidat"):
+            out["kandidat_customer"] = pop["kandidat"]
+            out["jawaban_wajib"] = ("Customer persis itu tidak ada. Tampilkan 'kandidat_customer' "
+                                    "dan minta user memilih — JANGAN menebak sendiri.")
+        return out
+
+    terpotong_unit = len(units) > _ARMADA_MAX_UNITS
+    units = units[:_ARMADA_MAX_UNITS]
+
+    # Kolom konfigurasi EPC yang MENENTUKAN part ini (per domain query): unit
+    # dengan nilai kolom-kolom ini identik = komponen terpasangnya sama.
+    terms, _syn = _expand_query(part)
+    ql = (part + " " + " ".join(terms)).lower()
+    modules, is_axle = _atlas_modules_for(ql)
+    if is_axle:
+        sig_fields = ("axle_depan", "axle_tengah", "axle_belakang")
+    elif "LHQ" in modules:      # kopling: ditentukan pasangan mesin+gearbox
+        sig_fields = ("engine", "gearbox")
+    elif "BSX" in modules:      # transmisi
+        sig_fields = ("gearbox",)
+    elif "CDQ" in modules:      # domain campuran (mis. 'filter' polos) → semua kolom
+        sig_fields = ("engine", "gearbox", "axle_depan", "axle_tengah", "axle_belakang")
+    else:                       # FDJ / mesin & aksesorinya
+        sig_fields = ("engine",)
+
+    def _cfg(u: dict):
+        v = epc.lookup(u["rangka"])
+        if not v.get("found"):
+            return u, None
+        return u, " | ".join(f"{f}: {v.get(f) or '-'}" for f in sig_fields)
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        pairs = list(ex.map(_cfg, units))
+
+    groups: dict[str, dict] = {}
+    epc_miss: list[dict] = []
+    for u, sig in pairs:
+        if sig is None:
+            epc_miss.append(u)
+            continue
+        groups.setdefault(sig, {"konfigurasi": sig, "unit": []})["unit"].append(u)
+
+    if not groups:
+        return {"found": False, "customer_cocok": pop.get("customers"),
+                "jumlah_unit": len(units),
+                "error": "Tidak ada satu pun rangka armada ini yang dikenali EPC Sinotruk "
+                         "(mungkin bukan unit Sinotruk/HOWO/SITRAK, atau EPC sedang gagal). "
+                         "Jangan menyimpulkan sama/beda."}
+
+    glist = sorted(groups.values(), key=lambda g: -len(g["unit"]))
+    dicek, dilewati = glist[:_ARMADA_MAX_GROUPS], glist[_ARMADA_MAX_GROUPS:]
+
+    def _cek_kelompok(g: dict) -> None:
+        rep = g["unit"][0]["rangka"]
+        r = _t_part_aus_dari_rangka(
+            {"rangka": rep, "query": part, **({"posisi": posisi} if posisi else {})}, user)
+        g["rangka_wakil"] = rep
+        if r.get("found"):
+            rows = ((r.get("parts") or []) + (r.get("parts_depan") or [])
+                    + (r.get("parts_belakang") or []) + (r.get("parts_tanpa_posisi") or []))
+            g["parts"] = [{k: p.get(k) for k in ("part_number", "nama", "posisi_poros",
+                                                 "qty_di_unit", "stok_total", "harga_lokal")
+                           if p.get(k) is not None} for p in rows[:15]]
+            g["pn_set"] = sorted({p.get("part_number") for p in rows if p.get("part_number")})
+            if r.get("catatan_mesin_weichai"):
+                g["catatan_mesin_weichai"] = r["catatan_mesin_weichai"]
+            if r.get("peringatan_tidak_lengkap"):
+                g["peringatan_tidak_lengkap"] = r["peringatan_tidak_lengkap"]
+        else:
+            g["error_cek_part"] = r.get("error") or "cek part EPC gagal"
+            if r.get("jawaban_wajib"):
+                g["jawaban_wajib"] = r["jawaban_wajib"]
+        g["jumlah_unit"] = len(g["unit"])
+        g["unit"] = [{"rangka": x["rangka"], "model": x.get("model"), "tahun": x.get("tahun")}
+                     for x in g["unit"][:15]]
+
+    # Walk Atlas tiap kelompok PARALEL (masing-masing puluhan detik; berurutan
+    # bisa >5 menit utk armada besar). Tiap _cek_kelompok memutasi dict g-nya
+    # sendiri — tidak ada state silang antar-thread.
+    with ThreadPoolExecutor(max_workers=_ARMADA_MAX_GROUPS) as ex:
+        list(ex.map(_cek_kelompok, dicek))
+
+    # Verdict dihitung SISTEM dari PN hasil EPC — model tinggal menyampaikan.
+    ok = [g for g in dicek if "pn_set" in g]
+    verdict: dict = {}
+    if ok and len(ok) == len(dicek):
+        identik = len({tuple(g["pn_set"]) for g in ok}) == 1
+        if identik and not dilewati and not epc_miss:
+            verdict["sama_semua"] = True
+            verdict["kesimpulan"] = (
+                f"SAMA — seluruh armada memakai daftar PN '{part}' yang sama "
+                "(semua unit berkonfigurasi identik menurut EPC, dan PN hasil cek "
+                "unit wakil tiap kelompok identik).")
+        elif identik:
+            verdict["sama_semua"] = None
+            verdict["kesimpulan"] = (
+                "Kelompok yang TERCEK semuanya memakai PN sama, TAPI ada kelompok yang "
+                "dilewati / unit yang tak dikenali EPC — sampaikan 'kemungkinan besar sama' "
+                "dengan catatan itu, JANGAN klaim pasti semua.")
+        else:
+            inter = set(ok[0]["pn_set"])
+            for g in ok[1:]:
+                inter &= set(g["pn_set"])
+            verdict["sama_semua"] = False
+            verdict["pn_sama_semua_kelompok"] = sorted(inter)
+            verdict["kesimpulan"] = (
+                "BERBEDA antar kelompok konfigurasi — rinci per kelompok: konfigurasi, "
+                "contoh unit (rangka/model/tahun), dan PN-nya ('pn_set'/'parts').")
+    else:
+        verdict["sama_semua"] = None
+        verdict["kesimpulan"] = ("BELUM TUNTAS — sebagian kelompok gagal dicek ke EPC. Jangan "
+                                 "menyimpulkan sama/beda; sebutkan kelompok yang gagal & sarankan coba lagi.")
+
+    return {
+        "found": True,
+        "customer_cocok": pop.get("customers"),
+        "part": part,
+        "jumlah_unit_populasi": pop.get("jumlah_unit"),
+        "jumlah_unit_dicek": len(units),
+        "dasar_pengelompokan": ("konfigurasi pabrik per-VIN dari EPC Sinotruk; kolom penentu: "
+                                + ", ".join(sig_fields)),
+        "jumlah_kelompok_konfigurasi": len(glist),
+        "kelompok": dicek,
+        **({"kelompok_dilewati": [{"konfigurasi": g["konfigurasi"], "jumlah_unit": len(g["unit"])}
+                                  for g in dilewati],
+            "catatan_dilewati": (f"Hanya {_ARMADA_MAX_GROUPS} kelompok konfigurasi terbesar yang "
+                                 "dicek part-nya — sebutkan ada kelompok lain yang belum tercek.")}
+           if dilewati else {}),
+        **({"unit_tak_dikenal_epc": [{"rangka": u["rangka"], "model": u.get("model")}
+                                     for u in epc_miss[:10]],
+            "jumlah_tak_dikenal_epc": len(epc_miss)} if epc_miss else {}),
+        **({"jumlah_unit_tanpa_rangka": tanpa_rangka} if tanpa_rangka else {}),
+        **({"peringatan": (f"Unit customer ini > {_ARMADA_MAX_UNITS}; hanya "
+                           f"{_ARMADA_MAX_UNITS} pertama yang dicek.")} if terpotong_unit else {}),
+        "perbandingan": verdict,
+        "sumber": ("Data populasi (armada per customer) + EPC Sinotruk resmi: konfigurasi pabrik "
+                   "per-VIN untuk mengelompokkan unit, lalu part dicek via EPC Parts Atlas pada "
+                   "SATU unit wakil per kelompok (unit sekelompok = konfigurasi komponen identik)."),
+        "catatan": ("Verdict di 'perbandingan' DIHITUNG SISTEM dari PN hasil EPC — sampaikan apa "
+                    "adanya, jangan menyimpulkan sendiri. Bila BERBEDA: rinci per kelompok. "
+                    "⛔ JANGAN menyebut PN di luar 'parts'/'pn_set'."),
+    }
 
 
 def _gearbox_from_rangka(rangka: str) -> tuple[str, dict]:
@@ -3093,6 +3298,7 @@ _DISPATCH = {
     "part_termasuk_assy": _t_part_termasuk_assy,
     "daftar_transmisi_assy": _t_daftar_transmisi_assy,
     "cek_populasi": _t_cek_populasi,
+    "banding_part_armada": _t_banding_part_armada,
     "detail_part": _t_detail_part,
     "harga_sims": _t_harga_sims,
     "info_aplikasi": _t_info_aplikasi,
@@ -3168,7 +3374,14 @@ def _system_prompt(user: dict) -> str:
         "(mis. 'ada berapa unit NX360', 'unit di lokasi X', 'unit tahun 2022', 'unit "
         "Euro 3'), panggil tool cek_populasi. Ini DATA UNIT/KENDARAAN — BUKAN stok "
         "part. Untuk 'berapa unit' gunakan 'jumlah_cocok'/'total_semua_unit'; untuk "
-        "rincian per model gunakan 'jumlah_per_nilai'. Jangan mengarang angka populasi."
+        "rincian per model gunakan 'jumlah_per_nilai'. Jangan mengarang angka populasi.\n"
+        "BANDING PART SATU ARMADA: bila user tanya apakah sebuah PART SAMA untuk SEMUA "
+        "unit milik satu customer/PT (mis. 'cek kampas kopling unit PT X apakah sama "
+        "semua'), WAJIB panggil banding_part_armada(customer, part) — tool ini otomatis "
+        "mengambil rangka tiap unit dari populasi, mengelompokkan per konfigurasi pabrik "
+        "EPC, mengecek part via EPC pada unit wakil tiap kelompok, dan MENGHITUNG verdict "
+        "SAMA/BEDA. ⛔ JANGAN menjawab dgn cek_populasi lalu menebak dari nama model, dan "
+        "JANGAN menyimpulkan sama/beda sendiri — pakai field 'perbandingan' hasil tool."
         if _can_populasi(user)
         else ""
     )

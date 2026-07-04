@@ -244,6 +244,13 @@
       "_kenapa": "Regresi 2026-07-03: 'air compressor' dulu jatuh ke modul poros Atlas → cuma pipa outlet, model simpulkan 'terintegrasi di engine assembly'. Aksesori terpasang di mesin = domain Weichai (Air Compressor Group; Assy 1013133963 & compressor 1013133966 terverifikasi live utk RJ345233).",
       "question": "cek part air compressor unit RJ345233",
       "expect": { "tools_any": ["uraikan_mesin"], "pn_any": ["1013133963", "1013133966"] }
+    },
+    {
+      "id": "epc-armada-kampas-kopling",
+      "tags": ["epc"],
+      "_kenapa": "Fitur banding part armada (2026-07-04): 'apakah part X sama utk semua unit PT Y' → tool banding_part_armada (populasi → rangka → konfigurasi EPC per-VIN → cek part unit wakil per kelompok → verdict sistem). PT MITRA ANGKUTAN SEJATI terverifikasi live: 155 unit, 16 kelompok engine+gearbox, verdict BERBEDA (hanya WG9114230019 sama di semua kelompok). LAMBAT (±2-3 mnt, armada besar).",
+      "question": "cek kampas kopling untuk unit PT MITRA ANGKUTAN SEJATI apakah sama semua",
+      "expect": { "tools_any": ["banding_part_armada"], "reply_any": ["kopling"] }
     }
   ]
 }

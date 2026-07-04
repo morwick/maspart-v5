@@ -44,6 +44,11 @@
 > (d) Dockerfile backend +`fonts-liberation` (angka balon = teks Arial di SVG; tanpa font
 > hilang senyap) & requirements +`resvg-py`. (e) Redeploy Coolify ternyata BISA dari CLI
 > (`docker compose up -d --force-recreate` di folder service) — §5.4.
+> Update **2026-07-04 (armada)**: **Banding part antar unit SATU CUSTOMER** — tool
+> `banding_part_armada`: "cek kampas kopling unit PT X apakah sama semua" → populasi
+> (kolom CUSTOMER + NOMOR RANGKA) → konfigurasi pabrik EPC per-VIN → kelompokkan unit
+> berkonfigurasi identik → cek part via EPC Atlas pada unit WAKIL tiap kelompok (paralel)
+> → verdict SAMA/BEDA dihitung SISTEM. Akses: admin/SEE_ALL (ikut populasi) — §3.5.5.
 
 ---
 
@@ -250,6 +255,7 @@ kamus sinonim **juga disuntikkan ke system prompt** ("KAMUS ISTILAH LAPANGAN"). 
 | `buat_excel` | **EXPORT EXCEL DINAMIS** — "buatkan excelnya" atas data apa pun yg dibahas → model susun judul+kolom+baris dari hasil tool → kartu unduh gaya Claude; PN di isi file wajib grounded (anti-karangan) (2026-07-03) | semua |
 | `katalog_kategori` | **KATALOG BERGAMBAR per-VIN** (§3.5.5h) — per kategori ("katalog kabin SJ346500") ATAU `semua` (LENGKAP); tanpa kategori → tawarkan pilihan. Excel 1 sheet: daftar isi hyperlink + gambar EXPLODED VIEW resmi EPC + No. Balon + stok/harga + pelengkap Loading List; dibangun saat kartu diunduh | semua |
 | `cek_populasi` | data **populasi unit** (armada terdaftar: model, tipe, lokasi kerja, tahun, Euro, nopol) | `admin` / `SEE_ALL` |
+| `banding_part_armada` | **banding SATU PART antar SEMUA unit milik SATU CUSTOMER/PT** ("kampas kopling PT X sama semua?") — populasi → rangka tiap unit → konfigurasi pabrik EPC per-VIN → kelompokkan → cek part EPC pada unit wakil/kelompok (paralel, maks 80 unit/5 kelompok) → verdict SAMA/BEDA dihitung sistem | `admin` / `SEE_ALL` |
 | `pesanan_saya`, `detail_pesanan` | pesanan milik buyer | `pembeli` |
 | `rekap_penjualan`, `daftar_pesanan` | rekap & daftar pesanan (cabang auto-scoped) | `admin` / cabang |
 | `harga_sims` | harga modal SIMS live (CNY→IDR) | `admin` / `SEE_ALL` |
@@ -605,11 +611,12 @@ cd backend
 pip install -r requirements-dev.txt        # pytest
 
 # 1) UNIT TEST logika murni — cepat (<20 dtk), TANPA network/API. Jalankan tiap ubah kode.
-python -m pytest tests/ -q                 # 88 test per 2026-07-04
+python -m pytest tests/ -q                 # 97 test per 2026-07-04
 #    Cakupan: guard anti-halusinasi PN (_extract_pns/_sanitize_ungrounded + loop chat()
 #    dgn DeepSeek di-mock), anti-bocor tool-call, ekspansi sinonim, catalog_bom
 #    (resolve/verdict/compare), routing modul Atlas (test_atlas_routing), export Excel
-#    dinamis + stash builder + svg→png (test_buat_excel).
+#    dinamis + stash builder + svg→png (test_buat_excel), banding part armada per
+#    customer (test_banding_armada — populasi & EPC di-mock).
 
 # 2) EVAL REGRESI Asisten AI — golden questions lewat chat() NYATA (DeepSeek + tool asli).
 #    Jalankan SEBELUM deploy perubahan prompt/tool. Ada biaya API kecil per run.
@@ -939,7 +946,7 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       (云桥, sysCode=intl — tanpa captcha/manual), deteksi "Login expired!", anti-bocor
       tool-call. Backend live (hot-swap) + image di-`build.sh`. Tanpa frontend baru → Redeploy
       tidak wajib. Catatan: Loading List ≠ Parts Atlas terstruktur (database EPC berbeda).
-- [x] **Suite pengujian** — SELESAI 2026-07-02: unit test `backend/tests/` (88 test murni
+- [x] **Suite pengujian** — SELESAI 2026-07-02: unit test `backend/tests/` (97 test murni
       per 2026-07-04) + eval regresi AI `backend/evals/` (golden questions, `run_evals.py`).
       Lihat §4.
 - [x] **Aksesori mesin (air compressor dll) rute ke Weichai + urutan komponen utama** —

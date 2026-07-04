@@ -63,6 +63,7 @@ const TOOL_LABELS: Record<string, string> = {
   repair_kit_mesin: "EPC Weichai · repair kit",
   unit_dari_part: "EPC · unit pemakai",
   cek_populasi: "Populasi unit",
+  banding_part_armada: "Banding part armada (populasi + EPC)",
   pesanan_saya: "Pesanan saya",
   detail_pesanan: "Detail pesanan",
   rekap_penjualan: "Rekap penjualan",
