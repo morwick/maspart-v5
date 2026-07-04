@@ -1019,13 +1019,46 @@ def assembly_components(rangka: str, terms: list[str], pn: str = "") -> dict:
                 "error": "assembly tak ditemukan di pohon unit ini",
                 "incomplete": walk.get("incomplete")}
 
-    items = _atlas_items(frame, rid, target["part_list_id"], target["id"], target.get("code"))
+    # Peta code → node (utk menembus "pointer"): sebuah node assembly NON-LEAF kerap
+    # punya daftar part yang isinya hanya SATU entri = figure leaf-nya (mis. node
+    # 'Retarder assembly' WG2203080020 → item tunggal WG2203080020/1), sedangkan
+    # part balon sebenarnya (Temperature sensor WG2203080020+035/1, dll.) ada di
+    # node LEAF WG2203080020/1. Tanpa menembus ini, dekomposisi berhenti di pointer.
+    leaf_by_code: dict[str, dict] = {}
+    for n in nodes:
+        c = (n.get("code") or "").upper()
+        if not c:
+            continue
+        if c not in leaf_by_code or n.get("leaf"):
+            leaf_by_code[c] = n
+
     comps: list[dict] = []
-    for p in items:
-        row = _atlas_item_row(p, "")
-        if row:
+    seen_pn: set = set()
+    seen_node: set = set()
+
+    def _collect(node: dict, depth: int) -> None:
+        nid = node.get("id")
+        if nid in seen_node or depth > 2:
+            return
+        seen_node.add(nid)
+        for p in _atlas_items(frame, rid, node["part_list_id"], node["id"], node.get("code")):
+            row = _atlas_item_row(p, "")
+            if not row:
+                continue
+            pnu = (row["pn"] or "").upper()
+            sub = leaf_by_code.get(pnu)
+            # Item yang ternyata SUB-FIGURE (punya node+part_list sendiri, bukan
+            # sekadar part balon) → uraikan isinya, jangan tampilkan pointer-nya.
+            if sub and sub.get("id") != nid and depth < 2:
+                _collect(sub, depth + 1)
+                continue
+            if pnu in seen_pn:
+                continue
+            seen_pn.add(pnu)
             comps.append({"pn": row["pn"], "nama": row["nama"], "nama_cn": row["nama_cn"],
                           "qty": row["qty"], "pengganti": row["pengganti"]})
+
+    _collect(target, 0)
     return {
         "found": True, "frame_number": frame,
         "assembly": {"pn": target.get("code"), "nama": target.get("nama"),
