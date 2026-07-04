@@ -252,6 +252,27 @@ def login() -> dict[str, str]:
     return {"jsessionid": jsid, "dsi": dsi}
 
 
+# Cooldown login: setelah login GAGAL (mis. Accurate throttle → errorTimeout),
+# JANGAN coba login lagi selama _LOGIN_COOLDOWN_SEC — pakai fallback lokal dulu.
+# Mencegah hantaman login berulang yang bisa memperpanjang throttle / terlihat abnormal.
+_LOGIN_COOLDOWN_SEC = 300
+_login_fail_until = 0.0
+
+
+def _login_guarded() -> dict[str, str]:
+    """login() dengan gerbang cooldown (dipanggil di dalam _login_lock)."""
+    global _login_fail_until
+    if time.time() < _login_fail_until:
+        raise AccurateSessionExpired(
+            "Login Accurate sedang cooldown setelah gagal berturut — pakai fallback."
+        )
+    try:
+        return login()
+    except AccurateError:
+        _login_fail_until = time.time() + _LOGIN_COOLDOWN_SEC
+        raise
+
+
 def _ensure_session() -> dict[str, str]:
     """Sesi siap-pakai: dari file, atau auto-login bila file kosong & kredensial ada."""
     try:
@@ -263,13 +284,13 @@ def _ensure_session() -> dict[str, str]:
         try:  # thread lain mungkin sudah login
             return load_session()
         except AccurateSessionMissing:
-            return login()
+            return _login_guarded()
 
 
 def _refresh_session() -> dict[str, str]:
-    """Paksa login ulang (dipanggil saat sesi kadaluarsa). Thread-safe."""
+    """Paksa login ulang (dipanggil saat sesi kadaluarsa). Thread-safe + cooldown."""
     with _login_lock:
-        return login()
+        return _login_guarded()
 
 
 # ── HTTP ───────────────────────────────────────────────────────────────────

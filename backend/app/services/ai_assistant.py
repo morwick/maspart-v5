@@ -226,10 +226,12 @@ def _tool_specs(user: dict) -> list[dict]:
             "function": {
                 "name": "detail_part",
                 "description": (
-                    "Ambil detail satu Part Number persis: nama, stok total, rincian "
-                    "stok per gudang, harga jual lokal, dan SPESIFIKASI fisik resmi "
-                    "(berat kg, dimensi cm, satuan, merek). Pakai juga untuk menjawab "
-                    "pertanyaan berat/dimensi/ukuran sebuah PN."
+                    "Ambil detail satu Part Number persis: nama, STOK (utama dari Accurate "
+                    "live — total + rincian per gudang; fallback Excel bila Accurate tak "
+                    "tersedia; lihat field 'sumber_stok'), harga jual lokal, dan SPESIFIKASI "
+                    "fisik resmi (berat kg, dimensi cm, satuan, merek). Pakai juga untuk "
+                    "menjawab pertanyaan berat/dimensi/ukuran sebuah PN. Ini tool utama untuk "
+                    "pertanyaan stok 1 PN."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1291,6 +1293,20 @@ def _t_detail_part(args: dict, user: dict) -> dict:
         "jumlah_varian": len(varian),
         "info_stok_harga": "Stok & harga berlaku per Part Number (sama untuk semua varian unit).",
     }
+    # STOK: Accurate = sumber UTAMA (samakan dgn tampilan web); Excel stok.xlsx =
+    # FALLBACK bila fetch Accurate gagal/tak menemukan PN (Excel di-export dari Accurate
+    # jadi datanya sama). Pembeli tetap stok lokal terscope.
+    if user.get("role") != "pembeli" and accurate.available():
+        try:
+            acc = accurate.stock_full(pn)
+        except accurate.AccurateError:
+            acc = None
+        if acc:
+            result["stok_total"] = f"{acc['available_to_sell']:.0f} {acc['unit']}".strip()
+            result["stok_per_gudang"] = {g["gudang"]: g["qty"] for g in (acc.get("per_gudang") or [])}
+            result["sumber_stok"] = "Accurate (live)"
+        else:
+            result["sumber_stok"] = "Excel stok.xlsx (fallback — Accurate tak tersedia/PN tak ada)"
     # Spesifikasi fisik resmi dari SIMS: berat (untuk ongkir) + dimensi + satuan +
     # merek. Non-fatal: bila SIMS tak punya data / down, detail tetap tampil.
     try:

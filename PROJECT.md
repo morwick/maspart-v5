@@ -67,6 +67,14 @@
 > (`part_pns`+PartThumbs), **log pencarian nihil** (`/admin/search-misses`), **katalog PDF**
 > (asisten tanya Excel/PDF, `katalog_pdf` via reportlab). (c) Fix `uraikan_assembly` menembus
 > pointer figure (sensor di dalam retarder kini muncul) + rute komponen-di-dalam-assembly.
+> Update **2026-07-05 (Accurate ERP)**: integrasi **ERP Accurate Online** (stok live). **Auto-login
+> SSO penuh** dari username+password (pre-login→auth.do Spring Security→SAML idp/sso+ACS→open-database),
+> auto-refresh sesi saat kadaluarsa + **cooldown anti-throttle**; stok per-PN instan (`stock_for_live`)
+> + **rincian per GUDANG/CABANG** (`view-itemstock-bywarehouse.do`, gaya `stok.xlsx`). Tool AI
+> **`stok_accurate`**; endpoint `GET /api/parts/accurate-stock`. **Accurate = SUMBER STOK UTAMA** di
+> halaman detail part & tool `detail_part`; **`stok.xlsx` = FALLBACK** bila fetch Accurate gagal (Excel
+> di-export dari Accurate, data sama). Kredensial env `ACCURATE_*` (juga di Coolify). Endpoint ditemukan
+> AMAN dari JS statis CDN (bukan meraba API). Lihat **§3.5.5i**.
 
 ---
 
@@ -247,7 +255,8 @@ kamus sinonim **juga disuntikkan ke system prompt** ("KAMUS ISTILAH LAPANGAN"). 
 | Tool | Untuk | Akses |
 |------|-------|-------|
 | `cari_part` | cari PN+nama sekaligus, auto ekspansi sinonim, bisa scope `unit` | semua |
-| `detail_part` | detail 1 PN (stok total/per gudang, harga) | semua |
+| `detail_part` | detail 1 PN (STOK **live dari Accurate** = utama, total+per gudang, `stok.xlsx` fallback; harga; spesifikasi SIMS) — tool utama pertanyaan stok 1 PN (§3.5.5i) | semua |
+| `stok_accurate` | **STOK LIVE ERP Accurate** per PN: `stok_dapat_dijual` + `stok_per_gudang` (rincian per gudang/cabang, mis. 01.Jakarta/05.Makasar) (§3.5.5i) | semua |
 | `info_aplikasi` | ringkasan index/stok/harga/gudang/kurs | semua |
 | `daftar_unit` | daftar unit/model truk tersedia | semua |
 | `cari_kode_kesalahan` | DTC/fault code Sinotruk-HOWO (ECU Bosch) via SPN+FMI / P-code / kata kunci | semua |
@@ -526,6 +535,46 @@ tool menolak + model menawarkan PILIHAN** (11 opsi) — jangan menebak.
   figure / 5.146 part / 190 gambar / 16 MB** (walk 85s + build 101s). Dinamis utk VIN apa pun
   (Sinotruk/HOWO/SITRAK).
 
+### 3.5.5i Integrasi ERP Accurate Online — stok live + auto-login SSO — sejak 2026-07-05
+
+Menghubungkan MASPART ke **ERP/akunting Accurate Online** agar stok yang ditampilkan = **stok
+riil pabrikan/gudang real-time**, bukan snapshot Excel. `services/accurate.py` + endpoint di
+`routers/parts.py` + tool AI di `ai_assistant.py`.
+
+- **Model akses (dibedah dari lalu-lintas web resmi, AMAN — meniru browser, tak meraba API):**
+  App perusahaan di host **`iris.accurate.id`** (tiap company DB punya host/zona). Auth data =
+  cookie **`JSESSIONID`** + parameter **`_dsi`** (di body). Endpoint stok:
+  `POST /accurate/inventory/search-item.do` (body `_dsi,keywords,resetFilter,sp.pageSize/start/limit`)
+  → `{"s":true,"d":[...],"sp":{rowCount}}`. `keywords=` memfilter server-side (lookup 1 PN instan).
+  Field item: `no` (kode "NNNNNN.<PN>+suffix"), `name`, `availableToSell` (=stok dapat dijual),
+  `quantity`, `unit1.name`. Contoh live: PT MAS AUTOMOBIL SEJAHTERA = **5.014 barang, 3.840 berstok**.
+- **AUTO-LOGIN SSO PENUH** (`accurate.login()`) — dari **username+password** saja, tanpa captcha/2FA:
+  1. `GET account.accurate.id/` (seed cookie) →
+  2. `POST /pre-login.do` (account, password=`"up"+b64({v,p,d})`) → `d.permit` (challenge) →
+  3. `POST /auth.do` (Spring Security `j_username`/`j_password`=`"ua"+b64({v,p,c=permit,t:null,d})`) → 302 /manage →
+  4. `GET iris/accurate/open.do?uid=<uid>&product=aol` → **form SAML auto-submit** → `POST account/idp/sso`
+     (SAMLRequest) → `POST iris/accurate/saml/SSO` (SAMLResponse) → sesi iris terautentikasi →
+  5. `POST iris/accurate/open-database.do` (uid,product) → **`dsi` segar**; `JSESSIONID` dari cookie jar.
+  Password dibungkus base64-JSON (bukan enkripsi), `d`=device-id + `uid`=uniqueId perusahaan (dari
+  HTML `/manage`) → **STABIL**. Sesi di `data/accurate_session.json` (dibaca segar tiap panggil).
+- **Auto-refresh + cooldown**: sesi mati (server pantul HTML SAML) → `_refresh_session` login ulang
+  otomatis 1×. Bila login GAGAL (mis. Accurate throttle `errorTimeout`) → **cooldown 5 menit**
+  (`_login_fail_until`): jangan hantam login lagi, pakai fallback lokal dulu (anti-abuse/anti-deteksi).
+- **Stok per gudang/cabang** (`stock_full`): endpoint UI resmi `view-itemstock-bywarehouse.do`
+  (param `id`,`asOfDate`) → `d.detailWarehouseData[]` {`warehouseName` mis "01.Jakarta", `balance`=qty
+  terkini, `description`, `id`}. 2 panggilan (search→id → warehouse). ~20-37 gudang, gaya `stok.xlsx`.
+  Endpoint ditemukan **AMAN dari JS statis** `cdn.accurate.id/.../inventory/item.js` (bukan tebak).
+- **Accurate = sumber stok UTAMA**: di halaman detail part (`part/[pn]`) & tool `detail_part`,
+  stok tampil dari Accurate (total+per gudang, badge "Accurate live"); **`stok.xlsx` = FALLBACK** hanya
+  bila fetch Accurate gagal/tak tersedia (Excel = export Accurate → data sama). **Pembeli** tetap stok
+  lokal terscope (jangan rusak alur beli/reservasi). Tanpa auto-login di `cari_part` (list, biar tak
+  banyak panggilan live) — pakai `detail_part`/`stok_accurate` utk angka live per-PN.
+- **Env** (`ACCURATE_USERNAME/PASSWORD/DEVICE_ID/UID/HOST`, lihat `core/config.py`): di `.env` lokal
+  & **Coolify Environment Variables** (sudah dibuat via API). ⚠️ device_id/uid spesifik akun+perusahaan.
+- **Aturan aman (WAJIB):** JANGAN meraba endpoint (tebakan = 404 mencurigakan); hanya panggil endpoint
+  yang dipakai browser; endpoint baru ditemukan dgn BACA JS STATIS; **jangan login berulang cepat**
+  (Accurate throttle → `errorTimeout`); pakai ulang sesi. File sesi/HAR/kredensial di-`.gitignore`.
+
 ### 3.5.6 Cari by Foto
 
 `services/image_search.py` — embedding **DINOv2-base** (torch CPU). Galeri dari **CSV lokal**
@@ -546,7 +595,7 @@ Hasil diagregasi per `part_number` + confidence boost. Foto part di-proxy via
 | Router (prefix) | Endpoint utama |
 |---|---|
 | **auth** `/api/auth` | `POST /login`, `GET /me`, `GET /permissions` |
-| **parts** `/api/parts` | `GET /search` (PN), `GET /search-name`, `POST /search-image`, `GET /compare`, `GET /photos`, `GET /spec` (berat/dimensi SIMS), `GET /image-proxy`, `GET /batch-template`, `POST /batch-catalog`, `GET/POST /index/status·refresh` |
+| **parts** `/api/parts` | `GET /search` (PN), `GET /search-name`, `POST /search-image`, `GET /compare`, `GET /photos`, `GET /spec` (berat/dimensi SIMS), `GET /accurate-stock` (stok live Accurate +per gudang, §3.5.5i), `GET /image-proxy`, `GET /batch-template`, `POST /batch-catalog`, `GET/POST /index/status·refresh` |
 | **harga** `/api/harga` | `GET /list·/list/export·/rate·/cari`, `POST /batch·/batch/export·/refresh` |
 | **opname** `/api/opname` | `GET /draft·/history`, `POST /draft/from-upload·/finalize`, `PUT/DELETE /draft`, `DELETE /history/{id}` |
 | **populasi** `/api/populasi` | `GET ""·/export`, `POST /refresh` |
@@ -583,8 +632,10 @@ Hasil diagregasi per `part_number` + confidence boost. Foto part di-proxy via
 - **Env vars backend** (lihat `core/config.py`): `APP_ENV`, `SUPABASE_URL/KEY/SERVICE_KEY/
   TABLE/DATA_BUCKET`, `JWT_SECRET/ALGORITHM/EXPIRE_MINUTES`, `DATA_DIR`, `IMAGE_INDEX_CSV`,
   `CORS_ORIGINS`, `RAJAONGKIR_API_KEY`, `PAYMENT_API_KEY/SANDBOX/CALLBACK_SECRET/BASE_URL`,
-  `PUBLIC_BASE_URL`, `DEEPSEEK_API_KEY/BASE_URL/MODEL`.
+  `PUBLIC_BASE_URL`, `DEEPSEEK_API_KEY/BASE_URL/MODEL`,
+  `ACCURATE_USERNAME/PASSWORD/DEVICE_ID/UID/HOST` (stok live Accurate, §3.5.5i).
 - **Selftest tanpa server/network**: `cd backend && python selftest.py <PN>`.
+  Accurate: `python -m app.services.accurate <PN>` (butuh env/sesi Accurate).
 
 ### 3.5.11 Monitoring User (online/offline) — sejak 2026-07-01
 
@@ -1073,6 +1124,14 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       `/admin/search-misses` + endpoint `GET/POST /api/admin/search-misses[/resolve]`.
 - [x] **Katalog bergambar PDF (pilih Excel/PDF)** — SELESAI 2026-07-04: tool `katalog_kategori`
       arg `format`; asisten TANYA Excel atau PDF; `ai_export.katalog_pdf` (reportlab). §3.5.5h.
+- [x] **Integrasi stok live ERP Accurate** — SELESAI & DEPLOYED 2026-07-05 (§3.5.5i): auto-login SSO
+      penuh + auto-refresh + cooldown; stok per-PN + rincian per gudang/cabang; Accurate = sumber stok
+      UTAMA (app detail part + `detail_part`), `stok.xlsx` = fallback; tool AI `stok_accurate`; endpoint
+      `/api/parts/accurate-stock`; env `ACCURATE_*` (di `.env` + Coolify via API). Terverifikasi dari
+      container prod. ⚠️ jangan login berulang cepat (Accurate throttle → errorTimeout).
+- [ ] **(opsional) Rotasi API token Coolify** yang dipakai set env Accurate (sudah sempat dibagikan).
+- [ ] **(opsional) Stok Accurate di halaman HASIL PENCARIAN** (perlu warm-cache bulk index biar tak
+      blok request; hindari per-baris live agar tak banyak panggilan).
 - [ ] **Kandidat fitur berikut**: harga jual otomatis dari modal SIMS utk part tanpa harga
       (stok ada tapi tak bisa dibeli), saran restock AI (penjualan×stok), interchange otomatis
       saat habis (`pengganti_part`+stok), OCR VIN dari foto, fault code→part, penawaran/quote
