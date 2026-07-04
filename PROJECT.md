@@ -59,7 +59,14 @@
 > ikut "Ingat saya" (sessionStorage bila tak dicentang); CSP + security headers di
 > `next.config.ts`. ⚠️ **BELUM diperbaiki (butuh Anda):** rotate kunci Supabase + scrub
 > `.streamlit/secrets.toml` dari commit `1be5c53` SEBELUM push `main` (service_key bocor);
-> TLS `verify=False` ke EPC/SIMS (sertifikat upstream invalid — perlu pin CA).
+> TLS `verify=False` ke EPC/SIMS (sertifikat upstream invalid — perlu pin CA). Rincian §3.5.12.
+> Update **2026-07-04 (UI + fitur)**: (a) **Redesign UI "Command Center"** — sidebar gelap +
+> rail lipat, header + command palette (⌘K) + toggle tema, **dark mode** penuh (token +
+> remap utilitas Tailwind), **Dashboard** admin. Halaman Populasi/Harga/Compare/Batch/Cari-
+> by-Foto diport ke design system. (b) 3 fitur AI: **foto part** di jawaban asisten
+> (`part_pns`+PartThumbs), **log pencarian nihil** (`/admin/search-misses`), **katalog PDF**
+> (asisten tanya Excel/PDF, `katalog_pdf` via reportlab). (c) Fix `uraikan_assembly` menembus
+> pointer figure (sensor di dalam retarder kini muncul) + rute komponen-di-dalam-assembly.
 
 ---
 
@@ -590,6 +597,60 @@ aktivitas terbaru. Frontend `admin/monitoring/page.tsx` (auto-refresh 15 dtk, fi
 container restart (wajar utk "siapa online sekarang"; setup 1 container backend). Menu didaftarkan di
 `AppShell` `NAV_ADMIN`.
 
+### 3.5.12 Keamanan — Audit & Hardening (2026-07-04)
+
+Audit keamanan menyeluruh (5 review paralel: auth, injeksi/upload/SSRF, secrets/CORS/
+webhook, asisten AI, frontend) + perbaikan temuan Kritis/Tinggi/Menengah. Semua fix
+di bawah **sudah LIVE & terverifikasi**; tes regresi di `tests/test_security_hardening.py`
+(19 kasus, bagian dari 116 unit test).
+
+**Sudah diperbaiki (deployed):**
+- **Rate-limit anti-spoof XFF** (`core/ratelimit.py`): IP klien diambil dari sisi KANAN
+  `X-Forwarded-For` sesuai `trusted_proxies` (default 1, Traefik). Sebelumnya ambil hop
+  kiri yang dikontrol penyerang → limiter login/webhook trivial dilewati XFF palsu.
+- **JWT_SECRET wajib** (`core/config.py`): default/kosong = FATAL menolak start di
+  lingkungan APA PUN; `APP_ENV` tak dikenal/kosong → fail-closed diperlakukan produksi.
+- **Otorisasi fail-closed saat DB down** (`deps.py`): saat Supabase mati & cache kosong,
+  role privileged (admin/pembeli) TIDAK dipercaya dari klaim token — diturunkan ke `user`.
+- **Rate-limit `/api/ai/chat`** + `/banding-rangka/export` + `/excel/{id}` (cegah abuse
+  biaya DeepSeek / DoS 1 worker).
+- **Guard formula/CSV injection** di semua export Excel (`ai_export.py`, `catalog.py`):
+  sel teks diawali `= + - @` di-escape (`'`) → ditulis sebagai teks, bukan formula/DDE.
+- **Upgrade password plaintext legacy → bcrypt saat login** (`services/auth.py`), lalu
+  null-kan kolom plaintext (migrasi bertahap, tak mengunci user).
+- **Security headers**: API (`main.py`) HSTS + `X-Frame-Options: DENY` + nosniff +
+  Referrer-Policy; frontend (`next.config.ts`) **CSP** + header keamanan (produksi).
+- **SRI pin Leaflet** dari unpkg (SHA-384) — CDN/paket terkompromi/MITM tak bisa suntik JS.
+- **Token ikut "Ingat saya"** (`lib/auth.ts`): `sessionStorage` bila tak dicentang.
+- **Cap upload** `batch-catalog` 8 MB (anti zip-bomb/OOM).
+- Menyusul: **CSP mengizinkan Google Fonts** (`fonts.googleapis.com`/`gstatic.com`) —
+  memperbaiki regresi font Geist/JetBrains Mono yang sempat diblokir CSP.
+
+**Terverifikasi AMAN (tak perlu diubah):**
+- **Webhook pembayaran** bertahan berlapis: verifikasi callback key + **re-konfirmasi
+  status ke gateway** + cek `order_id`+amount + idempotent + rate-limited → body "paid"
+  palsu tak mempan (`routers/orders.py`, `services/payments.py`).
+- **Otorisasi tool asisten** di-enforce di **dispatch handler** (tiap `_t_*` cek `user`),
+  bukan sekadar disembunyikan dari daftar → `<invoke>` yang bocor/diinjeksi tetap `denied`.
+- **IDOR order/cabang**: scope `username=`/`gudang=` di query Supabase (server-side).
+- Total/berat/ongkir order **dihitung ulang server-side**; JWT alg dipin HS256, `exp`
+  diverifikasi; tak ada `subprocess`/`eval`/`exec` atas input; output markdown asisten
+  di-render aman (React, tanpa `dangerouslySetInnerHTML`); path traversal upload diblok
+  (`_safe_catalog_dir`); tak ada secret di bundle frontend; `epc_token.txt` tak ter-track.
+
+**⚠️ BELUM diperbaiki — butuh tindakan pemilik:**
+- **KRITIS — kunci Supabase di git history.** Commit lokal **`1be5c53`** di branch `main`
+  men-track `.streamlit/secrets.toml` berisi Supabase `url` + anon key + **`service_key`
+  (bypass RLS)**. BELUM ter-push ke origin & tak ada di `snapshot-clean`. **SEBELUM push
+  `main`:** rotate service_key + anon key di dashboard Supabase, lalu scrub file dari
+  history (`git filter-repo`/BFG) termasuk `1be5c53`. Lihat [[jangan-push-main-secrets]].
+- **TLS `verify=False` ke EPC/SIMS** (`epc.py`, `epc_bom.py`, `epc_weichai.py`): sertifikat
+  upstream invalid (itu sebabnya dimatikan) — mengaktifkan verifikasi apa adanya mematikan
+  fitur EPC. Perlu pin CA/sertifikat EPC (investigasi ke endpoint live).
+- Temuan RENDAH (belum ditutup, dampak kecil): image-proxy mengikuti redirect (host
+  allowlist sudah benar); enumerasi username via timing login; `/health` bocorkan
+  `data_dir`; bcrypt truncate 72 byte.
+
 ---
 
 ## 4. Menjalankan Lokal (Development)
@@ -622,7 +683,7 @@ cd backend
 pip install -r requirements-dev.txt        # pytest
 
 # 1) UNIT TEST logika murni — cepat (<20 dtk), TANPA network/API. Jalankan tiap ubah kode.
-python -m pytest tests/ -q                 # 97 test per 2026-07-04
+python -m pytest tests/ -q                 # 116 test per 2026-07-04
 #    Cakupan: guard anti-halusinasi PN (_extract_pns/_sanitize_ungrounded + loop chat()
 #    dgn DeepSeek di-mock), anti-bocor tool-call, ekspansi sinonim, catalog_bom
 #    (resolve/verdict/compare), routing modul Atlas (test_atlas_routing), export Excel
@@ -957,9 +1018,14 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       (云桥, sysCode=intl — tanpa captcha/manual), deteksi "Login expired!", anti-bocor
       tool-call. Backend live (hot-swap) + image di-`build.sh`. Tanpa frontend baru → Redeploy
       tidak wajib. Catatan: Loading List ≠ Parts Atlas terstruktur (database EPC berbeda).
-- [x] **Suite pengujian** — SELESAI 2026-07-02: unit test `backend/tests/` (97 test murni
+- [x] **Suite pengujian** — SELESAI 2026-07-02: unit test `backend/tests/` (116 test murni
       per 2026-07-04) + eval regresi AI `backend/evals/` (golden questions, `run_evals.py`).
       Lihat §4.
+- [x] **Audit & hardening keamanan** — SELESAI 2026-07-04 (§3.5.12), LIVE: rate-limit
+      anti-spoof XFF, JWT_SECRET wajib + APP_ENV fail-closed, otorisasi fail-closed saat DB
+      down, rate-limit `/api/ai/chat`, guard formula-injection Excel, upgrade password
+      plaintext→bcrypt saat login, security headers + CSP + SRI Leaflet, cap upload. Webhook
+      pembayaran & otorisasi tool diverifikasi AMAN. Tes: `test_security_hardening.py` (19).
 - [x] **Aksesori mesin (air compressor dll) rute ke Weichai + urutan komponen utama** —
       SELESAI 2026-07-03 (§3.5.5e), LIVE (hot-swap + image). Eval `weichai-air-compressor`
       pass; checker `no_new_pn` kini kecualikan kode unit (samakan guard produksi).
@@ -984,26 +1050,43 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
 - [x] **Supersession part sasis Sinotruk** — DIVERIFIKASI BUNTU 2026-07-03 (§3.5.5c):
       endpoint ada tapi data role-gated internal; JANGAN kejar tanpa akun internal.
       (Part mesin Weichai → sudah ada `pengganti_part`.)
+- [ ] **⛔ KRITIS — rotate kunci Supabase + scrub `secrets.toml` SEBELUM push `main`** — commit
+      lokal `1be5c53` di `main` men-track `.streamlit/secrets.toml` berisi `service_key` (bypass
+      RLS); belum ter-push. Rotate service_key + anon key di dashboard, scrub file dari history
+      (filter-repo/BFG), baru merge/push (§3.5.12). JANGAN jalankan TODO merge `main` di bawah
+      sebelum ini beres.
+- [ ] **TLS `verify=False` ke EPC/SIMS** — sertifikat upstream invalid; perlu pin CA agar bisa
+      mengaktifkan verifikasi tanpa mematikan EPC (§3.5.12).
 - [ ] **Fast-forward/merge `main` ke `snapshot-clean`** — `main` di GitHub tertinggal jauh;
-      clone baru dapat kode lama (lihat §7).
+      clone baru dapat kode lama (lihat §7). ⚠️ Lakukan HANYA setelah scrub secrets di atas.
 - [ ] **`migrations/015_ai_feedback.sql`** — tabel `ai_feedback` masih dibuat manual (§3.5.5g);
       buat file migrasi agar konsisten dgn tabel lain.
 - [ ] **Backup otomatis `/opt/maspart/data`** — berisi upload admin + token; tidak semua di
       git. Cron tar harian / rclone.
-- [ ] **Migrasi password plaintext** — `auth.py` masih fallback kolom `password` legacy;
-      hash semua lalu hapus jalur fallback.
-- [ ] **Kandidat fitur berikut** (dipertimbangkan 2026-07-03): harga jual otomatis dari modal
-      SIMS utk part tanpa harga (stok ada tapi tak bisa dibeli), saran restock AI
-      (penjualan×stok), loop feedback→eval, auto-refresh index setelah upload-catalog
-      (sekarang TIDAK otomatis), log pencarian nihil → umpan sinonim, foto part di jawaban
-      asisten, CI GitHub Actions (pytest), pecah `ai_assistant.py` (±4.300 baris), ONNX
-      pengganti torch.
+- [~] **Migrasi password plaintext** — SEBAGIAN (2026-07-04): login via plaintext legacy kini
+      di-upgrade ke bcrypt + null-kan kolom plaintext (`services/auth.py`). SISA: hash baris yang
+      belum pernah login ulang lalu hapus jalur fallback (`core/security.py`).
+- [x] **Foto part di jawaban asisten** — SELESAI 2026-07-04: `chat()` kembalikan `part_pns`;
+      frontend `PartThumbs` (thumbnail foto SIMS via image-proxy) → klik detail part.
+- [x] **Log pencarian nihil → umpan sinonim** — SELESAI 2026-07-04: `services/search_log.py`
+      (`data/search_misses.json`); hook di `/search`·`/search-name`·`cari_part`; halaman admin
+      `/admin/search-misses` + endpoint `GET/POST /api/admin/search-misses[/resolve]`.
+- [x] **Katalog bergambar PDF (pilih Excel/PDF)** — SELESAI 2026-07-04: tool `katalog_kategori`
+      arg `format`; asisten TANYA Excel atau PDF; `ai_export.katalog_pdf` (reportlab). §3.5.5h.
+- [ ] **Kandidat fitur berikut**: harga jual otomatis dari modal SIMS utk part tanpa harga
+      (stok ada tapi tak bisa dibeli), saran restock AI (penjualan×stok), interchange otomatis
+      saat habis (`pengganti_part`+stok), OCR VIN dari foto, fault code→part, penawaran/quote
+      PDF, transfer antar-gudang, profil customer/armada, asisten via WhatsApp, loop
+      feedback→eval, auto-refresh index setelah upload-catalog, CI GitHub Actions (pytest),
+      pecah `ai_assistant.py` (±4.500 baris), ONNX pengganti torch.
 - [ ] **Revoke API token Coolify** yang dipakai untuk migrasi (di dashboard →
       Keys & Tokens) setelah yakin stabil — token = kontrol penuh.
 - [ ] Setelah Coolify stabil beberapa hari, pertimbangkan beresihkan fallback systemd
       (atau biarkan saja — sudah disabled, tidak mengganggu).
 - [ ] Pantau RAM: VPS hanya 3.8GB; container backend memuat torch+DINOv2. Hindari
       menjalankan systemd lama + container bersamaan (double torch = risiko OOM).
-- [ ] Pastikan `JWT_SECRET` di server kuat (32+ char acak) & `APP_ENV=prod`.
-- [ ] Rahasia (`backend/.env`, `.streamlit/secrets.toml`) jangan sampai ter-commit.
+- [x] **`JWT_SECRET` kuat & `APP_ENV=prod`** — TERVERIFIKASI + kini DIPAKSA: server menolak
+      start bila secret default/kosong, dan APP_ENV tak dikenal diperlakukan produksi (§3.5.12).
+- [ ] Rahasia (`backend/.env`, `.streamlit/secrets.toml`) jangan sampai ter-commit — lihat
+      butir KRITIS di atas (`1be5c53` di `main`).
 ```
