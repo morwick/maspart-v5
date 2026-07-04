@@ -30,4 +30,7 @@ export function toggleTheme(): Theme {
 }
 
 // Snippet yang dijalankan inline di <head> untuk mencegah kedip (FOUC).
-export const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('${KEY}');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){}})();`;
+// Default = TERANG (sesuai desain); gelap hanya bila user memilihnya via toggle
+// (tersimpan di localStorage) — TIDAK ikut setelan sistem, agar mode gelap yang
+// masih dipoles per-halaman tak muncul tanpa diminta.
+export const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('${KEY}');document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');}catch(e){}})();`;

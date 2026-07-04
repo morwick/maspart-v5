@@ -86,6 +86,30 @@ body {
   transition: background 0.35s ease, color 0.2s ease;
 }
 
+/* Banyak halaman lama memakai utilitas warna Tailwind terang (bg-white,
+   bg/text/border/ring/divide-zinc-*) alih-alih token var(--*). Petakan ke token
+   gelap saat mode gelap agar SEMUA halaman ikut gelap tanpa mengedit tiap file.
+   (text-white sengaja TIDAK dipetakan — dipakai di tombol/badge berwarna.) */
+[data-theme="dark"] .bg-white { background-color: var(--paper); }
+[data-theme="dark"] .bg-zinc-50 { background-color: var(--ink-50); }
+[data-theme="dark"] .bg-zinc-100 { background-color: var(--ink-100); }
+[data-theme="dark"] .bg-zinc-200 { background-color: var(--ink-200); }
+[data-theme="dark"] .bg-zinc-300 { background-color: var(--ink-300); }
+[data-theme="dark"] .hover\:bg-zinc-50:hover { background-color: var(--ink-100); }
+[data-theme="dark"] .hover\:bg-zinc-100:hover { background-color: var(--ink-150); }
+[data-theme="dark"] .hover\:bg-white:hover { background-color: var(--ink-50); }
+[data-theme="dark"] .text-zinc-300 { color: var(--ink-400); }
+[data-theme="dark"] .text-zinc-400 { color: var(--ink-400); }
+[data-theme="dark"] .text-zinc-500 { color: var(--ink-500); }
+[data-theme="dark"] .text-zinc-600 { color: var(--ink-600); }
+[data-theme="dark"] .text-zinc-700 { color: var(--ink-700); }
+[data-theme="dark"] .text-zinc-800 { color: var(--ink-800); }
+[data-theme="dark"] .border-zinc-200 { border-color: var(--ink-200); }
+[data-theme="dark"] .border-zinc-300 { border-color: var(--ink-300); }
+[data-theme="dark"] .ring-zinc-200 { --tw-ring-color: var(--ink-200); }
+[data-theme="dark"] .ring-zinc-300 { --tw-ring-color: var(--ink-300); }
+[data-theme="dark"] .divide-zinc-100 > * + * { border-color: var(--ink-150); }
+
 /* Tailwind theme tokens so utilities map to the design palette */
 @theme inline {
   --color-background: var(--canvas);
