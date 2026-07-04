@@ -250,10 +250,10 @@ _stash: dict[str, dict] = {}   # id -> {at, judul, kolom, baris, filename}
 _MONO_HEAD_RE = re.compile(r"\b(part\s*number|part\s*no|pn|nomor\s*part|kode)\b", re.IGNORECASE)
 
 
-def _stash_put(entry: dict, judul: str) -> tuple[str, str]:
+def _stash_put(entry: dict, judul: str, ext: str = "xlsx") -> tuple[str, str]:
     now = time.monotonic()
     slug = re.sub(r"[^A-Za-z0-9]+", "_", judul).strip("_")[:60] or "Data_MASPART"
-    filename = f"{slug}.xlsx"
+    filename = f"{slug}.{ext}"
     export_id = uuid.uuid4().hex
     with _stash_lock:
         for k in [k for k, v in _stash.items() if now - v["at"] > _STASH_TTL_SEC]:
@@ -269,10 +269,11 @@ def stash_export(judul: str, kolom: list[str], baris: list[list[str]]) -> tuple[
     return _stash_put({"kolom": kolom, "baris": baris}, judul)
 
 
-def stash_builder(judul: str, builder: dict) -> tuple[str, str]:
+def stash_builder(judul: str, builder: dict, ext: str = "xlsx") -> tuple[str, str]:
     """Simpan RESEP export yang dibangun SAAT DIUNDUH (mis. katalog bergambar —
-    berat, jadi dibangun ketika kartu diklik lalu bytes-nya di-cache di entri)."""
-    return _stash_put({"builder": builder}, judul)
+    berat, jadi dibangun ketika kartu diklik lalu bytes-nya di-cache di entri).
+    `ext` = ekstensi file hasil (xlsx/pdf) sesuai format yang dipilih user."""
+    return _stash_put({"builder": builder}, judul, ext=ext)
 
 
 def generic_excel(export_id: str) -> tuple[bytes | None, str]:
@@ -294,7 +295,11 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
             return cached, d["filename"]
         b = d["builder"]
         if b.get("kind") == "katalog":
-            data, err = katalog_excel(b.get("rangka", ""), b.get("kategori", ""))
+            fmt = (b.get("fmt") or "excel").lower()
+            if fmt == "pdf":
+                data, err = katalog_pdf(b.get("rangka", ""), b.get("kategori", ""))
+            else:
+                data, err = katalog_excel(b.get("rangka", ""), b.get("kategori", ""))
             if data is None:
                 return None, err
             with _stash_lock:
@@ -552,3 +557,133 @@ def katalog_excel(rangka: str, kategori: str) -> tuple[bytes | None, str]:
     wb.save(buf)
     kat_slug = re.sub(r"[^A-Za-z0-9]+", "_", kategori).strip("_")[:24] or "Kategori"
     return buf.getvalue(), f"Katalog_{kat_slug}_{frame}.xlsx"
+
+
+# ── KATALOG BERGAMBAR versi PDF (cetak) ─────────────────────────────────────
+def _pdf_esc(v) -> str:
+    s = "" if v is None else str(v)
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def katalog_pdf(rangka: str, kategori: str) -> tuple[bytes | None, str]:
+    """Versi PDF (siap cetak/kirim) dari katalog_excel: satu bagian per FIGURE —
+    judul, gambar exploded view EPC, lalu tabel part ber-nomor balon + stok/harga.
+    Return (bytes, filename) atau (None, pesan_error)."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.lib.utils import ImageReader
+        from reportlab.platypus import (Image as RLImage, Paragraph, SimpleDocTemplate,
+                                        Spacer, Table, TableStyle)
+    except Exception:
+        return None, "Modul PDF (reportlab) belum terpasang di server."
+
+    from . import epc_bom as _epc
+
+    d = _epc.catalog_walk(rangka, kategori)
+    if not d.get("found"):
+        return None, (d.get("message") or "Gagal mengambil katalog dari EPC. Coba lagi.")
+    figures = (d.get("figures") or [])[:_KATALOG_MAX_FIGURES]
+    if not figures:
+        return None, f"Tidak ada figure untuk kategori '{kategori}' di unit ini."
+    frame = d.get("frame_number") or ""
+
+    svg_names = list(dict.fromkeys(f["svg"] for f in figures if f.get("svg")))
+
+    def _render(name: str) -> tuple[str, bytes | None]:
+        return name, _svg_to_png(_epc.fetch_file(name))
+
+    pngs: dict[str, bytes] = {}
+    if svg_names:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for name, png in ex.map(_render, svg_names):
+                if png:
+                    pngs[name] = png
+
+    all_pns = list({it["pn"] for f in figures for it in f["items"]})
+    local: dict[str, dict] = {}
+    for r in part_index.search_exact_pns(all_pns):
+        pn = (r.get("part_number") or "").upper()
+        if pn and pn not in local:
+            local[pn] = r
+
+    buf = io.BytesIO()
+    page = landscape(A4)
+    doc = SimpleDocTemplate(buf, pagesize=page, leftMargin=12 * mm, rightMargin=12 * mm,
+                            topMargin=12 * mm, bottomMargin=12 * mm,
+                            title=f"Katalog {kategori} {frame}")
+    ss = getSampleStyleSheet()
+    st_title = ParagraphStyle("cc_t", parent=ss["Title"], fontSize=17,
+                              textColor=colors.HexColor("#026A0E"))
+    st_sub = ParagraphStyle("cc_sub", parent=ss["Normal"], fontSize=8.5,
+                            textColor=colors.HexColor("#535B56"))
+    st_sec = ParagraphStyle("cc_sec", parent=ss["Heading2"], fontSize=11.5,
+                            spaceBefore=10, spaceAfter=3, textColor=colors.HexColor("#0F1411"))
+    st_cell = ParagraphStyle("cc_c", parent=ss["Normal"], fontSize=7.3, leading=9)
+    st_head = ParagraphStyle("cc_h", parent=ss["Normal"], fontSize=7.3, leading=9,
+                             textColor=colors.HexColor("#026A0E"))
+
+    avail_w = page[0] - 24 * mm
+    story: list = [
+        Paragraph(f"Katalog Part — {_pdf_esc(kategori.title())}", st_title),
+        Paragraph(f"Unit / VIN: {_pdf_esc(frame)} · {len(figures)} figure · "
+                  "Sumber: EPC Parts Atlas resmi (Sinotruk) — MASPART", st_sub),
+        Spacer(1, 6),
+    ]
+
+    # Lebar kolom tabel: No, PN, Nama (fleksibel), Qty, Stok, Harga, Pengganti.
+    fixed = [11 * mm, 36 * mm, 13 * mm, 15 * mm, 24 * mm, 30 * mm]
+    col_w = [fixed[0], fixed[1], avail_w - sum(fixed), fixed[2], fixed[3], fixed[4], fixed[5]]
+    head = ["No.", "Part Number", "Nama", "Qty", "Stok", "Harga", "Pengganti"]
+
+    for i, f in enumerate(figures):
+        story.append(Paragraph(
+            f"{i + 1:02d}. {_pdf_esc(f['nama'])} · Figure {_pdf_esc(f.get('kode') or '')} · "
+            f"{len(f['items'])} part", st_sec))
+        png = pngs.get(f.get("svg") or "")
+        if png:
+            try:
+                iw, ih = ImageReader(io.BytesIO(png)).getSize()
+                w = min(avail_w, 165 * mm)
+                h = (w * ih / iw) if iw else 70 * mm
+                if h > 92 * mm:
+                    h = 92 * mm
+                    w = h * iw / ih if ih else w
+                story.append(RLImage(io.BytesIO(png), width=w, height=h))
+                story.append(Spacer(1, 3))
+            except Exception:
+                pass
+        rows = [[Paragraph(f"<b>{c}</b>", st_head) for c in head]]
+        items = sorted(f["items"], key=lambda x: (x.get("balon") is None, x.get("balon") or 0))
+        for it in items:
+            lr = local.get(it["pn"], {})
+            nama = " ".join((lr.get("part_name") or it.get("nama") or it.get("nama_cn") or "").split())
+            rows.append([
+                Paragraph(_pdf_esc(it.get("balon")), st_cell),
+                Paragraph(_pdf_esc(it["pn"]), st_cell),
+                Paragraph(_pdf_esc(nama), st_cell),
+                Paragraph(_pdf_esc(it.get("qty")), st_cell),
+                Paragraph(_pdf_esc(lr.get("stok") if lr else ""), st_cell),
+                Paragraph(_pdf_esc(lr.get("harga") if lr else ""), st_cell),
+                Paragraph(_pdf_esc(", ".join(it.get("pengganti") or [])), st_cell),
+            ])
+        tbl = Table(rows, colWidths=col_w, repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EAF6EC")),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#E1E4E1")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8F9F7")]),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+        story.append(tbl)
+        story.append(Spacer(1, 9))
+
+    try:
+        doc.build(story)
+    except Exception as e:
+        return None, f"Gagal membangun PDF katalog: {e}"
+    kat_slug = re.sub(r"[^A-Za-z0-9]+", "_", kategori).strip("_")[:24] or "Kategori"
+    return buf.getvalue(), f"Katalog_{kat_slug}_{frame}.pdf"

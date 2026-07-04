@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import catalog_bom, gudang, gudang_config, harga, image_search, orders, part_index, permissions, populasi, presence, reservations
+from ..services import catalog_bom, gudang, gudang_config, harga, image_search, orders, part_index, permissions, populasi, presence, reservations, search_log
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -528,3 +528,23 @@ def delete_user(username: str, admin: dict = Depends(require_admin)):
     if not ok:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, msg)
     return {"ok": True}
+
+
+# ── Pencarian Nihil (umpan sinonim) ──────────────────────────────────────────
+@router.get("/search-misses")
+def search_misses(limit: int = 300, _admin: dict = Depends(require_admin)):
+    """Query pencarian yang 0 hasil, tersering dulu — kandidat istilah lapangan
+    yang belum ada di sinonim.json. Untuk halaman admin 'Pencarian Nihil'."""
+    rows = search_log.top_misses(max(1, min(limit, 1000)))
+    return {"total": search_log.total_count(), "jumlah": len(rows), "misses": rows}
+
+
+class ResolveMissRequest(BaseModel):
+    query: str
+
+
+@router.post("/search-misses/resolve")
+def resolve_search_miss(body: ResolveMissRequest, _admin: dict = Depends(require_admin)):
+    """Tandai satu query selesai (mis. sudah ditambahkan ke sinonim.json) → hapus."""
+    ok = search_log.resolve_miss(body.query)
+    return {"ok": ok}

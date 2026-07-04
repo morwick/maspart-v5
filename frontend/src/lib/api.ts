@@ -1011,6 +1011,33 @@ export async function getCatalogFolders(token: string): Promise<{ folders: strin
   return res.json();
 }
 
+// ── Pencarian Nihil (umpan sinonim) ──
+export type SearchMiss = {
+  query: string;
+  count: number;
+  modes?: string[];
+  sources?: string[];
+  last?: number;
+};
+export async function getSearchMisses(
+  token: string,
+): Promise<{ total: number; jumlah: number; misses: SearchMiss[] }> {
+  const res = await fetch(`${API_BASE}/api/admin/search-misses`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+export async function resolveSearchMiss(token: string, query: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/api/admin/search-misses/resolve`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 export type CatalogUploadResult = {
   ok: boolean;
   saved: { path: string; size: number }[];
@@ -1248,6 +1275,8 @@ export type AIChatResult = {
   banding_exports?: AIBandingExport[];
   /** Export generik (tool buat_excel) → kartu unduh Excel dinamis. */
   excel_exports?: AIExcelExport[];
+  /** PN yang disebut asisten (grounded) → tampilkan thumbnail foto part. */
+  part_pns?: string[];
 };
 
 /** Unduh Excel hasil perbandingan part dua unit (banding_rangka). */

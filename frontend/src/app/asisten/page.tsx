@@ -13,6 +13,8 @@ import {
   exportBandingRangka,
   exportRepairKit,
   getAiStatus,
+  getPartPhotos,
+  partImageUrl,
   submitAiFeedback,
   type AIBandingExport,
   type AIChatTurn,
@@ -26,6 +28,7 @@ type Msg = AIChatTurn & {
   repairkitModels?: string[];
   bandingExports?: AIBandingExport[];
   excelExports?: AIExcelExport[];
+  partPns?: string[]; // PN yang disebut asisten → thumbnail foto
   at?: number; // epoch ms — jam pesan
   rating?: "up" | "down"; // umpan balik user atas jawaban ini
 };
@@ -239,6 +242,7 @@ export default function AsistenPage() {
           repairkitModels: res.repairkit_models,
           bandingExports: res.banding_exports,
           excelExports: res.excel_exports,
+          partPns: res.part_pns,
           at: Date.now(),
         },
       ]);
@@ -288,6 +292,7 @@ export default function AsistenPage() {
           repairkitModels: res.repairkit_models,
           bandingExports: res.banding_exports,
           excelExports: res.excel_exports,
+          partPns: res.part_pns,
           at: Date.now(),
         },
       ]);
@@ -591,6 +596,59 @@ export default function AsistenPage() {
   );
 }
 
+// Strip thumbnail foto part yang DISEBUT asisten (grounded). Foto diambil dari
+// SIMS via /api/parts/photos (proxy); PN tanpa foto dilewati. Klik → detail part.
+function PartThumbs({ pns }: { pns?: string[] }) {
+  const router = useRouter();
+  const [photos, setPhotos] = useState<{ pn: string; url: string }[]>([]);
+  const key = (pns || []).join(",");
+  useEffect(() => {
+    const token = getToken();
+    const list = (pns || []).slice(0, 6);
+    if (!token || list.length === 0) {
+      setPhotos([]);
+      return;
+    }
+    let alive = true;
+    (async () => {
+      const out: { pn: string; url: string }[] = [];
+      for (const pn of list) {
+        try {
+          const r = await getPartPhotos(pn, token);
+          if (r.photos && r.photos.length) out.push({ pn, url: partImageUrl(r.photos[0]) });
+        } catch {
+          /* lewati PN tanpa foto */
+        }
+      }
+      if (alive) setPhotos(out);
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  if (photos.length === 0) return null;
+  return (
+    <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+      {photos.map((p) => (
+        <button
+          key={p.pn}
+          onClick={() => router.push(`/part/${encodeURIComponent(p.pn)}`)}
+          title={`Lihat detail ${p.pn}`}
+          style={{ width: 78, borderRadius: 10, border: "1px solid var(--ink-200)", background: "var(--paper)", cursor: "pointer", overflow: "hidden", padding: 0 }}
+        >
+          <div style={{ width: "100%", height: 64, background: "var(--ink-50)" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={p.url} alt={p.pn} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          </div>
+          <div className="mono truncate" style={{ fontSize: 9.5, color: "var(--ink-500)", padding: "3px 4px" }}>{p.pn}</div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // Kartu file gaya Claude: ikon spreadsheet + nama file + tombol Unduh.
 // Shell dipakai bersama ExcelCard (banding rangka) & AiExcelCard (export generik).
 function ExcelCardShell({
@@ -707,19 +765,24 @@ function AiExcelCard({ exp }: { exp: AIExcelExport }) {
       downloadBlob(blob, exp.filename || "Data_MASPART.xlsx");
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
-        setErr("File sudah kedaluwarsa — minta asisten buatkan Excel-nya lagi.");
+        setErr("File sudah kedaluwarsa — minta asisten buatkan lagi.");
       } else {
-        setErr(e instanceof Error ? e.message : "Gagal mengunduh Excel");
+        setErr(e instanceof Error ? e.message : "Gagal mengunduh file");
       }
     } finally {
       setBusy(false);
     }
   }
 
+  const isPdf = (exp.filename || "").toLowerCase().endsWith(".pdf");
+  const sub = isPdf
+    ? "PDF · katalog bergambar siap cetak"
+    : `Spreadsheet · XLSX${exp.jumlah_baris ? ` · ${exp.jumlah_baris} baris` : ""}`;
+
   return (
     <ExcelCardShell
       fname={exp.judul || exp.filename}
-      sub={`Spreadsheet · XLSX · ${exp.jumlah_baris} baris`}
+      sub={sub}
       busy={busy}
       err={err}
       onDownload={download}
@@ -976,6 +1039,7 @@ function Bubble({
         {m.excelExports?.map((exp, i) => (
           <AiExcelCard key={exp.id || i} exp={exp} />
         ))}
+        <PartThumbs pns={m.partPns} />
         {(tools.length > 0 || time || onFeedback) && (
           <div
             style={{

@@ -24,7 +24,7 @@ from ..schemas import (
     PartPhotos,
     SearchResponse,
 )
-from ..services import catalog, compare, gudang, image_search, part_index, reservations, sims
+from ..services import catalog, compare, gudang, image_search, part_index, reservations, search_log, sims
 from ..services.supabase_client import fetch_part_photos, get_user_gudang
 
 _MAX_IMAGE_BYTES = 15 * 1024 * 1024  # 15 MB
@@ -109,6 +109,8 @@ def search(
         sims_results = _sims_fallback(q)
         if sims_results:
             results = results + sims_results
+    if not results and page == 1:
+        search_log.record_miss(q, "pn", "search")
     return _paginate(q, _scope_gudang(results, user), page, page_size)
 
 
@@ -119,7 +121,10 @@ def search_name(
     page_size: int = Query(20, ge=1, le=200),
     user: dict = Depends(get_current_user),
 ):
-    return _paginate(q, _scope_gudang(part_index.search_part_name(q), user), page, page_size)
+    results = part_index.search_part_name(q)
+    if not results and page == 1:
+        search_log.record_miss(q, "name", "search")
+    return _paginate(q, _scope_gudang(results, user), page, page_size)
 
 
 @router.get("/batch-template")

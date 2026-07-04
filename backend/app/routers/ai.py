@@ -122,14 +122,16 @@ def export_banding_rangka(
 
 @router.get("/excel/{export_id}", dependencies=[Depends(limit("ai_export", 20, 60))])
 def export_ai_excel(export_id: str, _user: dict = Depends(get_current_user)):
-    """Excel generik hasil tool AI `buat_excel` — dipicu kartu 'Unduh' di bawah
-    jawaban asisten. Payload disimpan sementara (TTL) saat tool dijalankan."""
+    """File hasil export asisten (Excel `buat_excel` / katalog bergambar Excel|PDF)
+    — dipicu kartu 'Unduh' di bawah jawaban. Payload disimpan sementara (TTL) saat
+    tool dijalankan; media type mengikuti ekstensi file (xlsx/pdf)."""
     data, fname = ai_export.generic_excel(export_id)
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, fname)
+    mime = "application/pdf" if fname.lower().endswith(".pdf") else _XLSX_MIME
     return Response(
         content=data,
-        media_type=_XLSX_MIME,
+        media_type=mime,
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
 

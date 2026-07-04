@@ -19,3 +19,6 @@ torchvision>=0.17
 
 # Render SVG exploded view EPC -> PNG (katalog bergambar asisten)
 resvg-py>=0.1
+
+# Katalog bergambar versi PDF (siap cetak)
+reportlab>=4.0

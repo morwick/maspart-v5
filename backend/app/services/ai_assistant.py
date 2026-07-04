@@ -20,7 +20,7 @@ import requests
 
 from ..core.config import get_settings
 from . import (ai_export, catalog_bom, epc, epc_bom, epc_weichai, fault_codes, filter_ref,
-               gudang, harga, orders, part_index, populasi, repairkit, sims)
+               gudang, harga, orders, part_index, populasi, repairkit, search_log, sims)
 
 logger = logging.getLogger("maspart.ai")
 
@@ -774,6 +774,7 @@ def _tool_specs(user: dict) -> list[dict]:
                     "properties": {
                         "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number 8 digit."},
                         "kategori": {"type": "string", "description": "Kategori yang mau dikatalogkan (mis. 'kabin', 'rem', 'transmisi', 'gardan belakang', 'kelistrikan', 'ac') — ATAU 'semua' untuk KATALOG LENGKAP seluruh kategori unit. HANYA diisi bila user MENYEBUTNYA; bila user belum menyebut kategori, KOSONGKAN (tool akan menyuruhmu menawarkan pilihan) — JANGAN menebak."},
+                        "format": {"type": "string", "enum": ["excel", "pdf"], "description": "Format file hasil: 'excel' (.xlsx) atau 'pdf' (siap cetak). HANYA diisi bila user SUDAH memilih; bila belum, KOSONGKAN (tool akan menyuruhmu menanyakan Excel atau PDF) — JANGAN menebak/mengasumsikan."},
                     },
                     "required": ["rangka"],
                 },
@@ -1206,6 +1207,14 @@ def _t_cari_part(args: dict, user: dict) -> dict:
             q, unit or None, matched_syn or [], bool(saran),
             user.get("username") or "?",
         )
+        # Catat ke log persisten (halaman admin 'Pencarian Nihil') — hanya bila
+        # istilah tak dikenali sinonim (yang dikenali tapi 0 hasil = data belum ada,
+        # bukan celah kamus). Best-effort.
+        if not matched_syn:
+            try:
+                search_log.record_miss(q, "nama", "asisten")
+            except Exception:
+                pass
 
     out_res = {
         "query": q, "kata_kunci_dicari": search_terms, "unit_filter": unit or None,
@@ -3220,6 +3229,9 @@ def _t_katalog_kategori(args: dict, user: dict) -> dict:
     diunduh (ai_export.katalog_excel) agar chat tak menunggu render gambar."""
     rangka = (args.get("rangka") or "").strip()
     kategori = (args.get("kategori") or "").strip()
+    fmt_raw = (args.get("format") or "").strip().lower()
+    fmt = ("pdf" if fmt_raw in ("pdf",)
+           else "excel" if fmt_raw in ("excel", "xlsx", "xls", "spreadsheet") else "")
     if not rangka:
         return {"error": "Sebutkan nomor rangka/VIN unit yang mau dikatalogkan."}
     if not kategori:
@@ -3235,6 +3247,17 @@ def _t_katalog_kategori(args: dict, user: dict) -> dict:
                               "'lengkap' untuk semua kategori sekaligus (file lebih besar, "
                               "±2-3 menit). ⛔ JANGAN memanggil tool ini lagi sebelum user "
                               "memilih, JANGAN menebak kategorinya."),
+        }
+    if not fmt:
+        # Kategori sudah dipilih tapi FORMAT belum → tanyakan Excel atau PDF dulu.
+        return {
+            "found": False,
+            "pilihan_format": ["Excel (.xlsx)", "PDF (siap cetak)"],
+            "jawaban_wajib": ("Kategori sudah jelas, tapi user BELUM memilih FORMAT file. "
+                              "TANYAKAN: mau hasilnya format EXCEL (.xlsx) atau PDF (siap "
+                              "cetak/kirim)? ⛔ JANGAN memanggil tool ini lagi sebelum user "
+                              "memilih format; setelah user memilih, panggil lagi dengan "
+                              "argumen 'format' = 'excel' atau 'pdf'."),
         }
 
     d = epc_bom.catalog_walk(rangka, kategori)
@@ -3258,18 +3281,21 @@ def _t_katalog_kategori(args: dict, user: dict) -> dict:
     else:
         kat_nama = catalog_bom.KATEGORI_NAMA.get(d.get("kategori_kode") or "", kategori.title())
     judul = f"Katalog {kat_nama.split(' (')[0]} {frame}"
+    ext = "pdf" if fmt == "pdf" else "xlsx"
     export_id, filename = ai_export.stash_builder(
-        judul, {"kind": "katalog", "rangka": rangka, "kategori": kategori})
+        judul, {"kind": "katalog", "rangka": rangka, "kategori": kategori, "fmt": fmt}, ext=ext)
     durasi = "±2-3 menit" if d.get("lengkap") else "±1 menit"
+    fmt_label = "PDF" if fmt == "pdf" else "Excel"
     return {
         "found": True, "export_id": export_id, "filename": filename, "judul": judul,
+        "format": fmt_label,
         "frame_number": frame, "katalog_lengkap": bool(d.get("lengkap")),
         "jumlah_figure": d.get("jumlah_figure"), "jumlah_baris": d.get("jumlah_part"),
         "kategori_cocok": (d.get("kategori_cocok") or [])[:20],
         **({"peringatan_tidak_lengkap":
             "⚠️ Sebagian data EPC gagal diambil — katalog bisa belum lengkap; sarankan coba lagi."}
            if d.get("incomplete") else {}),
-        "catatan": ("Katalog siap — KARTU UNDUH Excel otomatis muncul di bawah jawabanmu. "
+        "catatan": (f"Katalog {fmt_label} siap — KARTU UNDUH otomatis muncul di bawah jawabanmu. "
                     "Jawab SINGKAT: sebut jumlah figure + jumlah part + bahwa tiap figure ada "
                     "GAMBAR exploded view resmi EPC dengan nomor balon, dan UNDUHAN PERTAMA "
                     f"butuh {durasi} (menyusun gambar). ⛔ JANGAN menulis daftar part/figure "
@@ -4272,6 +4298,18 @@ def _extract_pns(text: str) -> set[str]:
     return out
 
 
+def _mentioned_part_pns(reply: str, grounded: set[str], limit: int = 6) -> list[str]:
+    """PN yang DISEBUT di jawaban DAN grounded (bukan kode unit/seri) — dipakai UI
+    untuk menampilkan thumbnail foto part di bawah jawaban. Dibatasi agar jawaban
+    daftar-panjang tak membanjiri UI; diurutkan sesuai kemunculan pertama di teks."""
+    found = _drop_unit_tokens(list(_extract_pns(reply) & grounded))
+    if not found:
+        return []
+    up = reply.upper()
+    found.sort(key=lambda p: up.find(p))
+    return found[:limit]
+
+
 def _ungrounded_pns(reply: str, grounded: set[str]) -> list[str]:
     """PN di jawaban yang TIDAK ada di data mana pun (grounded) → dugaan karangan."""
     return sorted(p for p in _extract_pns(reply) if p and p not in grounded)
@@ -4484,7 +4522,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 reply = _sanitize_ungrounded(reply, bad)
             return {"reply": reply, "tools_used": tools_used,
                     "repairkit_models": repairkit_models, "banding_exports": banding_exports,
-                    "excel_exports": excel_exports}
+                    "excel_exports": excel_exports,
+                    "part_pns": _mentioned_part_pns(reply, grounded)}
 
         # Catat pesan assistant (yang berisi tool_calls) lalu jalankan tiap tool.
         messages.append({
@@ -4524,4 +4563,5 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
         reply = _sanitize_ungrounded(reply, bad)
     return {"reply": reply, "tools_used": tools_used,
             "repairkit_models": repairkit_models, "banding_exports": banding_exports,
-            "excel_exports": excel_exports}
+            "excel_exports": excel_exports,
+            "part_pns": _mentioned_part_pns(reply, grounded)}
