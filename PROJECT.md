@@ -34,6 +34,16 @@
 > data role-gated internal — §3.5.5c; utk part MESIN Weichai SUDAH ada tool `pengganti_part`);
 > `repair_kit_mesin` kasus tanpa 维修包 kini menyarankan `uraikan_mesin`; tabel tool §3.5.5
 > dilengkapi 8 tool yang belum tercatat.
+> Update **2026-07-03/04**: (a) **Aksesori TERPASANG di mesin** (air compressor, alternator,
+> starter, turbo) dirutekan ke EPC Weichai — §3.5.5e. (b) **Export Excel DINAMIS** — tool
+> `buat_excel`: "buatkan excelnya" atas data apa pun → kartu unduh gaya Claude — §3.5.5h.
+> (c) **KATALOG BERGAMBAR per-VIN** — tool `katalog_kategori`: per kategori ATAU LENGKAP
+> (semua kategori); Excel 1 sheet berisi daftar-isi ber-hyperlink + gambar EXPLODED VIEW
+> resmi EPC (SVG d2s → PNG via resvg) + tabel No. Balon→PN + stok/harga + pelengkap Loading
+> List (cakupan part terpasang 100%); tanpa kategori → asisten menawarkan pilihan — §3.5.5h.
+> (d) Dockerfile backend +`fonts-liberation` (angka balon = teks Arial di SVG; tanpa font
+> hilang senyap) & requirements +`resvg-py`. (e) Redeploy Coolify ternyata BISA dari CLI
+> (`docker compose up -d --force-recreate` di folder service) — §5.4.
 
 ---
 
@@ -237,6 +247,8 @@ kamus sinonim **juga disuntikkan ke system prompt** ("KAMUS ISTILAH LAPANGAN"). 
 | `banding_rangka` | **bandingkan part DUA unit via dua nomor rangka** (Loading List per-VIN) — part sama/beda per kategori; memicu kartu unduh Excel di UI (§3.5.5g) | semua |
 | `part_termasuk_assy` | REVERSE: PN komponen kecil → **termasuk di assembly mana saja** (gearbox/kopling/gardan/mesin yang memuatnya) | semua |
 | `cari_filter_shantui` | cari **FILTER alat berat SHANTUI** (hidrolik, oli, solar, udara, water separator, AC) per model excavator/dozer/roller/grader | semua |
+| `buat_excel` | **EXPORT EXCEL DINAMIS** — "buatkan excelnya" atas data apa pun yg dibahas → model susun judul+kolom+baris dari hasil tool → kartu unduh gaya Claude; PN di isi file wajib grounded (anti-karangan) (2026-07-03) | semua |
+| `katalog_kategori` | **KATALOG BERGAMBAR per-VIN** (§3.5.5h) — per kategori ("katalog kabin SJ346500") ATAU `semua` (LENGKAP); tanpa kategori → tawarkan pilihan. Excel 1 sheet: daftar isi hyperlink + gambar EXPLODED VIEW resmi EPC + No. Balon + stok/harga + pelengkap Loading List; dibangun saat kartu diunduh | semua |
 | `cek_populasi` | data **populasi unit** (armada terdaftar: model, tipe, lokasi kerja, tahun, Euro, nopol) | `admin` / `SEE_ALL` |
 | `pesanan_saya`, `detail_pesanan` | pesanan milik buyer | `pembeli` |
 | `rekap_penjualan`, `daftar_pesanan` | rekap & daftar pesanan (cabang auto-scoped) | `admin` / cabang |
@@ -448,6 +460,48 @@ yang user sebut otomatis ikut "grounded". Melengkapi anti-bocor tool-call (§3.5
   openpyxl) = perbandingan LENGKAP tanpa cap. Pola sama dgn tombol Excel repair kit
   (§3.5.5a, field `repairkit_models`).
 
+### 3.5.5h Export Excel DINAMIS & KATALOG BERGAMBAR (exploded view) — sejak 2026-07-03
+
+**Export Excel dinamis (`buat_excel`)** — user bilang "buatkan excelnya" atas data APA PUN
+yang barusan dibahas:
+- Model menyusun `judul + kolom + baris` dari HASIL TOOL percakapan → handler
+  `_t_buat_excel` menyimpan payload via `ai_export.stash_export` (in-memory, TTL 24 jam,
+  maks 200 entri, hilang saat restart) → metadata `excel_exports` di return `chat()` →
+  frontend render kartu unduh (`AiExcelCard`, shell sama dgn `ExcelCard`) →
+  `GET /api/ai/excel/{export_id}` membangun xlsx ber-styling (`generic_excel`).
+- **Pagar anti-karangan**: `chat()` menyuntik set `grounded` ke args (`_grounded`) — PN di
+  isi file yang tak pernah muncul dari tool/riwayat DITOLAK (kode unit dikecualikan).
+
+**Katalog bergambar per-VIN (`katalog_kategori`)** — "berikan katalog kabin SJ346500",
+"katalog lengkap unit X"; kategori: kabin/mesin/kopling/transmisi/gardan depan-belakang/
+kelistrikan/rem/sasis/ac ATAU **'semua'** (katalog LENGKAP seluruh unit). **Tanpa kategori →
+tool menolak + model menawarkan PILIHAN** (11 opsi) — jangan menebak.
+- **Temuan EPC**: respons `part/tree/item` membawa **`d2s`** = nama file SVG **exploded view**
+  figure (Creo Illustrate) & tiap item punya **`ballNum`** (nomor balon); file diunduh
+  `GET /api/rest/file/<nama>` (WAJIB header Referer+UA; ekstensi diabaikan). `d3s` = 3D .pvz.
+- `epc_bom.catalog_walk(rangka, kategori)`: pilih kategori top-level Atlas → walk BFS paralel
+  → figures {nama, kode, svg, items:[balon, pn, qty, pengganti]}. Seleksi kategori 3 lapis:
+  (1) ⚠️ skema kode EPC `ZZ-XX` ≠ kode katalog lokal (ZZ-01=kabin, ZZ-02=SASIS, ZZ-04=
+  KELISTRIKAN, ZZ-05=POWERTRAIN) → prefix hanya utk kabin (`_KATALOG_ZZ_PREFIX`), lainnya
+  kata kunci EN/CN (`_KATALOG_KEYWORDS`; term pendek spt 'ac' diganti frasa —
+  `_KATALOG_TERM_KEYWORDS`); (2) UNION daftar figure RESMI modul UI
+  (`GET /workOrder/getAcOfType?cjh&type=JSS` — kode modul dari app.js; cakupan dijamin ⊇
+  pohon UI "01 Driver's cab"); (3) pelengkap **Loading List**: part terpasang kategori itu
+  yang tak digambar di Atlas (baut/mur dsb) masuk seksi terakhir → cakupan part terpasang
+  **100%** (SJ346500 kabin: 404/404). Mode 'semua' = semua kategori top-level, kelompok per
+  bab ZZ, budget node 2000.
+- **Build BERAT saat kartu DIKLIK** (bukan saat chat): `ai_export.stash_builder` menyimpan
+  resep → `generic_excel` men-dispatch `katalog_excel`: unduh SVG paralel → render PNG via
+  **resvg-py** (buang atribut `width/height` ber-mm; ⚠️ WAJIB **fonts-liberation** di image —
+  angka balon = `<text font-family='Arial'>`, tanpa font sistem teks DIBUANG SENYAP) → 1 sheet
+  "Katalog": judul + cara-baca (freeze) → DAFTAR ISI ber-hyperlink (klik nama → lompat;
+  "↑ Daftar Isi" di tiap seksi) → seksi per figure: bar hijau → GAMBAR → tabel (No. Balon,
+  PN mono, nama, qty/stok numerik, harga, pengganti). Bytes di-cache di entri stash → klik
+  kedua instan.
+- Terverifikasi live: SJ346500 kabin 73 seksi/821 part (±1 mnt); PB087964 LENGKAP **477
+  figure / 5.146 part / 190 gambar / 16 MB** (walk 85s + build 101s). Dinamis utk VIN apa pun
+  (Sinotruk/HOWO/SITRAK).
+
 ### 3.5.6 Cari by Foto
 
 `services/image_search.py` — embedding **DINOv2-base** (torch CPU). Galeri dari **CSV lokal**
@@ -477,7 +531,7 @@ Hasil diagregasi per `part_number` + confidence boost. Foto part di-proxy via
 | **branch** `/api/branch` | `GET /orders·/orders/count·/orders/{code}·/sales`, `PUT /orders/{code}/status` |
 | **chat** `/api` | `GET/POST /orders/{code}/chat`, `/chat/buyer/threads`, `/chat/gudang/{key}`, `/chat/branch/...` |
 | **geo** `/api/geo` | `GET /reverse·/search` |
-| **ai** `/api/ai` | `GET /status`, `POST /chat`, `POST /feedback`, `GET /feedback` (admin), `POST /feedback/{id}/resolve` (admin), `GET /banding-rangka/export` |
+| **ai** `/api/ai` | `GET /status`, `POST /chat`, `POST /feedback`, `GET /feedback` (admin), `POST /feedback/{id}/resolve` (admin), `GET /banding-rangka/export`, `GET /excel/{export_id}` (export dinamis + katalog bergambar §3.5.5h) |
 | **repairkit** `/api/repairkit` | `GET /transmisi`, `GET /transmisi/export` |
 | **admin** `/api/admin` | users, perms, gudang, `upload/{kind}`, `upload-catalog`, monitoring, sales, photos, `index*` (reload galeri/bulk), `catalog-bom/status·rebuild` |
 | **meta** | `GET /health` |
@@ -550,15 +604,16 @@ npm run dev                          # http://localhost:3000
 cd backend
 pip install -r requirements-dev.txt        # pytest
 
-# 1) UNIT TEST logika murni — cepat (<2 dtk), TANPA network/API. Jalankan tiap ubah kode.
-python -m pytest tests/ -q
+# 1) UNIT TEST logika murni — cepat (<20 dtk), TANPA network/API. Jalankan tiap ubah kode.
+python -m pytest tests/ -q                 # 88 test per 2026-07-04
 #    Cakupan: guard anti-halusinasi PN (_extract_pns/_sanitize_ungrounded + loop chat()
 #    dgn DeepSeek di-mock), anti-bocor tool-call, ekspansi sinonim, catalog_bom
-#    (resolve/verdict/compare).
+#    (resolve/verdict/compare), routing modul Atlas (test_atlas_routing), export Excel
+#    dinamis + stash builder + svg→png (test_buat_excel).
 
 # 2) EVAL REGRESI Asisten AI — golden questions lewat chat() NYATA (DeepSeek + tool asli).
 #    Jalankan SEBELUM deploy perubahan prompt/tool. Ada biaya API kecil per run.
-python evals/run_evals.py                  # semua kasus 'lokal' (default; ~22 kasus)
+python evals/run_evals.py                  # semua kasus 'lokal' (default; ~24 kasus)
 python evals/run_evals.py --net            # + kasus EPC/Weichai (butuh jaringan EPC)
 python evals/run_evals.py --only guard     # subset via substring id
 python evals/run_evals.py --list           # daftar kasus tanpa API
@@ -748,8 +803,18 @@ maspart-frontend nginx` + biarkan rollback.sh mengembalikan routing.
 #### 5.4c Catatan operasional
 - **JANGAN** menjalankan systemd lama + container Coolify bersamaan (dua-duanya muat
   torch → risiko OOM di RAM 3.8GB). rollback.sh sudah otomatis mematikan salah satu.
-- Setelah `build.sh`, container belum berubah sampai kamu klik **Redeploy** — itu yang
+- Setelah `build.sh`, container belum berubah sampai di-**Redeploy** — itu yang
   me-recreate container dengan image baru.
+- **Redeploy BISA dari CLI** (terbukti 2026-07-03 — klik dashboard TIDAK wajib):
+  container dikelola docker-compose Coolify di
+  `/data/coolify/services/jmmamc7kvqr6nlev97r79j5q/` (service `backend`, `frontend`):
+  ```bash
+  ssh root@maspart.tech "cd /data/coolify/services/jmmamc7kvqr6nlev97r79j5q && \
+    docker compose up -d --force-recreate backend"    # dan/atau frontend
+  ```
+  Health OK ±20-35s. Ini setara tombol Redeploy (recreate dari image `:latest` baru).
+- ⚠️ Dockerfile backend WAJIB mempertahankan **`fonts-liberation`** (apt) — dipakai render
+  gambar exploded view katalog (§3.5.5h); tanpa font, angka balon hilang senyap.
 - API token Coolify TIDAK diperlukan untuk operasi sehari-hari (semua via SSH + tombol
   dashboard). Token hanya dipakai sekali saat migrasi & sudah sebaiknya di-revoke.
 
@@ -874,13 +939,26 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       (云桥, sysCode=intl — tanpa captcha/manual), deteksi "Login expired!", anti-bocor
       tool-call. Backend live (hot-swap) + image di-`build.sh`. Tanpa frontend baru → Redeploy
       tidak wajib. Catatan: Loading List ≠ Parts Atlas terstruktur (database EPC berbeda).
-- [x] **Suite pengujian** — SELESAI 2026-07-02: unit test `backend/tests/` (81 test murni,
-      <2 dtk) + eval regresi AI `backend/evals/` (golden questions, `run_evals.py`). Lihat §4.
+- [x] **Suite pengujian** — SELESAI 2026-07-02: unit test `backend/tests/` (88 test murni
+      per 2026-07-04) + eval regresi AI `backend/evals/` (golden questions, `run_evals.py`).
+      Lihat §4.
 - [x] **Aksesori mesin (air compressor dll) rute ke Weichai + urutan komponen utama** —
       SELESAI 2026-07-03 (§3.5.5e), LIVE (hot-swap + image). Eval `weichai-air-compressor`
       pass; checker `no_new_pn` kini kecualikan kode unit (samakan guard produksi).
+- [x] **Export Excel DINAMIS (`buat_excel`)** — SELESAI 2026-07-03 (§3.5.5h), LIVE:
+      "buatkan excelnya" → kartu unduh gaya Claude; PN grounded (anti-karangan);
+      endpoint `GET /api/ai/excel/{id}`; frontend `AiExcelCard`.
+- [x] **KATALOG BERGAMBAR per-VIN (`katalog_kategori`)** — SELESAI 2026-07-03/04 (§3.5.5h),
+      LIVE: per kategori ATAU 'semua' (lengkap); exploded view resmi EPC (d2s SVG→PNG,
+      resvg + fonts-liberation); 1 sheet + daftar isi hyperlink + No. Balon; cakupan
+      dijamin (union modul JSS + pelengkap Loading List = 100% part terpasang); tanpa
+      kategori → asisten menawarkan pilihan. Terverifikasi SJ346500 (kabin 73 seksi) &
+      PB087964 (lengkap 477 figure/16 MB).
 - [x] **Semua pekerjaan dikomit per-fitur & di-push** — SELESAI 2026-07-02 (10+ commit di
       `snapshot-clean` → `origin/snapshot-clean`; sebelumnya menggantung tak terkomit).
+      ⚠️ Pekerjaan 2026-07-03/04 (buat_excel + katalog bergambar + font fix + evals) sudah
+      LIVE di server tapi **BELUM dikomit** (ditahan atas permintaan) — komit per-fitur
+      saat sudah dikonfirmasi.
 - [x] **Fix guard (jawaban tertelan [PIKIR] + kode seri disamarkan)** — SELESAI 2026-07-02
       (§3.5.5f), LIVE di server (hot-swap + image + Redeploy).
 - [x] **Repair kit transmisi per-VIN (arg `rangka` via EPC)** — SELESAI 2026-07-02 (§3.5.5a),
