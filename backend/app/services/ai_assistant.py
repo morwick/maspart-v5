@@ -19,7 +19,7 @@ import time
 import requests
 
 from ..core.config import get_settings
-from . import (ai_export, catalog_bom, epc, epc_bom, epc_weichai, fault_codes, filter_ref,
+from . import (accurate, ai_export, catalog_bom, epc, epc_bom, epc_weichai, fault_codes, filter_ref,
                gudang, harga, orders, part_index, populasi, repairkit, search_log, sims)
 
 logger = logging.getLogger("maspart.ai")
@@ -235,6 +235,27 @@ def _tool_specs(user: dict) -> list[dict]:
                     "type": "object",
                     "properties": {
                         "part_number": {"type": "string", "description": "Part Number lengkap/persis."},
+                    },
+                    "required": ["part_number"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "stok_accurate",
+                "description": (
+                    "Stok LIVE dari sistem akunting/ERP Accurate untuk satu Part Number "
+                    "persis: 'stok_dapat_dijual' (real-time) + 'stok_per_gudang' (rincian "
+                    "kuantitas per gudang/cabang, mis. 01.Jakarta, 05.Makasar). Pakai bila "
+                    "user tanya stok terkini/riil di Accurate, stok per cabang/gudang, atau "
+                    "untuk membandingkan stok Accurate vs stok katalog lokal. Ini SUMBER "
+                    "TAMBAHAN, tidak menggantikan stok gudang lokal dari detail_part."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "part_number": {"type": "string", "description": "Part Number persis untuk dicek di Accurate."},
                     },
                     "required": ["part_number"],
                 },
@@ -1282,6 +1303,40 @@ def _t_detail_part(args: dict, user: dict) -> dict:
     if pos:
         result["posisi_poros"] = pos
     return result
+
+
+def _t_stok_accurate(args: dict, user: dict) -> dict:
+    """Stok live dari ERP Accurate untuk 1 PN (sumber tambahan, non-fatal)."""
+    pn = (args.get("part_number") or "").strip()
+    if not pn:
+        return {"error": "part_number kosong"}
+    if not accurate.available():
+        return {"part_number": pn, "tersedia": False,
+                "pesan": "Integrasi Accurate belum aktif (sesi belum diatur)."}
+    try:
+        hit = accurate.stock_full(pn)
+    except accurate.AccurateSessionExpired:
+        return {"part_number": pn, "tersedia": False,
+                "pesan": "Sesi Accurate kadaluarsa — perlu diperbarui admin."}
+    except accurate.AccurateError as e:
+        return {"part_number": pn, "tersedia": False, "pesan": f"Accurate tak dapat diakses: {e}"}
+    if not hit:
+        return {"part_number": pn, "sumber": "Accurate", "ditemukan": False,
+                "pesan": "PN ini tidak ada di data Accurate."}
+    return {
+        "part_number": pn,
+        "sumber": "Accurate (live)",
+        "ditemukan": True,
+        "nama_accurate": hit["name"],
+        "kode_accurate": hit["no"],
+        "stok_dapat_dijual": hit["available_to_sell"],
+        "kuantitas": hit["quantity"],
+        "satuan": hit["unit"],
+        "tipe": hit["item_type"],
+        "stok_per_gudang": [
+            {"gudang": g["gudang"], "qty": g["qty"]} for g in (hit.get("per_gudang") or [])
+        ],
+    }
 
 
 def _t_harga_sims(args: dict, user: dict) -> dict:
@@ -3326,6 +3381,7 @@ _DISPATCH = {
     "cek_populasi": _t_cek_populasi,
     "banding_part_armada": _t_banding_part_armada,
     "detail_part": _t_detail_part,
+    "stok_accurate": _t_stok_accurate,
     "harga_sims": _t_harga_sims,
     "info_aplikasi": _t_info_aplikasi,
     "daftar_unit": _t_daftar_unit,

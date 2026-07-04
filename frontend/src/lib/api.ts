@@ -636,6 +636,32 @@ export async function getPartSpec(pn: string, token: string): Promise<PartSpecRe
   return res.json();
 }
 
+// ── Stok live Accurate (kolom tambahan) ─────────────────────────────
+export type AccurateStock = {
+  configured: boolean;
+  found?: boolean;
+  session_expired?: boolean;
+  error?: boolean;
+  reason?: string;
+  stock?: {
+    available_to_sell: number;
+    quantity: number;
+    unit: string;
+    name: string;
+    no: string;
+    item_type: string;
+    per_gudang?: { gudang: string; deskripsi: string; qty: number; gudang_id?: number }[];
+  };
+};
+
+export async function getAccurateStock(pn: string, token: string): Promise<AccurateStock> {
+  const res = await fetch(`${API_BASE}/api/parts/accurate-stock?pn=${encodeURIComponent(pn)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 // ── Permissions (menu + kolom + sub-tab harga) ──────────────────────
 export type MyPermissions = {
   menus: string[];

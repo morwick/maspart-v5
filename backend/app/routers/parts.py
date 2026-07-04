@@ -24,7 +24,7 @@ from ..schemas import (
     PartPhotos,
     SearchResponse,
 )
-from ..services import catalog, compare, gudang, image_search, part_index, reservations, search_log, sims
+from ..services import accurate, catalog, compare, gudang, image_search, part_index, reservations, search_log, sims
 from ..services.supabase_client import fetch_part_photos, get_user_gudang
 
 _MAX_IMAGE_BYTES = 15 * 1024 * 1024  # 15 MB
@@ -125,6 +125,39 @@ def search_name(
     if not results and page == 1:
         search_log.record_miss(q, "name", "search")
     return _paginate(q, _scope_gudang(results, user), page, page_size)
+
+
+@router.get("/accurate-stock")
+def accurate_stock(
+    pn: str = Query(..., min_length=1, description="Part Number persis untuk cek stok Accurate"),
+    user: dict = Depends(get_current_user),
+):
+    """Stok LIVE dari ERP Accurate untuk 1 Part Number (kolom tambahan, tak
+    menimpa stok lokal). Non-fatal: kegagalan sesi/koneksi dikembalikan sebagai
+    status, bukan error — frontend menampilkan seadanya."""
+    if not accurate.available():
+        return {"configured": False, "reason": "no_session"}
+    try:
+        hit = accurate.stock_full(pn)
+    except accurate.AccurateSessionExpired:
+        return {"configured": True, "session_expired": True}
+    except accurate.AccurateError:
+        return {"configured": True, "error": True}
+    if not hit:
+        return {"configured": True, "found": False}
+    return {
+        "configured": True,
+        "found": True,
+        "stock": {
+            "available_to_sell": hit["available_to_sell"],
+            "quantity": hit["quantity"],
+            "unit": hit["unit"],
+            "name": hit["name"],
+            "no": hit["no"],
+            "item_type": hit["item_type"],
+            "per_gudang": hit.get("per_gudang") or [],
+        },
+    }
 
 
 @router.get("/batch-template")

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { ApiError, getPartPhotos, getPartSpec, getBuyerLocations, partImageUrl, searchParts, type BuyerLocation, type PartResult, type PartSpec } from "@/lib/api";
+import { ApiError, getAccurateStock, getPartPhotos, getPartSpec, getBuyerLocations, partImageUrl, searchParts, type AccurateStock, type BuyerLocation, type PartResult, type PartSpec } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { ensurePerms } from "@/lib/perms";
 import { addToCart, hasPrice, hasWeight } from "@/lib/cart";
@@ -38,6 +38,7 @@ export default function PartDetailPage() {
   const [showHarga, setShowHarga] = useState(true);
   const [isBuyer, setIsBuyer] = useState(false);
   const [buyerLocs, setBuyerLocs] = useState<BuyerLocation[]>([]);
+  const [accStock, setAccStock] = useState<AccurateStock | null>(null);
 
   useEffect(() => {
     const b = getUser()?.role === "pembeli";
@@ -58,6 +59,14 @@ export default function PartDetailPage() {
     const from = new URLSearchParams(window.location.search).get("from");
     setBackHref(from === "image" ? "/search-image" : "/search");
   }, []);
+
+  // Stok live Accurate (kolom tambahan) — non-fatal, independen dari data utama.
+  useEffect(() => {
+    const t = getToken();
+    if (!pn || !t) return;
+    setAccStock(null);
+    getAccurateStock(pn, t).then(setAccStock).catch(() => setAccStock(null));
+  }, [pn]);
 
   useEffect(() => {
     const token = getToken();
@@ -314,6 +323,37 @@ export default function PartDetailPage() {
                           <div className="px-4 py-3" style={{ fontSize: 13, color: "var(--ink-400)" }}>
                             Tidak ada rincian stok per gudang.
                           </div>
+                        )}
+                      </div>
+                    )}
+
+                    {showStok && accStock?.configured && (
+                      <div className="surface" style={{ overflow: "hidden" }}>
+                        <div className="px-4 py-2.5" style={{ fontSize: 13, fontWeight: 600, borderBottom: "1px solid var(--ink-150)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <span>Stok Accurate <span className="pill pill-success" style={{ marginLeft: 6 }}>live</span></span>
+                          {accStock.found && accStock.stock && (
+                            <span className="mono" style={{ fontWeight: 700 }}>{accStock.stock.available_to_sell.toLocaleString("id-ID")} {accStock.stock.unit}</span>
+                          )}
+                        </div>
+                        {accStock.session_expired ? (
+                          <div className="px-4 py-3" style={{ fontSize: 13, color: "var(--warn-600, #b45309)" }}>Sesi Accurate kadaluarsa — perlu diperbarui admin.</div>
+                        ) : accStock.error ? (
+                          <div className="px-4 py-3" style={{ fontSize: 13, color: "var(--ink-400)" }}>Accurate tak dapat diakses saat ini.</div>
+                        ) : !(accStock.found && accStock.stock) ? (
+                          <div className="px-4 py-3" style={{ fontSize: 13, color: "var(--ink-400)" }}>PN ini tidak ada di Accurate.</div>
+                        ) : (accStock.stock.per_gudang && accStock.stock.per_gudang.length > 0) ? (
+                          <table className="tbl">
+                            <tbody>
+                              {accStock.stock.per_gudang.map((g) => (
+                                <tr key={g.gudang_id ?? g.gudang}>
+                                  <td style={{ color: "var(--ink-600)" }} title={g.deskripsi}>{g.gudang}</td>
+                                  <td className="num" style={{ fontWeight: 550 }}>{g.qty.toLocaleString("id-ID")}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <div className="px-4 py-3" style={{ fontSize: 13, color: "var(--ink-400)" }}>Tidak ada rincian per gudang.</div>
                         )}
                       </div>
                     )}

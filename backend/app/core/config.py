@@ -72,6 +72,21 @@ class Settings(BaseSettings):
     payment_base_url: str = ""               # override base URL (kalau kosong, dipilih dari payment_sandbox)
     public_base_url: str = "http://127.0.0.1:8001"  # URL publik backend (untuk callback_url webhook)
 
+    # ── Accurate Online (ERP — stok live) ──
+    # Auto-login SSO ke account.accurate.id → iris.accurate.id (lihat services/accurate.py).
+    # device_id & uid STABIL per akun/perusahaan (diambil sekali dari browser); tanpa
+    # keduanya, hanya mode sesi-manual (file data/accurate_session.json) yang aktif.
+    accurate_username: str = ""      # email login Accurate
+    accurate_password: str = ""      # password Accurate (plaintext; dibungkus saat kirim)
+    accurate_device_id: str = ""     # device-id browser (agar dianggap "device dikenal", tak minta OTP email)
+    accurate_uid: str = ""           # uniqueId database/perusahaan (open.do?uid=)
+    accurate_host: str = "iris.accurate.id"  # host aplikasi perusahaan (zona)
+
+    @property
+    def accurate_login_configured(self) -> bool:
+        return bool(self.accurate_username and self.accurate_password
+                    and self.accurate_device_id and self.accurate_uid)
+
     # ── Asisten AI (DeepSeek — OpenAI-compatible API) ──
     deepseek_api_key: str = ""                       # key dari platform.deepseek.com
     deepseek_base_url: str = "https://api.deepseek.com"  # base URL OpenAI-compatible

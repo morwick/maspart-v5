@@ -47,3 +47,17 @@ frontend/tsconfig.tsbuildinfo
 
 # Hasil run eval AI (regeneratable)
 backend/evals/last_run.json
+
+# Accurate capture (berisi cookie/kredensial) — JANGAN commit
+*.har
+_accurate_capture.har
+account.accurate.id.har
+_accurate_curl.txt
+_dsi.txt
+_accurate_stok_sample.csv
+backend/_accurate_*
+backend/_dsi.txt
+data/accurate_session.json
+login accurate.txt
+/login accurate.txt
+backend/_accurate_cookies.txt
