@@ -9,7 +9,6 @@ import {
   getAiStatus,
   getIndexStatus,
   getMonitoring,
-  getSalesRecap,
   type MonitoringActivity,
 } from "@/lib/api";
 
@@ -32,14 +31,6 @@ const I = {
 };
 
 type Stat = { label: string; value: string; sub: string; icon: ReactNode; href: string; tone?: "brand" | "warn" | "info" };
-
-function rupiah(n: number): string {
-  try {
-    return "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n));
-  } catch {
-    return "Rp " + n;
-  }
-}
 
 function StatCard({ st }: { st: Stat }) {
   const tone = st.tone === "warn"
@@ -64,7 +55,6 @@ export default function DashboardPage() {
   const [uname, setUname] = useState("");
   const [aiOn, setAiOn] = useState<boolean | null>(null);
   const [online, setOnline] = useState<number | null>(null);
-  const [omzet, setOmzet] = useState<number | null>(null);
   const [indexed, setIndexed] = useState<number | null>(null);
   const [activity, setActivity] = useState<MonitoringActivity[]>([]);
 
@@ -84,7 +74,6 @@ export default function DashboardPage() {
 
     getAiStatus(token).then((d) => setAiOn(d.available)).catch(() => setAiOn(null));
     getMonitoring(token).then((d) => { setOnline(d.online_count); setActivity(d.recent_activity?.slice(0, 6) ?? []); }).catch(() => {});
-    getSalesRecap(token).then((d) => setOmzet(d.summary?.omzet ?? 0)).catch(() => {});
     getIndexStatus(token).then((d) => setIndexed(d.total_indexed)).catch(() => {});
   }, [router]);
 
@@ -107,11 +96,10 @@ export default function DashboardPage() {
     const val = (n: number | null) => (n == null ? "—" : new Intl.NumberFormat("id-ID").format(n));
     return [
       { label: "User online", value: online == null ? "—" : String(online), sub: "aktif ≤ 5 menit", icon: I.users, href: "/admin/monitoring" },
-      { label: "Omzet", value: omzet == null ? "—" : rupiah(omzet), sub: "total pesanan lunas", icon: I.money, href: "/admin/penjualan", tone: "brand" },
       { label: "Part terindeks (foto)", value: val(indexed), sub: "galeri cari-by-foto", icon: I.grid, href: "/admin/index", tone: "info" },
       { label: "Asisten AI", value: aiOn == null ? "—" : aiOn ? "Aktif" : "Nonaktif", sub: aiOn ? "DeepSeek + tool live" : "belum dikonfigurasi", icon: I.ai, href: "/asisten", tone: aiOn === false ? "warn" : "brand" },
     ];
-  }, [online, omzet, indexed, aiOn]);
+  }, [online, indexed, aiOn]);
 
   const quick = [
     { label: "Cari Part", desc: "Part number / nama", icon: I.search, href: "/search" },

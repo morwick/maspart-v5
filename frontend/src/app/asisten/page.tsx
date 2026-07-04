@@ -359,17 +359,17 @@ export default function AsistenPage() {
 
   return (
     <AppShell active="/asisten" title="Asisten AI" sub="Tanya apa saja tentang part, stok, harga, dan pesanan">
-      <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4 py-4 sm:px-6">
+      <div className="flex h-full w-full flex-col">
         {available === false && (
-          <div className="alert alert-error" style={{ marginBottom: 12 }}>
+          <div className="alert alert-error" style={{ margin: 12 }}>
             Asisten AI belum aktif. Set <code>DEEPSEEK_API_KEY</code> di <code>backend/.env</code> lalu restart backend.
           </div>
         )}
 
-        {/* Kartu chat: header identitas · area pesan · input — satu kesatuan */}
+        {/* Chat memenuhi seluruh area kerja: header identitas · area pesan · input */}
         <div
-          className="surface flex flex-1 flex-col"
-          style={{ minHeight: 380, overflow: "hidden" }}
+          className="flex flex-1 flex-col"
+          style={{ minHeight: 0, overflow: "hidden" }}
         >
           {/* Header */}
           <div

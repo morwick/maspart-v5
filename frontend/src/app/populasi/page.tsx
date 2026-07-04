@@ -113,9 +113,9 @@ export default function PopulasiPage() {
 
   return (
     <AppShell active="/populasi" title="Populasi Unit" sub="Daftar unit & spesifikasi armada">
-      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-7">
-        {/* Toolbar: cari + filter + export */}
-        <form onSubmit={applySearch} className="flex flex-wrap items-center gap-2">
+      <div className="mx-auto w-full max-w-6xl" style={{ height: "100%", display: "flex", flexDirection: "column", padding: "22px 28px 18px" }}>
+        {/* Toolbar: cari + filter + export — tetap diam (tidak ikut scroll) */}
+        <form onSubmit={applySearch} className="flex flex-wrap items-center gap-2" style={{ flexShrink: 0 }}>
           <div style={{ position: "relative", flex: 1, minWidth: 240 }}>
             <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-400)", display: "inline-flex" }}>
               <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
@@ -156,18 +156,19 @@ export default function PopulasiPage() {
           </button>
         </form>
 
-        {error && <div className="alert alert-error" style={{ marginTop: 14 }}>{error}</div>}
+        {error && <div className="alert alert-error" style={{ marginTop: 14, flexShrink: 0 }}>{error}</div>}
 
         {data && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1" style={{ marginTop: 14, fontSize: 12.5, color: "var(--ink-500)" }}>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1" style={{ marginTop: 14, flexShrink: 0, fontSize: 12.5, color: "var(--ink-500)" }}>
             <span>Total <b style={{ color: "var(--ink-800)" }} className="mono">{data.total.toLocaleString("id-ID")}</b> unit</span>
             <span>·</span>
             <span>Hasil filter <b style={{ color: "var(--ink-800)" }} className="mono">{data.total_filtered.toLocaleString("id-ID")}</b></span>
           </div>
         )}
 
-        {data && data.rows.length > 0 ? (
-          <div className="surface" style={{ marginTop: 12, overflow: "auto" }}>
+        {/* Hanya area ini yang menggulir — header tabel (thead) sticky di atasnya */}
+        <div className="surface" style={{ marginTop: 12, flex: 1, minHeight: 0, overflow: "auto" }}>
+          {data && data.rows.length > 0 ? (
             <table className="tbl">
               <thead>
                 <tr>
@@ -204,17 +205,15 @@ export default function PopulasiPage() {
                 ))}
               </tbody>
             </table>
-          </div>
-        ) : (
-          data && !loading && (
-            <div className="surface grid place-items-center" style={{ marginTop: 12, height: 160, color: "var(--ink-500)", fontSize: 13.5 }}>
-              Tidak ada data yang cocok.
+          ) : (
+            <div className="grid place-items-center" style={{ height: "100%", minHeight: 160, color: "var(--ink-500)", fontSize: 13.5 }}>
+              {loading ? "Memuat…" : "Tidak ada data yang cocok."}
             </div>
-          )
-        )}
+          )}
+        </div>
 
         {data && data.total_pages > 1 && (
-          <div className="flex items-center justify-center gap-2" style={{ marginTop: 16, fontSize: 13 }}>
+          <div className="flex items-center justify-center gap-2" style={{ marginTop: 14, flexShrink: 0, fontSize: 13 }}>
             <button className="btn btn-secondary btn-sm" onClick={() => goToPage(page - 1)} disabled={page <= 1 || loading}>← Sebelumnya</button>
             <span style={{ color: "var(--ink-500)", padding: "0 8px" }}>Halaman {page} / {data.total_pages}</span>
             <button className="btn btn-secondary btn-sm" onClick={() => goToPage(page + 1)} disabled={page >= data.total_pages || loading}>Berikutnya →</button>
