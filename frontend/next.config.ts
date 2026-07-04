@@ -5,13 +5,14 @@ import type { NextConfig } from "next";
 const API = process.env.NEXT_PUBLIC_API_BASE || "";
 const isProd = process.env.NODE_ENV === "production";
 
-// leaflet dimuat dari unpkg (dengan SRI di MapPicker); tile peta = OpenStreetMap.
+// leaflet dimuat dari unpkg (dengan SRI di MapPicker); tile peta = OpenStreetMap;
+// font Geist + JetBrains Mono dari Google Fonts (CSS di googleapis, file di gstatic).
 const csp = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' https://unpkg.com",
-  "style-src 'self' 'unsafe-inline' https://unpkg.com",
+  "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",
-  "font-src 'self' data:",
+  "font-src 'self' data: https://fonts.gstatic.com",
   `connect-src ${["'self'", API].filter(Boolean).join(" ")}`,
   "object-src 'none'",
   "base-uri 'self'",
