@@ -50,6 +50,42 @@
   --cell-fs: 13.5px;
 }
 
+/* ── Dark mode (Command Center) — override tokens on [data-theme="dark"] ──
+   Semua halaman memakai var(--ink-*)/--paper/--canvas, jadi menimpa token di
+   sini otomatis mengubah seluruh aplikasi ke mode gelap. */
+:root[data-theme="dark"],
+body[data-theme="dark"] {
+  --canvas: #0e130f;
+  --paper: #161c18;
+  --ink-900: #f1f4f1;
+  --ink-800: #dfe4e0;
+  --ink-700: #c2c9c4;
+  --ink-600: #a2aaa4;
+  --ink-500: #8b938d;
+  --ink-400: #6d756f;
+  --ink-300: #4a524c;
+  --ink-200: #303832;
+  --ink-150: #262d28;
+  --ink-100: #1d241f;
+  --ink-50: #1b211c;
+  --brand-50: #14301c;
+  --brand-100: #1e4527;
+  --brand-700: #4ecb6b;
+  --warn-600: #e5a355;
+  --warn-50: #33250e;
+  --danger-600: #e88377;
+  --danger-50: #331714;
+  --info-600: #6cb8e6;
+  --info-50: #122733;
+  --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 1px 0 rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 12px 30px -8px rgba(0, 0, 0, 0.6), 0 4px 10px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+body {
+  transition: background 0.35s ease, color 0.2s ease;
+}
+
 /* Tailwind theme tokens so utilities map to the design palette */
 @theme inline {
   --color-background: var(--canvas);
@@ -558,6 +594,182 @@ main > div.mx-auto[class*="max-w-"] {
   font-style: italic;
   color: var(--ink-400);
   text-align: center;
+}
+
+/* ============================================================
+   Command Center — sidebar gelap, command palette, theme toggle
+   ============================================================ */
+/* Sidebar selalu gelap (baik mode terang maupun gelap) — ciri "Command Center". */
+.cc-side {
+  background: #0f1411;
+  color: #c5cac6;
+}
+.cc-side-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #767e79;
+  font-weight: 600;
+  padding: 16px 10px 6px;
+}
+.cc-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  color: #c5cac6;
+  transition: background 0.12s, color 0.12s;
+}
+.cc-nav-item:hover {
+  background: #1b211d;
+  color: #fff;
+}
+.cc-nav-item.active {
+  background: #1b211d;
+  color: #fff;
+}
+.cc-nav-item .cc-bar {
+  position: absolute;
+  left: -12px;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  background: #1ea83a;
+  border-radius: 0 3px 3px 0;
+  opacity: 0;
+}
+.cc-nav-item.active .cc-bar {
+  opacity: 1;
+}
+.cc-rail-item {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  cursor: pointer;
+  color: #c5cac6;
+  transition: background 0.12s, color 0.12s;
+  position: relative;
+}
+.cc-rail-item:hover {
+  background: #1b211d;
+  color: #fff;
+}
+.cc-rail-item.active {
+  background: #1b211d;
+  color: #fff;
+}
+.cc-rail-item.active::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  background: #1ea83a;
+  border-radius: 0 3px 3px 0;
+}
+
+/* Trigger command palette di header */
+.cc-search-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 520px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--ink-200);
+  background: var(--ink-50);
+  color: var(--ink-500);
+  font-size: 13.5px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: border-color 0.12s, background 0.12s;
+}
+.cc-search-trigger:hover {
+  border-color: var(--ink-300);
+  background: var(--paper);
+}
+
+/* Command palette overlay */
+.cmdk-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(15, 20, 17, 0.4);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  animation: fadeIn 0.12s ease;
+}
+.cmdk-panel {
+  width: 100%;
+  max-width: 560px;
+  background: var(--paper);
+  border: 1px solid var(--ink-200);
+  border-radius: 14px;
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+  animation: paletteIn 0.16s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.cmdk-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 13.5px;
+  color: var(--ink-800);
+}
+.cmdk-row .cmdk-ic {
+  display: inline-flex;
+  color: var(--ink-500);
+}
+.cmdk-row.active {
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+.cmdk-row.active .cmdk-ic {
+  color: var(--brand-700);
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes paletteIn {
+  from {
+    transform: translateY(-8px) scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* Saat mencetak: sembunyikan elemen non-cetak & ratakan lembar ke kertas. */
