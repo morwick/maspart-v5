@@ -4305,6 +4305,10 @@ def _mentioned_part_pns(reply: str, grounded: set[str], limit: int = 6) -> list[
     found = _drop_unit_tokens(list(_extract_pns(reply) & grounded))
     if not found:
         return []
+    # Buang PN murni-angka yang merupakan POTONGAN dari PN alfanumerik lain
+    # (mis. '9725190712' dari 'WG9725190712') agar tak jadi thumbnail ganda/palsu.
+    alnum = [p for p in found if not p.isdigit()]
+    found = [p for p in found if not (p.isdigit() and any(p in a for a in alnum))]
     up = reply.upper()
     found.sort(key=lambda p: up.find(p))
     return found[:limit]
