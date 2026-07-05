@@ -410,21 +410,39 @@ def _warehouse_retry(item_id: Any) -> dict[str, Any]:
         return _warehouse_raw(_refresh_session(), item_id)
 
 
+# Cache stok per-PN (TTL pendek): tekan latensi detail_part & lalu-lintas Accurate
+# saat PN sama dilihat berulang / dipanggil beberapa tool. Stok tak berubah tiap detik.
+_STOCK_CACHE_TTL = 90
+_stock_cache: dict[str, tuple[float, Any]] = {}
+_stock_cache_lock = threading.Lock()
+
+
 def stock_full(part_number: str) -> dict[str, Any] | None:
     """Stok Accurate 1 PN LENGKAP: agregat + rincian **per gudang** terkini.
 
-    Dua panggilan (search-item + view-itemstock-bywarehouse). ``per_gudang`` =
-    daftar {gudang, deskripsi, qty, gudang_id} untuk gudang berstok > 0 (urut
-    qty menurun). Gagal ambil per-gudang bersifat non-fatal (agregat tetap ada).
+    Dua panggilan (search-item + view-itemstock-bywarehouse), di-cache per-PN
+    ~90 dtk. ``per_gudang`` = daftar {gudang, deskripsi, qty, gudang_id} untuk gudang
+    berstok > 0 (urut qty menurun). Gagal ambil per-gudang non-fatal (agregat tetap).
     """
     want = _norm_pn(part_number)
     if not want:
         return None
+    now = time.time()
+    with _stock_cache_lock:
+        c = _stock_cache.get(want)
+        if c and now - c[0] < _STOCK_CACHE_TTL:
+            return c[1]
+
+    def _cache(v: Any) -> Any:
+        with _stock_cache_lock:
+            _stock_cache[want] = (time.time(), v)
+        return v
+
     data = _search_retry(keywords=part_number, start=0, limit=50)
     raws = [it for it in (data.get("d") or [])
             if _norm_pn(parse_pn(str(it.get("no") or ""))) == want]
     if not raws:
-        return None
+        return _cache(None)
     it = max(raws, key=lambda x: _num(x.get("availableToSell")))
     base = normalize_item(it)
     per: list[dict[str, Any]] = []
@@ -444,7 +462,7 @@ def stock_full(part_number: str) -> dict[str, Any] | None:
     except AccurateError:
         per = []  # non-fatal: agregat tetap tampil
     base["per_gudang"] = per
-    return base
+    return _cache(base)
 
 
 def fetch_all_items() -> list[dict[str, Any]]:
