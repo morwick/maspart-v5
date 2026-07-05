@@ -569,6 +569,11 @@ riil pabrikan/gudang real-time**, bukan snapshot Excel. `services/accurate.py` +
   bila fetch Accurate gagal/tak tersedia (Excel = export Accurate → data sama). **Pembeli** tetap stok
   lokal terscope (jangan rusak alur beli/reservasi). Tanpa auto-login di `cari_part` (list, biar tak
   banyak panggilan live) — pakai `detail_part`/`stok_accurate` utk angka live per-PN.
+- **HARGA JUAL dari Accurate** (2026-07-05): field `unitPrice` (fallback `branchPrice`) di response
+  item = harga jual satuan → `normalize_item.price`. **Accurate = sumber harga UTAMA** di detail part
+  & `detail_part`/`stok_accurate` (field `harga_lokal`/`harga_jual`+`sumber_harga`), `harga.xlsx`
+  fallback. Berlaku SEMUA peran (termasuk pembeli) → **menutup celah "stok ada tapi harga kosong →
+  tak bisa dibeli"** (banyak PN punya harga di Accurate tapi kosong di `harga.xlsx`).
 - **Env** (`ACCURATE_USERNAME/PASSWORD/DEVICE_ID/UID/HOST`, lihat `core/config.py`): di `.env` lokal
   & **Coolify Environment Variables** (sudah dibuat via API). ⚠️ device_id/uid spesifik akun+perusahaan.
 - **Aturan aman (WAJIB):** JANGAN meraba endpoint (tebakan = 404 mencurigakan); hanya panggil endpoint

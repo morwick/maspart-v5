@@ -650,6 +650,7 @@ export type AccurateStock = {
     name: string;
     no: string;
     item_type: string;
+    harga?: number;
     per_gudang?: { gudang: string; deskripsi: string; qty: number; gudang_id?: number }[];
   };
 };

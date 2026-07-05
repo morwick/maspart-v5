@@ -175,6 +175,11 @@ export default function PartDetailPage() {
   const displayTotal = acc
     ? `${acc.available_to_sell.toLocaleString("id-ID")} ${acc.unit}`
     : (main?.stok ?? "—");
+  // HARGA JUAL: Accurate = utama (juga isi part yg lokalnya kosong → jadi bisa dibeli),
+  // `harga.xlsx` fallback. Berlaku semua peran (termasuk pembeli).
+  const accHarga = accStock?.found && accStock.stock?.harga ? accStock.stock.harga : 0;
+  const hargaLive = accHarga > 0;
+  const hargaStr = hargaLive ? "Rp " + accHarga.toLocaleString("id-ID") : (main?.harga ?? "—");
   // Stok untuk pembeli: hanya daerah terpilih (sudah discope backend, fallback
   // ke lokasi terdekat bila daerah terpilih kosong).
   const buyerStock = useMemo(() => {
@@ -199,14 +204,14 @@ export default function PartDetailPage() {
           {main && isBuyer && (
             (!buyerStock || buyerStock.qty <= 0) ? (
               <span className="pill pill-danger" title="Stok habis di lokasimu">Stok habis</span>
-            ) : !hasPrice(main.harga) ? (
+            ) : !hasPrice(hargaStr) ? (
               <span className="pill pill-warn" title="Harga belum tersedia — belum bisa dibeli">Tanpa harga</span>
             ) : !hasWeight(main.berat || specBeratGram) ? (
               <span className="pill pill-warn" title="Berat belum ditetapkan admin — belum bisa dibeli">Tanpa berat</span>
             ) : (
               <button
                 className="btn btn-primary btn-sm"
-                onClick={() => addToCart({ part_number: main.part_number, name: main.part_name, harga: main.harga, berat: main.berat || specBeratGram })}
+                onClick={() => addToCart({ part_number: main.part_number, name: main.part_name, harga: hargaStr, berat: main.berat || specBeratGram })}
               >
                 + 🛒 Keranjang
               </button>
@@ -291,8 +296,8 @@ export default function PartDetailPage() {
                     </div>
                     {/* Pembeli selalu melihat harga (perlu untuk belanja), lepas dari izin kolom internal. */}
                     <div className="surface surface-pad">
-                      <div className="stat-label">Harga</div>
-                      <div className="stat-value mono" style={{ color: "var(--brand-700)", fontSize: 18 }}>{main.harga}</div>
+                      <div className="stat-label">Harga {hargaLive && <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate live</span>}</div>
+                      <div className="stat-value mono" style={{ color: "var(--brand-700)", fontSize: 18 }}>{hargaStr}</div>
                     </div>
                   </div>
                 ) : (
@@ -309,8 +314,8 @@ export default function PartDetailPage() {
                         )}
                         {showHarga && (
                           <div className="surface surface-pad">
-                            <div className="stat-label">Harga</div>
-                            <div className="stat-value mono" style={{ color: "var(--brand-700)", fontSize: 18 }}>{main.harga}</div>
+                            <div className="stat-label">Harga {hargaLive && <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate live</span>}</div>
+                            <div className="stat-value mono" style={{ color: "var(--brand-700)", fontSize: 18 }}>{hargaStr}</div>
                           </div>
                         )}
                       </div>

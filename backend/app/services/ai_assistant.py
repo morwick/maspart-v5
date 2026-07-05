@@ -1293,19 +1293,24 @@ def _t_detail_part(args: dict, user: dict) -> dict:
         "jumlah_varian": len(varian),
         "info_stok_harga": "Stok & harga berlaku per Part Number (sama untuk semua varian unit).",
     }
-    # STOK: Accurate = sumber UTAMA (samakan dgn tampilan web); Excel stok.xlsx =
-    # FALLBACK bila fetch Accurate gagal/tak menemukan PN (Excel di-export dari Accurate
-    # jadi datanya sama). Pembeli tetap stok lokal terscope.
-    if user.get("role") != "pembeli" and accurate.available():
+    # STOK & HARGA dari Accurate = sumber UTAMA (samakan tampilan web); Excel = FALLBACK
+    # bila fetch Accurate gagal/PN tak ada (Excel di-export dari Accurate → data sama).
+    # Stok per-gudang hanya utk non-pembeli (pembeli pakai stok lokal terscope); HARGA
+    # jual dari Accurate berlaku utk semua (menutup celah part tanpa harga → tak bisa dibeli).
+    if accurate.available():
         try:
             acc = accurate.stock_full(pn)
         except accurate.AccurateError:
             acc = None
         if acc:
-            result["stok_total"] = f"{acc['available_to_sell']:.0f} {acc['unit']}".strip()
-            result["stok_per_gudang"] = {g["gudang"]: g["qty"] for g in (acc.get("per_gudang") or [])}
-            result["sumber_stok"] = "Accurate (live)"
-        else:
+            if user.get("role") != "pembeli":
+                result["stok_total"] = f"{acc['available_to_sell']:.0f} {acc['unit']}".strip()
+                result["stok_per_gudang"] = {g["gudang"]: g["qty"] for g in (acc.get("per_gudang") or [])}
+                result["sumber_stok"] = "Accurate (live)"
+            if acc.get("price"):
+                result["harga_lokal"] = "Rp " + f"{int(acc['price']):,}".replace(",", ".")
+                result["sumber_harga"] = "Accurate (live)"
+        elif user.get("role") != "pembeli":
             result["sumber_stok"] = "Excel stok.xlsx (fallback — Accurate tak tersedia/PN tak ada)"
     # Spesifikasi fisik resmi dari SIMS: berat (untuk ongkir) + dimensi + satuan +
     # merek. Non-fatal: bila SIMS tak punya data / down, detail tetap tampil.
@@ -1349,6 +1354,7 @@ def _t_stok_accurate(args: dict, user: dict) -> dict:
         "kuantitas": hit["quantity"],
         "satuan": hit["unit"],
         "tipe": hit["item_type"],
+        "harga_jual": ("Rp " + f"{int(hit['price']):,}".replace(",", ".")) if hit.get("price") else None,
         "stok_per_gudang": [
             {"gudang": g["gudang"], "qty": g["qty"]} for g in (hit.get("per_gudang") or [])
         ],

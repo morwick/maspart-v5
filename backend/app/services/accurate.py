@@ -527,6 +527,8 @@ def normalize_item(it: dict[str, Any]) -> dict[str, Any]:
         "quantity": _num(it.get("quantity")),
         "unit": str(unit).strip(),
         "item_type": (it.get("itemTypeName") or "").strip(),
+        # Harga JUAL satuan-1 dari Accurate; fallback ke branchPrice bila unitPrice 0.
+        "price": _num(it.get("unitPrice")) or _num(it.get("branchPrice")),
         "accurate_id": it.get("id"),
     }
 

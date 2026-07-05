@@ -155,6 +155,7 @@ def accurate_stock(
             "name": hit["name"],
             "no": hit["no"],
             "item_type": hit["item_type"],
+            "harga": hit.get("price") or 0,
             "per_gudang": hit.get("per_gudang") or [],
         },
     }
