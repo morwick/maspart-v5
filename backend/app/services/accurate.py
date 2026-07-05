@@ -508,6 +508,11 @@ def _norm_pn(pn: str) -> str:
     return re.sub(r"[\s\-_/]", "", (pn or "").upper())
 
 
+def norm_pn(pn: str) -> str:
+    """Publik: normalisasi PN (dipakai router untuk cocokkan ke snapshot)."""
+    return _norm_pn(pn)
+
+
 def _num(v: Any) -> float:
     try:
         return float(v)
@@ -584,6 +589,60 @@ def available() -> bool:
         return True
     except AccurateSessionMissing:
         return False
+
+
+# ── Snapshot katalog (background) untuk overlay hasil PENCARIAN ─────────────
+# Stale-while-revalidate: snapshot {norm_pn: {stok, harga, unit}} dibangun di THREAD
+# LATAR (tak memblok request web). Basi → picu rebuild latar, sajikan yang lama dulu.
+# Cold start → kosong → pencarian pakai Excel sampai snapshot pertama siap (~sekali tarik).
+_SNAPSHOT_TTL = 30 * 60
+_snapshot: dict[str, dict[str, Any]] = {}
+_snapshot_ts = 0.0
+_snapshot_building = False
+_snapshot_lock = threading.Lock()
+
+
+def _build_snapshot() -> None:
+    global _snapshot, _snapshot_ts, _snapshot_building
+    try:
+        items = fetch_all_items()  # 1 tarik penuh (paging); auto-login dijaga cooldown
+        snap: dict[str, dict[str, Any]] = {}
+        for it in items:
+            n = normalize_item(it)
+            key = _norm_pn(n["pn"])
+            if not key:
+                continue
+            prev = snap.get(key)
+            if prev is None or n["available_to_sell"] > prev["stok"]:
+                snap[key] = {"stok": n["available_to_sell"], "harga": n["price"], "unit": n["unit"]}
+        with _snapshot_lock:
+            _snapshot = snap
+            _snapshot_ts = time.time()
+    except AccurateError:
+        pass  # sesi/throttle: pertahankan snapshot lama
+    finally:
+        with _snapshot_lock:
+            _snapshot_building = False
+
+
+def _maybe_refresh_snapshot() -> None:
+    global _snapshot_building
+    now = time.time()
+    with _snapshot_lock:
+        if (now - _snapshot_ts) <= _SNAPSHOT_TTL or _snapshot_building:
+            return
+        if not available():
+            return
+        _snapshot_building = True
+    threading.Thread(target=_build_snapshot, daemon=True).start()
+
+
+def snapshot() -> dict[str, dict[str, Any]]:
+    """Snapshot {norm_pn: {stok,harga,unit}} untuk overlay pencarian (refresh di latar).
+    Mengembalikan dict yang bisa kosong (cold start) — pemanggil fallback ke Excel."""
+    _maybe_refresh_snapshot()
+    with _snapshot_lock:
+        return _snapshot
 
 
 # ── CLI selftest (tanpa server) ────────────────────────────────────────────

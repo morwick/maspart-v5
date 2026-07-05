@@ -92,6 +92,30 @@ def _scope_gudang(results: list[dict], user: dict) -> list[dict]:
     return results
 
 
+def _overlay_accurate(results: list[dict]) -> list[dict]:
+    """Overlay STOK (total) + HARGA dari snapshot Accurate = sumber UTAMA; Excel =
+    fallback bila PN tak ada di snapshot / snapshot belum siap. Non-blocking: snapshot
+    dibangun di thread latar (stale-while-revalidate), jadi request tak pernah menunggu
+    tarikan Accurate. Rincian per-gudang (`gudang`) tetap Excel (snapshot hanya agregat)."""
+    if not accurate.available():
+        return results
+    try:
+        snap = accurate.snapshot()
+    except Exception:
+        return results
+    if not snap:
+        return results
+    for r in results:
+        e = snap.get(accurate.norm_pn(r.get("part_number") or ""))
+        if not e:
+            continue
+        if e.get("stok") is not None:
+            r["stok"] = f"{int(e['stok']):,}".replace(",", ".")
+        if e.get("harga"):
+            r["harga"] = "Rp " + f"{int(e['harga']):,}".replace(",", ".")
+    return results
+
+
 @router.get("/search", response_model=SearchResponse)
 def search(
     q: str = Query(..., min_length=1, description="Part number (cocok substring, uppercase)"),
@@ -111,7 +135,7 @@ def search(
             results = results + sims_results
     if not results and page == 1:
         search_log.record_miss(q, "pn", "search")
-    return _paginate(q, _scope_gudang(results, user), page, page_size)
+    return _paginate(q, _overlay_accurate(_scope_gudang(results, user)), page, page_size)
 
 
 @router.get("/search-name", response_model=SearchResponse)
@@ -124,7 +148,7 @@ def search_name(
     results = part_index.search_part_name(q)
     if not results and page == 1:
         search_log.record_miss(q, "name", "search")
-    return _paginate(q, _scope_gudang(results, user), page, page_size)
+    return _paginate(q, _overlay_accurate(_scope_gudang(results, user)), page, page_size)
 
 
 @router.get("/accurate-stock")
