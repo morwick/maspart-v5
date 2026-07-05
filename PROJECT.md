@@ -567,8 +567,13 @@ riil pabrikan/gudang real-time**, bukan snapshot Excel. `services/accurate.py` +
 - **Accurate = sumber stok UTAMA**: di halaman detail part (`part/[pn]`) & tool `detail_part`,
   stok tampil dari Accurate (total+per gudang, badge "Accurate live"); **`stok.xlsx` = FALLBACK** hanya
   bila fetch Accurate gagal/tak tersedia (Excel = export Accurate → data sama). **Pembeli** tetap stok
-  lokal terscope (jangan rusak alur beli/reservasi). Tanpa auto-login di `cari_part` (list, biar tak
-  banyak panggilan live) — pakai `detail_part`/`stok_accurate` utk angka live per-PN.
+  lokal terscope (jangan rusak alur beli/reservasi).
+- **Hasil PENCARIAN juga Accurate-utama** (2026-07-05): `accurate.snapshot()` = katalog {norm_pn:
+  stok,harga} dibangun di **THREAD LATAR** (stale-while-revalidate, TTL 30 mnt, ~45 dtk/4.8rb entri di
+  prod) → `routers/parts._overlay_accurate` menimpa `stok`(total)+`harga` tiap baris hasil `/search` &
+  `/search-name` (O(1), TAK menembak Accurate per-request). Excel = fallback (PN tak ada / snapshot
+  belum siap / Accurate down). `gudang` (rincian) tetap Excel. `cari_part` (asisten) tetap Excel per-baris;
+  angka live per-PN via `detail_part`/`stok_accurate`.
 - **HARGA JUAL dari Accurate** (2026-07-05): field `unitPrice` (fallback `branchPrice`) di response
   item = harga jual satuan → `normalize_item.price`. **Accurate = sumber harga UTAMA** di detail part
   & `detail_part`/`stok_accurate` (field `harga_lokal`/`harga_jual`+`sumber_harga`), `harga.xlsx`
