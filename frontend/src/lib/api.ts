@@ -486,6 +486,49 @@ export async function exportBatchHarga(
   return res.blob();
 }
 
+// ── Stok (Accurate live) ────────────────────────────────────────────
+export type StokListResponse = {
+  configured?: boolean;
+  session_expired?: boolean;
+  error?: boolean;
+  reason?: string;
+  total: number;
+  total_filtered: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  rows: Record<string, string>[];
+};
+
+export async function getStokList(
+  token: string,
+  opts: { q?: string; sort?: string; page?: number; pageSize?: number } = {},
+): Promise<StokListResponse> {
+  const qs = new URLSearchParams({
+    q: opts.q ?? "",
+    sort: opts.sort ?? "pn",
+    page: String(opts.page ?? 1),
+    page_size: String(opts.pageSize ?? 50),
+  });
+  const res = await fetch(`${API_BASE}/api/stok/list?${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function exportStokList(
+  token: string,
+  opts: { q?: string; sort?: string } = {},
+): Promise<Blob> {
+  const qs = new URLSearchParams({ q: opts.q ?? "", sort: opts.sort ?? "pn" });
+  const res = await fetch(`${API_BASE}/api/stok/list/export?${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.blob();
+}
+
 // ── Populasi Unit ───────────────────────────────────────────────────
 export type PopulasiResponse = {
   columns: string[];

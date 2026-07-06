@@ -57,6 +57,7 @@ const NAV_PRIMARY: NavItem[] = [
 const NAV_DATA: NavItem[] = [
   { key: "populasi", href: "/populasi", label: "Populasi Unit", icon: I.truck },
   { key: "harga", href: "/harga", label: "Harga", icon: I.money },
+  { key: "stok", href: "/stok", label: "Stok", icon: I.grid },
 ];
 const NAV_ADMIN: NavItem[] = [
   { href: "/admin/orders", label: "Pesanan", icon: I.cart },
@@ -81,7 +82,7 @@ const NAV_BUYER: NavItem[] = [
   { href: "/pilih-lokasi", label: "Ganti Lokasi", icon: I.truck },
 ];
 // Halaman internal yang TIDAK boleh diakses pembeli.
-const BUYER_DENY = ["/search-image", "/compare", "/batch", "/populasi", "/harga", "/cabang/pesanan", "/cabang/chat"];
+const BUYER_DENY = ["/search-image", "/compare", "/batch", "/populasi", "/harga", "/stok", "/cabang/pesanan", "/cabang/chat"];
 
 const SIDEBAR_KEY = "maspart_sidebar_collapsed";
 

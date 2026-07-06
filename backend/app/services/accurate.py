@@ -579,6 +579,14 @@ def stock_for(part_number: str, force: bool = False) -> dict[str, Any] | None:
     return idx["by_pn"].get(key)
 
 
+def all_items(force: bool = False) -> list[dict[str, Any]]:
+    """Seluruh barang Accurate (ternormalisasi) dari indeks ber-cache TTL.
+
+    Dipakai menu Stok untuk menampilkan katalog stok penuh. Auto-login saat sesi
+    habis (via ``refresh`` → ``fetch_all_items``)."""
+    return list(refresh(force=force)["items"])
+
+
 def available() -> bool:
     """True bila Accurate bisa dipakai: ada kredensial auto-login ATAU file sesi
     manual (tanpa menembak jaringan)."""

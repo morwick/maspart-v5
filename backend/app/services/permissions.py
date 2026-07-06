@@ -23,7 +23,7 @@ MENU_TABS: dict[str, str] = {
     "batch": "Batch Download",
     "populasi": "Populasi Unit",
     "harga": "Harga",
-
+    "stok": "Stok",
 }
 COLUMN_KEYS: dict[str, str] = {
     "col_stok": "Kolom Stok",

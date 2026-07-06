@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .core.config import get_settings
-from .routers import admin, ai, auth, branch, buyer, chat, geo, harga, orders, parts, populasi, repairkit
+from .routers import admin, ai, auth, branch, buyer, chat, geo, harga, orders, parts, populasi, repairkit, stok
 from .services import image_search, part_index
 
 logging.basicConfig(
@@ -94,6 +94,7 @@ app.include_router(auth.router)
 app.include_router(parts.router)
 app.include_router(populasi.router)
 app.include_router(harga.router)
+app.include_router(stok.router)
 
 app.include_router(orders.router)
 app.include_router(geo.router)
