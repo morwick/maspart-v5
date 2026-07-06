@@ -146,6 +146,17 @@ _GENERIC_KW = {
     "bracket", "clamp", "bushing", "wheel", "joint", "housing", "rod",
 }
 
+# Kata struktural/arah/pengisi yang DIBUANG saat BROADEN dalam-unit (fallback
+# cari kata inti) — biar tak menyeret seluruh katalog unit (mis. 'assembly',
+# 'left', 'front'). Kata BENDA inti (door/handle/glass/lock/brake…) tetap dicari.
+_BROADEN_STOP = {
+    "for", "and", "the", "with", "sub", "type", "and/or", "assy", "assembly",
+    "group", "set", "kit", "part", "parts", "left", "right", "upper", "lower",
+    "front", "rear", "inner", "outer", "mounted", "central",
+    "untuk", "dan", "dari", "yang", "kiri", "kanan", "depan", "belakang",
+    "atas", "bawah", "dalam", "luar", "tengah",
+}
+
 
 def _is_gearbox_assy(pn: str, name: str) -> bool:
     """True bila part ini UNIT TRANSMISI/GEARBOX utuh (bukan sub-part): PN berpola
@@ -1155,14 +1166,45 @@ def _t_cari_part(args: dict, user: dict) -> dict:
     note = " ".join(notes) if notes else None
     if unit:
         key = _norm(unit)
+
+        def _in_unit(r: dict) -> bool:
+            return key in _norm(r.get("file")) or key in _norm(r.get("path"))
+
         # Cocokkan ke nama file (unit) ATAU jalur folder — keduanya memuat model.
-        scoped = [r for r in rows if key in _norm(r.get("file")) or key in _norm(r.get("path"))]
-        unit_note = (
-            f"Difilter ke unit '{unit}'."
-            if scoped
-            else f"Tidak ada hasil untuk '{q}' pada unit '{unit}' (dari {len(rows)} hasil lintas-unit). "
-                 f"Coba tanpa filter unit atau cek daftar_unit untuk nama unit yang benar."
-        )
+        scoped = [r for r in rows if _in_unit(r)]
+
+        # BROADEN dalam-unit: di dalam scope SATU unit, pencarian dibuat FORGIVING —
+        # cari juga tiap KATA INTI (dari query + ekspansi sinonim) SENDIRI-SENDIRI
+        # lalu GABUNG (dedup). Ini menolong part yang di katalog bernama RINGKAS (mis.
+        # 'HANDLE' saat user tanya 'handle pintu'/'door handle' — part tak pernah
+        # bernama frasa penuh), tanpa mengorbankan presisi search global (yg tetap
+        # per-frasa). Aman karena scope sudah 1 unit → noise minim & hasil diperingkat
+        # relevansi. Kata unit/model & kata struktural/arah dibuang (_BROADEN_STOP).
+        broaden_words: list[str] = []
+        seen_w: set = set()
+        for t in terms:
+            for w in re.split(r"\s+", t or ""):
+                wl = w.strip().lower()
+                if (len(wl) >= 3 and wl not in seen_w and wl not in _BROADEN_STOP
+                        and _norm(wl) != key and key not in _norm(wl)):
+                    seen_w.add(wl)
+                    broaden_words.append(w.strip())
+        if broaden_words:
+            have = {(r.get("part_number"), r.get("file")) for r in scoped}
+            for r in _search_terms_rows(broaden_words):
+                k = (r.get("part_number"), r.get("file"))
+                if k not in have and _in_unit(r):
+                    have.add(k)
+                    scoped.append(r)
+            # Kata inti ikut dinilai relevansi (biar 'HANDLE' utk query 'handle pintu'
+            # dihitung kecocokan KUAT, bukan 0) — dipakai _relevansi di bawah.
+            terms = list(dict.fromkeys([*terms, *broaden_words]))
+
+        unit_note = (f"Difilter ke unit '{unit}' (pencarian kata-inti diperluas dalam unit)."
+                     if scoped else
+                     f"Tidak ada hasil untuk '{q}' pada unit '{unit}' (dari {len(rows)} hasil "
+                     "lintas-unit). Coba tanpa filter unit atau cek daftar_unit untuk nama unit "
+                     "yang benar.")
         note = f"{note} {unit_note}" if note else unit_note
         rows = scoped
 
@@ -1241,6 +1283,26 @@ def _t_cari_part(args: dict, user: dict) -> dict:
     # Pencarian global tetap dibatasi ketat agar hemat token.
     row_cap = _MAX_PART_ROWS_UNIT if unit else _MAX_PART_ROWS
     out = items[:row_cap]
+
+    # KONTEKS GRUP (hanya utk item yg DITAMPILKAN, biar murah): part bernama RINGKAS
+    # /ambigu ('HANDLE') dimaknai dari TETANGGA se-assembly — spt teknisi membaca
+    # katalog (lihat grup, bukan cuma nama baris). 'grup_induk' = head grup (mis.
+    # 'LOCK(L.H.)'); 'grup_isi' = tetangga se-grup (LOCK CATCH, LOCK BODY…). Dari
+    # kombinasi ini model menalar: HANDLE ber-tetangga LOCK/DOOR = handle pintu;
+    # ber-tetangga DAMPER/BAR/COLUMN = tuas/kontrol.
+    for it in out:
+        pn = (it.get("part_number") or "")
+        fhint = (it.get("varian_unit") or [""])[0] or ""
+        try:
+            ctx = part_index.assembly_context(pn, fhint)
+        except Exception:
+            ctx = {}
+        induk = ctx.get("induk") or ""
+        if induk and induk.upper() != (it.get("part_name") or "").upper():
+            it["grup_induk"] = induk
+        isi = ctx.get("anggota") or []
+        if isi:
+            it["grup_isi"] = isi
     # Catatan jumlah yang JUJUR: bila total membengkak karena kecocokan kata umum
     # (mis. 'seal' pada 'seal kruk as' → ribuan), laporkan 'jumlah_relevan_kuat'
     # agar AI tak menyebut total mentah yang menyesatkan ke user.
@@ -4325,13 +4387,48 @@ def _system_prompt(user: dict) -> str:
         "1. Untuk pertanyaan tentang DATA (stok, harga, part, gudang, pesanan, "
         "penjualan), WAJIB panggil tool yang sesuai — JANGAN mengarang angka, PN, "
         "atau kaitan part↔unit. Selalu dasari jawaban pada hasil tool.\n"
-        "2. Bila user menyebut UNIT/MODEL (mis. NX360, HOWO-7, SITRAK, SG21, L36), "
-        "WAJIB isi parameter 'unit' di cari_part agar hasil discoped ke unit itu. "
-        "JANGAN menampilkan part dari unit lain lalu mengeklaim 'cocok untuk' unit "
-        "yang diminta. Sebutkan field 'unit' sumber tiap part di jawaban.\n"
+        "2. Bila user menyebut UNIT/MODEL (mis. NX360, HOWO-7, SITRAK, SG21, L36, SD16, "
+        "SD22, SE215), WAJIB isi parameter 'unit' di cari_part = nama model itu, dan "
+        "'query' = KATA INTI PART-nya SAJA. ⛔ JANGAN memasukkan nama model ke dalam "
+        "'query' (mis. SALAH: query='handle pintu SD16'; BENAR: query='handle', "
+        "unit='SD16'). ⛔ Pakai KATA BENDA inti part, bukan frasa panjang — di katalog "
+        "part kerap bernama RINGKAS ('HANDLE', bukan 'door handle'); jadi cari 'handle' "
+        "(bukan 'handle pintu') lalu jelaskan mana yang untuk pintu. Bila hasil 0, "
+        "COBA LAGI dengan kata inti lain / sinonim sebelum bilang tidak ada. JANGAN "
+        "menampilkan part dari unit lain lalu mengeklaim 'cocok untuk' unit yang "
+        "diminta. Sebutkan field 'unit' sumber tiap part di jawaban.\n"
         "3. Jika filter unit memberi hasil kosong, katakan terus terang bahwa part "
         "itu tidak tercatat untuk unit tsb — JANGAN ganti dengan part dari unit lain "
         "tanpa memberi tahu user dengan jelas bahwa itu dari unit berbeda.\n"
+        "3b. 🧩 BACA KONTEKS GRUP & MENALAR (spt teknisi baca katalog, bukan cuma nama "
+        "baris): hasil cari_part bisa punya 'grup_induk' (nama ASSEMBLY head part itu) "
+        "dan 'grup_isi' (part TETANGGA se-assembly). PAKAI keduanya untuk MEMILAH part "
+        "bernama ambigu/ringkas. Cara menalar (contoh 'handle pintu' → banyak 'HANDLE'): "
+        "lihat tetangganya — 'HANDLE' yang grup_induk/grup_isi-nya memuat LOCK/DOOR/kunci "
+        "= HANDLE PINTU; yang tetangganya DAMPER/BAR/COLUMN/lever = tuas/kontrol (BUKAN "
+        "pintu); yang tanpa grup = part berdiri sendiri. Simpulkan fungsi dari KELUARGA "
+        "part-nya, jangan dari nama tunggal. Lalu TUNJUKKAN kandidat yang paling cocok "
+        "DULU + jelaskan alasannya ('146-… HANDLE — segrup dengan LOCK(L.H.), LOCK CATCH "
+        "→ ini handle kunci pintu'), sebut yang lain sebagai alternatif dgn fungsinya. "
+        "⛔ JANGAN menuang semua 'HANDLE' mentah tanpa memilah/menalar.\n"
+        "3c. 🧠 PRINSIP PENALARAN KONTEKS — BERLAKU SEMUA TOOL & DATA (bukan cuma katalog "
+        "lokal, TAPI JUGA EPC & lainnya). Tiap hasil tool membawa KONTEKS STRUKTURAL — "
+        "WAJIB dipakai untuk MENALAR fungsi/identitas part, JANGAN menuang baris mentah. "
+        "Petakan konteks per sumber & manfaatkan: "
+        "(a) katalog lokal cari_part → 'grup_induk'/'grup_isi' (keluarga assembly); "
+        "(b) EPC Loading List (bom_dari_rangka) → field 'kategori' tiap part + "
+        "'kategori_breakdown' (kelompokkan per kategori: kabin/rem/mesin/…); "
+        "(c) EPC Parts Atlas (kategori_unit / uraikan_assembly / part_aus_dari_rangka) → "
+        "HIERARKI kategori→assembly→komponen + POSISI (depan/belakang) — pakai untuk "
+        "bilang komponen ini bagian assembly apa & di poros mana; "
+        "(d) mesin Weichai (uraikan_mesin) → GROUP mesin (mis. Engine Block Group) — sebut "
+        "part berasal dari group apa; "
+        "(e) banding (banding_rangka/_massal/_kategori/_assy) → verdict & kelompok sudah "
+        "DIHITUNG sistem, sampaikan apa adanya; (f) populasi → model/tahun/lokasi unit. "
+        "SELALU: KELOMPOKKAN hasil per fungsi/kategori/assembly, SIMPULKAN peran part dari "
+        "KELUARGA/kategori/posisinya (bukan dari satu nama baris), dan untuk part ambigu "
+        "tampilkan yang paling relevan DULU + alasan kontekstualnya. Ini yang membedakan "
+        "jawaban CERDAS (paham struktur) dari sekadar menyalin daftar.\n"
         "4. Part Number berupa kombinasi huruf+angka (pola seperti 'WG…', 'AZ…', "
         "'200V…-…', 'HW…'). Bila user menyebut PN, gunakan apa adanya.\n"
         "4b. ⛔ ANTI-NGARANG PN (KRITIS): DILARANG KERAS menyebut Part Number apa pun "

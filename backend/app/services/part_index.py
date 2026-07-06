@@ -462,6 +462,82 @@ def name_for(pn: str) -> str:
     return ""
 
 
+_ASM_LASTRUN_RE = re.compile(r"(\d{3,})(\D*)$")
+
+
+def _assembly_base(pn: str) -> Optional[str]:
+    """PN INDUK assembly ala penomoran Shantui/Komatsu: nolkan 3 digit terakhir dari
+    run angka TERAKHIR. '146-56-15200' → '146-56-15000'; '16Y-56E-26400' →
+    '16Y-56E-26000'. None bila sudah level assembly (…000) / tak ada run angka."""
+    m = _ASM_LASTRUN_RE.search(pn or "")
+    if not m:
+        return None
+    run = m.group(1)
+    base = run[:-3] + "000"
+    if base == run:
+        return None
+    return (pn or "")[:m.start(1)] + base + m.group(2)
+
+
+def _group_key(pn: str) -> Optional[str]:
+    """Kunci GRUP assembly = PN tanpa 3 digit terakhir dari run angka TERAKHIR
+    ('146-56-15200' → '146-56-15'; '16Y-56E-26400' → '16Y-56E-26'). Part yang
+    berbagi kunci ini = satu cluster/assembly di katalog. None bila run < 4 digit."""
+    m = _ASM_LASTRUN_RE.search(pn or "")
+    if not m or len(m.group(1)) <= 3:
+        return None
+    return (pn or "")[:m.start(1)] + m.group(1)[:-3]
+
+
+def assembly_context(pn: str, file_simple: str = "") -> dict:
+    """KONTEKS GRUP sebuah part — meniru cara teknisi membaca katalog: lihat
+    TETANGGA fungsional, bukan cuma nama baris. Mengumpulkan part se-cluster (PN
+    berbagi kunci grup, lihat _group_key) di UNIT yang sama.
+    Return {induk, anggota:[nama unik…]} — `induk` = nama part head (…000) grup itu
+    (mis. 'LOCK(L.H.)'), `anggota` = nama tetangga se-grup (mis. LOCK CATCH, LOCK
+    BODY…) untuk memaknai part bernama ambigu ('HANDLE'). {} bila tak ada cluster."""
+    ensure_index()
+    key = _group_key(pn)
+    if not key:
+        return {}
+    ku = key.upper()
+    self_u = (pn or "").strip().upper()
+    fs = (file_simple or "").strip()
+    files = _state["excel_files"]
+    ordered = ([fi for fi in files if fs and fs in (fi.get("simple_name") or "")] + files
+               if fs else files)
+    for fi in ordered:
+        pidx = fi.get("part_number_index", {})
+        members: list[tuple[str, str]] = []
+        for k, idxs in pidx.items():
+            if k.startswith(ku) and idxs:
+                row = fi["dataframe"].iloc[idxs[0]]
+                nm = " ".join(str(row["part_name"]).split()) if pd.notna(row["part_name"]) else ""
+                if nm:
+                    members.append((k, nm))
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda x: x[0])
+        induk = next((nm for k, nm in members if k.endswith("000")), "")
+        self_name = next((nm for k, nm in members if k == self_u), "")
+        anggota: list[str] = []
+        seen: set[str] = set()
+        for k, nm in members:
+            nu = nm.upper()
+            if nm == induk or nm == self_name or nu in seen:
+                continue
+            seen.add(nu)
+            anggota.append(nm)
+        return {"induk": induk, "anggota": anggota[:6]}
+    return {}
+
+
+def assembly_parent(pn: str, file_simple: str = "") -> str:
+    """Nama part INDUK ASSEMBLY (head grup, mis. 'LOCK(L.H.)') — ringkas dari
+    assembly_context. '' bila tak ada. Dipertahankan untuk pemakai lama."""
+    return assembly_context(pn, file_simple).get("induk", "")
+
+
 def status() -> dict:
     return {
         "indexed": _state["indexed_at"] is not None,
