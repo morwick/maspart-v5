@@ -75,6 +75,21 @@
 > halaman detail part & tool `detail_part`; **`stok.xlsx` = FALLBACK** bila fetch Accurate gagal (Excel
 > di-export dari Accurate, data sama). Kredensial env `ACCURATE_*` (juga di Coolify). Endpoint ditemukan
 > AMAN dari JS statis CDN (bukan meraba API). Lihat **§3.5.5i**.
+> Update **2026-07-06**: fitur **banding BANYAK unit sekaligus** — tool `banding_rangka_massal`:
+> bandingkan SATU kategori (kabin/rem/dll) ATAU SEMUA kategori antar ≥2 unit, via **daftar VIN**
+> (semua user) atau **nama customer** (armada populasi, admin/`SEE_ALL`). Loading List NYATA tiap
+> unit → kelompokkan unit ber-set-PN identik → verdict SERAGAM/BEDA dihitung sistem + kartu unduh
+> Excel matriks. 14 unit test baru (total 130 lolos). Lihat **§3.5.5j**. Juga: `migrations/015_ai_feedback.sql`
+> dibuat; server↔lokal diverifikasi identik (2 file nyasar `app/admin.py`+`app/catalog_bom.py` di server).
+> Update **2026-07-06 (pencarian lebih pintar)**: cari_part **BROADEN dalam-unit** (kata inti dicari
+> sendiri saat scope unit → part bernama ringkas spt `HANDLE` untuk 'handle pintu' ketemu) + **konteks
+> cluster `grup_induk`+`grup_isi`** (assembly induk + TETANGGA se-grup dari penomoran, mis. `HANDLE`
+> segrup `LOCK(L.H.)`,`LOCK CATCH` = handle pintu; segrup `DAMPER`,`BAR` = tuas) agar asisten memilah
+> part ambigu spt teknisi baca katalog. Prompt: Rule 2/3b (scope unit, kata inti) + **Rule 3c PRINSIP
+> PENALARAN KONTEKS UMUM** berlaku SEMUA tool/data — EPC Loading List (field `kategori`+breakdown), EPC
+> Atlas (hierarki kategori→assembly→komponen+posisi), Weichai (GROUP mesin), populasi: WAJIB kelompokkan
+> & simpulkan fungsi dari keluarga/kategori/posisi, bukan nama baris tunggal (EPC sudah bawa konteks ini;
+> yg diperbaiki = model konsisten MENALAR-nya). LIVE & deployed. 6 test baru (total 136). Lihat §3.5.3 butir 4–5.
 
 ---
 
@@ -222,6 +237,17 @@ Pemetaan akun→gudang ada di `services/gudang.py` (`ACCOUNT_GUDANG`, mis. `jaka
    restart), cocokkan **trigger** sebagai kata/frasa utuh, lalu tambahkan **keyword
    katalog (Inggris)** sebagai istilah cari tambahan. Contoh: `kampas kopling` → `driven
    disc, driven plate`; `dinamo cas` → `generator`.
+4. **BROADEN dalam-unit** (`_t_cari_part`, sejak 2026-07-06) — bila `unit=` di-set, pencarian
+   dibuat **forgiving**: tiap KATA INTI (query+sinonim) dicari sendiri-sendiri lalu digabung.
+   Menolong part yang di katalog bernama **ringkas** (mis. `HANDLE` saat user tanya `handle
+   pintu`/`door handle` — part tak pernah bernama frasa penuh). Search **global tetap presisi
+   per-frasa** (tak bocor antar-unit). Kata model/arah/struktural dibuang (`_BROADEN_STOP`).
+5. **KONTEKS GRUP INDUK** (`part_index.assembly_parent`, sejak 2026-07-06) — hasil cari_part
+   (item yang ditampilkan) diberi field **`grup_induk`** = nama ASSEMBLY tempat part berada,
+   dihitung dari penomoran Shantui/Komatsu (nolkan 3 digit terakhir: `146-56-15200` →
+   induk `146-56-15000` = `LOCK(L.H.)`). Memungkinkan asisten **memilah part bernama ambigu**
+   — mis. `HANDLE` ber-grup `LOCK(L.H.)` = **handle pintu**, vs `HANDLE` tanpa induk = tuas.
+   Prompt Rule 2/3b mengajari model men-scope `unit=`, pakai kata inti, & baca `grup_induk`.
 
 **Format `sinonim.json`** = list of `{grup, triggers[], keywords[]}`:
 - `triggers` = istilah lapangan/slang Indonesia (mis. `seher`, `laher`, `gardan reduksi`).
@@ -277,6 +303,7 @@ kamus sinonim **juga disuntikkan ke system prompt** ("KAMUS ISTILAH LAPANGAN"). 
 | `part_aus_dari_rangka` | **part servis/aus persis per-VIN** dari EPC Parts Atlas — auto pilih modul (rem/kopling/filter/dll); WAJIB utk part aus per-rangka, jangan cari_part lokal | semua |
 | `assembly_utama_unit` | daftar **ASSEMBLY UTAMA terpasang** satu unit per-VIN ('four-assembly': kabin, gardan, mesin, transmisi, kopling — PN assy nyata) | semua |
 | `banding_rangka` | **bandingkan part DUA unit via dua nomor rangka** (Loading List per-VIN) — part sama/beda per kategori; memicu kartu unduh Excel di UI (§3.5.5g) | semua |
+| `banding_rangka_massal` | **bandingkan KATEGORI antar BANYAK unit (≥2) sekaligus** ("kabin semua unit PT X sama?" / daftar VIN) — via `rangka_list[]` ATAU `customer` (armada populasi); Loading List NYATA tiap VIN → kelompokkan unit ber-set-PN identik → verdict SERAGAM/BEDA + `kategori`='semua' (ringkasan semua kategori) + kartu unduh Excel matriks (§3.5.5j) | semua (mode `customer` → `admin`/`SEE_ALL`) |
 | `part_termasuk_assy` | REVERSE: PN komponen kecil → **termasuk di assembly mana saja** (gearbox/kopling/gardan/mesin yang memuatnya) | semua |
 | `cari_filter_shantui` | cari **FILTER alat berat SHANTUI** (hidrolik, oli, solar, udara, water separator, AC) per model excavator/dozer/roller/grader | semua |
 | `buat_excel` | **EXPORT EXCEL DINAMIS** — "buatkan excelnya" atas data apa pun yg dibahas → model susun judul+kolom+baris dari hasil tool → kartu unduh gaya Claude; PN di isi file wajib grounded (anti-karangan) (2026-07-03) | semua |
@@ -584,6 +611,37 @@ riil pabrikan/gudang real-time**, bukan snapshot Excel. `services/accurate.py` +
 - **Aturan aman (WAJIB):** JANGAN meraba endpoint (tebakan = 404 mencurigakan); hanya panggil endpoint
   yang dipakai browser; endpoint baru ditemukan dgn BACA JS STATIS; **jangan login berulang cepat**
   (Accurate throttle → `errorTimeout`); pakai ulang sesi. File sesi/HAR/kredensial di-`.gitignore`.
+
+### 3.5.5j Banding BANYAK unit sekaligus (per kategori / semua kategori) — sejak 2026-07-06
+
+Generalisasi `banding_rangka` (2 unit) & `banding_part_armada` (1 part) menjadi **banding
+SATU KATEGORI (atau SEMUA kategori) antar BANYAK unit (≥2) sekaligus**. Menjawab "apakah
+KABIN semua unit PT ARGCIO sama atau beda?" dan "cek 5 nomor rangka Sinotruk ini kabinnya
+sama?" (kabin cuma contoh — berlaku semua kategori). Tool `banding_rangka_massal` di
+`services/ai_assistant.py` (`_t_banding_rangka_massal`).
+
+- **Dua mode input:** `rangka_list[]` (daftar VIN — **semua user**) ATAU `customer` (armada
+  dari populasi — **admin/`SEE_ALL`** saja, gated di handler via `_can_populasi`). VIN
+  di-dedup; dibatasi **`_MASSAL_MAX_UNITS`=15** unit (Loading List ~30 dtk/unit; sisanya
+  dilaporkan `unit_terpotong`).
+- **Cek NYATA tiap unit (bukan tebak konfigurasi):** ambil `epc_bom.loading_list(rangka)`
+  PARALEL (6 worker), filter PN per kategori via `catalog_bom.pn_category_map()`, lalu
+  **kelompokkan unit ber-SET-PN identik**. Unit yang gagal dibaca EPC dikecualikan +
+  dilaporkan (`unit_gagal`); <2 unit sukses → error jujur (tak menyimpulkan). Dipilih atas
+  trik grouping-konfigurasi (armada) karena **kabin tak ada di `epc.lookup`** → beda kabin
+  halus hanya ketahuan dari Loading List nyata.
+- **Verdict dihitung SISTEM** (bukan model): satu kelompok → `seragam=true`; >1 →
+  `seragam=false` + rincian kelompok (unit mana) + `part_beda` (union−intersection, nama
+  disilang `part_index.search_exact_pns`/`translate_cn`). Mode **`kategori='semua'`** (atau
+  kosong) → `ringkasan_kategori` per kategori + `kategori_beda`/`kategori_seragam`.
+- **Kartu unduh Excel** (pola `buat_excel`, field `excel_exports` → `AiExcelCard`, endpoint
+  `GET /api/ai/excel/{id}`): mode 1 kategori = **matriks part × unit** (centang = terpasang,
+  PN beda di atas); mode semua = **matriks unit × kategori** (angka = nomor kelompok; kolom
+  yang semua "1" = seragam). Dibangun via `ai_export.stash_export`. **Tanpa endpoint/frontend
+  baru** (reuse jalur export generik).
+- **Test:** `tests/test_banding_massal.py` (14 kasus, EPC/populasi/catalog di-mock) — seragam/
+  beda, dedup VIN, string dipisah koma, unit gagal dikecualikan, <2 sukses, kategori tak
+  dikenal, mode semua, gating customer. Suite total **130 test** lolos.
 
 ### 3.5.6 Cari by Foto
 
@@ -1116,12 +1174,17 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       RLS); belum ter-push. Rotate service_key + anon key di dashboard, scrub file dari history
       (filter-repo/BFG), baru merge/push (§3.5.12). JANGAN jalankan TODO merge `main` di bawah
       sebelum ini beres.
+- [x] **Banding BANYAK unit sekaligus** — SELESAI & DEPLOYED 2026-07-06 (§3.5.5j): tool
+      `banding_rangka_massal` (daftar VIN / customer; 1 kategori atau semua; verdict sistem + Excel
+      matriks) + disambiguasi routing (kategori→tool ini, bukan `banding_part_armada`). 14 test lolos
+      (total 130). Live di container prod (scp+build.sh+force-recreate, health OK). ⚠️ BELUM dikomit.
 - [ ] **TLS `verify=False` ke EPC/SIMS** — sertifikat upstream invalid; perlu pin CA agar bisa
       mengaktifkan verifikasi tanpa mematikan EPC (§3.5.12).
 - [ ] **Fast-forward/merge `main` ke `snapshot-clean`** — `main` di GitHub tertinggal jauh;
       clone baru dapat kode lama (lihat §7). ⚠️ Lakukan HANYA setelah scrub secrets di atas.
-- [ ] **`migrations/015_ai_feedback.sql`** — tabel `ai_feedback` masih dibuat manual (§3.5.5g);
-      buat file migrasi agar konsisten dgn tabel lain.
+- [x] **`migrations/015_ai_feedback.sql`** — SELESAI: file migrasi dibuat (DDL identik dgn
+      `ai_feedback.py::create_table_sql()`) agar konsisten dgn tabel lain (§3.5.5g). Jalankan
+      sekali di Supabase SQL Editor bila tabel belum ada.
 - [ ] **Backup otomatis `/opt/maspart/data`** — berisi upload admin + token; tidak semua di
       git. Cron tar harian / rclone.
 - [~] **Migrasi password plaintext** — SEBAGIAN (2026-07-04): login via plaintext legacy kini
@@ -1140,8 +1203,9 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       `/api/parts/accurate-stock`; env `ACCURATE_*` (di `.env` + Coolify via API). Terverifikasi dari
       container prod. ⚠️ jangan login berulang cepat (Accurate throttle → errorTimeout).
 - [ ] **(opsional) Rotasi API token Coolify** yang dipakai set env Accurate (sudah sempat dibagikan).
-- [ ] **(opsional) Stok Accurate di halaman HASIL PENCARIAN** (perlu warm-cache bulk index biar tak
-      blok request; hindari per-baris live agar tak banyak panggilan).
+- [x] **(opsional) Stok Accurate di halaman HASIL PENCARIAN** — SELESAI (§3.5.5i): `snapshot()` di
+      thread latar (stale-while-revalidate) → `routers/parts._overlay_accurate` menimpa stok+harga tiap
+      baris `/search`·`/search-name` (O(1), non-blocking). Excel = fallback; rincian per-gudang tetap Excel.
 - [ ] **Kandidat fitur berikut**: harga jual otomatis dari modal SIMS utk part tanpa harga
       (stok ada tapi tak bisa dibeli), saran restock AI (penjualan×stok), interchange otomatis
       saat habis (`pengganti_part`+stok), OCR VIN dari foto, fault code→part, penawaran/quote
