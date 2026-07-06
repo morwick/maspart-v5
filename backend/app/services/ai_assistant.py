@@ -3861,7 +3861,7 @@ def _t_gambar_exploded(args: dict, user: dict) -> dict:
     for f in d["figures"][:3]:   # cap 3 figure agar tak membanjiri chat
         judul = f"Exploded {pn} - {f.get('nama') or kategori}"
         image_id, filename = ai_export.stash_builder(
-            judul, {"kind": "exploded", "svg": f["svg"]}, ext="png")
+            judul, {"kind": "exploded", "svg": f["svg"], "balon": f.get("balon")}, ext="png")
         gambar.append({"image_id": image_id, "filename": filename,
                        "balon": f.get("balon"), "nama_figure": f.get("nama"),
                        "kategori": f.get("kategori"), "jumlah_item": f.get("jumlah_item")})

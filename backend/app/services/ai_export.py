@@ -306,7 +306,7 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
                 d["_bytes"] = data
             return data, d["filename"]
         if b.get("kind") == "exploded":
-            data = exploded_png(b.get("svg", ""))
+            data = exploded_png(b.get("svg", ""), b.get("balon"))
             if data is None:
                 return None, ("Gagal mengambil/menrender gambar exploded view EPC "
                               "(file gambar tak tersedia / resvg gagal).")
@@ -384,9 +384,51 @@ def _svg_to_png(svg: bytes, width: int = _KATALOG_IMG_WIDTH) -> bytes | None:
         return None
 
 
-def exploded_png(svg_name: str) -> bytes | None:
-    """Unduh SATU file SVG exploded-view EPC (nama dari field d2s) → render PNG.
-    Dipakai fitur 'tampilkan gambar exploded view part ini' (gambar inline di chat).
+def _highlight_ball(svg: bytes, ball) -> bytes:
+    """Sisipkan LINGKARAN KUNING di belakang teks NOMOR BALON `ball` di SVG EPC —
+    agar part yang diminta MENONJOL di gambar. Balon = <text x y font-size>N</text>
+    (Arial); disisipkan <circle> tepat SEBELUM teks itu (paint order → di belakang).
+    Aman: bila nomor tak ketemu / ball kosong → SVG dikembalikan apa adanya."""
+    if not svg or ball in (None, ""):
+        return svg
+    b = re.sub(r"\s+", "", str(ball))
+    if not b:
+        return svg
+    try:
+        txt = svg.decode("utf-8", "replace")
+    except Exception:
+        return svg
+
+    def _repl(m: "re.Match") -> str:
+        tag = m.group(0)
+        inner = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", tag))
+        if inner != b:
+            return tag
+        mx, my = re.search(r'\bx="([-\d.]+)"', tag), re.search(r'\by="([-\d.]+)"', tag)
+        if not mx or not my:
+            return tag
+        x, y = float(mx.group(1)), float(my.group(1))
+        mfs = re.search(r'font-size="([-\d.]+)"', tag)
+        fs = float(mfs.group(1)) if mfs else 4.2
+        n = len(b)
+        cx = x + fs * 0.30 * n           # tengah horizontal angka (x = tepi kiri)
+        cy = y - fs * 0.33               # y = baseline → naik ke tengah tinggi angka
+        r = fs * (0.95 + 0.20 * (n - 1))  # sedikit lebih besar dari angka
+        circle = (f'<circle cx="{cx:.3f}" cy="{cy:.3f}" r="{r:.3f}" fill="#FFD400" '
+                  f'fill-opacity="0.9" stroke="#E39A00" stroke-width="{fs*0.09:.3f}"/>')
+        return circle + tag              # lingkaran DI BELAKANG teks nomor
+
+    try:
+        out = re.sub(r"<text\b[^>]*>.*?</text>", _repl, txt, flags=re.S)
+        return out.encode("utf-8")
+    except Exception:
+        return svg
+
+
+def exploded_png(svg_name: str, ball=None) -> bytes | None:
+    """Unduh SATU file SVG exploded-view EPC (nama dari field d2s) → render PNG,
+    dengan NOMOR BALON `ball` di-HIGHLIGHT kuning bila diberikan. Dipakai fitur
+    'tampilkan gambar exploded view part ini' (gambar inline di chat).
     None bila nama kosong / file tak ada / resvg gagal."""
     if not svg_name:
         return None
@@ -394,7 +436,9 @@ def exploded_png(svg_name: str) -> bytes | None:
         svg = epc_bom.fetch_file(svg_name)
     except Exception:
         return None
-    return _svg_to_png(svg) if svg else None
+    if not svg:
+        return None
+    return _svg_to_png(_highlight_ball(svg, ball))
 
 
 def katalog_excel(rangka: str, kategori: str) -> tuple[bytes | None, str]:
