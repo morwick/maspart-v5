@@ -54,9 +54,10 @@ _UA = (
 _PAGE_SIZE = 200
 _HTTP_TIMEOUT = 30
 
-# TTL cache indeks stok penuh (detik). Lookup stok berulang tak menembak Accurate
-# tiap kali; ubah via refresh(force=True).
-_INDEX_TTL = 5 * 60
+# TTL cache indeks stok penuh (detik). Menu Stok cukup segar tiap 5 JAM
+# (permintaan pemilik 2026-07-06); butuh angka terkini sekarang → admin punya
+# endpoint refresh(force=True) (POST /api/stok/refresh).
+_INDEX_TTL = 5 * 60 * 60
 
 
 def _session_file() -> Path:

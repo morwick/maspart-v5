@@ -286,7 +286,7 @@ Pemetaan akun→gudang ada di `services/gudang.py` (`ACCOUNT_GUDANG`, mis. `jaka
   berat resmi SIMS mengisi otomatis → part tak lagi tertolak "tanpa berat".
 - **Populasi**: data populasi unit (`services/populasi.py`).
 - **Menu Stok (live Accurate)**: halaman `stok` menampilkan katalog stok penuh dari Accurate
-  (indeks ber-cache TTL 5 mnt), terpisah dari stok.xlsx multi-gudang di atas — lihat §3.5.5l.
+  (indeks ber-cache TTL 5 jam), terpisah dari stok.xlsx multi-gudang di atas — lihat §3.5.5l.
 
 ### 3.5.5 Asisten AI (DeepSeek, tool-calling)
 
@@ -688,10 +688,12 @@ Part Name, Stok, Satuan**. Dilengkapi cari (PN/nama/kode Accurate), urut (PN, na
 paginasi & **export Excel**.
 
 - **Sumber data:** `accurate.all_items()` → `refresh()` = **indeks ternormalisasi ber-cache
-  TTL 5 menit** (`_INDEX_TTL`, dibagi semua user). Buka pertama (cache dingin/kadaluarsa) →
-  tarik katalog penuh dari Accurate (paging ~4.8rb barang); dalam 5 menit berikutnya dilayani
-  dari memori (**tak menembak Accurate**). Cari/urut/ganti-halaman diproses server-side di atas
-  cache → murah. Beban maks: 1 tarik penuh per 5 menit apa pun jumlah user.
+  TTL 5 JAM** (`_INDEX_TTL`, dibagi semua user; semula 5 menit — diubah 2026-07-06 atas
+  permintaan pemilik). Buka pertama (cache dingin/kadaluarsa) → tarik katalog penuh dari
+  Accurate (paging ~4.8rb barang); dalam 5 jam berikutnya dilayani dari memori (**tak menembak
+  Accurate**). Cari/urut/ganti-halaman diproses server-side di atas cache → murah. Beban maks:
+  1 tarik penuh per 5 jam apa pun jumlah user; butuh angka terkini → admin `POST /api/stok/refresh`
+  (force).
 - **Backend:** `services/stok.py` (filter/urut/`display_rows`/`to_excel_bytes`) +
   `routers/stok.py`: `GET /api/stok/list` (paginasi), `GET /api/stok/list/export` (Excel),
   `POST /api/stok/refresh` (admin, `accurate.refresh(force=True)`). Kegagalan sesi/koneksi
