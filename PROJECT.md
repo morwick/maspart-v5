@@ -107,7 +107,8 @@ Fitur utama (berdasarkan halaman frontend & router backend):
 - **Cari by Foto** (`search-image`) — pencocokan gambar part pakai model **DINOv2** (torch) dari galeri CSV lokal
 - **Compare** — bandingkan 2 part
 - **Harga** — lookup & batch harga
-- **Stok / Opname** — multi-gudang, scope per cabang
+- **Stok / Opname** — multi-gudang, scope per cabang; plus **menu Stok** (daftar stok live
+  seluruh barang Accurate, §3.5.5l)
 - **Populasi** — data populasi unit
 - **Orders / Pesanan / Keranjang** — alur jual-beli + pembayaran + ongkir
 - **Chat** — chat order & gudang
@@ -272,6 +273,8 @@ Pemetaan akun→gudang ada di `services/gudang.py` (`ACCOUNT_GUDANG`, mis. `jaka
   `harga.weight_for(pn, allow_remote=True)` di `create_order` — bila kolom berat manual kosong,
   berat resmi SIMS mengisi otomatis → part tak lagi tertolak "tanpa berat".
 - **Populasi**: data populasi unit (`services/populasi.py`).
+- **Menu Stok (live Accurate)**: halaman `stok` menampilkan katalog stok penuh dari Accurate
+  (indeks ber-cache TTL 5 mnt), terpisah dari stok.xlsx multi-gudang di atas — lihat §3.5.5l.
 
 ### 3.5.5 Asisten AI (DeepSeek, tool-calling)
 
@@ -665,6 +668,31 @@ PN itu = No. balon N. Tool `gambar_exploded` (`_t_gambar_exploded`).
 - Terverifikasi live: PB087964 + `WG9761349009` (gardan) → figure "braking plate assembly",
   balon 3, PNG 132 KB ter-render. **136 test lolos** (tak ada regresi).
 
+### 3.5.5l Menu STOK — daftar stok live seluruh barang Accurate — sejak 2026-07-06
+
+Menu baru **Stok** (sidebar bagian **Data**, di bawah Harga) menampilkan **katalog stok
+LIVE seluruh barang dari Accurate** dalam tabel, kolom mengikuti Daftar Harga: **Part Number,
+Part Name, Stok, Satuan**. Dilengkapi cari (PN/nama/kode Accurate), urut (PN, nama, Stok ↑/↓),
+paginasi & **export Excel**.
+
+- **Sumber data:** `accurate.all_items()` → `refresh()` = **indeks ternormalisasi ber-cache
+  TTL 5 menit** (`_INDEX_TTL`, dibagi semua user). Buka pertama (cache dingin/kadaluarsa) →
+  tarik katalog penuh dari Accurate (paging ~4.8rb barang); dalam 5 menit berikutnya dilayani
+  dari memori (**tak menembak Accurate**). Cari/urut/ganti-halaman diproses server-side di atas
+  cache → murah. Beban maks: 1 tarik penuh per 5 menit apa pun jumlah user.
+- **Backend:** `services/stok.py` (filter/urut/`display_rows`/`to_excel_bytes`) +
+  `routers/stok.py`: `GET /api/stok/list` (paginasi), `GET /api/stok/list/export` (Excel),
+  `POST /api/stok/refresh` (admin, `accurate.refresh(force=True)`). Kegagalan sesi/koneksi
+  Accurate dikembalikan sebagai **status flag** (`configured`/`session_expired`/`error`), bukan
+  HTTP error — frontend tampilkan banner seadanya (pola sama `/api/parts/accurate-stock`).
+- **Izin & akses:** key menu **`stok`** di `permissions.MENU_TABS` (muncul di Menu Control,
+  discope per-user). Default aktif utk admin & user tanpa baris izin. **Pembeli DITOLAK**
+  (`BUYER_DENY` di `AppShell`).
+- **Frontend:** `app/stok/page.tsx` (mirip sub-tab List Harga) + `getStokList`/`exportStokList`
+  di `lib/api.ts`; item nav "Stok" di `AppShell` (`NAV_DATA`, key `stok`).
+- **Deployed live 2026-07-06** (commit `2e5488f`, snapshot-clean). Terverifikasi: 136 test lolos,
+  tsc bersih, `https://maspart.tech/stok` → 200, `/api/stok/list` → 401 (route hidup).
+
 ### 3.5.6 Cari by Foto
 
 `services/image_search.py` — embedding **DINOv2-base** (torch CPU). Galeri dari **CSV lokal**
@@ -687,6 +715,7 @@ Hasil diagregasi per `part_number` + confidence boost. Foto part di-proxy via
 | **auth** `/api/auth` | `POST /login`, `GET /me`, `GET /permissions` |
 | **parts** `/api/parts` | `GET /search` (PN), `GET /search-name`, `POST /search-image`, `GET /compare`, `GET /photos`, `GET /spec` (berat/dimensi SIMS), `GET /accurate-stock` (stok live Accurate +per gudang, §3.5.5i), `GET /image-proxy`, `GET /batch-template`, `POST /batch-catalog`, `GET/POST /index/status·refresh` |
 | **harga** `/api/harga` | `GET /list·/list/export·/rate·/cari`, `POST /batch·/batch/export·/refresh` |
+| **stok** `/api/stok` | `GET /list·/list/export` (daftar stok live Accurate, §3.5.5l), `POST /refresh` (admin) |
 | **opname** `/api/opname` | `GET /draft·/history`, `POST /draft/from-upload·/finalize`, `PUT/DELETE /draft`, `DELETE /history/{id}` |
 | **populasi** `/api/populasi` | `GET ""·/export`, `POST /refresh` |
 | **orders** `/api` | `POST /orders`, `GET /orders·/orders/{code}`, `POST /orders/{code}/confirm·cancel·proof`, `GET /shipping/rates`, `POST /shipping/weight`, `GET /payments/methods`, `POST /payments/webhook`, `GET/PUT /admin/orders...` |
@@ -702,7 +731,7 @@ Hasil diagregasi per `part_number` + confidence boost. Foto part di-proxy via
 ### 3.5.9 Peta halaman frontend (Next.js App Router, `frontend/src/app/`)
 
 `login` · `/` (search PN) · `search` · `search-image` · `compare` · `part/[pn]` · `harga` ·
-`batch` · `opname` · `populasi` · `download` · `asisten` (AI) · `keranjang` · `pesanan` +
+`stok` (stok live Accurate, §3.5.5l) · `batch` · `opname` · `populasi` · `download` · `asisten` (AI) · `keranjang` · `pesanan` +
 `pesanan/[code]` + invoice · `pilih-lokasi` · `chat` · `cabang/*` (pesanan/penjualan/chat) ·
 `admin/*` (menu, users, gudang, upload, monitoring, index, foto, orders, penjualan, **feedback**).
 
