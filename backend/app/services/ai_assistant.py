@@ -612,6 +612,46 @@ def _tool_specs(user: dict) -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "banding_rangka_massal",
+                "description": (
+                    "BANDINGKAN PART BANYAK UNIT (>=2) SEKALIGUS — untuk 'apakah KABIN semua "
+                    "unit PT X SAMA atau beda?', 'cek 5 nomor rangka ini kabinnya sama semua?', "
+                    "'bandingkan rem unit A, B, C'. Input: DAFTAR nomor rangka (rangka_list) ATAU "
+                    "nama customer/PT (customer — armada dari populasi, admin/'mas' saja). Isi "
+                    "'kategori' (kabin/rem/mesin/transmisi/kopling/kelistrikan/sasis/gardan) untuk "
+                    "SATU kategori, atau 'semua' untuk RINGKASAN semua kategori (mana yang seragam/"
+                    "beda). Membandingkan SET PART NYATA tiap unit (Loading List per-VIN), "
+                    "MENGELOMPOKKAN unit ber-set identik, verdict SERAGAM/BEDA dihitung SISTEM + "
+                    "kartu unduh Excel. ⛔ Beda dari banding_rangka (HANYA 2 unit) & "
+                    "banding_part_armada (SATU part saja). ⛔ JANGAN menyimpulkan sama/beda dari "
+                    "kode model — itu menebak. HANYA Sinotruk/HOWO/SITRAK."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka_list": {
+                            "type": "array", "items": {"type": "string"},
+                            "description": "Daftar nomor rangka/VIN unit yang mau dibandingkan (>=2). "
+                                           "Pakai ini bila user menyebut/menempel beberapa VIN.",
+                        },
+                        "customer": {
+                            "type": "string",
+                            "description": "Alternatif rangka_list: nama customer/PT (mis. 'PT ARGCIO') "
+                                           "— unit diambil dari data populasi. Admin/'mas' saja.",
+                        },
+                        "kategori": {
+                            "type": "string",
+                            "description": "Kategori yang dibandingkan (mis. 'kabin', 'rem', 'mesin', "
+                                           "'transmisi', 'kelistrikan', 'sasis', 'gardan'). Isi 'semua' "
+                                           "untuk ringkasan SELURUH kategori.",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "part_aus_dari_rangka",
                 "description": (
                     "PART persis untuk SATU unit dari NOMOR RANGKA/VIN — diuraikan dari EPC PARTS "
@@ -874,7 +914,11 @@ def _tool_specs(user: dict) -> list[dict]:
                     "part via EPC Parts Atlas pada unit WAKIL tiap kelompok → verdict "
                     "SAMA/BEDA dihitung SISTEM (bukan tebakan). Hanya unit Sinotruk/"
                     "HOWO/SITRAK yang dikenali EPC. JANGAN menjawab pertanyaan seperti "
-                    "ini dgn cek_populasi lalu menebak dari nama model."
+                    "ini dgn cek_populasi lalu menebak dari nama model. ⛔ Tool ini untuk "
+                    "SATU PART AUS spesifik (kampas kopling/rem, filter, hub, bearing). "
+                    "Bila user tanya soal KATEGORI utuh (KABIN, mesin, transmisi, "
+                    "kelistrikan, sasis, gardan) armada → pakai banding_rangka_massal, "
+                    "BUKAN tool ini."
                 ),
                 "parameters": {
                     "type": "object",
@@ -2451,6 +2495,310 @@ def _t_banding_rangka(args: dict, user: dict) -> dict:
     }
 
 
+# Batas unit yang di-fetch Loading List-nya untuk banding massal (tiap call ke
+# server China ~30 dtk; ambil paralel tapi tetap dibatasi agar tak menggantung).
+_MASSAL_MAX_UNITS = 15
+
+
+def _t_banding_rangka_massal(args: dict, user: dict) -> dict:
+    """BANDINGKAN PART BANYAK UNIT (>=2) sekaligus — via DAFTAR nomor rangka ATAU
+    nama CUSTOMER (armada). Untuk 'apakah kabin semua unit PT X sama?' / 'cek 5 VIN
+    ini kabinnya sama atau beda?'. Ambil Loading List NYATA tiap VIN (paralel,
+    dibatasi), filter per kategori, lalu KELOMPOKKAN unit ber-SET-PN identik →
+    verdict SERAGAM/BEDA dihitung SISTEM (bukan tebakan dari kode model). Mode
+    'semua' kategori → ringkasan kategori mana yang seragam & mana yang beda.
+    Membangun kartu unduh Excel (matriks). HANYA unit Sinotruk/HOWO/SITRAK (EPC)."""
+    # ── 1) Kumpulkan daftar unit (mode daftar VIN atau mode customer) ──
+    raw_list = args.get("rangka_list") or args.get("rangka") or args.get("rangka_daftar") or []
+    if isinstance(raw_list, str):
+        raw_list = [x for x in re.split(r"[\s,;]+", raw_list) if x]
+    customer = (args.get("customer") or "").strip()
+    kategori = (args.get("kategori") or "").strip()
+
+    vins: list[dict] = []
+    sumber_unit = ""
+    terpotong = 0
+    total_customer = None
+    customer_cocok = None
+
+    if raw_list:
+        seen: set[str] = set()
+        for r in raw_list:
+            rr = str(r).strip()
+            if rr and rr.upper() not in seen:
+                seen.add(rr.upper())
+                vins.append({"rangka": rr})
+        sumber_unit = "daftar nomor rangka yang disebut user"
+    elif customer:
+        if not _can_populasi(user):
+            return {"denied": True,
+                    "error": "Banding armada per CUSTOMER hanya untuk admin & akun 'mas'. "
+                             "User lain bisa memberi DAFTAR nomor rangka langsung (rangka_list)."}
+        try:
+            pop = populasi.units_for_customer(customer)
+        except Exception as e:  # pragma: no cover
+            return {"error": f"gagal baca data populasi: {e}"}
+        if not pop.get("available"):
+            return {"available": False,
+                    "error": "Data populasi unit belum tersedia (populasi.xlsx belum diunggah admin)."}
+        punits = [u for u in (pop.get("units") or []) if u.get("rangka")]
+        if not punits:
+            out = {"found": False,
+                   "error": f"Tidak ada unit ber-nomor-rangka untuk customer '{customer}' di populasi."}
+            if pop.get("kandidat"):
+                out["kandidat_customer"] = pop["kandidat"]
+                out["jawaban_wajib"] = ("Customer persis itu tidak ada. Tampilkan 'kandidat_customer' "
+                                        "dan minta user memilih — JANGAN menebak sendiri.")
+            return out
+        seen = set()
+        for u in punits:
+            k = (u.get("rangka") or "").upper()
+            if k and k not in seen:
+                seen.add(k)
+                vins.append({"rangka": u["rangka"], "model": u.get("model"), "tahun": u.get("tahun")})
+        total_customer = pop.get("jumlah_unit")
+        customer_cocok = pop.get("customers")
+        sumber_unit = "data populasi (armada per customer)"
+    else:
+        return {"error": "Sebutkan DAFTAR nomor rangka (rangka_list) ATAU nama customer/PT."}
+
+    if len(vins) > _MASSAL_MAX_UNITS:
+        terpotong = len(vins) - _MASSAL_MAX_UNITS
+        vins = vins[:_MASSAL_MAX_UNITS]
+    if len(vins) < 2:
+        return {"error": "Perlu MINIMAL 2 unit untuk dibandingkan (beri >=2 nomor rangka, "
+                         "atau customer dengan >=2 unit ber-rangka)."}
+
+    # ── 2) Resolusi kategori ──
+    semua_kat = kategori.lower() in ("", "semua", "all", "lengkap", "semua kategori")
+    code = None
+    kat_nama = "SEMUA kategori"
+    if not semua_kat:
+        code = catalog_bom.resolve_kategori(kategori) if catalog_bom.available() else None
+        if not code:
+            return {"found": False,
+                    "error": f"Kategori '{kategori}' tak dikenal (mis. kabin, rem, transmisi, mesin, "
+                             "kopling, kelistrikan, sasis, gardan). Atau sebut 'semua' untuk "
+                             "ringkasan SEMUA kategori."}
+        kat_nama = catalog_bom.KATEGORI_NAMA.get(code, kategori)
+
+    # ── 3) Ambil Loading List tiap unit (paralel, dibatasi) ──
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _fetch(v: dict):
+        return v, epc_bom.loading_list(v["rangka"])
+
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        fetched = list(ex.map(_fetch, vins))
+
+    ok: list[tuple[dict, dict]] = []
+    gagal: list[dict] = []
+    token_issue = False
+    for v, ll in fetched:
+        if ll.get("found") and not ll.get("partial"):
+            ok.append(({**v, "frame_number": ll.get("frame_number") or v["rangka"]}, ll))
+        else:
+            err = ll.get("_err")
+            if err in ("token_expired", "no_token"):
+                token_issue = True
+            gagal.append({"rangka": v["rangka"], "alasan": (
+                "token EPC" if err in ("token_expired", "no_token")
+                else "jaringan EPC" if err == "network"
+                else "data EPC tidak lengkap" if ll.get("partial")
+                else "tidak ditemukan di EPC (cek VIN; hanya Sinotruk/HOWO/SITRAK)")})
+    if token_issue and not ok:
+        return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
+    if len(ok) < 2:
+        return {"found": False, "jumlah_unit_diminta": len(vins), "unit_gagal": gagal,
+                "error": "Kurang dari 2 unit yang berhasil dibaca Loading List-nya — tak bisa "
+                         "dibandingkan. Cek nomor rangka / coba lagi (EPC bisa lambat)."}
+
+    _pncat = catalog_bom.pn_category_map() if catalog_bom.available() else {}
+
+    def _catcode(pn: str) -> str:
+        return (_pncat.get(catalog_bom._norm(pn)) or {}).get("kategori") or "00"
+
+    # Per unit: {kode_kategori: set(PN)} + {PN: baris part} (utk nama/qty).
+    units: list[tuple[dict, dict, dict]] = []
+    for v, ll in ok:
+        bycat: dict[str, set] = {}
+        pmap: dict[str, dict] = {}
+        for p in ll.get("parts", []):
+            pn = p.get("pn")
+            if not pn:
+                continue
+            bycat.setdefault(_catcode(pn), set()).add(pn)
+            pmap[pn] = p
+        units.append((v, bycat, pmap))
+
+    frames = [u[0]["frame_number"] for u in units]
+
+    def _pmap_get(pn: str) -> dict | None:
+        for _, _, pmap in units:
+            if pn in pmap:
+                return pmap[pn]
+        return None
+
+    def _nama_lokal(pns) -> dict:
+        localn: dict[str, str] = {}
+        for r in part_index.search_exact_pns(list(pns)):
+            pn = (r.get("part_number") or "").upper()
+            if pn and pn not in localn:
+                localn[pn] = r.get("part_name") or ""
+        return localn
+
+    def _analyze(c: str):
+        """→ (glist[(frozenset, [idx])] urut kelompok terbesar, seragam, set_beda)."""
+        groups: dict[frozenset, list[int]] = {}
+        for idx, (_v, bycat, _pm) in enumerate(units):
+            groups.setdefault(frozenset(bycat.get(c, set())), []).append(idx)
+        glist = sorted(groups.items(), key=lambda kv: -len(kv[1]))
+        sets = [set(k) for k, _ in glist]
+        union = set().union(*sets) if sets else set()
+        inter = set(sets[0]) if sets else set()
+        for s in sets[1:]:
+            inter &= s
+        return glist, (len(glist) == 1), (union - inter)
+
+    def _detail(c: str, cap: int = 40) -> dict:
+        glist, seragam, beda = _analyze(c)
+        localn = _nama_lokal(beda)
+
+        def _row(pn: str) -> dict:
+            p = _pmap_get(pn)
+            en = localn.get(pn) or (epc_bom.translate_cn(p.get("nama_cn")) if p else None)
+            return {"part_number": pn,
+                    "nama": " ".join((en or (p.get("nama_cn") if p else "") or "").split()),
+                    "kelompok_yang_punya": [gi + 1 for gi, (k, _) in enumerate(glist) if pn in k]}
+
+        kelompok = [{
+            "kelompok": gi + 1,
+            "jumlah_unit": len(idxs),
+            "jumlah_part": len(k),
+            "unit": [{"rangka": units[i][0]["frame_number"],
+                      **({"model": units[i][0].get("model")} if units[i][0].get("model") else {})}
+                     for i in idxs][:15],
+        } for gi, (k, idxs) in enumerate(glist)]
+        return {
+            "kategori_kode": c,
+            "kategori": catalog_bom.KATEGORI_NAMA.get(c, c),
+            "seragam": seragam,
+            "jumlah_kelompok": len(glist),
+            "kelompok": kelompok,
+            "jumlah_part_beda": len(beda),
+            "part_beda": [_row(pn) for pn in sorted(beda)[:cap]],
+            "part_beda_terpotong": max(0, len(beda) - cap),
+        }
+
+    meta_unit = {
+        "jumlah_unit_dibanding": len(units),
+        "unit": [{"rangka": v["frame_number"],
+                  **({"model": v.get("model")} if v.get("model") else {})} for v, _, _ in units],
+        "sumber_unit": sumber_unit,
+        **({"customer_cocok": customer_cocok} if customer_cocok else {}),
+        **({"jumlah_unit_populasi": total_customer} if total_customer else {}),
+        **({"unit_gagal": gagal, "catatan_gagal": (
+            "Unit ini gagal dibaca dari EPC — TIDAK ikut dibandingkan; sebutkan ke user.")} if gagal else {}),
+        **({"unit_terpotong": terpotong, "catatan_terpotong": (
+            f"Unit melebihi batas {_MASSAL_MAX_UNITS}; hanya {_MASSAL_MAX_UNITS} pertama yang dicek.")}
+           if terpotong else {}),
+    }
+    sumber = ("EPC Loading List per-VIN — membandingkan SET PART NYATA tiap unit, "
+              "BUKAN tebakan dari kemiripan kode model/spesifikasi.")
+
+    # ── 4a) Mode SATU kategori ──
+    if code:
+        d = _detail(code)
+        # Excel: matriks part x unit (centang = part terpasang di unit itu).
+        allpn = sorted(set().union(*[bycat.get(code, set()) for _, bycat, _ in units]) or set())
+        _, _, beda_set = _analyze(code)
+        allpn.sort(key=lambda pn: (pn not in beda_set, pn))  # yang BEDA di atas
+        localn = _nama_lokal(allpn)
+        kolom = ["Part Number", "Nama"] + frames
+        baris: list[list[str]] = []
+        for pn in allpn:
+            p = _pmap_get(pn)
+            en = localn.get(pn) or (epc_bom.translate_cn(p.get("nama_cn")) if p else None)
+            nama = " ".join((en or (p.get("nama_cn") if p else "") or "").split())
+            baris.append([pn, nama] + ["v" if pn in bycat.get(code, set()) else ""
+                                       for _, bycat, _ in units])
+        judul = f"Banding {kat_nama} - {len(units)} unit"
+        export_id, filename = ai_export.stash_export(judul, kolom, baris)
+        verdict = ("SERAGAM — semua unit yang dicek memakai daftar PN kategori ini yang sama."
+                   if d["seragam"] else
+                   "BERBEDA — ada unit dengan set PN kategori ini yang berbeda; rinci per kelompok.")
+        return {
+            "found": True,
+            "mode": "satu_kategori",
+            "kategori": kat_nama,
+            **meta_unit,
+            "seragam": d["seragam"],
+            "jumlah_kelompok": d["jumlah_kelompok"],
+            "kelompok": d["kelompok"],
+            "jumlah_part_beda": d["jumlah_part_beda"],
+            "part_beda": d["part_beda"],
+            "part_beda_terpotong": d["part_beda_terpotong"],
+            "perbandingan": {"seragam": d["seragam"], "kesimpulan": verdict},
+            "export_id": export_id, "filename": filename, "judul": judul, "jumlah_baris": len(baris),
+            "sumber": sumber,
+            "catatan": ("Verdict DIHITUNG SISTEM — sampaikan apa adanya. seragam=true → semua unit "
+                        "sama untuk kategori ini. seragam=FALSE → sebutkan berapa KELOMPOK, unit "
+                        "mana di tiap kelompok, dan contoh part yang beda (part_beda). ⛔ JANGAN "
+                        "menyimpulkan dari kode model/spesifikasi. ⛔ JANGAN sebut PN di luar data "
+                        "ini. 📎 Kartu unduh Excel (matriks part x unit) otomatis muncul di bawah "
+                        "jawaban — beri tahu user singkat."),
+        }
+
+    # ── 4b) Mode SEMUA kategori (ringkasan) ──
+    codes_present = sorted({c for _, bycat, _ in units for c in bycat if c != "00"})
+    ringkasan = []
+    catgroupnum: dict[str, dict] = {}
+    for c in codes_present:
+        glist, seragam, beda = _analyze(c)
+        catgroupnum[c] = {k: i + 1 for i, (k, _) in enumerate(glist)}
+        ringkasan.append({
+            "kategori_kode": c,
+            "kategori": catalog_bom.KATEGORI_NAMA.get(c, c),
+            "seragam": seragam,
+            "jumlah_kelompok": len(glist),
+            "jumlah_part_beda": len(beda),
+        })
+    kategori_beda = [r for r in ringkasan if not r["seragam"]]
+    kategori_seragam = [r for r in ringkasan if r["seragam"]]
+
+    # Excel: matriks unit x kategori (angka = nomor kelompok; kolom yang semua '1' = seragam).
+    kolom = ["Unit (rangka)", "Model"] + [catalog_bom.KATEGORI_NAMA.get(c, c) for c in codes_present]
+    baris = []
+    for v, bycat, _ in units:
+        row = [v["frame_number"], v.get("model") or ""]
+        for c in codes_present:
+            row.append(str(catgroupnum[c][frozenset(bycat.get(c, set()))]))
+        baris.append(row)
+    judul = f"Banding SEMUA kategori - {len(units)} unit"
+    export_id, filename = ai_export.stash_export(judul, kolom, baris)
+
+    verdict = ("SEMUA kategori SERAGAM di seluruh unit yang dicek." if not kategori_beda else
+               "ADA kategori yang BERBEDA antar unit: "
+               + ", ".join(r["kategori"] for r in kategori_beda) + ".")
+    return {
+        "found": True,
+        "mode": "semua_kategori",
+        **meta_unit,
+        "seragam_semua": (not kategori_beda),
+        "kategori_beda": kategori_beda,
+        "kategori_seragam": kategori_seragam,
+        "ringkasan_kategori": ringkasan,
+        "perbandingan": {"seragam": (not kategori_beda), "kesimpulan": verdict},
+        "export_id": export_id, "filename": filename, "judul": judul, "jumlah_baris": len(baris),
+        "sumber": sumber,
+        "catatan": ("Verdict DIHITUNG SISTEM. Sebutkan kategori mana SERAGAM & mana BEDA "
+                    "(kategori_beda). Untuk melihat PART yang beda di satu kategori, user bisa "
+                    "minta banding kategori itu spesifik (mis. 'rinci kabinnya'). ⛔ JANGAN "
+                    "menyimpulkan dari kode model. 📎 Kartu unduh Excel (matriks unit x kategori; "
+                    "angka = nomor kelompok, kolom yang semua '1' = seragam) muncul di bawah jawaban."),
+    }
+
+
 # Kata kunci tambahan (Inggris + China) per domain PART AUS — Atlas memberi nama
 # bilingual; sinonim katalog (_expand_query) sering hanya Inggris, jadi kita
 # perkuat dgn istilah China inti agar pencocokan tak meleset.
@@ -3392,6 +3740,7 @@ _DISPATCH = {
     "assembly_utama_unit": _t_assembly_utama_unit,
     "bom_dari_rangka": _t_bom_dari_rangka,
     "banding_rangka": _t_banding_rangka,
+    "banding_rangka_massal": _t_banding_rangka_massal,
     "part_aus_dari_rangka": _t_part_aus_dari_rangka,
     "repair_kit_transmisi": _t_repair_kit_transmisi,
     "banding_assy": _t_banding_assy,
@@ -3485,7 +3834,12 @@ def _system_prompt(user: dict) -> str:
         "mengambil rangka tiap unit dari populasi, mengelompokkan per konfigurasi pabrik "
         "EPC, mengecek part via EPC pada unit wakil tiap kelompok, dan MENGHITUNG verdict "
         "SAMA/BEDA. ⛔ JANGAN menjawab dgn cek_populasi lalu menebak dari nama model, dan "
-        "JANGAN menyimpulkan sama/beda sendiri — pakai field 'perbandingan' hasil tool."
+        "JANGAN menyimpulkan sama/beda sendiri — pakai field 'perbandingan' hasil tool.\n"
+        "⚠️ PENTING — SATU PART vs KATEGORI: banding_part_armada hanya untuk SATU part aus "
+        "spesifik (kampas kopling/rem, filter, hub). Bila user tanya KATEGORI utuh armada — "
+        "mis. 'apakah KABIN semua unit PT ARGCIO sama?', 'rem/mesin/kelistrikan armada PT X "
+        "seragam?' — WAJIB panggil banding_rangka_massal(customer='PT X', kategori='kabin' "
+        "(atau 'semua')), BUKAN banding_part_armada. 'kabin' itu KATEGORI, bukan satu part."
         if _can_populasi(user)
         else ""
     )
@@ -3678,6 +4032,16 @@ def _system_prompt(user: dict) -> str:
         "sama TAPI part bisa beda; contoh nyata: 2 unit HOWO NX 8×4 model sama, kabin beda 25 part "
         "— fender, APAR, karpet). Baca 'identik': true→sebut 'sama semua'; false→sebut JUMLAH yang "
         "beda + DAFTAR part beda-nya (jangan bilang 'sama persis'). Jawab dari angka tool, bukan nalar.\n"
+        "- 🔬🔬 BANDING BANYAK UNIT (>=2) SEKALIGUS: bila user tanya apakah sebuah KATEGORI (kabin/"
+        "rem/mesin/dll) SAMA untuk BEBERAPA unit — beri DAFTAR nomor rangka (mis. 'cek 5 VIN ini "
+        "kabinnya sama?') ATAU nama customer/PT (mis. 'kabin semua unit PT ARGCIO sama?') — WAJIB "
+        "panggil banding_rangka_massal(rangka_list=[...] ATAU customer='...', kategori='<kabin/rem/…>' "
+        "atau 'semua'). Tool mengambil Loading List NYATA tiap unit, MENGELOMPOKKAN unit ber-set-PN "
+        "identik, dan MENGHITUNG verdict. Baca 'seragam'/'seragam_semua': true→sebut 'sama semua'; "
+        "false→sebut berapa KELOMPOK & unit mana beda (kategori_beda / kelompok / part_beda). "
+        "Bedakan: banding_rangka = tepat 2 unit; banding_part_armada = SATU part; banding_rangka_massal "
+        "= satu KATEGORI (atau semua) antar BANYAK unit. Mode customer perlu admin/'mas'; user lain "
+        "beri rangka_list. ⛔ JANGAN menyimpulkan dari kode model. Sebut kartu unduh Excel bila ada.\n"
         "  ⚠️ ATURAN KERAS (WAJIB) — POLA 'cek/cari <part> untuk <rangka>': bila pesan menyebut "
         "NAMA KOMPONEN DAN sebuah NOMOR RANGKA/VIN/frame (mis. 'SF137401', 'LZZ5DMSD5RT108966'):\n"
         "   • ⛔⛔ PART POROS/AXLE (kampas rem/friction plate, sepatu rem/brake shoe, BAUT RODA & "
@@ -4512,7 +4876,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
 
     def _capture_meta(name: str, args: dict, result: dict) -> None:
         """Kumpulkan metadata untuk tombol/kartu unduh di frontend."""
-        if name in ("buat_excel", "katalog_kategori") and result.get("found"):
+        if name in ("buat_excel", "katalog_kategori", "banding_rangka_massal") and result.get("found"):
             item = {"id": result.get("export_id"), "filename": result.get("filename"),
                     "judul": result.get("judul"), "jumlah_baris": result.get("jumlah_baris")}
             if item["id"] and item not in excel_exports:
