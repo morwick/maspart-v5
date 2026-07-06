@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 
 from .core.config import get_settings
 from .routers import admin, ai, auth, branch, buyer, chat, geo, harga, orders, parts, populasi, repairkit, stok
-from .services import image_search, part_index
+from .services import accurate, image_search, part_index
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +46,12 @@ def _warmup():
         image_search.preload_model()
     except Exception as e:  # pragma: no cover
         print(f"[startup] preload model gagal: {e}")
+    try:
+        # Indeks stok Accurate (menu Stok) ditarik TERJADWAL tiap _INDEX_TTL di
+        # latar → cache selalu hangat, tak ada user yang menunggu tarikan penuh.
+        accurate.start_scheduled_refresh()
+    except Exception as e:  # pragma: no cover
+        print(f"[startup] scheduler refresh Accurate gagal: {e}")
 
 
 @asynccontextmanager

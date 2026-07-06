@@ -689,11 +689,12 @@ paginasi & **export Excel**.
 
 - **Sumber data:** `accurate.all_items()` → `refresh()` = **indeks ternormalisasi ber-cache
   TTL 5 JAM** (`_INDEX_TTL`, dibagi semua user; semula 5 menit — diubah 2026-07-06 atas
-  permintaan pemilik). Buka pertama (cache dingin/kadaluarsa) → tarik katalog penuh dari
-  Accurate (paging ~4.8rb barang); dalam 5 jam berikutnya dilayani dari memori (**tak menembak
-  Accurate**). Cari/urut/ganti-halaman diproses server-side di atas cache → murah. Beban maks:
-  1 tarik penuh per 5 jam apa pun jumlah user; butuh angka terkini → admin `POST /api/stok/refresh`
-  (force).
+  permintaan pemilik). **Refresh TERJADWAL di latar** (`start_scheduled_refresh()`, dipanggil
+  dari `_warmup` lifespan `main.py`): thread daemon menarik katalog penuh (~4.8rb barang) tiap
+  5 jam — cache SELALU hangat, tak ada user yang menunggu tarikan penuh; gagal (sesi/jaringan/
+  throttle) → retry 15 mnt (`_SCHED_RETRY`). Cari/urut/ganti-halaman diproses server-side di
+  atas cache → murah. Beban maks: 1 tarik penuh per 5 jam apa pun jumlah user; butuh angka
+  terkini → admin `POST /api/stok/refresh` (force). Test: `tests/test_accurate_scheduler.py`.
 - **Backend:** `services/stok.py` (filter/urut/`display_rows`/`to_excel_bytes`) +
   `routers/stok.py`: `GET /api/stok/list` (paginasi), `GET /api/stok/list/export` (Excel),
   `POST /api/stok/refresh` (admin, `accurate.refresh(force=True)`). Kegagalan sesi/koneksi

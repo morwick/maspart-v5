@@ -30,6 +30,7 @@ from __future__ import annotations
 import base64
 import html as _html
 import json
+import logging
 import re
 import threading
 import time
@@ -39,6 +40,8 @@ from typing import Any, Iterable
 import requests
 
 from ..core.config import get_settings
+
+logger = logging.getLogger("maspart.accurate")
 
 # ── Konfigurasi ────────────────────────────────────────────────────────────
 def _base() -> str:
@@ -598,6 +601,56 @@ def available() -> bool:
         return True
     except AccurateSessionMissing:
         return False
+
+
+# ── Refresh indeks TERJADWAL (latar) ─────────────────────────────────────────
+# Tanpa ini, tarikan penuh hanya terjadi saat ada user membuka menu Stok setelah
+# cache kedaluwarsa → user pertama tiap periode menunggu ±45 dtk. Thread ini
+# menarik indeks tiap _INDEX_TTL di belakang layar sehingga cache SELALU hangat
+# dan tak ada user yang kena tunggu. Beban Accurate tetap 1 tarikan/periode.
+_SCHED_RETRY = 15 * 60  # gagal (sesi/jaringan/throttle) → coba lagi 15 menit
+_sched_lock = threading.Lock()
+_sched_started = False
+
+
+def _scheduled_refresh_once() -> float:
+    """Satu iterasi refresh terjadwal; return detik tunggu sampai iterasi berikut."""
+    try:
+        if available():
+            refresh(force=True)
+            logger.info(
+                "[accurate] refresh terjadwal indeks stok OK (%d barang); "
+                "berikutnya %d mnt lagi", len(_index_cache["items"]), _INDEX_TTL // 60,
+            )
+        # Accurate tak dikonfigurasi → tak ada yang bisa ditarik; cek lagi
+        # nanti (murah, tanpa jaringan) kalau-kalau file sesi manual muncul.
+        return _INDEX_TTL
+    except Exception as e:
+        logger.warning(
+            "[accurate] refresh terjadwal gagal (%s) — coba lagi %d mnt",
+            e, _SCHED_RETRY // 60,
+        )
+        return _SCHED_RETRY
+
+
+def _scheduled_refresh_loop() -> None:
+    while True:
+        time.sleep(_scheduled_refresh_once())
+
+
+def start_scheduled_refresh() -> bool:
+    """Mulai thread daemon refresh indeks berkala. Idempoten (aman dipanggil
+    berulang); return True hanya saat thread baru benar-benar dimulai.
+    Tarikan pertama berjalan segera → cache hangat sejak server nyala."""
+    global _sched_started
+    with _sched_lock:
+        if _sched_started:
+            return False
+        _sched_started = True
+    threading.Thread(
+        target=_scheduled_refresh_loop, daemon=True, name="accurate-index-refresh"
+    ).start()
+    return True
 
 
 # ── Snapshot katalog (background) untuk overlay hasil PENCARIAN ─────────────
