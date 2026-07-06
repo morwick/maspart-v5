@@ -643,6 +643,28 @@ sama?" (kabin cuma contoh — berlaku semua kategori). Tool `banding_rangka_mass
   beda, dedup VIN, string dipisah koma, unit gagal dikecualikan, <2 sukses, kategori tak
   dikenal, mode semua, gating customer. Suite total **130 test** lolos.
 
+### 3.5.5k Gambar EXPLODED VIEW satu PN — INLINE di chat — sejak 2026-07-06
+
+Menampilkan **gambar exploded view resmi EPC untuk SATU Part Number langsung di jawaban
+asisten** (bukan file unduh) + **nomor balonnya**. Contoh: *"cek bearing WG… untuk rangka
+LZZ…"* → *"tampilkan gambar exploded view-nya"* → gambar figure hub assembly muncul di chat,
+PN itu = No. balon N. Tool `gambar_exploded` (`_t_gambar_exploded`).
+
+- **Cara kerja (per-VIN, reuse infra §3.5.5h):** `epc_bom.exploded_figures(rangka, pn, kategori)`
+  memakai `catalog_walk` pada kategori tsb, lalu **saring figure yang salah satu item-nya
+  ber-PN sama** → ambil `svg` (d2s) + `ballNum` PN itu. Render `ai_export.exploded_png`
+  (unduh SVG via `fetch_file` → resvg SVG→PNG). Butuh **nomor rangka** + **kategori** (untuk
+  mempersempit; ditentukan dari jenis part: bearing/hub→gardan, rem→rem, piston→mesin, dst).
+- **Delivery:** tool stash builder (`kind:"exploded"`) → `generic_excel` men-dispatch ke
+  `exploded_png` → **endpoint `GET /api/ai/excel/{id}` menyajikan `image/png` INLINE**
+  (Content-Disposition inline). `chat()` kembalikan metadata **`exploded_images`** → frontend
+  **`AiExplodedImages`** (fetch blob ber-auth → `objectURL` → `<img>` + kaption balon+PN+figure).
+- **Batas:** hanya **Sinotruk/HOWO/SITRAK** (Parts Atlas per-VIN); butuh PN memang terpasang &
+  ber-figure di kategori itu (part work-BOM baut/mur tak digambar). Versi **tanpa VIN** (buka
+  figure langsung dari PN global) belum — endpoint katalog-standar (18080 `/struct`) belum ketemu.
+- Terverifikasi live: PB087964 + `WG9761349009` (gardan) → figure "braking plate assembly",
+  balon 3, PNG 132 KB ter-render. **136 test lolos** (tak ada regresi).
+
 ### 3.5.6 Cari by Foto
 
 `services/image_search.py` — embedding **DINOv2-base** (torch CPU). Galeri dari **CSV lokal**
