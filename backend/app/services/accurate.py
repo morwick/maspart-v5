@@ -422,11 +422,14 @@ _stock_cache_lock = threading.Lock()
 
 
 def stock_full(part_number: str) -> dict[str, Any] | None:
-    """Stok Accurate 1 PN LENGKAP: agregat + rincian **per gudang** terkini.
+    """Stok Accurate 1 PN: agregat + harga dari **INDEKS BERSAMA** (tarikan
+    terjadwal tiap ``_INDEX_TTL`` — TIDAK menembak pencarian Accurate per-PN),
+    plus rincian **per gudang** yang tetap ditarik live per-PN (data per-gudang
+    tidak ikut tarikan massal; 1 panggilan kecil, cache ~90 dtk, non-fatal).
 
-    Dua panggilan (search-item + view-itemstock-bywarehouse), di-cache per-PN
-    ~90 dtk. ``per_gudang`` = daftar {gudang, deskripsi, qty, gudang_id} untuk gudang
-    berstok > 0 (urut qty menurun). Gagal ambil per-gudang non-fatal (agregat tetap).
+    Non-blocking: indeks belum siap (cold start) / PN tak ada di Accurate →
+    None → pemanggil fallback Excel. ``per_gudang`` = daftar {gudang, deskripsi,
+    qty, gudang_id} untuk gudang berstok > 0 (urut qty menurun).
     """
     want = _norm_pn(part_number)
     if not want:
@@ -442,16 +445,13 @@ def stock_full(part_number: str) -> dict[str, Any] | None:
             _stock_cache[want] = (time.time(), v)
         return v
 
-    data = _search_retry(keywords=part_number, start=0, limit=50)
-    raws = [it for it in (data.get("d") or [])
-            if _norm_pn(parse_pn(str(it.get("no") or ""))) == want]
-    if not raws:
+    entry = (_index_cache.get("by_pn") or {}).get(want)
+    if not entry:
         return _cache(None)
-    it = max(raws, key=lambda x: _num(x.get("availableToSell")))
-    base = normalize_item(it)
+    base = dict(entry)
     per: list[dict[str, Any]] = []
     try:
-        wd = _warehouse_retry(it.get("id")).get("d") or {}
+        wd = _warehouse_retry(base.get("accurate_id")).get("d") or {}
         for w in wd.get("detailWarehouseData") or []:
             qty = _num(w.get("balance"))
             if qty <= 0:
@@ -570,6 +570,12 @@ def refresh(force: bool = False) -> dict[str, Any]:
         items = fetch_all_items()
         _index_cache["items"] = [normalize_item(x) for x in items]
         _index_cache["by_pn"] = _build_by_pn(items)
+        # View ringkas utk overlay hasil pencarian (dipakai snapshot()) — dibangun
+        # sekali di sini agar tiap request pencarian tinggal baca dict jadi.
+        _index_cache["snap"] = {
+            k: {"stok": v["available_to_sell"], "harga": v["price"], "unit": v["unit"]}
+            for k, v in _index_cache["by_pn"].items()
+        }
         _index_cache["ts"] = time.time()
         return _index_cache
 
@@ -653,58 +659,18 @@ def start_scheduled_refresh() -> bool:
     return True
 
 
-# ── Snapshot katalog (background) untuk overlay hasil PENCARIAN ─────────────
-# Stale-while-revalidate: snapshot {norm_pn: {stok, harga, unit}} dibangun di THREAD
-# LATAR (tak memblok request web). Basi → picu rebuild latar, sajikan yang lama dulu.
-# Cold start → kosong → pencarian pakai Excel sampai snapshot pertama siap (~sekali tarik).
-_SNAPSHOT_TTL = 30 * 60
-_snapshot: dict[str, dict[str, Any]] = {}
-_snapshot_ts = 0.0
-_snapshot_building = False
-_snapshot_lock = threading.Lock()
-
-
-def _build_snapshot() -> None:
-    global _snapshot, _snapshot_ts, _snapshot_building
-    try:
-        items = fetch_all_items()  # 1 tarik penuh (paging); auto-login dijaga cooldown
-        snap: dict[str, dict[str, Any]] = {}
-        for it in items:
-            n = normalize_item(it)
-            key = _norm_pn(n["pn"])
-            if not key:
-                continue
-            prev = snap.get(key)
-            if prev is None or n["available_to_sell"] > prev["stok"]:
-                snap[key] = {"stok": n["available_to_sell"], "harga": n["price"], "unit": n["unit"]}
-        with _snapshot_lock:
-            _snapshot = snap
-            _snapshot_ts = time.time()
-    except AccurateError:
-        pass  # sesi/throttle: pertahankan snapshot lama
-    finally:
-        with _snapshot_lock:
-            _snapshot_building = False
-
-
-def _maybe_refresh_snapshot() -> None:
-    global _snapshot_building
-    now = time.time()
-    with _snapshot_lock:
-        if (now - _snapshot_ts) <= _SNAPSHOT_TTL or _snapshot_building:
-            return
-        if not available():
-            return
-        _snapshot_building = True
-    threading.Thread(target=_build_snapshot, daemon=True).start()
+# ── Snapshot utk overlay hasil PENCARIAN — VIEW dari indeks bersama ─────────
+# Dulu snapshot menarik katalog penuh SENDIRI tiap 30 mnt (duplikat tarikan
+# massal). Sejak 2026-07-06 (permintaan pemilik: "ambil stok 5 jam sekali,
+# dibagi ke semua fitur") sumbernya SATU: indeks terjadwal `_INDEX_TTL`
+# (start_scheduled_refresh). View "snap" dibangun saat refresh() — di sini
+# tinggal baca, non-blocking, request pencarian tak pernah menunggu tarikan.
 
 
 def snapshot() -> dict[str, dict[str, Any]]:
-    """Snapshot {norm_pn: {stok,harga,unit}} untuk overlay pencarian (refresh di latar).
-    Mengembalikan dict yang bisa kosong (cold start) — pemanggil fallback ke Excel."""
-    _maybe_refresh_snapshot()
-    with _snapshot_lock:
-        return _snapshot
+    """{norm_pn: {stok,harga,unit}} dari indeks 5-jam bersama (tanpa tarikan
+    terpisah). Bisa kosong (cold start / Accurate down) — pemanggil fallback Excel."""
+    return _index_cache.get("snap") or {}
 
 
 # ── CLI selftest (tanpa server) ────────────────────────────────────────────

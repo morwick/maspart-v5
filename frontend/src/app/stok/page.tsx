@@ -79,7 +79,7 @@ export default function StokPage() {
   const fetchError = data && data.error;
 
   return (
-    <AppShell active="/stok" title="Stok" sub="Stok live seluruh barang dari Accurate">
+    <AppShell active="/stok" title="Stok" sub="Stok seluruh barang dari Accurate (sinkron tiap 5 jam)">
       <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-7">
         <div className="flex flex-wrap gap-2">
           <form

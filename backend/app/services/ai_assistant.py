@@ -239,9 +239,9 @@ def _tool_specs(user: dict) -> list[dict]:
             "function": {
                 "name": "detail_part",
                 "description": (
-                    "Ambil detail satu Part Number persis: nama, STOK (utama dari Accurate "
-                    "live — total + rincian per gudang; fallback Excel bila Accurate tak "
-                    "tersedia; lihat field 'sumber_stok'), harga jual lokal, dan SPESIFIKASI "
+                    "Ambil detail satu Part Number persis: nama, STOK (utama dari ERP Accurate, "
+                    "disinkron berkala — total + rincian per gudang; fallback Excel bila Accurate "
+                    "tak tersedia; lihat field 'sumber_stok'), harga jual lokal, dan SPESIFIKASI "
                     "fisik resmi (berat kg, dimensi cm, satuan, merek). Pakai juga untuk "
                     "menjawab pertanyaan berat/dimensi/ukuran sebuah PN. Ini tool utama untuk "
                     "pertanyaan stok 1 PN."
@@ -260,10 +260,10 @@ def _tool_specs(user: dict) -> list[dict]:
             "function": {
                 "name": "stok_accurate",
                 "description": (
-                    "Stok LIVE dari sistem akunting/ERP Accurate untuk satu Part Number "
-                    "persis: 'stok_dapat_dijual' (real-time) + 'stok_per_gudang' (rincian "
-                    "kuantitas per gudang/cabang, mis. 01.Jakarta, 05.Makasar). Pakai bila "
-                    "user tanya stok terkini/riil di Accurate, stok per cabang/gudang, atau "
+                    "Stok dari sistem akunting/ERP Accurate untuk satu Part Number persis "
+                    "(disinkron berkala dari Accurate): 'stok_dapat_dijual' + 'stok_per_gudang' "
+                    "(rincian kuantitas per gudang/cabang, mis. 01.Jakarta, 05.Makasar). Pakai "
+                    "bila user tanya stok di Accurate, stok per cabang/gudang, atau "
                     "untuk membandingkan stok Accurate vs stok katalog lokal. Ini SUMBER "
                     "TAMBAHAN, tidak menggantikan stok gudang lokal dari detail_part."
                 ),
@@ -1439,10 +1439,10 @@ def _t_detail_part(args: dict, user: dict) -> dict:
             if user.get("role") != "pembeli":
                 result["stok_total"] = f"{acc['available_to_sell']:.0f} {acc['unit']}".strip()
                 result["stok_per_gudang"] = {g["gudang"]: g["qty"] for g in (acc.get("per_gudang") or [])}
-                result["sumber_stok"] = "Accurate (live)"
+                result["sumber_stok"] = "Accurate (sinkron berkala)"
             if acc.get("price"):
                 result["harga_lokal"] = "Rp " + f"{int(acc['price']):,}".replace(",", ".")
-                result["sumber_harga"] = "Accurate (live)"
+                result["sumber_harga"] = "Accurate (sinkron berkala)"
         elif user.get("role") != "pembeli":
             result["sumber_stok"] = "Excel stok.xlsx (fallback — Accurate tak tersedia/PN tak ada)"
     # Spesifikasi fisik resmi dari SIMS: berat (untuk ongkir) + dimensi + satuan +
@@ -1460,7 +1460,7 @@ def _t_detail_part(args: dict, user: dict) -> dict:
 
 
 def _t_stok_accurate(args: dict, user: dict) -> dict:
-    """Stok live dari ERP Accurate untuk 1 PN (sumber tambahan, non-fatal)."""
+    """Stok ERP Accurate utk 1 PN dari indeks sinkron berkala (sumber tambahan, non-fatal)."""
     pn = (args.get("part_number") or "").strip()
     if not pn:
         return {"error": "part_number kosong"}
@@ -1479,7 +1479,7 @@ def _t_stok_accurate(args: dict, user: dict) -> dict:
                 "pesan": "PN ini tidak ada di data Accurate."}
     return {
         "part_number": pn,
-        "sumber": "Accurate (live)",
+        "sumber": "Accurate (sinkron berkala)",
         "ditemukan": True,
         "nama_accurate": hit["name"],
         "kode_accurate": hit["no"],
@@ -4456,7 +4456,7 @@ def _system_prompt(user: dict) -> str:
         "tonjolkan yang paling relevan + alasannya; sisanya ringkas. Menyalin daftar "
         "mentah panjang = jawaban malas.\n"
         "- KALIBRASI KEPASTIAN: bedakan tegas mana FAKTA dari data (sebut sumbernya: "
-        "'EPC unit ini' / 'katalog per-model' / 'stok live Accurate') dan mana "
+        "'EPC unit ini' / 'katalog per-model' / 'stok Accurate') dan mana "
         "PERKIRAAN/penalaran. Jangan menyajikan perkiraan dengan nada pasti, dan jangan "
         "pula ragu-ragu menyampaikan fakta yang jelas ada datanya.\n"
         "- SATU LANGKAH DI DEPAN: setelah menjawab, pikirkan tujuan praktis user "

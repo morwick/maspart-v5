@@ -102,6 +102,13 @@
 > Terverifikasi: 136 unit test + **24/24 eval golden lolos**. DIKOMIT (`6426735`/`9263e1f`) &
 > **LIVE di prod 2026-07-06** (scp + build.sh + force-recreate; cek dalam container: rounds=8,
 > blok prompt baru ada; /health 200).
+> Update **2026-07-06 (satu sumber stok Accurate)**: TTL indeks stok Accurate **5 menit → 5 JAM**
+> + **refresh TERJADWAL di latar** (thread daemon dari lifespan; gagal → retry 15 mnt; cache selalu
+> hangat, tak ada user menunggu tarikan ±45 dtk) + **indeks 5-jam jadi SUMBER STOK TUNGGAL semua
+> fitur**: snapshot pencarian = view indeks (tarikan 30-menit-an sendiri DIHAPUS), `stock_full`
+> (detail part / `detail_part`/`stok_accurate`) baca agregat+harga dari indeks — panggilan massal
+> Accurate kini **1× per 5 jam utk seluruh app**; rincian per-gudang tetap live per-PN (kecil,
+> cache 90 dtk). Label "live" diganti "sinkron berkala". Lihat §3.5.5i/l. 145 unit test lolos.
 
 ---
 
@@ -604,18 +611,25 @@ riil pabrikan/gudang real-time**, bukan snapshot Excel. `services/accurate.py` +
   (`_login_fail_until`): jangan hantam login lagi, pakai fallback lokal dulu (anti-abuse/anti-deteksi).
 - **Stok per gudang/cabang** (`stock_full`): endpoint UI resmi `view-itemstock-bywarehouse.do`
   (param `id`,`asOfDate`) → `d.detailWarehouseData[]` {`warehouseName` mis "01.Jakarta", `balance`=qty
-  terkini, `description`, `id`}. 2 panggilan (search→id → warehouse). ~20-37 gudang, gaya `stok.xlsx`.
+  terkini, `description`, `id`}. Sejak 2026-07-06: `id` barang diambil dari INDEKS bersama (bukan
+  search live) → tinggal 1 panggilan warehouse per-PN (cache 90 dtk). ~20-37 gudang, gaya `stok.xlsx`.
   Endpoint ditemukan **AMAN dari JS statis** `cdn.accurate.id/.../inventory/item.js` (bukan tebak).
 - **Accurate = sumber stok UTAMA**: di halaman detail part (`part/[pn]`) & tool `detail_part`,
   stok tampil dari Accurate (total+per gudang, badge "Accurate live"); **`stok.xlsx` = FALLBACK** hanya
   bila fetch Accurate gagal/tak tersedia (Excel = export Accurate → data sama). **Pembeli** tetap stok
   lokal terscope (jangan rusak alur beli/reservasi).
-- **Hasil PENCARIAN juga Accurate-utama** (2026-07-05): `accurate.snapshot()` = katalog {norm_pn:
-  stok,harga} dibangun di **THREAD LATAR** (stale-while-revalidate, TTL 30 mnt, ~45 dtk/4.8rb entri di
-  prod) → `routers/parts._overlay_accurate` menimpa `stok`(total)+`harga` tiap baris hasil `/search` &
-  `/search-name` (O(1), TAK menembak Accurate per-request). Excel = fallback (PN tak ada / snapshot
-  belum siap / Accurate down). `gudang` (rincian) tetap Excel. `cari_part` (asisten) tetap Excel per-baris;
-  angka live per-PN via `detail_part`/`stok_accurate`.
+- **SATU SUMBER STOK — indeks 5 jam dibagi semua fitur (2026-07-06, permintaan pemilik):**
+  `accurate.snapshot()` BUKAN lagi tarikan sendiri (dulu TTL 30 mnt, duplikat) — kini **VIEW dari
+  indeks terjadwal 5 jam** (field `snap` dibangun saat `refresh()`), non-blocking. `stock_full()`
+  (detail part + `detail_part`/`stok_accurate`) juga baca agregat+harga dari indeks (TAK menembak
+  pencarian Accurate per-PN); **rincian per-gudang tetap live per-PN** (1 panggilan kecil, cache
+  90 dtk — data per-gudang tidak ikut tarikan massal). Total panggilan massal Accurate = **1 per
+  5 jam untuk seluruh aplikasi**. `routers/parts._overlay_accurate` menimpa `stok`+`harga` tiap
+  baris `/search` & `/search-name` dari view yang sama. Excel = fallback (PN tak ada / indeks belum
+  siap / Accurate down). `gudang` (rincian di hasil pencarian) tetap Excel. `cari_part` (asisten)
+  tetap Excel per-baris; angka per-PN via `detail_part`/`stok_accurate` (dari indeks). Label UI &
+  field `sumber` kini "Accurate (sinkron berkala)" / badge "Accurate" (bukan "live"). Test:
+  `tests/test_accurate_index_share.py`.
 - **HARGA JUAL dari Accurate** (2026-07-05): field `unitPrice` (fallback `branchPrice`) di response
   item = harga jual satuan → `normalize_item.price`. **Accurate = sumber harga UTAMA** di detail part
   & `detail_part`/`stok_accurate` (field `harga_lokal`/`harga_jual`+`sumber_harga`), `harga.xlsx`

@@ -93,10 +93,11 @@ def _scope_gudang(results: list[dict], user: dict) -> list[dict]:
 
 
 def _overlay_accurate(results: list[dict]) -> list[dict]:
-    """Overlay STOK (total) + HARGA dari snapshot Accurate = sumber UTAMA; Excel =
-    fallback bila PN tak ada di snapshot / snapshot belum siap. Non-blocking: snapshot
-    dibangun di thread latar (stale-while-revalidate), jadi request tak pernah menunggu
-    tarikan Accurate. Rincian per-gudang (`gudang`) tetap Excel (snapshot hanya agregat)."""
+    """Overlay STOK (total) + HARGA dari indeks Accurate bersama (tarikan terjadwal
+    tiap 5 jam — sumber sama dgn menu Stok & detail part) = sumber UTAMA; Excel =
+    fallback bila PN tak ada / indeks belum siap. Non-blocking: snapshot() cuma view
+    dict di memori, request tak pernah menunggu tarikan Accurate. Rincian per-gudang
+    (`gudang`) tetap Excel (indeks hanya agregat)."""
     if not accurate.available():
         return results
     try:
@@ -156,9 +157,9 @@ def accurate_stock(
     pn: str = Query(..., min_length=1, description="Part Number persis untuk cek stok Accurate"),
     user: dict = Depends(get_current_user),
 ):
-    """Stok LIVE dari ERP Accurate untuk 1 Part Number (kolom tambahan, tak
-    menimpa stok lokal). Non-fatal: kegagalan sesi/koneksi dikembalikan sebagai
-    status, bukan error — frontend menampilkan seadanya."""
+    """Stok ERP Accurate untuk 1 Part Number (agregat+harga dari indeks sinkron
+    tiap 5 jam; rincian per-gudang live per-PN). Non-fatal: kegagalan sesi/koneksi
+    dikembalikan sebagai status, bukan error — frontend menampilkan seadanya."""
     if not accurate.available():
         return {"configured": False, "reason": "no_session"}
     try:

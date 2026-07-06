@@ -296,7 +296,7 @@ export default function PartDetailPage() {
                     </div>
                     {/* Pembeli selalu melihat harga (perlu untuk belanja), lepas dari izin kolom internal. */}
                     <div className="surface surface-pad">
-                      <div className="stat-label">Harga {hargaLive && <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate live</span>}</div>
+                      <div className="stat-label">Harga {hargaLive && <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate</span>}</div>
                       <div className="stat-value mono" style={{ color: "var(--brand-700)", fontSize: 18 }}>{hargaStr}</div>
                     </div>
                   </div>
@@ -307,14 +307,14 @@ export default function PartDetailPage() {
                         {showStok && (
                           <div className="surface surface-pad">
                             <div className="stat-label">
-                              Stok total {stokLive && <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate live</span>}
+                              Stok total {stokLive && <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate</span>}
                             </div>
                             <div className="stat-value">{displayTotal}</div>
                           </div>
                         )}
                         {showHarga && (
                           <div className="surface surface-pad">
-                            <div className="stat-label">Harga {hargaLive && <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate live</span>}</div>
+                            <div className="stat-label">Harga {hargaLive && <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate</span>}</div>
                             <div className="stat-value mono" style={{ color: "var(--brand-700)", fontSize: 18 }}>{hargaStr}</div>
                           </div>
                         )}
@@ -324,7 +324,7 @@ export default function PartDetailPage() {
                     {showStok && (
                       <div className="surface" style={{ overflow: "hidden" }}>
                         <div className="px-4 py-2.5" style={{ fontSize: 13, fontWeight: 600, borderBottom: "1px solid var(--ink-150)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                          <span>Stok per Gudang {stokLive && <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate live</span>}</span>
+                          <span>Stok per Gudang {stokLive && <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate</span>}</span>
                           {!stokLive && !isBuyer && (accStock?.session_expired || accStock?.error) && (
                             <span style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-400)" }} title="Fetch Accurate gagal — memakai data Excel (export Accurate)">fallback Excel</span>
                           )}
