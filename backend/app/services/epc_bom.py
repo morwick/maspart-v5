@@ -1455,3 +1455,46 @@ def catalog_walk(rangka: str, kategori: str) -> dict:
         with _katalog_lock:
             _katalog_cache[ckey] = {"at": time.monotonic(), "val": val}
     return val
+
+
+def exploded_figures(rangka: str, pn: str, kategori: str) -> dict:
+    """FIGURE exploded-view (per-VIN) yang MEMUAT sebuah PN + NOMOR BALON-nya.
+    Reuse catalog_walk pada `kategori`, lalu saring figure yang salah satu item-nya
+    ber-PN sama. Untuk fitur 'tampilkan gambar exploded view part ini'.
+    {found, frame_number, pn, kategori, figures:[{svg, balon, nama, kode, kategori,
+     jumlah_item, items_ringkas:[{balon,pn,nama}]}]} — svg = nama file (unduh via
+     fetch_file). {found:False,_err} bila kategori tak cocok / PN tak di kategori itu."""
+    pnu = (pn or "").strip().upper()
+    if not pnu:
+        return {"found": False, "_err": "input"}
+    d = catalog_walk(rangka, kategori)
+    if not d.get("found"):
+        return d
+    figs: list[dict] = []
+    for f in d.get("figures", []):
+        if not f.get("svg"):
+            continue
+        hit = next((it for it in (f.get("items") or [])
+                    if (it.get("pn") or "").strip().upper() == pnu), None)
+        if not hit:
+            continue
+        figs.append({
+            "svg": f["svg"],
+            "balon": hit.get("balon"),
+            "nama": f.get("nama"),
+            "kode": f.get("kode"),
+            "kategori": f.get("kategori"),
+            "jumlah_item": len(f.get("items") or []),
+            "items_ringkas": [{"balon": it.get("balon"), "pn": it.get("pn"),
+                               "nama": it.get("nama") or it.get("nama_cn")}
+                              for it in (f.get("items") or [])],
+        })
+    return {
+        "found": bool(figs),
+        "frame_number": d.get("frame_number"),
+        "pn": pnu, "kategori": kategori,
+        "figures": figs,
+        **({} if figs else {"_err": "not_in_category",
+                            "message": f"PN {pnu} tak muncul di figure kategori '{kategori}' "
+                                       "untuk unit ini — coba kategori lain."}),
+    }

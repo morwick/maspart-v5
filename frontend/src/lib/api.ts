@@ -1292,6 +1292,14 @@ export type AIExcelExport = {
   judul: string;
   jumlah_baris: number;
 };
+/** Gambar exploded view untuk 1 PN → tampil INLINE di jawaban asisten. */
+export type AIExplodedImage = {
+  id: string;
+  pn?: string;
+  balon?: number | string | null;
+  nama_figure?: string;
+  kategori?: string;
+};
 export type AIChatResult = {
   reply: string;
   tools_used: string[];
@@ -1302,6 +1310,8 @@ export type AIChatResult = {
   banding_exports?: AIBandingExport[];
   /** Export generik (tool buat_excel) → kartu unduh Excel dinamis. */
   excel_exports?: AIExcelExport[];
+  /** Gambar exploded view (tool gambar_exploded) → tampil inline di jawaban. */
+  exploded_images?: AIExplodedImage[];
   /** PN yang disebut asisten (grounded) → tampilkan thumbnail foto part. */
   part_pns?: string[];
 };

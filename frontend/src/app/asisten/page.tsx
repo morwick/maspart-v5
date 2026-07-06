@@ -19,6 +19,7 @@ import {
   type AIBandingExport,
   type AIChatTurn,
   type AIExcelExport,
+  type AIExplodedImage,
 } from "@/lib/api";
 import { clearSession, getToken } from "@/lib/auth";
 
@@ -28,6 +29,7 @@ type Msg = AIChatTurn & {
   repairkitModels?: string[];
   bandingExports?: AIBandingExport[];
   excelExports?: AIExcelExport[];
+  explodedImages?: AIExplodedImage[]; // gambar exploded view inline
   partPns?: string[]; // PN yang disebut asisten → thumbnail foto
   at?: number; // epoch ms — jam pesan
   rating?: "up" | "down"; // umpan balik user atas jawaban ini
@@ -242,6 +244,7 @@ export default function AsistenPage() {
           repairkitModels: res.repairkit_models,
           bandingExports: res.banding_exports,
           excelExports: res.excel_exports,
+          explodedImages: res.exploded_images,
           partPns: res.part_pns,
           at: Date.now(),
         },
@@ -292,6 +295,7 @@ export default function AsistenPage() {
           repairkitModels: res.repairkit_models,
           bandingExports: res.banding_exports,
           excelExports: res.excel_exports,
+          explodedImages: res.exploded_images,
           partPns: res.part_pns,
           at: Date.now(),
         },
@@ -644,6 +648,71 @@ function PartThumbs({ pns }: { pns?: string[] }) {
           </div>
           <div className="mono truncate" style={{ fontSize: 9.5, color: "var(--ink-500)", padding: "3px 4px" }}>{p.pn}</div>
         </button>
+      ))}
+    </div>
+  );
+}
+
+// Gambar EXPLODED VIEW (tool gambar_exploded) — tampil INLINE di jawaban.
+// PNG dilayani /api/ai/excel/{id} (butuh auth) → fetch blob → objectURL utk <img>.
+function AiExplodedImages({ images }: { images?: AIExplodedImage[] }) {
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [err, setErr] = useState(false);
+  const key = (images || []).map((i) => i.id).join(",");
+  useEffect(() => {
+    const token = getToken();
+    const list = (images || []).filter((i) => i.id).slice(0, 3);
+    if (!token || list.length === 0) {
+      setUrls({});
+      return;
+    }
+    let alive = true;
+    const made: string[] = [];
+    (async () => {
+      const out: Record<string, string> = {};
+      for (const img of list) {
+        try {
+          const blob = await exportAiExcel(token, img.id);
+          const u = URL.createObjectURL(blob);
+          made.push(u);
+          out[img.id] = u;
+        } catch {
+          if (alive) setErr(true);
+        }
+      }
+      if (alive) setUrls(out);
+    })();
+    return () => {
+      alive = false;
+      made.forEach((u) => URL.revokeObjectURL(u));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  const list = (images || []).filter((i) => i.id).slice(0, 3);
+  if (list.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
+      {list.map((img) => (
+        <figure key={img.id} style={{ margin: 0, border: "1px solid var(--ink-200)", borderRadius: 12, overflow: "hidden", background: "var(--paper)", maxWidth: 560 }}>
+          {urls[img.id] ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={urls[img.id]} alt={`Exploded view ${img.pn || ""}`} loading="lazy" style={{ width: "100%", display: "block", background: "#fff" }} />
+          ) : (
+            <div style={{ height: 200, display: "grid", placeItems: "center", color: "var(--ink-400)", fontSize: 12 }}>
+              {err ? "Gambar kedaluwarsa — minta lagi." : "Memuat gambar exploded view…"}
+            </div>
+          )}
+          <figcaption style={{ padding: "7px 10px", fontSize: 12, color: "var(--ink-600)", borderTop: "1px solid var(--ink-100)" }}>
+            {img.balon != null && (
+              <span style={{ display: "inline-block", minWidth: 20, textAlign: "center", background: "var(--brand, #16a34a)", color: "#fff", borderRadius: 999, padding: "0 6px", marginRight: 6, fontWeight: 700 }}>
+                {img.balon}
+              </span>
+            )}
+            <span className="mono" style={{ fontWeight: 600 }}>{img.pn}</span>
+            {img.nama_figure ? <span style={{ color: "var(--ink-500)" }}> · {img.nama_figure}</span> : null}
+          </figcaption>
+        </figure>
       ))}
     </div>
   );
@@ -1039,6 +1108,7 @@ function Bubble({
         {m.excelExports?.map((exp, i) => (
           <AiExcelCard key={exp.id || i} exp={exp} />
         ))}
+        <AiExplodedImages images={m.explodedImages} />
         <PartThumbs pns={m.partPns} />
         {(tools.length > 0 || time || onFeedback) && (
           <div

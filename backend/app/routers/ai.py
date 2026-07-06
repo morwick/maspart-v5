@@ -128,7 +128,13 @@ def export_ai_excel(export_id: str, _user: dict = Depends(get_current_user)):
     data, fname = ai_export.generic_excel(export_id)
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, fname)
-    mime = "application/pdf" if fname.lower().endswith(".pdf") else _XLSX_MIME
+    fl = fname.lower()
+    # Gambar exploded view = tampil INLINE (dipakai <img> di chat); file lain = unduh.
+    if fl.endswith(".png"):
+        return Response(content=data, media_type="image/png",
+                        headers={"Content-Disposition": f'inline; filename="{fname}"',
+                                 "Cache-Control": "private, max-age=86400"})
+    mime = "application/pdf" if fl.endswith(".pdf") else _XLSX_MIME
     return Response(
         content=data,
         media_type=mime,

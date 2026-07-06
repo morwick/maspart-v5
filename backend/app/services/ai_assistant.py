@@ -857,6 +857,31 @@ def _tool_specs(user: dict) -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "gambar_exploded",
+                "description": (
+                    "TAMPILKAN GAMBAR EXPLODED VIEW untuk SATU Part Number (gambar muncul INLINE "
+                    "di jawaban chat, bukan file unduh) — panggil saat user minta 'tampilkan/lihat "
+                    "gambar exploded view part ini', 'gambar/skema part <PN>', 'part ini nomor "
+                    "balon berapa di gambar'. Menemukan FIGURE resmi EPC (Parts Atlas per-VIN) yang "
+                    "memuat PN itu + NOMOR BALON-nya, lalu menyajikan gambarnya. Butuh NOMOR RANGKA "
+                    "(per-VIN) + PN + KATEGORI (untuk mempersempit pencarian figure). Beda dari "
+                    "katalog_kategori (itu FILE Excel seluruh kategori); ini 1 gambar untuk 1 PN "
+                    "langsung di chat. Hanya Sinotruk/HOWO/SITRAK."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Nomor rangka/VIN unit (gambar diambil per-VIN)."},
+                        "pn": {"type": "string", "description": "Part Number yang mau ditampilkan gambar exploded view-nya (apa adanya)."},
+                        "kategori": {"type": "string", "description": "Kategori figure untuk mempersempit pencarian: tentukan dari JENIS part (bearing/hub/baut roda → 'gardan depan'/'gardan belakang'; kampas/sepatu rem → 'rem'; piston/liner/klep → 'mesin'; sinkromes/garpu → 'transmisi'; part kabin → 'kabin'; kelistrikan → 'kelistrikan'). Bila belum yakin, KOSONGKAN (tool akan meminta ditentukan)."},
+                    },
+                    "required": ["rangka", "pn"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "buat_excel",
                 "description": (
                     "BUAT FILE EXCEL (kartu unduh) dari data yang SUDAH dibahas — panggil saat user "
@@ -3790,6 +3815,67 @@ def _t_katalog_kategori(args: dict, user: dict) -> dict:
     }
 
 
+def _t_gambar_exploded(args: dict, user: dict) -> dict:
+    """GAMBAR EXPLODED VIEW EPC untuk SATU PN (per-VIN): temukan figure yang memuat
+    PN + NOMOR BALON-nya, siapkan PNG yang tampil INLINE di chat. Reuse Parts Atlas
+    (epc_bom.exploded_figures) + render resvg (ai_export.exploded_png)."""
+    rangka = (args.get("rangka") or "").strip()
+    pn = (args.get("pn") or args.get("part_number") or "").strip().upper()
+    kategori = (args.get("kategori") or "").strip()
+    if not rangka:
+        return {"error": "Sebutkan nomor rangka/VIN unit — gambar exploded view diambil "
+                         "PER-VIN dari EPC (hanya Sinotruk/HOWO/SITRAK)."}
+    if not pn:
+        return {"error": "Sebutkan Part Number yang mau ditampilkan gambar exploded view-nya."}
+    if not kategori:
+        return {"found": False,
+                "pilihan_kategori": ["kabin", "mesin", "kopling", "transmisi", "gardan depan",
+                                     "gardan belakang", "kelistrikan", "rem", "sasis"],
+                "jawaban_wajib": ("Kategori belum jelas — perlu untuk menemukan figure yang "
+                                  "memuat PN ini. TENTUKAN dari jenis part-nya (bearing/hub/baut "
+                                  "roda → 'gardan depan/belakang'; kampas/sepatu rem → 'rem'; "
+                                  "piston/liner/klep → 'mesin'; sinkromes → 'transmisi'; part "
+                                  "kabin → 'kabin'). Panggil lagi dengan 'kategori' terisi. ⛔ "
+                                  "jangan menebak sembarang kategori.")}
+    d = epc_bom.exploded_figures(rangka, pn, kategori)
+    if not d.get("found"):
+        err = d.get("_err")
+        if err in ("token_expired", "no_token"):
+            return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
+        if err == "network":
+            return {"found": False, "error": "Gagal menghubungi server EPC (jaringan). Coba lagi."}
+        if err == "not_found":
+            return {"found": False, "error": "Nomor rangka tak ditemukan di EPC Parts Atlas "
+                    "(cek VIN; hanya Sinotruk/HOWO/SITRAK)."}
+        if err == "no_category":
+            return {"found": False, "error": (d.get("message") or "Kategori tak dikenal."),
+                    "saran": "Coba kategori lain: kabin/mesin/rem/gardan/kelistrikan/sasis/transmisi/kopling."}
+        # not_in_category — PN tak ada di kategori itu utk unit ini
+        return {"found": False,
+                "error": d.get("message") or f"PN {pn} tak muncul di figure kategori "
+                f"'{kategori}' untuk unit ini.",
+                "saran": ("Pastikan PN & kategori cocok, atau coba kategori lain. Bila PN memang "
+                          "terpasang tapi tak ber-gambar, itu part work-BOM (baut/mur) yang tak "
+                          "digambar di Parts Atlas.")}
+    gambar = []
+    for f in d["figures"][:3]:   # cap 3 figure agar tak membanjiri chat
+        judul = f"Exploded {pn} - {f.get('nama') or kategori}"
+        image_id, filename = ai_export.stash_builder(
+            judul, {"kind": "exploded", "svg": f["svg"]}, ext="png")
+        gambar.append({"image_id": image_id, "filename": filename,
+                       "balon": f.get("balon"), "nama_figure": f.get("nama"),
+                       "kategori": f.get("kategori"), "jumlah_item": f.get("jumlah_item")})
+    b0 = gambar[0]
+    return {
+        "found": True, "frame_number": d.get("frame_number"), "pn": pn, "kategori": kategori,
+        "jumlah_figure_cocok": len(d["figures"]), "gambar": gambar,
+        "catatan": (f"Gambar exploded view SIAP — tampil OTOMATIS (inline) di bawah jawabanmu. "
+                    f"PN {pn} = NOMOR BALON '{b0['balon']}' di figure '{b0['nama_figure']}'. "
+                    "Beri tahu user singkat: figure apa + PN ini balon nomor berapa. ⛔ JANGAN "
+                    "membuat link/gambar/URL sendiri; JANGAN sebut PN lain di luar data ini."),
+    }
+
+
 _DISPATCH = {
     "cari_part": _t_cari_part,
     "kategori_unit": _t_kategori_unit,
@@ -3826,6 +3912,7 @@ _DISPATCH = {
     "daftar_pesanan": _t_daftar_pesanan,
     "buat_excel": _t_buat_excel,
     "katalog_kategori": _t_katalog_kategori,
+    "gambar_exploded": _t_gambar_exploded,
 }
 
 
@@ -4197,6 +4284,14 @@ def _system_prompt(user: dict) -> str:
         "semua kategori) — baru panggil tool setelah user memilih. ⛔ JANGAN pakai buat_excel/"
         "kategori_unit/bom_dari_rangka utk permintaan KATALOG, JANGAN tulis daftar part "
         "satu-satu, JANGAN buat link sendiri. Butuh rangka — bila user tak menyebut, minta dulu.\n"
+        "- 🖼️ GAMBAR EXPLODED VIEW SATU PN (inline di chat, BUKAN file): bila user minta "
+        "'tampilkan/lihat GAMBAR exploded view part ini', 'gambar/skema PN <X>', 'part ini "
+        "nomor balon berapa' → panggil gambar_exploded(rangka, pn, kategori). Gambar figure "
+        "resmi EPC yang memuat PN itu muncul LANGSUNG di jawaban + kita tahu NOMOR BALON-nya. "
+        "Butuh RANGKA (per-VIN) + tentukan KATEGORI dari jenis part (bearing/hub → gardan; "
+        "rem → rem; piston → mesin; dst). Beda dari katalog_kategori (itu FILE Excel se-kategori). "
+        "Setelah tool sukses, sebutkan SINGKAT: figure apa & PN itu balon nomor berapa; "
+        "gambarnya sudah tampil sendiri — JANGAN buat link/gambar sendiri.\n"
         "- 📥 EXPORT EXCEL (kartu unduh): bila user minta file Excel dari data yang dibahas "
         "('buatkan excelnya', 'export ke excel/xlsx/spreadsheet', 'bikin filenya', 'unduh "
         "sebagai excel') → panggil buat_excel(judul, kolom, baris). Isi 'baris' disalin PERSIS "
@@ -4980,14 +5075,22 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     repairkit_models: list[str] = []  # model transmisi yg dibahas → tombol unduh Excel di UI
     banding_exports: list[dict] = []  # perbandingan rangka → kartu unduh Excel di UI
     excel_exports: list[dict] = []    # buat_excel (export generik) → kartu unduh di UI
+    exploded_images: list[dict] = []  # gambar_exploded → gambar INLINE di jawaban
 
     def _capture_meta(name: str, args: dict, result: dict) -> None:
-        """Kumpulkan metadata untuk tombol/kartu unduh di frontend."""
+        """Kumpulkan metadata untuk tombol/kartu/gambar di frontend."""
         if name in ("buat_excel", "katalog_kategori", "banding_rangka_massal") and result.get("found"):
             item = {"id": result.get("export_id"), "filename": result.get("filename"),
                     "judul": result.get("judul"), "jumlah_baris": result.get("jumlah_baris")}
             if item["id"] and item not in excel_exports:
                 excel_exports.append(item)
+        elif name == "gambar_exploded" and result.get("found"):
+            for g in (result.get("gambar") or []):
+                item = {"id": g.get("image_id"), "pn": result.get("pn"),
+                        "balon": g.get("balon"), "nama_figure": g.get("nama_figure"),
+                        "kategori": g.get("kategori")}
+                if item["id"] and item not in exploded_images:
+                    exploded_images.append(item)
         elif name == "repair_kit_transmisi":
             for h in (result.get("hasil") or []):
                 mk = h.get("model")
@@ -5075,7 +5178,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 reply = _sanitize_ungrounded(reply, bad)
             return {"reply": reply, "tools_used": tools_used,
                     "repairkit_models": repairkit_models, "banding_exports": banding_exports,
-                    "excel_exports": excel_exports,
+                    "excel_exports": excel_exports, "exploded_images": exploded_images,
                     "part_pns": _mentioned_part_pns(reply, grounded)}
 
         # Catat pesan assistant (yang berisi tool_calls) lalu jalankan tiap tool.
@@ -5116,5 +5219,5 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
         reply = _sanitize_ungrounded(reply, bad)
     return {"reply": reply, "tools_used": tools_used,
             "repairkit_models": repairkit_models, "banding_exports": banding_exports,
-            "excel_exports": excel_exports,
+            "excel_exports": excel_exports, "exploded_images": exploded_images,
             "part_pns": _mentioned_part_pns(reply, grounded)}

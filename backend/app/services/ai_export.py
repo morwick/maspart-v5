@@ -305,6 +305,14 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
             with _stash_lock:
                 d["_bytes"] = data
             return data, d["filename"]
+        if b.get("kind") == "exploded":
+            data = exploded_png(b.get("svg", ""))
+            if data is None:
+                return None, ("Gagal mengambil/menrender gambar exploded view EPC "
+                              "(file gambar tak tersedia / resvg gagal).")
+            with _stash_lock:
+                d["_bytes"] = data
+            return data, d["filename"]
         return None, "Jenis export tidak dikenal."
 
     kolom: list[str] = d["kolom"]
@@ -374,6 +382,19 @@ def _svg_to_png(svg: bytes, width: int = _KATALOG_IMG_WIDTH) -> bytes | None:
         return bytes(resvg_py.svg_to_bytes(svg_string=head + ">" + rest, width=width))
     except Exception:
         return None
+
+
+def exploded_png(svg_name: str) -> bytes | None:
+    """Unduh SATU file SVG exploded-view EPC (nama dari field d2s) → render PNG.
+    Dipakai fitur 'tampilkan gambar exploded view part ini' (gambar inline di chat).
+    None bila nama kosong / file tak ada / resvg gagal."""
+    if not svg_name:
+        return None
+    try:
+        svg = epc_bom.fetch_file(svg_name)
+    except Exception:
+        return None
+    return _svg_to_png(svg) if svg else None
 
 
 def katalog_excel(rangka: str, kategori: str) -> tuple[bytes | None, str]:
