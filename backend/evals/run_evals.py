@@ -27,6 +27,12 @@ import sys
 import time
 from pathlib import Path
 
+# Console Windows default cp1252 tak bisa menulis '──'/emoji → UnicodeEncodeError
+# tepat di baris ringkasan akhir. Paksa UTF-8 agar ringkasan selalu tercetak.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 _EVALS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_EVALS_DIR.parent))  # backend/ → agar 'app' bisa diimpor
 
