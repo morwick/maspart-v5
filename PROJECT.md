@@ -90,6 +90,16 @@
 > Atlas (hierarki kategori→assembly→komponen+posisi), Weichai (GROUP mesin), populasi: WAJIB kelompokkan
 > & simpulkan fungsi dari keluarga/kategori/posisi, bukan nama baris tunggal (EPC sudah bawa konteks ini;
 > yg diperbaiki = model konsisten MENALAR-nya). LIVE & deployed. 6 test baru (total 136). Lihat §3.5.3 butir 4–5.
+> Update **2026-07-06 (prinsip agentik)**: asisten diberi **prinsip kerja agentik umum** di system
+> prompt (blok `agentik_block` + `berpikir_block` diperkuat): (a) TUNTASKAN — hasil tool = langkah
+> antara, terus panggil tool sampai pertanyaan benar-benar terjawab; (b) **RANTAI ESKALASI** baku
+> saat buntu (kata inti → sinonim → typo → tool lain → ubah scope) sebelum bilang 'tidak ada' +
+> sebutkan yang sudah dicoba; (c) **CEK AKHIR** sebelum jawab (semua sub-pertanyaan terjawab?
+> kesimpulan didukung data? PN traceable? sumber & kepastian jelas? kalimat 1 = inti jawaban);
+> (d) pertanyaan multi-bagian diurai & dijawab semua; (e) kesimpulan dulu + sintesis (bukan tuang
+> mentah) + kalibrasi kepastian + tawarkan 1 langkah lanjutan. `_MAX_TOOL_ROUNDS` 6→8 (rantai
+> fallback multi-tool). Fix `run_evals.py` UnicodeEncodeError cp1252 di ringkasan (Windows).
+> Terverifikasi: 136 unit test + **24/24 eval golden lolos**. BELUM di-deploy/dikomit.
 
 ---
 
