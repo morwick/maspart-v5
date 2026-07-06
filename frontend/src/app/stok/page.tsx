@@ -7,7 +7,9 @@ import {
   ApiError,
   downloadBlob,
   exportStokList,
+  getAccurateStock,
   getStokList,
+  type AccurateStock,
   type StokListResponse,
 } from "@/lib/api";
 import { clearSession, getToken } from "@/lib/auth";
@@ -23,6 +25,10 @@ export default function StokPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Rincian per gudang/cabang: dimuat ON-DEMAND saat baris diklik (1 panggilan
+  // kecil per-PN, cache 90 dtk di backend) — indeks 5 jam hanya berisi agregat.
+  const [openPn, setOpenPn] = useState<string | null>(null);
+  const [details, setDetails] = useState<Record<string, AccurateStock | "loading">>({});
 
   const on401 = useCallback(
     (err: unknown): boolean => {
@@ -46,6 +52,7 @@ export default function StokPage() {
         const res = await getStokList(token, { q: keyword, sort: srt, page: p, pageSize: PAGE_SIZE });
         setData(res);
         setPage(res.page);
+        setOpenPn(null);
       } catch (err) {
         if (!on401(err)) setError(err instanceof Error ? err.message : "Gagal memuat");
       } finally {
@@ -72,6 +79,24 @@ export default function StokPage() {
     } catch (err) {
       if (!on401(err)) setError(err instanceof Error ? err.message : "Gagal export");
     }
+  }
+
+  function toggleDetail(pn: string) {
+    if (!pn) return;
+    if (openPn === pn) {
+      setOpenPn(null);
+      return;
+    }
+    setOpenPn(pn);
+    if (details[pn] && details[pn] !== "loading") return; // sudah pernah dimuat
+    const token = getToken();
+    if (!token) return;
+    setDetails((d) => ({ ...d, [pn]: "loading" }));
+    getAccurateStock(pn, token)
+      .then((res) => setDetails((d) => ({ ...d, [pn]: res })))
+      .catch((err) => {
+        if (!on401(err)) setDetails((d) => ({ ...d, [pn]: { configured: true, error: true } }));
+      });
   }
 
   const notConfigured = data && data.configured === false;
@@ -148,6 +173,7 @@ export default function StokPage() {
             <table className="tbl">
               <thead>
                 <tr>
+                  <th style={{ width: 28 }} aria-label="Rincian" />
                   <th>Part Number</th>
                   <th>Part Name</th>
                   <th className="num">Stok</th>
@@ -155,14 +181,20 @@ export default function StokPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.rows.map((r, i) => (
-                  <tr key={i}>
-                    <td className="pn">{r["Part Number"]}</td>
-                    <td style={{ fontWeight: 500 }}>{r["Part Name"]}</td>
-                    <td className="num mono">{r["Stok"]}</td>
-                    <td style={{ color: "var(--ink-500)" }}>{r["Satuan"]}</td>
-                  </tr>
-                ))}
+                {data.rows.map((r, i) => {
+                  const pn = r["Part Number"];
+                  const open = openPn === pn;
+                  const det = details[pn];
+                  return (
+                    <StokRow
+                      key={`${pn}-${i}`}
+                      row={r}
+                      open={open}
+                      detail={open ? det : undefined}
+                      onToggle={() => toggleDetail(pn)}
+                    />
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -171,6 +203,12 @@ export default function StokPage() {
         {data && data.configured !== false && !sessionExpired && !fetchError && data.rows.length === 0 && (
           <p style={{ marginTop: 16, fontSize: 13, color: "var(--ink-500)" }}>
             Tidak ada barang yang cocok.
+          </p>
+        )}
+
+        {data && data.rows.length > 0 && (
+          <p style={{ marginTop: 8, fontSize: 12, color: "var(--ink-400)" }}>
+            Klik baris untuk melihat rincian stok per gudang/cabang (diambil langsung dari Accurate).
           </p>
         )}
 
@@ -183,5 +221,67 @@ export default function StokPage() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+/** Satu baris stok + panel rincian per gudang (expand saat diklik). */
+function StokRow({
+  row,
+  open,
+  detail,
+  onToggle,
+}: {
+  row: Record<string, string>;
+  open: boolean;
+  detail?: AccurateStock | "loading";
+  onToggle: () => void;
+}) {
+  const per = detail && detail !== "loading" && detail.found ? detail.stock?.per_gudang || [] : [];
+  const failed =
+    detail && detail !== "loading" && (detail.error || detail.session_expired || detail.found === false);
+  return (
+    <>
+      <tr onClick={onToggle} style={{ cursor: "pointer" }} title="Klik untuk rincian per gudang">
+        <td style={{ color: "var(--ink-400)", fontSize: 11, textAlign: "center" }}>{open ? "▾" : "▸"}</td>
+        <td className="pn">{row["Part Number"]}</td>
+        <td style={{ fontWeight: 500 }}>{row["Part Name"]}</td>
+        <td className="num mono">{row["Stok"]}</td>
+        <td style={{ color: "var(--ink-500)" }}>{row["Satuan"]}</td>
+      </tr>
+      {open && (
+        <tr>
+          <td colSpan={5} style={{ background: "var(--ink-50)", padding: "10px 14px" }}>
+            {(!detail || detail === "loading") && (
+              <span style={{ fontSize: 12.5, color: "var(--ink-500)" }}>Memuat rincian gudang…</span>
+            )}
+            {failed && (
+              <span style={{ fontSize: 12.5, color: "var(--warn-600)" }}>
+                Rincian per gudang tidak tersedia saat ini (koneksi Accurate gagal / PN tak ditemukan).
+              </span>
+            )}
+            {detail && detail !== "loading" && detail.found && (
+              per.length > 0 ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {per.map((g, j) => (
+                    <span
+                      key={j}
+                      className="pill"
+                      title={g.deskripsi || g.gudang}
+                      style={{ fontSize: 12 }}
+                    >
+                      {g.gudang} · <b className="mono">{g.qty.toLocaleString("id-ID")}</b>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <span style={{ fontSize: 12.5, color: "var(--ink-500)" }}>
+                  Tidak ada gudang berstok untuk barang ini.
+                </span>
+              )
+            )}
+          </td>
+        </tr>
+      )}
+    </>
   );
 }

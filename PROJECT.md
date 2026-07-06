@@ -719,6 +719,12 @@ paginasi & **export Excel**.
   (`BUYER_DENY` di `AppShell`).
 - **Frontend:** `app/stok/page.tsx` (mirip sub-tab List Harga) + `getStokList`/`exportStokList`
   di `lib/api.ts`; item nav "Stok" di `AppShell` (`NAV_DATA`, key `stok`).
+- **Rincian per GUDANG/CABANG (2026-07-06):** klik baris → panel expand berisi pill per gudang
+  ("01.Jakarta · 46.965", dst; hover = deskripsi gudang). Data dimuat **ON-DEMAND per-PN** via
+  endpoint yang sudah ada `GET /api/parts/accurate-stock` (`stock_full`: agregat dari indeks,
+  per-gudang 1 panggilan kecil live, cache 90 dtk) — TANPA tarikan massal per-gudang utk ~5rb
+  barang. Hasil di-cache di state halaman (buka-tutup ulang tak refetch). Gagal/PN tak ada →
+  pesan non-fatal di panel; komponen `StokRow`.
 - **Deployed live 2026-07-06** (commit `2e5488f`, snapshot-clean). Terverifikasi: 136 test lolos,
   tsc bersih, `https://maspart.tech/stok` → 200, `/api/stok/list` → 401 (route hidup).
 
