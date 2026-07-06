@@ -99,7 +99,9 @@
 > (d) pertanyaan multi-bagian diurai & dijawab semua; (e) kesimpulan dulu + sintesis (bukan tuang
 > mentah) + kalibrasi kepastian + tawarkan 1 langkah lanjutan. `_MAX_TOOL_ROUNDS` 6→8 (rantai
 > fallback multi-tool). Fix `run_evals.py` UnicodeEncodeError cp1252 di ringkasan (Windows).
-> Terverifikasi: 136 unit test + **24/24 eval golden lolos**. BELUM di-deploy/dikomit.
+> Terverifikasi: 136 unit test + **24/24 eval golden lolos**. DIKOMIT (`6426735`/`9263e1f`) &
+> **LIVE di prod 2026-07-06** (scp + build.sh + force-recreate; cek dalam container: rounds=8,
+> blok prompt baru ada; /health 200).
 
 ---
 
