@@ -1135,6 +1135,69 @@ export async function resolveSearchMiss(token: string, query: string): Promise<{
   return res.json();
 }
 
+// ── Usulan Sinonim OTOMATIS (LLM belajar dari pencarian nihil) ──
+// generate → LLM memetakan istilah lapangan gagal → keyword EN (divalidasi ke
+// katalog nyata di backend); approve → langsung masuk kamus & dipakai asisten.
+export type SinonimUsulan = {
+  id: string;
+  query: string;
+  count_miss: number;
+  grup: string;
+  triggers: string[];
+  keywords: string[];
+  keywords_dibuang?: string[];
+  confidence: number;
+  alasan?: string;
+  status: string;
+  catatan_apply?: string;
+};
+export async function getSinonimUsulan(
+  token: string,
+): Promise<{ jumlah: number; usulan: SinonimUsulan[] }> {
+  const res = await fetch(`${API_BASE}/api/admin/sinonim/usulan`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+export async function generateSinonimUsulan(
+  token: string,
+  limit = 10,
+  autoApprove = false,
+): Promise<{ dibuat: number; auto_disetujui: number; usulan: SinonimUsulan[]; catatan?: string; error?: string }> {
+  const res = await fetch(`${API_BASE}/api/admin/sinonim/usulan/generate`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ limit, auto_approve: autoApprove }),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+export async function approveSinonimUsulan(
+  token: string,
+  id: string,
+): Promise<{ ok: boolean; usulan: SinonimUsulan }> {
+  const res = await fetch(`${API_BASE}/api/admin/sinonim/usulan/approve`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+export async function rejectSinonimUsulan(
+  token: string,
+  id: string,
+): Promise<{ ok: boolean; usulan: SinonimUsulan }> {
+  const res = await fetch(`${API_BASE}/api/admin/sinonim/usulan/reject`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 // ── Kamus Sinonim (istilah lapangan → kata kunci katalog) ──
 // Perubahan langsung dipakai asisten AI (reload per-mtime, tanpa restart).
 export type SinonimEntry = {

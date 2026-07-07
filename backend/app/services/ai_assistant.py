@@ -11,6 +11,7 @@ asisten tidak membocorkan data lintas-peran.
 """
 from __future__ import annotations
 
+import difflib
 import json
 import logging
 import re
@@ -112,6 +113,67 @@ def _expand_query(q: str) -> tuple[list[str], list[str]]:
                 if kw and kw not in terms:
                     terms.append(kw)
     return terms, matched
+
+
+# ── Posisi part dari NAMA (deterministik — jangan serahkan ke model) ─────────
+# 'spion kanan' dulu diputuskan model dgn membaca RH/LH sendiri → rawan salah.
+# Sekarang Python yang menandai posisi tiap part; model tinggal menyajikan.
+_POSISI_PAT: list[tuple[str, re.Pattern]] = [
+    ("kanan",    re.compile(r"(?<![A-Z])(RH|R\.H\.?|RIGHT)(?![A-Z])")),
+    ("kiri",     re.compile(r"(?<![A-Z])(LH|L\.H\.?|LEFT)(?![A-Z])")),
+    ("depan",    re.compile(r"(?<![A-Z])(FRONT|FRT)(?![A-Z])")),
+    ("belakang", re.compile(r"(?<![A-Z])(REAR)(?![A-Z])")),
+    ("atas",     re.compile(r"(?<![A-Z])(UPPER|UPR)(?![A-Z])")),
+    ("bawah",    re.compile(r"(?<![A-Z])(LOWER|LWR)(?![A-Z])")),
+]
+_POSISI_CN = [("kanan", "右"), ("kiri", "左"), ("depan", "前"), ("belakang", "后"),
+              ("atas", "上"), ("bawah", "下")]
+
+
+def _parse_posisi(nama_en: str | None, nama_cn: str | None = None) -> list[str]:
+    """Deteksi posisi (kanan/kiri/depan/belakang/atas/bawah) dari nama part:
+    penanda Inggris (RH/LH/RIGHT/LEFT/FRONT/REAR/UPPER/LOWER) lebih dipercaya;
+    bila nama Inggris tak memberi apa-apa, jatuh ke karakter China (右/左/前/后)."""
+    tags: list[str] = []
+    # 'REAR VIEW MIRROR' / '后视镜': kata rear/后 di situ bagian NAMA BENDA
+    # (kaca spion), bukan posisi pemasangan → buang dulu sebelum scan.
+    up = (nama_en or "").upper().replace("REARVIEW", " ").replace("REAR VIEW", " ")
+    for tag, pat in _POSISI_PAT:
+        if pat.search(up):
+            tags.append(tag)
+    if not tags and nama_cn:
+        cn = nama_cn.replace("后视", "")
+        for tag, ch in _POSISI_CN:
+            if ch in cn:
+                tags.append(tag)
+    return tags
+
+
+def _bom_mungkin_maksud(parts: list[dict], local: dict, terms: list[str],
+                        limit: int = 5) -> list[dict]:
+    """Saran fuzzy 'mungkin maksud' KHUSUS isi Loading List unit ini: part yang
+    namanya paling mirip dgn kata query (toleran typo/ejaan). Dipakai saat
+    kata_kunci 0 hasil supaya tool tidak menjawab kosong polos."""
+    kws = [w for t in terms for w in (t or "").upper().split()
+           if len(w) >= 4 and not any(c.isdigit() for c in w)]
+    if not kws:
+        return []
+    best: dict[str, tuple[float, dict]] = {}
+    for p in parts:
+        nama = (local.get(p["pn"], {}).get("part_name") or p.get("nama_cn") or "")
+        up = " ".join(nama.upper().replace("-", " ").split())
+        if not up:
+            continue
+        score = max((difflib.SequenceMatcher(None, k, w).ratio()
+                     for w in up.split() for k in kws), default=0.0)
+        if score >= 0.72:
+            cur = best.get(p["pn"])
+            if not cur or score > cur[0]:
+                best[p["pn"]] = (score, {"part_number": p["pn"],
+                                         "nama": " ".join(nama.split()),
+                                         "skor": round(score, 2)})
+    rows = sorted(best.values(), key=lambda t: -t[0])
+    return [r[1] for r in rows[:limit]]
 
 
 _DISC_RE = re.compile(r"\bdisc\b", re.IGNORECASE)
@@ -594,6 +656,8 @@ def _tool_specs(user: dict) -> list[dict]:
                         "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number 8 digit (mis. SJ346500)."},
                         "kata_kunci": {"type": "string", "description": "Opsional. Saring part berdasar nama/PN (mis. 'injector', 'oil seal', 'WG9')."},
                         "kategori": {"type": "string", "description": "Opsional. Saring ke satu kategori untuk unit ini (mis. 'kabin', 'rem', 'transmisi', 'kelistrikan', 'sasis'). Untuk 'berapa/part apa di <kategori> unit ini'."},
+                        "sisi": {"type": "string", "enum": ["kanan", "kiri", "depan", "belakang", "atas", "bawah"],
+                                 "description": "Opsional. Isi bila user minta SISI tertentu (mis. 'spion KANAN') — sistem memfilter dari penanda RH/LH/FRONT/REAR di nama part. Tiap hasil juga punya field 'posisi' bila terdeteksi."},
                     },
                     "required": ["rangka"],
                 },
@@ -2435,6 +2499,7 @@ def _t_bom_dari_rangka(args: dict, user: dict) -> dict:
         note = (f"Difilter ke kategori {catalog_bom.KATEGORI_NAMA.get(code, code)} — "
                 "kategorisasi PERSIS untuk unit ini (PN dari EPC × kategori katalog lokal), "
                 "bukan angka per-model.")
+    saran_fuzzy: list[dict] = []
     if kata:
         terms, matched_syn = _expand_query(kata)
         up_terms = [t.upper() for t in terms if t]
@@ -2451,6 +2516,34 @@ def _t_bom_dari_rangka(args: dict, user: dict) -> dict:
         if matched_syn:
             note = (f"Istilah lapangan '{', '.join(dict.fromkeys(matched_syn))}' diperluas ke "
                     f"kata kunci katalog: {', '.join(up_terms[1:])}.")
+        if not matched:
+            # Fallback belajar: (a) saran fuzzy dari isi unit INI (toleran typo),
+            # (b) catat istilah tak dikenal ke log 'Pencarian Nihil' → bahan
+            # usulan sinonim otomatis (ai_sinonim_learn). Hanya dicatat bila
+            # kamus sinonim TIDAK mengenali istilahnya (celah kamus, bukan data).
+            saran_fuzzy = _bom_mungkin_maksud(parts, local, terms)
+            if not matched_syn:
+                try:
+                    search_log.record_miss(kata, "bom", "asisten_bom")
+                except Exception:
+                    pass
+
+    # Filter SISI deterministik (user minta 'yang kanan/kiri/depan/belakang'):
+    # dari penanda posisi di NAMA part, bukan tafsiran model.
+    sisi = (args.get("sisi") or "").strip().lower()
+    catatan_sisi = None
+    if sisi and matched:
+        if sisi in ("kanan", "kiri", "depan", "belakang", "atas", "bawah"):
+            sided = [p for p in matched if sisi in _parse_posisi(
+                local.get(p["pn"], {}).get("part_name"), p.get("nama_cn"))]
+            if sided:
+                matched = sided
+                catatan_sisi = (f"Difilter sisi '{sisi}' berdasar penanda posisi di nama part "
+                                "(RH/LH/FRONT/REAR atau 右/左/前/后).")
+            else:
+                catatan_sisi = (f"Tidak ada part dengan penanda sisi '{sisi}' pada namanya — "
+                                "SEMUA kandidat ditampilkan. Sampaikan ke user bahwa sisi tidak "
+                                "bisa dipastikan dari nama part; JANGAN mengarang sisi.")
 
     # Nama Inggris RESMI EPC (kamus translate_cn) untuk part tanpa padanan lokal —
     # diisi sebelum render (lihat di bawah). Agar tak lagi cuma nama China.
@@ -2470,6 +2563,11 @@ def _t_bom_dari_rangka(args: dict, user: dict) -> dict:
         # Nama China asli SELALU disertakan (bila ada) → tiap nama bisa diverifikasi.
         if p.get("nama_cn"):
             out["nama_china"] = p["nama_cn"]
+        # Posisi (kanan/kiri/depan/belakang) dideteksi Python dari nama —
+        # pakai field ini saat user minta sisi tertentu, jangan menafsir sendiri.
+        pos = _parse_posisi(eng, p.get("nama_cn"))
+        if pos:
+            out["posisi"] = pos
         # Bila nama masih China (tak ada padanan Inggris) → minta AI terjemahkan.
         if not eng and p.get("nama_cn"):
             out["nama_perlu_terjemah"] = True
@@ -2493,6 +2591,8 @@ def _t_bom_dari_rangka(args: dict, user: dict) -> dict:
     }
     if note:
         base["catatan_sinonim"] = note
+    if catatan_sisi:
+        base["catatan_sisi"] = catatan_sisi
 
     if res.get("partial"):
         # Loading List terpotong (server EPC balas data tak lengkap). JANGAN dipakai
@@ -2530,6 +2630,12 @@ def _t_bom_dari_rangka(args: dict, user: dict) -> dict:
     base["parts"] = [_enrich(p) for p in matched[:cap]]
     base["terpotong"] = max(0, len(matched) - cap)
     if not matched:
+        if saran_fuzzy:
+            base["mungkin_maksud"] = saran_fuzzy
+            base["catatan_saran"] = (
+                "0 hasil persis, tapi ada part unit ini yang NAMANYA MIRIP query "
+                "(lihat 'mungkin_maksud'). Tawarkan ke user: 'mungkin maksud Anda …?' — "
+                "JANGAN langsung menjawab tidak ada.")
         base["catatan"] = (
             f"Tidak ada part cocok '{kata}' sebagai ITEM TERPISAH di Loading List unit ini. "
             f"PENTING: Loading List = BOM pabrik level ASSEMBLY. Part AUS/SERVIS/POROS (kampas "

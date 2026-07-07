@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import catalog_bom, gudang, gudang_config, harga, image_search, orders, part_index, permissions, populasi, presence, reservations, search_log, sinonim
+from ..services import ai_sinonim_learn, catalog_bom, gudang, gudang_config, harga, image_search, orders, part_index, permissions, populasi, presence, reservations, search_log, sinonim
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -592,3 +592,58 @@ def sinonim_delete(index: int, _admin: dict = Depends(require_admin)):
     except IndexError as err:
         raise HTTPException(status.HTTP_409_CONFLICT, str(err))
     return {"ok": True, "entry": entry}
+
+
+# ── Usulan Sinonim OTOMATIS (loop belajar: miss → LLM → validasi → approve) ──
+class UsulanGenerateRequest(BaseModel):
+    limit: int = 10
+    auto_approve: bool = False
+
+
+class UsulanDecisionRequest(BaseModel):
+    id: str
+    triggers: list[str] | None = None
+    keywords: list[str] | None = None
+
+
+@router.get("/sinonim/usulan")
+def sinonim_usulan_list(status_filter: str | None = "pending",
+                        _admin: dict = Depends(require_admin)):
+    """Daftar usulan sinonim hasil LLM. status_filter: pending/approved/rejected,
+    kosongkan untuk semua."""
+    rows = ai_sinonim_learn.list_usulan(status_filter or None)
+    return {"jumlah": len(rows), "usulan": rows}
+
+
+@router.post("/sinonim/usulan/generate")
+def sinonim_usulan_generate(body: UsulanGenerateRequest,
+                            _admin: dict = Depends(require_admin)):
+    """Minta LLM mengusulkan sinonim dari pencarian nihil tersering. Keyword
+    divalidasi ke katalog nyata sebelum disimpan. auto_approve=True → usulan
+    yang semua keyword-nya valid & confidence tinggi langsung masuk kamus."""
+    return ai_sinonim_learn.generate(limit=body.limit, auto_approve=body.auto_approve)
+
+
+@router.post("/sinonim/usulan/approve")
+def sinonim_usulan_approve(body: UsulanDecisionRequest,
+                           _admin: dict = Depends(require_admin)):
+    """Setujui usulan → masuk sinonim.json (langsung aktif) + miss di-resolve.
+    triggers/keywords opsional untuk edit sebelum masuk kamus."""
+    try:
+        u = ai_sinonim_learn.approve(body.id, body.triggers, body.keywords)
+    except KeyError as err:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(err))
+    except RuntimeError as err:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(err))
+    return {"ok": True, "usulan": u}
+
+
+@router.post("/sinonim/usulan/reject")
+def sinonim_usulan_reject(body: UsulanDecisionRequest,
+                          _admin: dict = Depends(require_admin)):
+    """Tolak usulan (tidak akan diusulkan ulang; miss ikut dianggap selesai)."""
+    try:
+        u = ai_sinonim_learn.reject(body.id)
+    except KeyError as err:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(err))
+    return {"ok": True, "usulan": u}
