@@ -239,6 +239,14 @@
       "expect": { "tools_any": ["katalog_kategori"], "reply_any": ["figure", "katalog"] }
     },
     {
+      "id": "weichai-katalog-mesin",
+      "tags": ["weichai"],
+      "_kenapa": "Fitur katalog_mesin (2026-07-07): 'katalog mesin <rangka>' → tool katalog_mesin (part internal mesin Weichai bergambar exploded view). Endpoint gambar dePreview (common-api) ketemu via bedah lazy-chunk JS; RJ345233 terverifikasi live (walk 'blok' = 8 figure/53 part, Excel 2,6 MB dg 8 gambar).",
+      "question": "buatkan katalog mesin untuk unit RJ345233",
+      "expect": { "reply_any": ["bagian", "blok", "kelompok", "lengkap"] },
+      "expect_alt": [{ "tools_any": ["katalog_mesin"], "reply_any": ["mesin", "figure", "katalog"] }]
+    },
+    {
       "id": "weichai-air-compressor",
       "tags": ["weichai"],
       "_kenapa": "Regresi 2026-07-03: 'air compressor' dulu jatuh ke modul poros Atlas → cuma pipa outlet, model simpulkan 'terintegrasi di engine assembly'. Aksesori terpasang di mesin = domain Weichai (Air Compressor Group; Assy 1013133963 & compressor 1013133966 terverifikasi live utk RJ345233).",

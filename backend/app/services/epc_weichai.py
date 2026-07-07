@@ -133,7 +133,30 @@ def _bridge(frame: str) -> dict:
     return val
 
 
+# Endpoint gambar (ditemukan via bedah lazy-chunk JS EPC Weichai, 2026-07-07):
+# service common-api, token DI QUERY (bukan header). id = svgFileId GROUP (bukan
+# svgFileId part assembly — yang itu 非法访问). Lihat memori weichai-katalog-gambar.
+_DEPREVIEW_URL = "https://epc-cloud.weichai.com/Api/common-api/common/file-storage/dePreview"
+
 _tok_cache: dict = {"token": "", "at": 0.0, "seed": ""}
+
+
+def fetch_svg(file_id: str, token: str) -> bytes | None:
+    """Unduh SVG exploded view mesin Weichai (per svgFileId group) → bytes.
+    None bila kosong/gagal/bukan SVG (mis. token kedaluwarsa → JSON 401)."""
+    fid = (file_id or "").strip()
+    if not fid or not token:
+        return None
+    try:
+        r = requests.get(_DEPREVIEW_URL, params={"id": fid, "token": token},
+                         headers={"Referer": "https://epc-cloud.weichai.com/", **_UA},
+                         timeout=40, verify=False)
+    except Exception:
+        return None
+    if not r.ok or not r.content:
+        return None
+    # dePreview balas SVG (text/plain) saat sukses; JSON {code,msg} saat gagal.
+    return r.content if b"<svg" in r.content[:3000].lower() else None
 
 
 def _ensure_token(rangka: str = "") -> str:
@@ -250,6 +273,173 @@ def engine_bom(rangka: str) -> dict:
            "_ctx": {"dhh": dhh, "ddate": ddate, "token": token}}
     with _lock:
         _bom_cache[frame] = {"at": time.monotonic(), "val": val}
+    return val
+
+
+# ── KATALOG BERGAMBAR MESIN (figure = GROUP ber-svgFileId) ───────────────────
+# Struktur figure DIBUAT SAMA dgn epc_bom.catalog_walk agar builder Excel/PDF di
+# ai_export dipakai ulang penuh. Beda: 'svg' = svgFileId (bukan nama file); ambil
+# gambar via fetch_svg(svgFileId, token).
+_KATALOG_TTL = 3000.0
+_katalog_cache: dict[str, dict] = {}
+_katalog_lock = threading.Lock()
+_MESIN_ALL_TERMS = {"lengkap", "semua", "all", "mesin", "mesin lengkap", "engine",
+                    "komplit", "komplet", "full", "seluruhnya", "semua kategori"}
+
+# Istilah (ID/EN) → substring nama GROUP mesin (EN) yang cocok. Dicek lowercase.
+_MESIN_KAT = [
+    (["blok", "block", "silinder", "cylinder", "liner", "piston", "seher",
+      "connecting rod", "conrod", "stang seher", "kruk", "crankshaft",
+      "poros engkol", "bearing", "metal", "flywheel", "roda gila", "thrust"],
+     ["block", "liner", "piston", "connecting rod", "crankshaft", "main bearing",
+      "thrust", "flywheel"]),
+    (["kepala silinder", "cylinder head", "head", "klep", "valve", "katup",
+      "noken", "camshaft", "rocker", "pelatuk", "tutup klep", "gear drive"],
+     ["cylinder head", "valve train", "head cover", "gear drive"]),
+    (["bahan bakar", "fuel", "solar", "injektor", "injector", "nozzle", "spray",
+      "pompa injeksi", "injection pump", "common rail", "fuel filter",
+      "filter solar", "fuel pipe", "high pressure"],
+     ["fuel", "injection pump", "injector", "nozzle", "spray"]),
+    (["oli", "oil", "pelumas", "pompa oli", "oil pump", "filter oli", "oil filter",
+      "oil pan", "carter", "oil cooler", "dipstick", "oil-gas", "separator"],
+     ["oil", "dipstick", "separator"]),
+    (["pendingin", "cooling", "radiator", "water", "pompa air", "water pump",
+      "thermostat", "termostat", "intercooler", "kipas", "fan", "cooler"],
+     ["water", "cooler", "thermostat", "intercooler", "fan", "cooling"]),
+    (["turbo", "turbocharger", "turbin", "intake", "manifold isap"],
+     ["turbocharger", "intake manifold", "air discharging"]),
+    (["kompresor", "compressor", "kompresor angin", "air compressor", "angin"],
+     ["compressor"]),
+    (["alternator", "dinamo", "dinamo ampere", "dinamo cas", "starter",
+      "motor starter", "dinamo starter", "generator"],
+     ["alternator", "starter", "generator"]),
+    (["knalpot", "exhaust", "manifold", "buang"],
+     ["exhaust manifold"]),
+    (["belt", "tensioner", "pulley", "tali kipas", "fan belt", "puli", "puli"],
+     ["belt", "tensioner", "pulley"]),
+]
+
+
+def _mesin_kat_subs(term: str) -> list[str]:
+    """Term kategori → daftar substring nama group EN yang dicari (dedup).
+    Fallback: kata term itu sendiri (≥3 huruf) bila tak ada di peta."""
+    t = (term or "").lower()
+    subs: list[str] = []
+    for trigs, groups in _MESIN_KAT:
+        if any(k in t for k in trigs):
+            subs += groups
+    if not subs:
+        subs = [w for w in t.split() if len(w) >= 3]
+    return list(dict.fromkeys(subs))
+
+
+def catalog_walk(rangka: str, kategori: str) -> dict:
+    """SEMUA figure mesin Weichai satu KATEGORI utk katalog bergambar. Tiap GROUP
+    (findBomTree) = satu figure (svgFileId=gambar); part-nya (findBomList) = item
+    ber-nomor balon (lineNumber). Bentuk hasil SAMA dgn epc_bom.catalog_walk.
+    {found, frame_number, engine_model, lengkap, kategori_cocok, jumlah_figure,
+     jumlah_part, figures:[...], incomplete, _token} | {found:False, _err}."""
+    frame = epc_bom._frame(rangka)
+    term = " ".join((kategori or "").split()).lower()
+    if not frame or not term:
+        return {"found": False, "_err": "input"}
+    ckey = f"{frame}|{term}"
+    with _katalog_lock:
+        c = _katalog_cache.get(ckey)
+        if c and (time.monotonic() - c["at"] < _KATALOG_TTL):
+            return c["val"]
+
+    br = _bridge(frame)
+    if not br.get("found"):
+        return {"found": False, "frame_number": frame,
+                "_err": br.get("reason") or "api", "message": br.get("message")}
+    token, dhh, ddate = br["token"], br["dhhNumber"], br.get("dhhDate") or ""
+
+    tree = _get(_TREE_URL, {"dhhNumber": dhh, "dhhDate": ddate, "lang": "en_US",
+                            "ypartFlag": "false"}, token)
+    if "_err" in tree:
+        return {"found": False, "frame_number": frame, "_err": tree["_err"]}
+    data = tree.get("data")
+    root = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) else None)
+    if not root:
+        return {"found": False, "frame_number": frame, "_err": "empty"}
+    engine_nama = " ".join((root.get("partName") or "Mesin").split())
+    groups = [g for g in (root.get("children") or []) if g.get("id")]
+
+    is_all = term in _MESIN_ALL_TERMS
+    subs = [] if is_all else _mesin_kat_subs(term)
+
+    def _match(g: dict) -> bool:
+        if is_all:
+            return True
+        name = (g.get("partName") or "").lower()
+        return any(s in name for s in subs)
+
+    matched = [g for g in groups if _match(g)]
+    if not matched:
+        return {"found": False, "frame_number": frame, "_err": "no_category",
+                "message": f"Tidak ada kelompok mesin yang cocok dengan '{kategori}'.",
+                "tersedia": [g.get("partName") for g in groups]}
+
+    errbox = [False]
+
+    def _figure_of(idx_g: tuple) -> dict:
+        idx, g = idx_g
+        lst = _get(_LIST_URL, {"dhhNumber": dhh, "dhhId": g["id"], "ypartFlag": "false",
+                               "dhhDate": ddate}, token)
+        if "_err" in lst:
+            errbox[0] = True
+            raw = []
+        else:
+            raw = lst.get("data") or []
+        items: list[dict] = []
+
+        def _scan(nodes):
+            for p in nodes or []:
+                pn = (p.get("partNumber") or "").strip().upper()
+                if pn:
+                    iba = p.get("iba") if isinstance(p.get("iba"), dict) else {}
+                    nama = " ".join((p.get("partName") or "").split())
+                    if not nama:
+                        nama = " ".join(str(iba.get("英文名称") or "").split())
+                    items.append({
+                        "balon": p.get("lineNumber"),
+                        "pn": pn,
+                        "nama": nama,
+                        "nama_cn": "",
+                        "qty": None,
+                        "pengganti": [],
+                        "aus": (iba.get("IsRepidWear") == "Y"),
+                    })
+                _scan(p.get("children"))
+
+        _scan(raw)
+        return {
+            "kategori": engine_nama,
+            "nama": " ".join((g.get("partName") or "").split()) or f"Group {idx + 1}",
+            "kode": str(g.get("orderNo") or (idx + 1)),
+            "kode_kategori": "",
+            "svg": (g.get("svgFileId") or "").strip(),
+            "svg_lain": [],
+            "items": items,
+        }
+
+    with ThreadPoolExecutor(max_workers=_WORKERS) as ex:
+        figures = list(ex.map(_figure_of, list(enumerate(matched))))
+    figures = [f for f in figures if f["items"] or f["svg"]]
+
+    val = {
+        "found": True, "frame_number": frame, "engine_model": br.get("serial"),
+        "lengkap": is_all,
+        "kategori_cocok": [g.get("partName") for g in matched],
+        "jumlah_figure": len(figures),
+        "jumlah_part": sum(len(f["items"]) for f in figures),
+        "figures": figures, "incomplete": errbox[0],
+        "_token": token,
+    }
+    if not errbox[0]:
+        with _katalog_lock:
+            _katalog_cache[ckey] = {"at": time.monotonic(), "val": val}
     return val
 
 

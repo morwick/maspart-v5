@@ -861,6 +861,32 @@ def _tool_specs(user: dict) -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "katalog_mesin",
+                "description": (
+                    "KATALOG PART BERGAMBAR MESIN (exploded view) untuk unit bermesin WEICHAI, per-VIN "
+                    "— panggil saat user minta 'katalog mesin <rangka>', 'buku part mesin unit X', "
+                    "'katalog blok/piston/bahan bakar mesin', 'catalog engine + gambar'. Menyusun part "
+                    "internal mesin per-KELOMPOK (blok, kepala silinder, kruk as, bahan bakar, pelumas, "
+                    "pendingin, turbo, kompresor, alternator/starter, dll.) LENGKAP dengan gambar "
+                    "exploded view resmi EPC Weichai + nomor balon + stok/harga lokal, menjadi FILE "
+                    "Excel/PDF (kartu unduh otomatis). Untuk part INTERNAL MESIN — BEDA dari "
+                    "katalog_kategori (itu bodi/sasis Sinotruk). HANYA unit bermesin Weichai (WP-series; "
+                    "Sinotruk/HOWO/SITRAK bermesin Weichai). Proses ±1-3 menit."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number."},
+                        "kategori": {"type": "string", "description": "Bagian mesin yang mau dikatalogkan (mis. 'blok', 'kepala silinder', 'bahan bakar', 'pelumas', 'pendingin', 'turbo', 'kompresor', 'alternator') — ATAU 'lengkap'/'semua' untuk SELURUH mesin. HANYA diisi bila user MENYEBUTNYA; bila belum, KOSONGKAN (tool akan menyuruhmu menawarkan pilihan) — JANGAN menebak."},
+                        "format": {"type": "string", "enum": ["excel", "pdf"], "description": "Format hasil: 'excel' atau 'pdf'. HANYA diisi bila user SUDAH memilih; bila belum, KOSONGKAN (tool akan menyuruhmu menanyakan) — JANGAN menebak."},
+                    },
+                    "required": ["rangka"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "gambar_exploded",
                 "description": (
                     "TAMPILKAN GAMBAR EXPLODED VIEW untuk SATU Part Number (gambar muncul INLINE "
@@ -3770,6 +3796,88 @@ def _t_buat_excel(args: dict, user: dict) -> dict:
                         "tabelnya, JANGAN membuat link/URL unduhan sendiri.")}
 
 
+def _t_katalog_mesin(args: dict, user: dict) -> dict:
+    """KATALOG BERGAMBAR MESIN Weichai per-VIN — tiap GROUP mesin = satu figure
+    (gambar exploded view resmi EPC Weichai + part ber-nomor balon). Reuse penuh
+    pipeline katalog (epc_weichai.catalog_walk → ai_export builder source=weichai).
+    Hanya unit bermesin Weichai (WP-series)."""
+    rangka = (args.get("rangka") or "").strip()
+    kategori = (args.get("kategori") or "").strip()
+    fmt_raw = (args.get("format") or "").strip().lower()
+    fmt = ("pdf" if fmt_raw in ("pdf",)
+           else "excel" if fmt_raw in ("excel", "xlsx", "xls", "spreadsheet") else "")
+    if not rangka:
+        return {"error": "Sebutkan nomor rangka/VIN unit yang mesinnya mau dikatalogkan."}
+    if not kategori:
+        return {
+            "found": False,
+            "pilihan_kategori": ["Mesin LENGKAP (semua kelompok)", "Blok & piston",
+                                 "Kepala silinder & klep", "Kruk as & bearing",
+                                 "Sistem bahan bakar (injektor/pompa)", "Sistem pelumas (oli)",
+                                 "Sistem pendingin (air/radiator)", "Turbocharger",
+                                 "Kompresor angin", "Alternator & starter"],
+            "jawaban_wajib": ("User belum menyebut bagian mesin. TANYAKAN dulu — tampilkan "
+                              "'pilihan_kategori' sebagai pilihan dan minta user memilih SATU, "
+                              "atau 'lengkap' untuk seluruh kelompok mesin (file lebih besar, "
+                              "±2-3 menit). ⛔ JANGAN memanggil tool ini lagi sebelum user memilih, "
+                              "JANGAN menebak."),
+        }
+    if not fmt:
+        return {
+            "found": False,
+            "pilihan_format": ["Excel (.xlsx)", "PDF (siap cetak)"],
+            "jawaban_wajib": ("Bagian mesin sudah jelas, tapi user BELUM memilih FORMAT. "
+                              "TANYAKAN: mau EXCEL (.xlsx) atau PDF (siap cetak)? ⛔ JANGAN "
+                              "memanggil tool ini lagi sebelum user memilih; setelah dipilih, "
+                              "panggil lagi dengan 'format'='excel' atau 'pdf'."),
+        }
+
+    d = epc_weichai.catalog_walk(rangka, kategori)
+    if not d.get("found"):
+        err = d.get("_err")
+        reason = d.get("reason")
+        if err == "no_link" or reason == "no_link":
+            return {"found": False, "error": ("Unit ini tidak punya link EPC Weichai (mesin "
+                    "non-Weichai atau rangka salah). Katalog mesin hanya untuk unit bermesin Weichai.")}
+        if err in ("no_engine", "no_order", "empty"):
+            return {"found": False, "error": "EPC Weichai tak mengembalikan data mesin untuk unit ini."}
+        if err == "network":
+            return {"found": False, "error": "Gagal menghubungi server EPC Weichai (jaringan). Coba lagi."}
+        if err == "no_category":
+            tersedia = d.get("tersedia") or []
+            return {"found": False,
+                    "error": (d.get("message") or "Bagian mesin tak dikenal.")
+                    + " Sebutkan bagian lain (blok/kepala silinder/bahan bakar/pelumas/"
+                      "pendingin/turbo/kompresor/alternator) atau 'lengkap'.",
+                    "kelompok_tersedia": tersedia[:40]}
+        return {"found": False, "error": (d.get("message")
+                or "EPC Weichai tidak mengembalikan katalog untuk unit ini.")}
+
+    frame = d.get("frame_number") or rangka
+    kat_nama = "Mesin Lengkap" if d.get("lengkap") else kategori.title()
+    judul = f"Katalog {kat_nama} {frame}"
+    ext = "pdf" if fmt == "pdf" else "xlsx"
+    export_id, filename = ai_export.stash_builder(
+        judul, {"kind": "katalog_mesin", "rangka": rangka, "kategori": kategori, "fmt": fmt}, ext=ext)
+    durasi = "±2-3 menit" if d.get("lengkap") else "±1 menit"
+    fmt_label = "PDF" if fmt == "pdf" else "Excel"
+    return {
+        "found": True, "export_id": export_id, "filename": filename, "judul": judul,
+        "format": fmt_label, "frame_number": frame, "engine_model": d.get("engine_model"),
+        "katalog_lengkap": bool(d.get("lengkap")),
+        "jumlah_figure": d.get("jumlah_figure"), "jumlah_baris": d.get("jumlah_part"),
+        "kategori_cocok": (d.get("kategori_cocok") or [])[:20],
+        **({"peringatan_tidak_lengkap":
+            "⚠️ Sebagian data EPC Weichai gagal diambil — katalog bisa belum lengkap; sarankan coba lagi."}
+           if d.get("incomplete") else {}),
+        "catatan": (f"Katalog mesin {fmt_label} siap — KARTU UNDUH otomatis muncul di bawah jawabanmu. "
+                    "Jawab SINGKAT: sebut jumlah figure + jumlah part + bahwa tiap figure ada GAMBAR "
+                    "exploded view resmi EPC Weichai dengan nomor balon, dan UNDUHAN PERTAMA butuh "
+                    f"{durasi} (menyusun gambar). ⛔ JANGAN menulis daftar part/figure satu-satu, "
+                    "JANGAN membuat link/URL sendiri."),
+    }
+
+
 def _t_katalog_kategori(args: dict, user: dict) -> dict:
     """KATALOG BERGAMBAR per kategori per-VIN — walk Atlas (epc_bom.catalog_walk,
     di-cache), lalu stash RESEP export; Excel bergambar dibangun saat kartu
@@ -3947,6 +4055,7 @@ _DISPATCH = {
     "daftar_pesanan": _t_daftar_pesanan,
     "buat_excel": _t_buat_excel,
     "katalog_kategori": _t_katalog_kategori,
+    "katalog_mesin": _t_katalog_mesin,
     "gambar_exploded": _t_gambar_exploded,
 }
 
@@ -4319,6 +4428,14 @@ def _system_prompt(user: dict) -> str:
         "semua kategori) — baru panggil tool setelah user memilih. ⛔ JANGAN pakai buat_excel/"
         "kategori_unit/bom_dari_rangka utk permintaan KATALOG, JANGAN tulis daftar part "
         "satu-satu, JANGAN buat link sendiri. Butuh rangka — bila user tak menyebut, minta dulu.\n"
+        "- 🔧 KATALOG BERGAMBAR MESIN (Weichai): bila user minta 'katalog MESIN <rangka>', 'buku "
+        "part mesin unit X', 'katalog blok/piston/bahan bakar/injektor mesin', 'catalog engine + "
+        "gambar' → WAJIB panggil katalog_mesin(rangka, kategori) — ini part INTERNAL MESIN Weichai "
+        "(figure per-kelompok: blok, kepala silinder, kruk as, bahan bakar, pelumas, pendingin, "
+        "turbo, kompresor, alternator/starter), BEDA dari katalog_kategori (bodi/sasis Sinotruk). "
+        "kategori='lengkap' utk seluruh mesin. Sama seperti katalog lain: bila user belum menyebut "
+        "bagian/format, TANYAKAN dulu (tool memandu); jawab SINGKAT setelah kartu unduh muncul. "
+        "HANYA unit bermesin Weichai (WP-series).\n"
         "- 🖼️ GAMBAR EXPLODED VIEW SATU PN (inline di chat, BUKAN file): bila user minta "
         "'tampilkan/lihat GAMBAR exploded view part ini', 'gambar/skema PN <X>', 'part ini "
         "nomor balon berapa' → panggil gambar_exploded(rangka, pn, kategori). Gambar figure "
@@ -5160,7 +5277,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
 
     def _capture_meta(name: str, args: dict, result: dict) -> None:
         """Kumpulkan metadata untuk tombol/kartu/gambar di frontend."""
-        if name in ("buat_excel", "katalog_kategori", "banding_rangka_massal") and result.get("found"):
+        if name in ("buat_excel", "katalog_kategori", "katalog_mesin", "banding_rangka_massal") and result.get("found"):
             item = {"id": result.get("export_id"), "filename": result.get("filename"),
                     "judul": result.get("judul"), "jumlah_baris": result.get("jumlah_baris")}
             if item["id"] and item not in excel_exports:

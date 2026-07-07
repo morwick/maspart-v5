@@ -294,12 +294,13 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
         if cached:
             return cached, d["filename"]
         b = d["builder"]
-        if b.get("kind") == "katalog":
+        if b.get("kind") in ("katalog", "katalog_mesin"):
+            src = "weichai" if b.get("kind") == "katalog_mesin" else "sinotruk"
             fmt = (b.get("fmt") or "excel").lower()
             if fmt == "pdf":
-                data, err = katalog_pdf(b.get("rangka", ""), b.get("kategori", ""))
+                data, err = katalog_pdf(b.get("rangka", ""), b.get("kategori", ""), src)
             else:
-                data, err = katalog_excel(b.get("rangka", ""), b.get("kategori", ""))
+                data, err = katalog_excel(b.get("rangka", ""), b.get("kategori", ""), src)
             if data is None:
                 return None, err
             with _stash_lock:
@@ -441,13 +442,26 @@ def exploded_png(svg_name: str, ball=None) -> bytes | None:
     return _svg_to_png(_highlight_ball(svg, ball))
 
 
-def katalog_excel(rangka: str, kategori: str) -> tuple[bytes | None, str]:
+def _katalog_source(rangka: str, kategori: str, source: str):
+    """Ambil hasil walk + fungsi pengambil-SVG sesuai sumber katalog.
+    'sinotruk' → epc_bom.catalog_walk + fetch_file(nama); 'weichai' →
+    epc_weichai.catalog_walk + fetch_svg(svgFileId, token). Return (d, fetch)."""
+    if source == "weichai":
+        from . import epc_weichai as _wc
+        d = _wc.catalog_walk(rangka, kategori)
+        tok = d.get("_token")
+        return d, (lambda ref: _wc.fetch_svg(ref, tok))
+    from . import epc_bom as _epc
+    return _epc.catalog_walk(rangka, kategori), _epc.fetch_file
+
+
+def katalog_excel(rangka: str, kategori: str, source: str = "sinotruk") -> tuple[bytes | None, str]:
     """KATALOG PART BERGAMBAR satu kategori per-VIN: satu sheet per FIGURE
     (gambar exploded view EPC + tabel part ber-nomor balon + stok/harga lokal)
-    + sheet Ringkasan. Return (bytes, filename) atau (None, pesan_error)."""
-    from . import epc_bom as _epc
+    + sheet Ringkasan. Return (bytes, filename) atau (None, pesan_error).
+    source='weichai' → katalog MESIN Weichai (figure=group, gambar via dePreview)."""
+    d, _fetch = _katalog_source(rangka, kategori, source)
 
-    d = _epc.catalog_walk(rangka, kategori)
     if not d.get("found"):
         return None, (d.get("message") or "Gagal mengambil katalog dari EPC. Coba lagi.")
     figures = (d.get("figures") or [])[:_KATALOG_MAX_FIGURES]
@@ -455,11 +469,11 @@ def katalog_excel(rangka: str, kategori: str) -> tuple[bytes | None, str]:
         return None, f"Tidak ada figure untuk kategori '{kategori}' di unit ini."
     frame = d.get("frame_number") or ""
 
-    # 1) Unduh + render SEMUA gambar paralel (nama file → PNG bytes).
+    # 1) Unduh + render SEMUA gambar paralel (referensi gambar → PNG bytes).
     svg_names = list(dict.fromkeys(f["svg"] for f in figures if f.get("svg")))
 
     def _render(name: str) -> tuple[str, bytes | None]:
-        return name, _svg_to_png(_epc.fetch_file(name))
+        return name, _svg_to_png(_fetch(name))
 
     pngs: dict[str, bytes] = {}
     if svg_names:
@@ -630,10 +644,11 @@ def _pdf_esc(v) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def katalog_pdf(rangka: str, kategori: str) -> tuple[bytes | None, str]:
+def katalog_pdf(rangka: str, kategori: str, source: str = "sinotruk") -> tuple[bytes | None, str]:
     """Versi PDF (siap cetak/kirim) dari katalog_excel: satu bagian per FIGURE —
     judul, gambar exploded view EPC, lalu tabel part ber-nomor balon + stok/harga.
-    Return (bytes, filename) atau (None, pesan_error)."""
+    Return (bytes, filename) atau (None, pesan_error).
+    source='weichai' → katalog MESIN Weichai."""
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4, landscape
@@ -645,9 +660,8 @@ def katalog_pdf(rangka: str, kategori: str) -> tuple[bytes | None, str]:
     except Exception:
         return None, "Modul PDF (reportlab) belum terpasang di server."
 
-    from . import epc_bom as _epc
+    d, _fetch = _katalog_source(rangka, kategori, source)
 
-    d = _epc.catalog_walk(rangka, kategori)
     if not d.get("found"):
         return None, (d.get("message") or "Gagal mengambil katalog dari EPC. Coba lagi.")
     figures = (d.get("figures") or [])[:_KATALOG_MAX_FIGURES]
@@ -658,7 +672,7 @@ def katalog_pdf(rangka: str, kategori: str) -> tuple[bytes | None, str]:
     svg_names = list(dict.fromkeys(f["svg"] for f in figures if f.get("svg")))
 
     def _render(name: str) -> tuple[str, bytes | None]:
-        return name, _svg_to_png(_epc.fetch_file(name))
+        return name, _svg_to_png(_fetch(name))
 
     pngs: dict[str, bytes] = {}
     if svg_names:
@@ -693,8 +707,9 @@ def katalog_pdf(rangka: str, kategori: str) -> tuple[bytes | None, str]:
     avail_w = page[0] - 24 * mm
     story: list = [
         Paragraph(f"Katalog Part — {_pdf_esc(kategori.title())}", st_title),
-        Paragraph(f"Unit / VIN: {_pdf_esc(frame)} · {len(figures)} figure · "
-                  "Sumber: EPC Parts Atlas resmi (Sinotruk) — MASPART", st_sub),
+        Paragraph(f"Unit / VIN: {_pdf_esc(frame)} · {len(figures)} figure · Sumber: "
+                  + ("EPC Weichai resmi (mesin, per-VIN)" if source == "weichai"
+                     else "EPC Parts Atlas resmi (Sinotruk)") + " — MASPART", st_sub),
         Spacer(1, 6),
     ]
 
