@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 
 from .core.config import get_settings
 from .routers import admin, ai, auth, branch, buyer, chat, geo, harga, orders, parts, populasi, repairkit, stok
-from .services import accurate, image_search, part_index
+from .services import accurate, ai_sinonim_learn, image_search, part_index
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,6 +52,13 @@ def _warmup():
         accurate.start_scheduled_refresh()
     except Exception as e:  # pragma: no cover
         print(f"[startup] scheduler refresh Accurate gagal: {e}")
+    try:
+        # Usulan sinonim otomatis harian (loop belajar): miss baru cukup banyak →
+        # LLM menyusun usulan di latar; admin tinggal Setujui di halaman
+        # Pencarian Nihil.
+        ai_sinonim_learn.start_scheduled_generate()
+    except Exception as e:  # pragma: no cover
+        print(f"[startup] scheduler usulan sinonim gagal: {e}")
 
 
 @asynccontextmanager

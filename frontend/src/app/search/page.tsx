@@ -7,6 +7,7 @@ import {
   ApiError,
   searchParts,
   type PartResult,
+  type SaranPart,
   type SearchMode,
 } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
@@ -30,6 +31,8 @@ export default function SearchPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [truncated, setTruncated] = useState(false);
   const [searched, setSearched] = useState(false);
+  // "Mungkin maksud Anda" dari backend — hanya terisi saat 0 hasil.
+  const [saran, setSaran] = useState<SaranPart[]>([]);
 
   // Saring live di atas hasil.
   const [refine, setRefine] = useState("");
@@ -125,6 +128,7 @@ export default function SearchPage() {
       setAllResults(acc);
       setTotalCount(first.count);
       setTruncated(first.count > acc.length);
+      setSaran(first.saran ?? []);
       setActiveQuery(term);
       setActiveMode(searchMode);
       setRefine("");
@@ -138,6 +142,7 @@ export default function SearchPage() {
       setError(err instanceof Error ? err.message : "Gagal mencari");
       setAllResults([]);
       setTotalCount(0);
+      setSaran([]);
       setSearched(true);
     } finally {
       setLoading(false);
@@ -303,6 +308,29 @@ export default function SearchPage() {
                   <span style={{ color: "var(--warn-600)" }}>
                     {` · memuat ${allResults.length.toLocaleString("id-ID")} dari ${totalCount.toLocaleString("id-ID")} — persempit kata kunci utama`}
                   </span>
+                )}
+                {shown === 0 && !refine.trim() && saran.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <span style={{ fontWeight: 600, color: "var(--ink-700)" }}>Mungkin maksud Anda: </span>
+                    {saran.map((s) => (
+                      <button
+                        key={`${s.part_number}|${s.part_name}`}
+                        className="pill"
+                        style={{ marginRight: 6, marginTop: 4, cursor: "pointer", fontSize: 11.5 }}
+                        title={s.part_name || s.part_number}
+                        onClick={() => {
+                          // PN → cari ulang mode PN; hanya-nama → cari ulang mode nama.
+                          const term = s.part_number || s.part_name;
+                          const m: SearchMode = s.part_number ? "pn" : "name";
+                          setMode(m);
+                          setQ(term);
+                          runSearch(term, m);
+                        }}
+                      >
+                        {s.part_number ? `${s.part_number}${s.part_name ? ` — ${s.part_name}` : ""}` : s.part_name}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
               <div className="grow" />

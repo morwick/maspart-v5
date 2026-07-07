@@ -27,6 +27,11 @@ export type PartResult = {
   berat?: number;  // berat per item (gram); 0/undefined = belum ditetapkan
 };
 
+export type SaranPart = {
+  part_number: string;
+  part_name: string;
+};
+
 export type SearchResponse = {
   term: string;
   count: number;
@@ -34,6 +39,7 @@ export type SearchResponse = {
   page_size: number;
   total_pages: number;
   results: PartResult[];
+  saran?: SaranPart[]; // "mungkin maksud Anda" — hanya saat 0 hasil
 };
 
 export class ApiError extends Error {

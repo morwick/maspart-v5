@@ -37,6 +37,11 @@ class PartResult(BaseModel):
     source: str = ""  # "" = database lokal, "sims" = nama diambil dari SIMS
 
 
+class SaranPart(BaseModel):
+    part_number: str = ""
+    part_name: str = ""
+
+
 class SearchResponse(BaseModel):
     term: str
     count: int           # total hasil (semua halaman)
@@ -44,6 +49,7 @@ class SearchResponse(BaseModel):
     page_size: int
     total_pages: int
     results: list[PartResult]  # hanya potongan halaman ini
+    saran: list[SaranPart] = []  # "mungkin maksud Anda" — hanya diisi saat 0 hasil
 
 
 class PartPhotos(BaseModel):

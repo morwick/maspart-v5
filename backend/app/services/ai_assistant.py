@@ -1477,6 +1477,25 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         note = ("Tidak ada hasil persis — lihat 'saran_mungkin_maksud' (PN/nama serupa) dan "
                 "tawarkan ke user, jangan langsung menyerah.")
 
+    # FALLBACK SIMS — PN valid yang tak ada di katalog lokal (kasus nyata: PN
+    # Weichai numerik spt 1014167092). Sama seperti halaman Cari Part
+    # (_sims_fallback): ambil NAMA PART dari SIMS supaya asisten tidak menjawab
+    # 'tidak ada' untuk part yang nyata. Maks 3 PN per query (hemat panggilan).
+    hasil_sims: list[dict] = []
+    if not items and sims.available():
+        for p in part_index.pn_tokens(q)[:3]:
+            if len(p) < 4:
+                continue
+            nama_sims = (str((sims.get_part_info(p) or {}).get("partName") or "")).strip()
+            if nama_sims:
+                hasil_sims.append({"part_number": p.upper(), "part_name": nama_sims,
+                                   "sumber": "SIMS (katalog resmi Sinotruk)"})
+    if hasil_sims:
+        note = ((note + " ") if note else "") + (
+            "PN TIDAK ada di katalog lokal, tapi DIKENALI katalog resmi SIMS — lihat "
+            "'hasil_sims' (nama part resmi). Sampaikan itu ke user; untuk harga/detail "
+            "lanjutkan dengan detail_part atau harga_sims. JANGAN bilang part tidak ada.")
+
     # UMPAN BALIK KAMUS: catat pencarian yang 0 hasil. Daftar 'MISS' ini = istilah
     # lapangan yang belum dikenali sistem → kandidat tambahan untuk sinonim.json.
     # Cek log: docker logs <container> 2>&1 | grep MISS  (lihat PROJECT.md §3.5.3).
@@ -1488,8 +1507,9 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         )
         # Catat ke log persisten (halaman admin 'Pencarian Nihil') — hanya bila
         # istilah tak dikenali sinonim (yang dikenali tapi 0 hasil = data belum ada,
-        # bukan celah kamus). Best-effort.
-        if not matched_syn:
+        # bukan celah kamus) DAN SIMS juga tidak mengenalnya (kalau SIMS kenal,
+        # itu bukan celah kamus istilah). Best-effort.
+        if not matched_syn and not hasil_sims:
             try:
                 search_log.record_miss(q, "nama", "asisten")
             except Exception:
@@ -1502,6 +1522,7 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         "ditampilkan": len(out),
         "jumlah_tersedia_stok": jumlah_tersedia,
         "saran_mungkin_maksud": saran,
+        "hasil_sims": hasil_sims,
         "urutan": "Hasil DIURUT berdasarkan KECOCOKAN/KOMPATIBILITAS part dengan katalog (BUKAN stok). Rekomendasikan part yang paling cocok untuk unit/kebutuhan user — stok hanya info, bukan dasar rekomendasi.",
         "info_stok_harga": "Stok & harga berlaku per Part Number (sama untuk semua varian unit yang memakai PN itu).",
         "hasil": out,

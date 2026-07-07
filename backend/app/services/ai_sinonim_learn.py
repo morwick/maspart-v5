@@ -17,6 +17,7 @@ Resilient: LLM gagal → kembalikan error ringkas tanpa mengubah state.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -26,6 +27,8 @@ import requests
 
 from ..core.config import get_settings
 from . import part_index, search_log, sinonim
+
+logger = logging.getLogger("maspart.sinonim")
 
 _lock = threading.Lock()
 _TIMEOUT = 90
@@ -263,6 +266,53 @@ def approve(usulan_id: str, triggers: list[str] | None = None,
     if not ok:
         raise RuntimeError(msg)
     return u
+
+
+# ── Generate TERJADWAL (latar) — usulan siap saat admin membuka halaman ──────
+# Pola sama dgn accurate.start_scheduled_refresh: thread daemon, idempoten.
+# LLM hanya dipanggil bila miss baru cukup banyak → hemat & tidak berisik.
+_SCHED_INTERVAL = 24 * 3600     # cek sekali sehari
+_SCHED_STARTUP_DELAY = 600      # tunggu startup selesai (indeks part dibangun dulu)
+_SCHED_MIN_KANDIDAT = 3         # minimal miss baru sebelum memanggil LLM
+
+_sched_lock = threading.Lock()
+_sched_started = False
+
+
+def start_scheduled_generate() -> bool:
+    """Mulai thread daemon usulan sinonim berkala. Idempoten; True hanya saat
+    thread baru benar-benar dimulai."""
+    global _sched_started
+    with _sched_lock:
+        if _sched_started:
+            return False
+        _sched_started = True
+    threading.Thread(target=_sched_loop, daemon=True,
+                     name="sinonim-usulan-generate").start()
+    return True
+
+
+def _sched_loop() -> None:  # pragma: no cover — loop tidur; logika inti dites via generate()
+    time.sleep(_SCHED_STARTUP_DELAY)
+    while True:
+        try:
+            _sched_tick()
+        except Exception as e:
+            logger.warning("usulan sinonim terjadwal gagal: %s", e)
+        time.sleep(_SCHED_INTERVAL)
+
+
+def _sched_tick() -> None:
+    """Satu putaran: cek kandidat; cukup banyak → generate (LLM sekali)."""
+    if not get_settings().ai_configured:
+        return
+    with _lock:
+        n = len(_kandidat(_SCHED_MIN_KANDIDAT))
+    if n < _SCHED_MIN_KANDIDAT:
+        return
+    res = generate(limit=10)
+    logger.info("usulan sinonim terjadwal: %s dibuat (%s pending menunggu admin)",
+                res.get("dibuat"), len(list_usulan("pending")))
 
 
 def reject(usulan_id: str) -> dict:

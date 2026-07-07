@@ -60,7 +60,8 @@ def _sims_fallback(term: str) -> list[dict]:
     }]
 
 
-def _paginate(term: str, results: list, page: int, page_size: int) -> SearchResponse:
+def _paginate(term: str, results: list, page: int, page_size: int,
+              saran: list[dict] | None = None) -> SearchResponse:
     total = len(results)
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(max(1, page), total_pages)
@@ -72,6 +73,7 @@ def _paginate(term: str, results: list, page: int, page_size: int) -> SearchResp
         page_size=page_size,
         total_pages=total_pages,
         results=results[start : start + page_size],
+        saran=saran or [],
     )
 
 
@@ -138,9 +140,15 @@ def search(
         sims_results = _sims_fallback(q)
         if sims_results:
             results = results + sims_results
-    if not results and page == 1:
-        search_log.record_miss(q, "pn", "search")
-    return _paginate(q, _overlay_accurate(_scope_gudang(results, user)), page, page_size)
+    saran: list[dict] = []
+    if not results:
+        # "Mungkin maksud Anda" — PN katalog selisih 1-2 karakter + nama mirip
+        # (mesin saran yang sama dengan asisten AI).
+        saran = (part_index.suggest_pns(q) + part_index.suggest_names(q, limit=6))[:6]
+        if page == 1:
+            search_log.record_miss(q, "pn", "search")
+    return _paginate(q, _overlay_accurate(_scope_gudang(results, user)), page, page_size,
+                     saran=saran)
 
 
 @router.get("/search-name", response_model=SearchResponse)
@@ -151,9 +159,13 @@ def search_name(
     user: dict = Depends(get_current_user),
 ):
     results = part_index.search_part_name(q)
-    if not results and page == 1:
-        search_log.record_miss(q, "name", "search")
-    return _paginate(q, _overlay_accurate(_scope_gudang(results, user)), page, page_size)
+    saran: list[dict] = []
+    if not results:
+        saran = part_index.suggest_names(q, limit=6)
+        if page == 1:
+            search_log.record_miss(q, "name", "search")
+    return _paginate(q, _overlay_accurate(_scope_gudang(results, user)), page, page_size,
+                     saran=saran)
 
 
 @router.get("/accurate-stock")
