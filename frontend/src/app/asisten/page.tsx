@@ -1135,8 +1135,13 @@ function Bubble({
         {m.excelExports?.map((exp, i) => (
           <AiExcelCard key={exp.id || i} exp={exp} />
         ))}
-        <AiExplodedImages images={m.explodedImages} />
-        <PartThumbs pns={m.partPns} />
+        {/* Foto part + gambar exploded view BERSEBELAHAN (bukan menumpuk):
+            kartu foto di kiri, exploded view di sampingnya; membungkus ke bawah
+            di layar sempit. */}
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <PartThumbs pns={m.partPns} />
+          <AiExplodedImages images={m.explodedImages} />
+        </div>
         {(tools.length > 0 || time || onFeedback) && (
           <div
             style={{
