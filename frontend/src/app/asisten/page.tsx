@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
+import ImageLightbox from "@/components/ImageLightbox";
 import Markdown from "@/components/Markdown";
 import {
   ApiError,
@@ -658,6 +659,7 @@ function PartThumbs({ pns }: { pns?: string[] }) {
 function AiExplodedImages({ images }: { images?: AIExplodedImage[] }) {
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [err, setErr] = useState(false);
+  const [zoomId, setZoomId] = useState<string | null>(null);
   const key = (images || []).map((i) => i.id).join(",");
   useEffect(() => {
     const token = getToken();
@@ -691,13 +693,21 @@ function AiExplodedImages({ images }: { images?: AIExplodedImage[] }) {
 
   const list = (images || []).filter((i) => i.id).slice(0, 3);
   if (list.length === 0) return null;
+  const zoomImg = zoomId ? list.find((i) => i.id === zoomId) : null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
       {list.map((img) => (
         <figure key={img.id} style={{ margin: 0, border: "1px solid var(--ink-200)", borderRadius: 12, overflow: "hidden", background: "var(--paper)", maxWidth: 560 }}>
           {urls[img.id] ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={urls[img.id]} alt={`Exploded view ${img.pn || ""}`} loading="lazy" style={{ width: "100%", display: "block", background: "#fff" }} />
+            <button
+              type="button"
+              onClick={() => setZoomId(img.id)}
+              title="Klik untuk memperbesar & zoom"
+              style={{ display: "block", width: "100%", padding: 0, border: 0, background: "#fff", cursor: "zoom-in" }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={urls[img.id]} alt={`Exploded view ${img.pn || ""}`} loading="lazy" style={{ width: "100%", display: "block", background: "#fff" }} />
+            </button>
           ) : (
             <div style={{ height: 200, display: "grid", placeItems: "center", color: "var(--ink-400)", fontSize: 12 }}>
               {err ? "Gambar kedaluwarsa — minta lagi." : "Memuat gambar exploded view…"}
@@ -714,6 +724,20 @@ function AiExplodedImages({ images }: { images?: AIExplodedImage[] }) {
           </figcaption>
         </figure>
       ))}
+      {zoomImg && urls[zoomImg.id] && (
+        <ImageLightbox
+          src={urls[zoomImg.id]}
+          onClose={() => setZoomId(null)}
+          alt={`Exploded view ${zoomImg.pn || ""}`}
+          caption={
+            <>
+              {zoomImg.balon != null ? `Balon ${zoomImg.balon} · ` : ""}
+              <span className="mono">{zoomImg.pn}</span>
+              {zoomImg.nama_figure ? ` · ${zoomImg.nama_figure}` : ""}
+            </>
+          }
+        />
+      )}
     </div>
   );
 }

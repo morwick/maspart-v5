@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
+import ImageLightbox from "@/components/ImageLightbox";
 import { ApiError, getAccurateStock, getPartPhotos, getPartSpec, getBuyerLocations, partImageUrl, searchParts, type AccurateStock, type BuyerLocation, type PartResult, type PartSpec } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { ensurePerms } from "@/lib/perms";
@@ -26,13 +27,6 @@ export default function PartDetailPage() {
   const [loadingPhotos, setLoadingPhotos] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [dragging, setDragging] = useState(false);
-  const lbRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ x: number; y: number } | null>(null);
-  const movedRef = useRef(false);
-  const zoomRef = useRef(1);
   const [backHref, setBackHref] = useState("/search");
   const [showStok, setShowStok] = useState(true);
   const [showHarga, setShowHarga] = useState(true);
@@ -117,50 +111,6 @@ export default function PartDetailPage() {
       active = false;
     };
   }, [pn, router]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setLightbox(null);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // Reset zoom/geser tiap kali buka gambar baru.
-  useEffect(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  }, [lightbox]);
-
-  useEffect(() => {
-    zoomRef.current = zoom;
-    if (zoom <= 1) setPan({ x: 0, y: 0 });
-  }, [zoom]);
-
-  // Lightbox: scroll untuk zoom (non-passive) + seret untuk geser.
-  useEffect(() => {
-    if (!lightbox) return;
-    const el = lbRef.current;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      setZoom((z) => Math.min(8, Math.max(1, z * (e.deltaY < 0 ? 1.12 : 0.89))));
-    };
-    el?.addEventListener("wheel", onWheel, { passive: false });
-    const onMove = (e: MouseEvent) => {
-      if (!dragRef.current || zoomRef.current <= 1) return;
-      movedRef.current = true;
-      setPan({ x: e.clientX - dragRef.current.x, y: e.clientY - dragRef.current.y });
-    };
-    const onUp = () => {
-      dragRef.current = null;
-      setDragging(false);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      el?.removeEventListener("wheel", onWheel);
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [lightbox]);
 
   const main = units[0];
   const gudang = useMemo(() => Object.entries(main?.gudang || {}), [main]);
@@ -418,62 +368,11 @@ export default function PartDetailPage() {
       </div>
 
       {lightbox && (
-        <div
-          ref={lbRef}
-          className="fixed inset-0 z-50 grid place-items-center p-4"
-          style={{ background: "rgba(0,0,0,.85)", overflow: "hidden", cursor: zoom > 1 ? (dragging ? "grabbing" : "grab") : "default" }}
-          onMouseDown={(e) => {
-            if (e.button !== 0 || zoom <= 1) return;
-            dragRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
-            movedRef.current = false;
-            setDragging(true);
-          }}
-          onClick={() => {
-            if (movedRef.current) {
-              movedRef.current = false;
-              return;
-            }
-            setLightbox(null);
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setLightbox(null)}
-            className="btn btn-sm"
-            style={{ position: "absolute", right: 16, top: 16, background: "rgba(255,255,255,.12)", color: "#fff", zIndex: 2 }}
-          >
-            ✕ Tutup
-          </button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={partImageUrl(lightbox)}
-            alt="Foto part"
-            draggable={false}
-            onClick={(e) => e.stopPropagation()}
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              setZoom(1);
-              setPan({ x: 0, y: 0 });
-            }}
-            style={{
-              maxHeight: "90vh",
-              maxWidth: "100%",
-              borderRadius: 8,
-              objectFit: "contain",
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-              transition: dragging ? "none" : "transform .08s ease-out",
-              userSelect: "none",
-            }}
-          />
-          <div
-            style={{
-              position: "absolute", bottom: 14, left: 0, right: 0, textAlign: "center",
-              fontSize: 12, color: "rgba(255,255,255,.6)", pointerEvents: "none",
-            }}
-          >
-            Scroll untuk zoom · seret untuk geser · klik dua kali untuk reset
-          </div>
-        </div>
+        <ImageLightbox
+          src={partImageUrl(lightbox)}
+          onClose={() => setLightbox(null)}
+          alt="Foto part"
+        />
       )}
     </AppShell>
   );
