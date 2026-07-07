@@ -62,6 +62,21 @@ def _can_orders(user: dict) -> bool:
     return role == "admin" or bool(gudang.gudang_for_user(user.get("username", ""), role))
 
 
+def _is_pembeli(user: dict) -> bool:
+    return (user.get("role") or "").lower() == "pembeli"
+
+
+def _hide_gudang_for_buyer(result: dict, user: dict) -> dict:
+    """Sembunyikan rincian stok ANTAR-CABANG dari akun pembeli. Pembeli hanya
+    berhak melihat total & stok tergudang miliknya (lewat jalur web terscope),
+    BUKAN enumerasi kuantitas tiap cabang. Dipakai di semua tool yang bisa
+    memuat 'stok_per_gudang' (detail_part, cari_part, stok_accurate). Mutasi
+    di tempat + kembalikan result agar enak dirangkai."""
+    if _is_pembeli(user):
+        result.pop("stok_per_gudang", None)
+    return result
+
+
 _SINONIM_CACHE: dict = {"mtime": None, "data": []}
 
 
@@ -1366,6 +1381,8 @@ def _t_cari_part(args: dict, user: dict) -> dict:
             slim = _slim_part(r)
             slim.pop("lokasi_file", None)
             slim.pop("unit", None)
+            # Pembeli: sembunyikan breakdown antar-cabang (lihat _hide_gudang_for_buyer).
+            _hide_gudang_for_buyer(slim, user)
             # Hemat token: buang field KOSONG per baris (artinya 'belum ada data' —
             # aturan 5b system prompt sudah menjelaskan cara menyampaikannya).
             if not slim.get("stok_per_gudang"):
@@ -1563,6 +1580,9 @@ def _t_detail_part(args: dict, user: dict) -> dict:
     base = _slim_part(hits[0])
     base.pop("unit", None)
     base.pop("lokasi_file", None)
+    # Pembeli tak boleh lihat breakdown antar-cabang (dari Excel maupun Accurate).
+    # Buang di SUMBER — sebelum jalur Accurate di bawah menimpanya utk non-pembeli.
+    _hide_gudang_for_buyer(base, user)
     result = {
         "found": True,
         **base,
@@ -1621,7 +1641,7 @@ def _t_stok_accurate(args: dict, user: dict) -> dict:
     if not hit:
         return {"part_number": pn, "sumber": "Accurate", "ditemukan": False,
                 "pesan": "PN ini tidak ada di data Accurate."}
-    return {
+    out = {
         "part_number": pn,
         "sumber": "Accurate (sinkron berkala)",
         "ditemukan": True,
@@ -1636,6 +1656,8 @@ def _t_stok_accurate(args: dict, user: dict) -> dict:
             {"gudang": g["gudang"], "qty": g["qty"]} for g in (hit.get("per_gudang") or [])
         ],
     }
+    # Pembeli tak boleh enumerasi stok tiap cabang (samakan dgn detail_part/cari_part).
+    return _hide_gudang_for_buyer(out, user)
 
 
 def _t_harga_sims(args: dict, user: dict) -> dict:
@@ -1676,7 +1698,13 @@ def _t_info_aplikasi(args: dict, user: dict) -> dict:
 
 
 def _t_pesanan_saya(args: dict, user: dict) -> dict:
-    rows = orders.list_orders(username=user.get("username"))
+    uname = (user.get("username") or "").strip()
+    # Tanpa username, orders.list_orders(username=None) TAK memfilter → akan
+    # mengembalikan pesanan SEMUA customer. Tolak dini; jangan pernah query
+    # orders tanpa filter dari jalur asisten.
+    if not uname:
+        return {"error": "Sesi tidak dikenali (username kosong) — tidak bisa menampilkan pesanan."}
+    rows = orders.list_orders(username=uname)
     return {"jumlah": len(rows), "pesanan": rows[:30]}
 
 
@@ -1684,7 +1712,10 @@ def _t_detail_pesanan(args: dict, user: dict) -> dict:
     code = (args.get("order_code") or "").strip()
     if not code:
         return {"error": "order_code kosong"}
-    o = orders.get_order(code, username=user.get("username"))
+    uname = (user.get("username") or "").strip()
+    if not uname:  # tanpa filter username, get_order bisa membuka pesanan siapa saja
+        return {"error": "Sesi tidak dikenali (username kosong) — tidak bisa membuka pesanan."}
+    o = orders.get_order(code, username=uname)
     if not o:
         return {"order_code": code, "found": False, "pesan": "Pesanan tidak ditemukan / bukan milik Anda."}
     keep = (
@@ -4191,11 +4222,67 @@ def _run_tool(name: str, args: dict, user: dict) -> dict:
     fn = _DISPATCH.get(name)
     if not fn:
         return {"error": f"tool tidak dikenal: {name}"}
+    # PENJAGA TERPUSAT (defense in depth): jalankan HANYA tool yang memang
+    # ditawarkan ke peran user ini. Tanpa ini, satu-satunya benteng adalah
+    # re-check peran di tiap handler — sekali ada tool sensitif baru yang lupa
+    # cek, ia bisa dipanggil lintas-peran via prompt-injection/riwayat palsu.
+    if name not in _allowed_tool_names(user):
+        logger.warning("tool %s ditolak untuk peran %s/%s", name,
+                       user.get("role"), user.get("username"))
+        return {"denied": True,
+                "error": f"Tool '{name}' tidak tersedia untuk peran Anda."}
     try:
         return fn(args or {}, user)
     except Exception as e:  # pragma: no cover
         logger.exception("tool %s gagal", name)
         return {"error": f"tool '{name}' gagal dijalankan: {e}"}
+
+
+def _allowed_tool_names(user: dict) -> set[str]:
+    """Nama tool yang SAH untuk peran user — sumber kebenaran sama dgn yang
+    ditawarkan ke model (_tool_specs), jadi allow-list eksekusi tak pernah
+    menyimpang dari daftar yang di-expose."""
+    return {f["function"]["name"] for f in _tool_specs(user)}
+
+
+_MAX_TOOL_CONTENT = 24000  # batas char JSON hasil tool yg di-append ke messages
+
+
+def _cap_tool_content(s: str) -> str:
+    """Batasi panjang JSON hasil tool yang dimasukkan ke riwayat percakapan.
+    Hasil raksasa (banding_rangka_massal, katalog_mesin) bila di-append penuh
+    tiap ronde membuat token membengkak & bisa menembus limit konteks model
+    (→ API 400 → 502). Tool tetap mengembalikan data lengkap ke frontend lewat
+    metadata; yang dipotong hanya salinan untuk konsumsi model."""
+    if len(s) <= _MAX_TOOL_CONTENT:
+        return s
+    return (s[:_MAX_TOOL_CONTENT]
+            + f"\n…[dipotong {len(s) - _MAX_TOOL_CONTENT} karakter — hasil terlalu "
+              "besar; rangkum dari bagian di atas, jangan menebak sisanya]")
+
+
+def _tool_failed(result: dict) -> bool:
+    """True bila hasil tool = kegagalan/kekosongan lookup (error, ditolak, atau
+    'tidak ditemukan'). Dipakai untuk mengingatkan model agar TIDAK mengarang
+    stok/harga saat data sebenarnya gagal diambil (guard PN tak menangkap angka)."""
+    if not isinstance(result, dict):
+        return False
+    if result.get("error") or result.get("denied"):
+        return True
+    # found/ditemukan/tersedia == False → lookup nihil (bedakan dari absennya key).
+    for k in ("found", "ditemukan", "tersedia"):
+        if result.get(k) is False:
+            return True
+    return False
+
+
+_LOOKUP_GAGAL_NOTE = (
+    "[CATATAN SISTEM] Sebagian tool di atas GAGAL / tidak menemukan data (lihat "
+    "field 'error'/'denied'/'found=false'). DILARANG mengarang angka stok, harga, "
+    "atau ketersediaan untuk item yang datanya gagal diambil. Sampaikan apa adanya "
+    "bahwa data tidak tersedia / gagal diambil, dan bila relevan sarankan langkah "
+    "(coba lagi, cek nomor, atau hubungi admin)."
+)
 
 
 def _units_context() -> str:
@@ -5432,20 +5519,48 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                         "kategori_nama": result.get("kategori") or "semua part"}
                 if item not in banding_exports:
                     banding_exports.append(item)
-    # Guard anti-halusinasi: kumpulan PN yang SAH. Diambil dari SELURUH riwayat —
-    # pesan user (PN/VIN yang ia sebut) DAN jawaban asisten turn sebelumnya (yang
-    # sudah LOLOS guard saat dibuat) — plus hasil tool turn ini. Menyertakan jawaban
-    # asisten sebelumnya penting agar FOLLOW-UP yang menjawab dari konteks TANPA
-    # panggil tool ulang tidak salah-tandai PN lama yang sah, sekaligus tetap
-    # menangkap PN BARU yang dikarang (tak ada di riwayat mana pun).
+    # Guard anti-halusinasi: kumpulan PN yang SAH.
+    #  • Pesan USER → tepercaya apa adanya (PN/VIN yang user ketik).
+    #  • Pesan ASSISTANT → TIDAK otomatis tepercaya: seluruh riwayat dikirim mentah
+    #    oleh KLIEN (tak ada sesi server), jadi klien bisa menyisipkan turn
+    #    "assistant" palsu berisi PN KARANGAN agar lolos guard. PN dari turn
+    #    assistant hanya di-ground bila TERBUKTI ADA di katalog lokal — PN nyata
+    #    dari jawaban sebelumnya (follow-up sah) tetap lolos, PN fiktif hasil
+    #    forgery tidak. (PN hasil tool turn ini di-ground terpisah di bawah.)
     grounded: set[str] = set()
+    _asst_pns: set[str] = set()
     for _m in history:
-        grounded |= _extract_pns((_m or {}).get("content") or "")
+        role = (_m or {}).get("role")
+        pns = _extract_pns((_m or {}).get("content") or "")
+        if role == "user":
+            grounded |= pns
+        elif role == "assistant":
+            _asst_pns |= pns
+    if _asst_pns:
+        try:
+            _ada = {(r.get("part_number") or "").upper()
+                    for r in part_index.search_exact_pns(list(_asst_pns))}
+            grounded |= {p for p in _asst_pns if p.upper() in _ada}
+        except Exception:
+            pass  # gagal cek katalog → jangan ground dari assistant (aman by default)
     guard_retries = 0
     empty_retries = 0  # model hanya menulis [PIKIR]/kosong → paksa tulis ulang
+    lookup_gagal = False  # ada tool lookup yang error/tak ketemu → jangan mengarang angka
 
-    for _round in range(_MAX_TOOL_ROUNDS):
-        data = _post_chat(messages, tools)
+    # Anggaran RONDE TOOL (produktif: model benar-benar memanggil tool) DIPISAH
+    # dari anggaran RETRY (kosong/guard: tak menjalankan tool). Dulu semuanya
+    # berbagi satu `range(_MAX_TOOL_ROUNDS)` lewat `continue`, sehingga retry
+    # koreksi bisa menghabiskan jatah ronde tool & rantai fallback panjang
+    # kelaparan. Kini: tool_rounds dibatasi _MAX_TOOL_ROUNDS; retry dibatasi
+    # counter-nya sendiri; _iters = pagar total agar mustahil loop selamanya.
+    tool_rounds = 0
+    _iters = 0
+    _MAX_ITERS = _MAX_TOOL_ROUNDS + _MAX_EMPTY_RETRIES + _MAX_GUARD_RETRIES + 2
+    while _iters < _MAX_ITERS:
+        _iters += 1
+        tools_habis = tool_rounds >= _MAX_TOOL_ROUNDS
+        # Ronde tool habis → jangan tawarkan tool lagi, paksa jawaban final.
+        data = _post_chat(messages, [] if tools_habis else tools)
         choice = (data.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
         tool_calls = msg.get("tool_calls") or []
@@ -5454,8 +5569,9 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
         # Tangani pemanggilan tool yang BOCOR sebagai teks (model menulisnya alih-alih
         # memakai field tool_calls API): jalankan tool-nya, jangan biarkan ke layar.
         if not tool_calls:
-            leaked = _parse_leaked_tool_calls(content)
+            leaked = [] if tools_habis else _parse_leaked_tool_calls(content)
             if leaked:
+                tool_rounds += 1  # leaked = tool BENAR dijalankan → ronde produktif
                 messages.append({"role": "assistant", "content": _strip_tool_markup(content)})
                 for lc in leaked:
                     name = lc["name"]
@@ -5472,9 +5588,12 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                             f"[HASIL TOOL {name}] (sistem sudah MENJALANKAN tool ini — "
                             "JANGAN tulis pemanggilan tool sebagai teks; pakai hasil ini "
                             "untuk menjawab):\n"
-                            + json.dumps(result, ensure_ascii=False, default=str)
+                            + _cap_tool_content(json.dumps(result, ensure_ascii=False, default=str))
                         ),
                     })
+                    if _tool_failed(result) and not lookup_gagal:
+                        lookup_gagal = True
+                        messages.append({"role": "user", "content": _LOOKUP_GAGAL_NOTE})
                 continue
 
             reply = _strip_reasoning(content)
@@ -5507,6 +5626,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                     "part_pns": _mentioned_part_pns(reply, grounded)}
 
         # Catat pesan assistant (yang berisi tool_calls) lalu jalankan tiap tool.
+        tool_rounds += 1  # ronde produktif (model memanggil tool via API)
         messages.append({
             "role": "assistant",
             "content": _strip_tool_markup(content),
@@ -5528,8 +5648,15 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.get("id"),
-                "content": json.dumps(result, ensure_ascii=False, default=str),
+                "content": _cap_tool_content(json.dumps(result, ensure_ascii=False, default=str)),
             })
+            if _tool_failed(result):
+                lookup_gagal = True
+        if lookup_gagal:
+            # Ingatkan SEKALI per turn (setelah batch tool) agar model tak mengarang
+            # angka utk lookup yang gagal. Reset flag agar tak menumpuk tiap ronde.
+            messages.append({"role": "user", "content": _LOOKUP_GAGAL_NOTE})
+            lookup_gagal = False
 
     # Putaran tool habis — minta jawaban final tanpa tool.
     final = _post_chat(messages, [])
