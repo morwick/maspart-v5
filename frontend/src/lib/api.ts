@@ -570,6 +570,31 @@ export async function getPopulasi(
   return res.json();
 }
 
+export async function getPopulasiKolom(
+  token: string,
+  opts: {
+    q?: string;
+    filters?: Record<string, string>;
+    sort?: string;
+    dir?: "asc" | "desc";
+    kolom?: string; // kosong = kolom nomor rangka
+  } = {},
+): Promise<{ kolom: string | null; jumlah: number; values: string[] }> {
+  const qs = new URLSearchParams({ q: opts.q ?? "" });
+  if (opts.filters && Object.keys(opts.filters).length)
+    qs.set("filters", JSON.stringify(opts.filters));
+  if (opts.sort) {
+    qs.set("sort", opts.sort);
+    qs.set("dir", opts.dir ?? "asc");
+  }
+  if (opts.kolom) qs.set("kolom", opts.kolom);
+  const res = await fetch(`${API_BASE}/api/populasi/kolom?${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 export async function exportPopulasi(
   token: string,
   opts: { q?: string; filters?: Record<string, string> } = {},

@@ -53,6 +53,28 @@ def get_data(
     }
 
 
+@router.get("/kolom")
+def kolom_values(
+    q: str = Query(""),
+    filters: str = Query(""),
+    sort: str = Query(""),
+    dir: str = Query("asc"),
+    kolom: str = Query("", description="Nama kolom persis; kosong = kolom nomor rangka"),
+    _user: dict = Depends(get_current_user),
+):
+    """SEMUA nilai satu kolom dari hasil filter (tanpa paginasi), urut sesuai
+    sort aktif — untuk tombol 'Salin No. Rangka' (tempel ke Excel/WA, satu per
+    baris). Ringan: hanya string satu kolom, bukan seluruh baris."""
+    cols = populasi.columns()
+    target = kolom if kolom in cols else next((c for c in cols if "RANGKA" in c.upper()), None)
+    if not target:
+        return {"kolom": None, "jumlah": 0, "values": []}
+    df = populasi.query(q, _parse_filters(filters))
+    df = populasi.sort_df(df, sort, dir)
+    vals = [s for s in (str(v).strip() for v in df[target].fillna("")) if s]
+    return {"kolom": target, "jumlah": len(vals), "values": vals}
+
+
 @router.get("/export")
 def export(
     q: str = Query(""),

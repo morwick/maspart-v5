@@ -8,6 +8,7 @@ import {
   downloadBlob,
   exportPopulasi,
   getPopulasi,
+  getPopulasiKolom,
   type PopulasiResponse,
 } from "@/lib/api";
 import { clearSession, getToken } from "@/lib/auth";
@@ -25,6 +26,8 @@ export default function PopulasiPage() {
   const [error, setError] = useState<string | null>(null);
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [copying, setCopying] = useState(false);
+  const [copyMsg, setCopyMsg] = useState<string | null>(null);
 
   const load = useCallback(
     async (
@@ -97,6 +100,50 @@ export default function PopulasiPage() {
     load(p, q, filters, sortCol, sortDir);
   }
 
+  async function handleCopyRangka() {
+    const token = getToken();
+    if (!token) return router.replace("/login");
+    setCopying(true);
+    setCopyMsg(null);
+    setError(null);
+    try {
+      // Ambil SELURUH hasil filter (bukan cuma halaman ini), urut sesuai sort aktif.
+      const res = await getPopulasiKolom(token, {
+        q,
+        filters,
+        sort: sortCol ?? undefined,
+        dir: sortDir,
+      });
+      if (!res.values.length) {
+        setCopyMsg("Tidak ada nomor rangka pada hasil filter.");
+        return;
+      }
+      const text = res.values.join("\n");
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // Fallback utk browser tanpa izin Clipboard API.
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      setCopyMsg(`✓ ${res.jumlah.toLocaleString("id-ID")} nomor rangka disalin — tinggal tempel (satu per baris).`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearSession();
+        return router.replace("/login");
+      }
+      setError(err instanceof Error ? err.message : "Gagal menyalin nomor rangka");
+    } finally {
+      setCopying(false);
+    }
+  }
+
   async function handleExport() {
     const token = getToken();
     if (!token) return router.replace("/login");
@@ -148,6 +195,15 @@ export default function PopulasiPage() {
           </button>
           <button
             type="button"
+            onClick={handleCopyRangka}
+            disabled={copying || !data || data.total_filtered === 0}
+            className="btn btn-secondary"
+            title="Salin semua nomor rangka hasil filter ke clipboard, satu per baris"
+          >
+            {copying ? "Menyalin…" : "⧉ Salin No. Rangka"}
+          </button>
+          <button
+            type="button"
             onClick={handleExport}
             disabled={!data || data.total_filtered === 0}
             className="btn btn-secondary"
@@ -163,6 +219,7 @@ export default function PopulasiPage() {
             <span>Total <b style={{ color: "var(--ink-800)" }} className="mono">{data.total.toLocaleString("id-ID")}</b> unit</span>
             <span>·</span>
             <span>Hasil filter <b style={{ color: "var(--ink-800)" }} className="mono">{data.total_filtered.toLocaleString("id-ID")}</b></span>
+            {copyMsg && <span style={{ color: "var(--brand-700)", fontWeight: 600 }}>{copyMsg}</span>}
           </div>
         )}
 
