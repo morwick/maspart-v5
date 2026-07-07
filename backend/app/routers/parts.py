@@ -200,6 +200,7 @@ def batch_template(_user: dict = Depends(get_current_user)):
 async def batch_catalog(
     text: str = Form("", description="Daftar part number, 1 per baris"),
     file: UploadFile | None = File(None, description="File Excel/CSV berisi PN di kolom A"),
+    columns: str = Form("", description="Kolom dipilih, pisah koma (nama,foto,stok,harga_sims,harga_accurate,harga_daftar)"),
     _user: dict = Depends(get_current_user),
 ):
     # Kumpulkan PN dari file (kolom A) atau teks manual.
@@ -233,8 +234,9 @@ async def batch_catalog(
             f"Maksimum {catalog._MAX_BATCH} PN per batch (diberikan {len(part_numbers)}).",
         )
 
+    col_list = [c.strip() for c in columns.split(",") if c.strip()]
     try:
-        xls = catalog.build_catalog_excel(part_numbers)
+        xls = catalog.build_catalog_excel(part_numbers, columns=col_list)
     except Exception as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Gagal membuat katalog: {e}")
 

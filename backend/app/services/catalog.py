@@ -84,12 +84,63 @@ def _fetch_image_bytes(url: str) -> bytes | None:
     return None
 
 
-def build_catalog_excel(part_numbers: list[str], on_progress=None) -> bytes:
+# ── Kolom katalog yang bisa DIPILIH user ─────────────────────────────────────
+# Part Number SELALU disertakan. Kunci di bawah = opsi yang bisa dicentang di
+# frontend. Urutan _COLUMN_ORDER = urutan kolom di Excel (teks dulu, gambar kanan).
+_COLUMN_DEFS: dict[str, tuple[str, int]] = {
+    "nama": ("Part Name", 30),
+    "kecocokan": ("Kecocokan", 45),
+    "stok": ("Stok", 16),
+    "harga_sims": ("Harga SIMS", 18),
+    "harga_accurate": ("Harga Jual Accurate", 22),
+    "harga_daftar": ("Harga (Daftar)", 18),
+}
+_COLUMN_ORDER = [
+    "nama", "kecocokan", "stok", "harga_sims", "harga_accurate", "harga_daftar", "foto",
+]
+# Default bila user tidak memilih apa pun (perilaku ramah: identitas + foto + stok).
+_DEFAULT_COLUMNS = ("nama", "foto", "stok")
+
+
+def clean_columns(cols) -> list[str]:
+    """Saring pilihan kolom user → hanya kunci sah, urut sesuai _COLUMN_ORDER.
+    Kosong/tak sah → _DEFAULT_COLUMNS."""
+    if not cols:
+        return list(_DEFAULT_COLUMNS)
+    want = {str(c).strip().lower() for c in cols}
+    out = [c for c in _COLUMN_ORDER if c in want]
+    return out or list(_DEFAULT_COLUMNS)
+
+
+def _fmt_qty(v) -> str:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return "0"
+    return str(int(f)) if f == int(f) else f"{f:g}"
+
+
+def build_catalog_excel(part_numbers: list[str], columns=None, on_progress=None) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
     from openpyxl.drawing.image import Image as XLImage
     from PIL import Image as PILImage
+
+    from . import accurate, harga
+
+    cols = clean_columns(columns)
+    text_cols = [c for c in cols if c != "foto"]   # kolom teks terpilih, terurut
+    has_foto = "foto" in cols
+    need_accurate = "stok" in cols or "harga_accurate" in cols
+    need_sims_price = "harga_sims" in cols
+
+    rate = 0.0
+    if need_sims_price:
+        try:
+            rate, _ = harga.get_rate()
+        except Exception:
+            rate = 0.0
 
     wb = Workbook()
     ws = wb.active
@@ -102,9 +153,15 @@ def build_catalog_excel(part_numbers: list[str], on_progress=None) -> bytes:
     thin = Side(style="thin", color="BDBDBD")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    headers = ["Part Number", "Part Name", "Kecocokan", "Gambar 1", "Gambar 2"]
-    col_widths = [20, 30, 45, 38, 38]
-    for ci, (h, w) in enumerate(zip(headers, col_widths), start=1):
+    # Susun header dinamis: Part Number + kolom teks terpilih + (Gambar 1, Gambar 2).
+    headers = ["Part Number"] + [_COLUMN_DEFS[c][0] for c in text_cols]
+    widths = [20] + [_COLUMN_DEFS[c][1] for c in text_cols]
+    img_col_1 = None
+    if has_foto:
+        img_col_1 = len(text_cols) + 2          # indeks 1-based kolom "Gambar 1"
+        headers += ["Gambar 1", "Gambar 2"]
+        widths += [38, 38]
+    for ci, (h, w) in enumerate(zip(headers, widths), start=1):
         c = ws.cell(row=1, column=ci, value=h)
         c.font = header_font
         c.fill = header_fill
@@ -139,56 +196,95 @@ def build_catalog_excel(part_numbers: list[str], on_progress=None) -> bytes:
 
         info = _lookup_part(pn)
         part_name = info["part_name"]
-        kecocokan = info["kecocokan"] or "—"
         is_found = info["found"]
         fill = (fill_even if i % 2 == 0 else fill_odd) if is_found else fill_nf
-        row_height = 80
+
+        stok_entry = accurate.stock_for(pn) if need_accurate else None
+
+        # Nilai tiap kolom teks terpilih.
+        vals: dict[str, str] = {}
+        if "kecocokan" in cols:
+            vals["kecocokan"] = info["kecocokan"] or "—"
+        if "stok" in cols:
+            vals["stok"] = (
+                f'{_fmt_qty(stok_entry["available_to_sell"])} {stok_entry.get("unit", "")}'.strip()
+                if stok_entry else "—"
+            )
+        if "harga_accurate" in cols:
+            p = stok_entry.get("price") if stok_entry else 0
+            vals["harga_accurate"] = harga.fmt_rp(p) if p else "—"
+        if "harga_sims" in cols:
+            try:
+                cny, _note = sims.get_price(pn)
+            except Exception:
+                cny = None
+            vals["harga_sims"] = harga.fmt_rp(round(cny * rate)) if (cny is not None and rate) else "—"
+        if "harga_daftar" in cols:
+            dp, dname = harga.price_for(pn)
+            vals["harga_daftar"] = harga.fmt_rp(dp) if dp else "—"
+            if not part_name and dname:
+                part_name = dname
+
+        # Fallback nama part: lokal → Accurate → daftar harga → SIMS (paling akhir, jaringan).
+        if "nama" in cols and not part_name and stok_entry and stok_entry.get("name"):
+            part_name = stok_entry["name"]
+        if "nama" in cols and not part_name:
+            _dp, dname = harga.price_for(pn)
+            if dname:
+                part_name = dname
+
+        # Gambar (hanya bila kolom foto dipilih — melewati ini mempercepat batch).
         img_d = img_e = None
+        row_height = 80 if has_foto else 22
+        if has_foto:
+            urls = sims.get_images(pn)
+            if urls:
+                b1 = _fetch_image_bytes(urls[0])
+                if b1:
+                    try:
+                        xl, h = _xl_image(b1)
+                        img_d = xl
+                        row_height = max(int(h * 0.75) + 10, row_height)
+                        hash1 = hashlib.md5(b1).hexdigest()
+                        for u2 in urls[1:]:
+                            b2 = _fetch_image_bytes(u2)
+                            if b2 and hashlib.md5(b2).hexdigest() != hash1:
+                                xl2, h2 = _xl_image(b2)
+                                img_e = xl2
+                                row_height = max(int(h2 * 0.75) + 10, row_height)
+                                break
+                    except Exception:
+                        pass
 
-        urls = sims.get_images(pn)
-        if urls:
-            b1 = _fetch_image_bytes(urls[0])
-            if b1:
-                try:
-                    xl, h = _xl_image(b1)
-                    img_d = xl
-                    row_height = max(int(h * 0.75) + 10, row_height)
-                    hash1 = hashlib.md5(b1).hexdigest()
-                    for u2 in urls[1:]:
-                        b2 = _fetch_image_bytes(u2)
-                        if b2 and hashlib.md5(b2).hexdigest() != hash1:
-                            xl2, h2 = _xl_image(b2)
-                            img_e = xl2
-                            row_height = max(int(h2 * 0.75) + 10, row_height)
-                            break
-                except Exception:
-                    pass
+        # Nama dari SIMS kalau masih kosong (upaya terakhir, jaringan).
+        if "nama" in cols and not part_name:
+            try:
+                info_sims = sims.get_part_info(pn)
+                if info_sims.get("partName"):
+                    part_name = info_sims["partName"]
+            except Exception:
+                pass
+        vals["nama"] = part_name or ""
 
-        # Part name dari SIMS kalau tak ketemu lokal
-        if not is_found and not part_name:
-            info_sims = sims.get_part_info(pn)
-            if info_sims.get("partName"):
-                part_name = info_sims["partName"]
+        # Tulis Part Number.
+        c = ws.cell(row=row_idx, column=1, value=_xlsafe(pn))
+        c.fill, c.border, c.alignment, c.font = fill, border, center, Font(name="Arial", size=10)
+        # Tulis kolom teks terpilih (nama/kecocokan rata kiri, sisanya tengah).
+        for offset, key in enumerate(text_cols, start=2):
+            aln = left if key in ("nama", "kecocokan") else center
+            c = ws.cell(row=row_idx, column=offset, value=_xlsafe(vals.get(key, "")))
+            c.fill, c.border, c.alignment, c.font = fill, border, aln, Font(name="Arial", size=10)
+        # Kolom gambar: sel kosong bergaya + tempel gambar.
+        if has_foto:
+            for ci in (img_col_1, img_col_1 + 1):
+                c = ws.cell(row=row_idx, column=ci, value="")
+                c.fill, c.border, c.alignment = fill, border, center
+            if img_d:
+                ws.add_image(img_d, f"{get_column_letter(img_col_1)}{row_idx}")
+            if img_e:
+                ws.add_image(img_e, f"{get_column_letter(img_col_1 + 1)}{row_idx}")
 
         ws.row_dimensions[row_idx].height = row_height
-        for ci, (val, aln) in enumerate(
-            [(pn, center), (part_name, left), (kecocokan, left)], start=1
-        ):
-            c = ws.cell(row=row_idx, column=ci, value=_xlsafe(val))
-            c.fill = fill
-            c.border = border
-            c.alignment = aln
-            c.font = Font(name="Arial", size=10)
-        for ci in (4, 5):
-            c = ws.cell(row=row_idx, column=ci, value="")
-            c.fill = fill
-            c.border = border
-            c.alignment = center
-
-        if img_d:
-            ws.add_image(img_d, f"D{row_idx}")
-        if img_e:
-            ws.add_image(img_e, f"E{row_idx}")
         row_idx += 1
 
     ws.freeze_panes = "A2"

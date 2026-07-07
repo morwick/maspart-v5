@@ -624,11 +624,12 @@ export async function fetchBatchTemplate(token: string): Promise<Blob> {
 
 export async function buildBatchCatalog(
   token: string,
-  opts: { text?: string; file?: File | null },
+  opts: { text?: string; file?: File | null; columns?: string[] },
 ): Promise<Blob> {
   const form = new FormData();
   if (opts.file) form.append("file", opts.file);
   else form.append("text", opts.text ?? "");
+  if (opts.columns && opts.columns.length) form.append("columns", opts.columns.join(","));
   const res = await fetch(`${API_BASE}/api/parts/batch-catalog`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },

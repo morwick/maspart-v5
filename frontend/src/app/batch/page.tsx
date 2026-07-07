@@ -11,6 +11,19 @@ import {
 } from "@/lib/api";
 import { clearSession, getToken } from "@/lib/auth";
 
+// Kolom yang bisa dipilih untuk disertakan di katalog Excel.
+// Part Number selalu ikut (tidak bisa dimatikan).
+const COLUMN_OPTS: { key: string; label: string; desc: string }[] = [
+  { key: "nama", label: "Nama Part", desc: "Nama/deskripsi part" },
+  { key: "foto", label: "Foto", desc: "2 gambar dari SIMS (paling lambat)" },
+  { key: "stok", label: "Stok", desc: "Stok Accurate (live)" },
+  { key: "harga_sims", label: "Harga SIMS", desc: "Harga SIMS × kurs → Rupiah" },
+  { key: "harga_accurate", label: "Harga Jual Accurate", desc: "Harga jual dari Accurate" },
+  { key: "harga_daftar", label: "Harga (Daftar)", desc: "Dari daftar harga internal" },
+  { key: "kecocokan", label: "Kecocokan", desc: "File katalog lokal yang cocok" },
+];
+const DEFAULT_COLUMNS = ["nama", "foto", "stok"];
+
 export default function BatchPage() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -19,6 +32,13 @@ export default function BatchPage() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [columns, setColumns] = useState<string[]>(DEFAULT_COLUMNS);
+
+  function toggleColumn(key: string) {
+    setColumns((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  }
 
   useEffect(() => {
     if (!getToken()) router.replace("/login");
@@ -57,10 +77,14 @@ export default function BatchPage() {
       setError("Masukkan part number atau unggah file dulu.");
       return;
     }
+    if (columns.length === 0) {
+      setError("Pilih minimal satu kolom untuk disertakan.");
+      return;
+    }
     setError(null);
     setLoading(true);
     try {
-      const blob = await buildBatchCatalog(token, { text, file });
+      const blob = await buildBatchCatalog(token, { text, file, columns });
       downloadBlob(blob, "catalog.xlsx");
     } catch (err) {
       if (!authOr401(err))
@@ -74,13 +98,58 @@ export default function BatchPage() {
     <AppShell active="/batch" title="Batch Download" sub="Unduh katalog Excel banyak part sekaligus">
       <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-7">
         <p style={{ marginBottom: 16, fontSize: 13.5, color: "var(--ink-500)" }}>
-          Masukkan banyak part number sekaligus → unduh katalog Excel berisi nama part & gambar
-          (dari SIMS). Maksimum 300 PN per batch.
+          Masukkan banyak part number sekaligus → unduh katalog Excel. Pilih sendiri kolom yang
+          disertakan (nama, foto, stok, harga). Maksimum 300 PN per batch.
         </p>
 
         <button onClick={handleTemplate} className="btn btn-secondary" style={{ marginBottom: 18 }}>
           📄 Download Template Input
         </button>
+
+        {/* Pemilihan kolom */}
+        <section style={{ marginBottom: 18 }}>
+          <label className="block" style={{ marginBottom: 8, fontSize: 13, fontWeight: 600, color: "var(--ink-700)" }}>
+            Kolom yang disertakan
+          </label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <span
+              className="mono"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px",
+                borderRadius: 10, fontSize: 12.5, fontWeight: 600,
+                background: "var(--brand-50)", color: "var(--brand-700)", border: "1px solid var(--brand-100)",
+              }}
+              title="Selalu disertakan"
+            >
+              Part Number · wajib
+            </span>
+            {COLUMN_OPTS.map((opt) => {
+              const on = columns.includes(opt.key);
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => toggleColumn(opt.key)}
+                  title={opt.desc}
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 12px",
+                    borderRadius: 10, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                    background: on ? "var(--brand-600)" : "var(--paper)",
+                    color: on ? "#fff" : "var(--ink-600)",
+                    border: on ? "1px solid var(--brand-600)" : "1px solid var(--ink-200)",
+                    transition: "all .12s",
+                  }}
+                >
+                  <span style={{ fontSize: 13, lineHeight: 1 }}>{on ? "✓" : "+"}</span>
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          <p style={{ marginTop: 8, fontSize: 11.5, color: "var(--ink-400)" }}>
+            Tip: matikan <b>Foto</b> agar proses jauh lebih cepat bila hanya butuh stok/harga.
+          </p>
+        </section>
 
         {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
 
@@ -131,7 +200,7 @@ export default function BatchPage() {
 
         <button
           onClick={handleProcess}
-          disabled={loading || (!file && !text.trim())}
+          disabled={loading || columns.length === 0 || (!file && !text.trim())}
           className="btn btn-primary btn-lg"
           style={{ marginTop: 24, width: "100%" }}
         >
@@ -139,7 +208,9 @@ export default function BatchPage() {
         </button>
         {loading && (
           <p style={{ marginTop: 8, textAlign: "center", fontSize: 12, color: "var(--ink-400)" }}>
-            Mengambil gambar dari SIMS untuk tiap part — bisa beberapa menit untuk banyak PN.
+            {columns.includes("foto") || columns.includes("harga_sims")
+              ? "Mengambil data dari SIMS untuk tiap part — bisa beberapa menit untuk banyak PN."
+              : "Menyusun katalog — sebentar lagi selesai."}
           </p>
         )}
       </div>
