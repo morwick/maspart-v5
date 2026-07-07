@@ -47,6 +47,8 @@ type NavItem = { key?: string; href: string; label: string; icon: ReactNode; bad
 type NavSection = { label: string; items: NavItem[] };
 
 const NAV_DASHBOARD: NavItem = { href: "/dashboard", label: "Dashboard", icon: I.dashboard };
+// Beranda ringkas untuk staf internal (user/cabang) — bukan Command Center admin.
+const NAV_BERANDA: NavItem = { href: "/beranda", label: "Beranda", icon: I.dashboard };
 const NAV_PRIMARY: NavItem[] = [
   { key: "ai", href: "/asisten", label: "Asisten AI", icon: I.ai },
   { key: "search", href: "/search", label: "Cari Part", icon: I.search },
@@ -199,8 +201,8 @@ export default function AppShell({
   const sections: NavSection[] = useMemo(() => {
     if (isBuyer) return [{ label: "Belanja", items: NAV_BUYER }];
     const out: NavSection[] = [];
-    // Dashboard Command Center — khusus admin.
-    if (isAdmin) out.push({ label: "Ringkasan", items: [NAV_DASHBOARD] });
+    // Ringkasan: admin → Command Center; staf internal → Beranda ringkas.
+    out.push({ label: "Ringkasan", items: [isAdmin ? NAV_DASHBOARD : NAV_BERANDA] });
     out.push(
       { label: "Pencarian", items: NAV_PRIMARY.filter(show) },
       { label: "Data", items: NAV_DATA.filter(show) },
