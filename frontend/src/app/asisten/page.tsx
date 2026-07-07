@@ -656,6 +656,9 @@ function PartThumbs({ pns }: { pns?: string[] }) {
 
 // Gambar EXPLODED VIEW (tool gambar_exploded) — tampil INLINE di jawaban.
 // PNG dilayani /api/ai/excel/{id} (butuh auth) → fetch blob → objectURL utk <img>.
+// Batas selaras dgn backend (_MAX_EXPLODED_FIGURES) agar semua figure yg
+// dibangun ikut tampil.
+const MAX_EXPLODED = 6;
 function AiExplodedImages({ images }: { images?: AIExplodedImage[] }) {
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [err, setErr] = useState(false);
@@ -663,7 +666,7 @@ function AiExplodedImages({ images }: { images?: AIExplodedImage[] }) {
   const key = (images || []).map((i) => i.id).join(",");
   useEffect(() => {
     const token = getToken();
-    const list = (images || []).filter((i) => i.id).slice(0, 3);
+    const list = (images || []).filter((i) => i.id).slice(0, MAX_EXPLODED);
     if (!token || list.length === 0) {
       setUrls({});
       return;
@@ -691,7 +694,7 @@ function AiExplodedImages({ images }: { images?: AIExplodedImage[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  const list = (images || []).filter((i) => i.id).slice(0, 3);
+  const list = (images || []).filter((i) => i.id).slice(0, MAX_EXPLODED);
   if (list.length === 0) return null;
   const zoomImg = zoomId ? list.find((i) => i.id === zoomId) : null;
   return (

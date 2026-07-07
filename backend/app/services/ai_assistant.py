@@ -31,6 +31,8 @@ _MAX_TOOL_ROUNDS = 8          # batas putaran panggil-tool agar tidak loop;
 _MAX_HISTORY = 16             # batas pesan riwayat yang dikirim balik ke model
 _MAX_PART_ROWS = 12           # batas baris hasil pencarian part global (hemat token)
 _MAX_PART_ROWS_UNIT = 25      # batas lebih longgar saat difilter ke 1 unit (daftar lengkap)
+_MAX_EXPLODED_FIGURES = 6     # batas figure exploded view per panggilan gambar_exploded
+                              # (render PNG per-figure + fetch per-gambar di frontend)
 
 
 class AINotConfigured(RuntimeError):
@@ -3891,7 +3893,7 @@ def _t_gambar_exploded(args: dict, user: dict) -> dict:
                           "terpasang tapi tak ber-gambar, itu part work-BOM (baut/mur) yang tak "
                           "digambar di Parts Atlas.")}
     gambar = []
-    for f in d["figures"][:3]:   # cap 3 figure agar tak membanjiri chat
+    for f in d["figures"][:_MAX_EXPLODED_FIGURES]:   # batas figure agar tak membanjiri chat
         judul = f"Exploded {pn} - {f.get('nama') or kategori}"
         image_id, filename = ai_export.stash_builder(
             judul, {"kind": "exploded", "svg": f["svg"], "balon": f.get("balon")}, ext="png")
