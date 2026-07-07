@@ -698,34 +698,28 @@ function AiExplodedImages({ images }: { images?: AIExplodedImage[] }) {
   if (list.length === 0) return null;
   const zoomImg = zoomId ? list.find((i) => i.id === zoomId) : null;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
+    <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
       {list.map((img) => (
-        <figure key={img.id} style={{ margin: 0, border: "1px solid var(--ink-200)", borderRadius: 12, overflow: "hidden", background: "var(--paper)", maxWidth: 560 }}>
-          {urls[img.id] ? (
-            <button
-              type="button"
-              onClick={() => setZoomId(img.id)}
-              title="Klik untuk memperbesar & zoom"
-              style={{ display: "block", width: "100%", padding: 0, border: 0, background: "#fff", cursor: "zoom-in" }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={urls[img.id]} alt={`Exploded view ${img.pn || ""}`} loading="lazy" style={{ width: "100%", display: "block", background: "#fff" }} />
-            </button>
-          ) : (
-            <div style={{ height: 200, display: "grid", placeItems: "center", color: "var(--ink-400)", fontSize: 12 }}>
-              {err ? "Gambar kedaluwarsa — minta lagi." : "Memuat gambar exploded view…"}
-            </div>
-          )}
-          <figcaption style={{ padding: "7px 10px", fontSize: 12, color: "var(--ink-600)", borderTop: "1px solid var(--ink-100)" }}>
-            {img.balon != null && (
-              <span style={{ display: "inline-block", minWidth: 20, textAlign: "center", background: "var(--brand, #16a34a)", color: "#fff", borderRadius: 999, padding: "0 6px", marginRight: 6, fontWeight: 700 }}>
-                {img.balon}
-              </span>
+        // Thumbnail KECIL seukuran kartu foto (78px); klik → perbesar (lightbox).
+        <button
+          key={img.id}
+          type="button"
+          onClick={() => urls[img.id] && setZoomId(img.id)}
+          title={urls[img.id] ? "Klik untuk memperbesar exploded view" : "Memuat…"}
+          style={{ width: 78, borderRadius: 10, border: "1px solid var(--ink-200)", background: "var(--paper)", cursor: urls[img.id] ? "zoom-in" : "default", overflow: "hidden", padding: 0 }}
+        >
+          <div style={{ width: "100%", height: 64, background: "#fff", display: "grid", placeItems: "center" }}>
+            {urls[img.id] ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={urls[img.id]} alt={`Exploded view ${img.pn || ""}`} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            ) : (
+              <span style={{ fontSize: 9, color: "var(--ink-400)" }}>{err ? "gagal" : "…"}</span>
             )}
-            <span className="mono" style={{ fontWeight: 600 }}>{img.pn}</span>
-            {img.nama_figure ? <span style={{ color: "var(--ink-500)" }}> · {img.nama_figure}</span> : null}
-          </figcaption>
-        </figure>
+          </div>
+          <div className="mono truncate" style={{ fontSize: 9.5, color: "var(--ink-500)", padding: "3px 4px" }}>
+            {img.balon != null ? `#${img.balon} ` : ""}{img.pn}
+          </div>
+        </button>
       ))}
       {zoomImg && urls[zoomImg.id] && (
         <ImageLightbox
