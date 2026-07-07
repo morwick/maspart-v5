@@ -6,7 +6,7 @@ export const metadata: Metadata = {
 };
 
 const APK_URL = "/maspart.apk";
-const APK_SIZE = "51 MB";
+const APK_SIZE = "18 MB";
 const APP_VERSION = "1.0.0";
 
 export default function DownloadPage() {

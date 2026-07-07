@@ -37,6 +37,9 @@ frontend/node_modules/
 frontend/.next/
 frontend/.env.local
 
+# Binari aplikasi Android (besar ~18MB, di-deploy via scp bukan git)
+*.apk
+
 # IDE / OS / build artefak
 .vscode/
 .idea/
