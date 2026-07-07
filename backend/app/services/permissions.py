@@ -73,6 +73,8 @@ def all_effective(username: str, role: str) -> dict:
         "harga_subtabs": effective("harga", username, role),
         "role": role,
         "branch": gudang.gudang_label(branch) if branch else None,
+        # Boleh ekspor kolom harga di Batch Download — admin & akun 'mas' saja.
+        "can_price": gudang.can_see_price(username, role),
     }
 
 

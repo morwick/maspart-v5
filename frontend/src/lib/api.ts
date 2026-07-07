@@ -714,6 +714,7 @@ export type MyPermissions = {
   harga_subtabs: string[];
   role: string;
   branch?: string | null; // label gudang bila akun cabang
+  can_price?: boolean; // boleh ekspor kolom harga di Batch (admin & akun 'mas')
 };
 
 export async function getMyPermissions(token: string): Promise<MyPermissions> {

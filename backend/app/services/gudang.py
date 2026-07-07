@@ -12,6 +12,12 @@ from . import gudang_config
 
 SEE_ALL_ACCOUNTS = {"mas"}
 
+
+def can_see_price(username: str, role: str) -> bool:
+    """Boleh lihat/mengekspor harga (SIMS/jual Accurate/daftar): HANYA admin &
+    akun SEE_ALL (mis. 'mas'). Konsisten dgn aturan harga di asisten AI."""
+    return (role or "").lower() == "admin" or (username or "").strip().lower() in SEE_ALL_ACCOUNTS
+
 ACCOUNT_GUDANG: dict[str, str] = {
     "jakarta": "01.Jakarta",
     "balikpapan": "03.Balikpapan",

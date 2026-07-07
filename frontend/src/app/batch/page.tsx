@@ -10,6 +10,7 @@ import {
   fetchBatchTemplate,
 } from "@/lib/api";
 import { clearSession, getToken } from "@/lib/auth";
+import { ensurePerms } from "@/lib/perms";
 
 // Kolom yang bisa dipilih untuk disertakan di katalog Excel.
 // Part Number selalu ikut (tidak bisa dimatikan).
@@ -23,6 +24,8 @@ const COLUMN_OPTS: { key: string; label: string; desc: string }[] = [
   { key: "kecocokan", label: "Kecocokan", desc: "File katalog lokal yang cocok" },
 ];
 const DEFAULT_COLUMNS = ["nama", "foto", "stok"];
+// Kolom harga: hanya admin & akun 'mas' (di-enforce juga di backend).
+const PRICE_KEYS = ["harga_sims", "harga_accurate", "harga_daftar"];
 
 export default function BatchPage() {
   const router = useRouter();
@@ -33,6 +36,7 @@ export default function BatchPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [columns, setColumns] = useState<string[]>(DEFAULT_COLUMNS);
+  const [canPrice, setCanPrice] = useState(false);
 
   function toggleColumn(key: string) {
     setColumns((prev) =>
@@ -41,8 +45,20 @@ export default function BatchPage() {
   }
 
   useEffect(() => {
-    if (!getToken()) router.replace("/login");
+    if (!getToken()) {
+      router.replace("/login");
+      return;
+    }
+    ensurePerms().then((p) => {
+      const allow = !!p?.can_price;
+      setCanPrice(allow);
+      // Amankan: buang kolom harga dari pilihan bila akun ini tak berizin.
+      if (!allow) setColumns((prev) => prev.filter((k) => !PRICE_KEYS.includes(k)));
+    });
   }, [router]);
+
+  // Opsi yang boleh ditampilkan: sembunyikan kolom harga untuk akun non-izin.
+  const visibleColumnOpts = COLUMN_OPTS.filter((o) => canPrice || !PRICE_KEYS.includes(o.key));
 
   const lineCount = text
     .split("\n")
@@ -123,7 +139,7 @@ export default function BatchPage() {
             >
               Part Number · wajib
             </span>
-            {COLUMN_OPTS.map((opt) => {
+            {visibleColumnOpts.map((opt) => {
               const on = columns.includes(opt.key);
               return (
                 <button

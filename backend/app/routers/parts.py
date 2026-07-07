@@ -201,7 +201,7 @@ async def batch_catalog(
     text: str = Form("", description="Daftar part number, 1 per baris"),
     file: UploadFile | None = File(None, description="File Excel/CSV berisi PN di kolom A"),
     columns: str = Form("", description="Kolom dipilih, pisah koma (nama,foto,stok,harga_sims,harga_accurate,harga_daftar)"),
-    _user: dict = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
     # Kumpulkan PN dari file (kolom A) atau teks manual.
     if file is not None:
@@ -235,6 +235,10 @@ async def batch_catalog(
         )
 
     col_list = [c.strip() for c in columns.split(",") if c.strip()]
+    # Kolom harga (SIMS/jual Accurate/daftar) HANYA untuk admin & akun 'mas'.
+    # Akun lain: diam-diam di-strip agar tak bisa mengekspor harga via batch.
+    if not gudang.can_see_price(user.get("username", ""), user.get("role", "")):
+        col_list = [c for c in col_list if c not in catalog.PRICE_COLUMNS]
     try:
         xls = catalog.build_catalog_excel(part_numbers, columns=col_list)
     except Exception as e:

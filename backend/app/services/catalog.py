@@ -101,6 +101,10 @@ _COLUMN_ORDER = [
 # Default bila user tidak memilih apa pun (perilaku ramah: identitas + foto + stok).
 _DEFAULT_COLUMNS = ("nama", "foto", "stok")
 
+# Kolom harga — hanya boleh untuk admin & akun SEE_ALL (mis. 'mas'). Di-strip di
+# endpoint untuk akun lain (lihat routers/parts.py::batch_catalog).
+PRICE_COLUMNS = frozenset({"harga_sims", "harga_accurate", "harga_daftar"})
+
 
 def clean_columns(cols) -> list[str]:
     """Saring pilihan kolom user → hanya kunci sah, urut sesuai _COLUMN_ORDER.
