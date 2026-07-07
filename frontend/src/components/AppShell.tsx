@@ -66,6 +66,7 @@ const NAV_ADMIN: NavItem[] = [
   { href: "/admin/orders", label: "Pesanan", icon: I.cart },
   { href: "/admin/penjualan", label: "Laporan Penjualan", icon: I.chart },
   { href: "/admin/feedback", label: "Umpan Balik AI", icon: I.ai },
+  { href: "/admin/chat-log", label: "Observabilitas AI", icon: I.pulse },
   { href: "/admin/search-misses", label: "Pencarian Nihil", icon: I.search },
   { href: "/admin/sinonim", label: "Kamus Sinonim", icon: I.book },
   { href: "/admin/menu", label: "Menu Control", icon: I.shield },

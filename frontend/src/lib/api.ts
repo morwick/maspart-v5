@@ -1141,6 +1141,43 @@ export async function resolveSearchMiss(token: string, query: string): Promise<{
   return res.json();
 }
 
+// ── Observabilitas Asisten AI (ai_chat_log) ──
+export type ChatLogRow = {
+  id: number;
+  created_at: string;
+  username?: string;
+  role?: string;
+  question?: string;
+  tools?: string;
+  tools_count: number;
+  rounds: number;
+  latency_ms: number;
+  guard_hit: boolean;
+  tool_failed: boolean;
+  reply_len: number;
+  outcome?: string;
+};
+export type ChatLogSummary = {
+  total: number;
+  latensi_ms?: { p50: number; p90: number; maks: number };
+  guard_menyala?: number;
+  guard_rasio_persen?: number;
+  tool_gagal?: number;
+  tool_gagal_rasio_persen?: number;
+  tool_tersering?: [string, number][];
+  outcome?: Record<string, number>;
+};
+export async function getChatLog(
+  token: string,
+  limit = 200,
+): Promise<{ ringkasan: ChatLogSummary; log: ChatLogRow[] }> {
+  const res = await fetch(`${API_BASE}/api/admin/chat-log?limit=${limit}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 // ── Usulan Sinonim OTOMATIS (LLM belajar dari pencarian nihil) ──
 // generate → LLM memetakan istilah lapangan gagal → keyword EN (divalidasi ke
 // katalog nyata di backend); approve → langsung masuk kamus & dipakai asisten.

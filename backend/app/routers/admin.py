@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import ai_sinonim_learn, catalog_bom, gudang, gudang_config, harga, image_search, orders, part_index, permissions, populasi, presence, reservations, search_log, sinonim
+from ..services import ai_chat_log, ai_sinonim_learn, catalog_bom, gudang, gudang_config, harga, image_search, orders, part_index, permissions, populasi, presence, reservations, search_log, sinonim
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -592,6 +592,15 @@ def sinonim_delete(index: int, _admin: dict = Depends(require_admin)):
     except IndexError as err:
         raise HTTPException(status.HTTP_409_CONFLICT, str(err))
     return {"ok": True, "entry": entry}
+
+
+# ── Observabilitas Asisten AI (ai_chat_log) ─────────────────────────────────
+@router.get("/chat-log")
+def chat_log_list(limit: int = 200, _admin: dict = Depends(require_admin)):
+    """Log ringkas per giliran chat (terbaru dulu) + ringkasan agregat. Untuk
+    halaman admin 'Observabilitas AI'. Kosong bila tabel belum dibuat."""
+    return {"ringkasan": ai_chat_log.summary(),
+            "log": ai_chat_log.list_logs(max(1, min(limit, 1000)))}
 
 
 # ── Usulan Sinonim OTOMATIS (loop belajar: miss → LLM → validasi → approve) ──

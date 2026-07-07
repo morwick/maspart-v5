@@ -20,8 +20,8 @@ import time
 import requests
 
 from ..core.config import get_settings
-from . import (accurate, ai_export, catalog_bom, epc, epc_bom, epc_weichai, fault_codes, filter_ref,
-               gudang, harga, orders, part_index, populasi, repairkit, search_log, sims)
+from . import (accurate, ai_chat_log, ai_export, catalog_bom, epc, epc_bom, epc_weichai, fault_codes,
+               filter_ref, gudang, harga, orders, part_index, populasi, repairkit, search_log, sims)
 
 logger = logging.getLogger("maspart.ai")
 
@@ -5462,7 +5462,11 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     yang disuntikkan sebagai konteks ke pesan user terakhir.
     Return {"reply": str, "tools_used": [nama, ...]}.
     """
+    _t0 = time.monotonic()
     history = list(history or [])
+    # Pertanyaan user terakhir (untuk observabilitas — dipotong saat disimpan).
+    _pertanyaan = next((m.get("content") or "" for m in reversed(history)
+                        if (m or {}).get("role") == "user"), "")
     if photo_candidates is not None:
         note = _photo_note(photo_candidates)
         if history and (history[-1] or {}).get("role") == "user":
@@ -5546,6 +5550,29 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     guard_retries = 0
     empty_retries = 0  # model hanya menulis [PIKIR]/kosong → paksa tulis ulang
     lookup_gagal = False  # ada tool lookup yang error/tak ketemu → jangan mengarang angka
+    tool_gagal_pernah = False  # untuk observabilitas: pernahkah ada tool gagal turn ini
+
+    def _finalize(reply: str, part_pns=None) -> dict:
+        """Bungkus payload jawaban + catat observabilitas (best-effort). Dipanggil
+        di SEMUA titik return agar setiap giliran chat terekam."""
+        outcome_for = (
+            "not_found" if reply == _NOT_FOUND_REPLY else
+            "empty" if reply == _EMPTY_FINAL_MSG else
+            "sanitized" if "tak terverifikasi" in (reply or "") else "ok"
+        )
+        try:
+            ai_chat_log.log_turn(
+                username=user.get("username"), role=user.get("role"),
+                question=_pertanyaan, tools_used=tools_used,
+                rounds=tool_rounds, latency_ms=int((time.monotonic() - _t0) * 1000),
+                guard_hit=guard_retries > 0, tool_failed=tool_gagal_pernah,
+                reply_len=len(reply or ""), outcome=outcome_for)
+        except Exception:
+            pass
+        return {"reply": reply, "tools_used": tools_used,
+                "repairkit_models": repairkit_models, "banding_exports": banding_exports,
+                "excel_exports": excel_exports, "exploded_images": exploded_images,
+                "part_pns": part_pns if part_pns is not None else _mentioned_part_pns(reply, grounded)}
 
     # Anggaran RONDE TOOL (produktif: model benar-benar memanggil tool) DIPISAH
     # dari anggaran RETRY (kosong/guard: tak menjalankan tool). Dulu semuanya
@@ -5591,9 +5618,11 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                             + _cap_tool_content(json.dumps(result, ensure_ascii=False, default=str))
                         ),
                     })
-                    if _tool_failed(result) and not lookup_gagal:
-                        lookup_gagal = True
-                        messages.append({"role": "user", "content": _LOOKUP_GAGAL_NOTE})
+                    if _tool_failed(result):
+                        tool_gagal_pernah = True
+                        if not lookup_gagal:
+                            lookup_gagal = True
+                            messages.append({"role": "user", "content": _LOOKUP_GAGAL_NOTE})
                 continue
 
             reply = _strip_reasoning(content)
@@ -5620,10 +5649,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 continue
             if bad:
                 reply = _sanitize_ungrounded(reply, bad)
-            return {"reply": reply, "tools_used": tools_used,
-                    "repairkit_models": repairkit_models, "banding_exports": banding_exports,
-                    "excel_exports": excel_exports, "exploded_images": exploded_images,
-                    "part_pns": _mentioned_part_pns(reply, grounded)}
+            return _finalize(reply)
 
         # Catat pesan assistant (yang berisi tool_calls) lalu jalankan tiap tool.
         tool_rounds += 1  # ronde produktif (model memanggil tool via API)
@@ -5652,6 +5678,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             })
             if _tool_failed(result):
                 lookup_gagal = True
+                tool_gagal_pernah = True
         if lookup_gagal:
             # Ingatkan SEKALI per turn (setelah batch tool) agar model tak mengarang
             # angka utk lookup yang gagal. Reset flag agar tak menumpuk tiap ronde.
@@ -5669,7 +5696,4 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     bad = _drop_unit_tokens(_ungrounded_pns(reply, grounded))
     if bad:
         reply = _sanitize_ungrounded(reply, bad)
-    return {"reply": reply, "tools_used": tools_used,
-            "repairkit_models": repairkit_models, "banding_exports": banding_exports,
-            "excel_exports": excel_exports, "exploded_images": exploded_images,
-            "part_pns": _mentioned_part_pns(reply, grounded)}
+    return _finalize(reply)
