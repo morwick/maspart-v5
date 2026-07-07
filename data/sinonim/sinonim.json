@@ -3768,5 +3768,86 @@
       "track plate",
       "track shoe"
     ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu"
+    ],
+    "keywords": [
+      "head lamp",
+      "headlamp",
+      "rear lamp",
+      "fog lamp",
+      "warning lamp",
+      "combination lamp",
+      "light"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu besar",
+      "lampu depan",
+      "lampu utama"
+    ],
+    "keywords": [
+      "head lamp",
+      "headlamp",
+      "front combination lamp"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu rotary",
+      "lampu strobo",
+      "lampu peringatan"
+    ],
+    "keywords": [
+      "warning lamp"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu belakang"
+    ],
+    "keywords": [
+      "rear lamp",
+      "rear combination lamp",
+      "tail lamp"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu kabut"
+    ],
+    "keywords": [
+      "fog lamp"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu sein",
+      "lampu sen",
+      "sein",
+      "riting"
+    ],
+    "keywords": [
+      "turn signal",
+      "side turn"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "lampu kabin"
+    ],
+    "keywords": [
+      "ceiling lamp"
+    ]
   }
 ]

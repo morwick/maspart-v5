@@ -1164,6 +1164,32 @@ def _t_cari_part(args: dict, user: dict) -> dict:
             search_terms = list(dict.fromkeys(search_terms + corr_terms))
             rows = _search_terms_rows(corr_terms)
 
+    # PN "PEMAAF" — pola nyata log Pencarian Nihil: user menempel PN dengan
+    # suffix qty/halaman ('WG…0011/7', '+01', ' 1/3'), PN varian panjang yang
+    # basisnya ada di katalog ('WG…0223TQF717'), atau beberapa PN sekaligus.
+    pn_notes: list[str] = []
+    if not rows:
+        pns = part_index.pn_tokens(q)
+        if len(pns) >= 2:
+            # Multi-PN dalam satu pertanyaan → cari PERSIS satu per satu.
+            rows = part_index.search_exact_pns(pns)
+            found = {(r.get("part_number") or "").strip().upper() for r in rows}
+            missing = [p for p in pns if p not in found]
+            for p in list(missing):  # yang belum ketemu dicoba jalur pintar
+                extra, _n = part_index.smart_pn_search(p)
+                if extra:
+                    rows.extend(extra)
+                    missing.remove(p)
+            pn_notes.append(
+                f"Query memuat {len(pns)} PN — dicari satu per satu."
+                + (f" TIDAK ditemukan di katalog: {', '.join(missing)} — sampaikan "
+                   "apa adanya per PN, jangan disamaratakan." if missing else "")
+            )
+        elif pns:
+            rows, smart_note = part_index.smart_pn_search(q)
+            if smart_note:
+                pn_notes.append(smart_note)
+
     # Untuk query TRANSMISI/GEARBOX: baris gearbox assy kerap bernama hanya kode
     # "HW….(spec)" TANPA kata 变速器/transmission (mis. HW13709XST216603 di NX280 6X2),
     # sehingga pencarian-nama melewatkannya & seolah varian itu "tak punya transmisi
@@ -1178,7 +1204,7 @@ def _t_cari_part(args: dict, user: dict) -> dict:
                 seen_keys.add(k)
                 rows.append(r)
 
-    notes: list[str] = []
+    notes: list[str] = [*pn_notes]
     if matched_syn:
         notes.append(
             f"Istilah lapangan '{', '.join(dict.fromkeys(matched_syn))}' diperluas ke "
@@ -1349,10 +1375,15 @@ def _t_cari_part(args: dict, user: dict) -> dict:
             )
         note = f"{note} {tail}" if note else tail
 
-    # "Mungkin maksud Anda" — hanya saat benar-benar 0 hasil.
+    # "Mungkin maksud Anda" — hanya saat benar-benar 0 hasil. Untuk query PN,
+    # sarankan juga PN katalog yang selisih 1-2 karakter (kasus nyata: user
+    # kurang/tertukar satu digit lalu mencoba PN yang sama berulang kali).
     saran = part_index.suggest_names(q, limit=6) if not items else []
+    if not items:
+        saran = (part_index.suggest_pns(q) + saran)[:6]
     if saran and not note:
-        note = "Tidak ada hasil persis — lihat 'saran_mungkin_maksud' untuk part dengan nama serupa."
+        note = ("Tidak ada hasil persis — lihat 'saran_mungkin_maksud' (PN/nama serupa) dan "
+                "tawarkan ke user, jangan langsung menyerah.")
 
     # UMPAN BALIK KAMUS: catat pencarian yang 0 hasil. Daftar 'MISS' ini = istilah
     # lapangan yang belum dikenali sistem → kandidat tambahan untuk sinonim.json.

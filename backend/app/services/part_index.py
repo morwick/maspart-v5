@@ -832,3 +832,123 @@ def suggest_names(term: str, limit: int = 6) -> list[dict]:
                 if len(out) >= limit:
                     return out
     return out
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  PENCARIAN PN "PEMAAF" — varian bersih, basis-PN, bebas-pemisah, fuzzy
+#  (dipetakan dari pola nyata log Pencarian Nihil: user menempel PN dengan
+#  suffix qty/halaman 'WG…0011/7', PN varian panjang 'WG…0223TQF717' yang
+#  basisnya ada di katalog, atau PN salah satu digit yang dicoba berulang.)
+# ═══════════════════════════════════════════════════════════════════════
+_PN_TOKEN_RE = re.compile(r"[A-Z0-9][A-Z0-9.\-]{4,}", re.IGNORECASE)
+
+
+def looks_like_pn(token: str) -> bool:
+    """Heuristik token Part Number: cukup panjang, mayoritas alfanumerik,
+    dan memuat ≥3 digit (nama part hampir tak pernah begitu)."""
+    t = (token or "").strip().upper()
+    return (len(t) >= 6 and " " not in t
+            and sum(ch.isdigit() for ch in t) >= 3
+            and all(ch.isalnum() or ch in ".-/" for ch in t))
+
+
+def pn_tokens(query: str) -> list[str]:
+    """Token PN-like pada query (untuk deteksi multi-PN dalam satu pertanyaan)."""
+    out: list[str] = []
+    for m in _PN_TOKEN_RE.findall((query or "").upper()):
+        if looks_like_pn(m) and m not in out:
+            out.append(m)
+    return out
+
+
+def pn_query_variants(term: str) -> list[str]:
+    """Token PN BERSIH dari query, urut kemunculan — tanpa term asli utuh.
+    Suffix qty/halaman otomatis lepas krn '/' dan '+' bukan karakter token:
+    'WG9925680011/7' → ['WG9925680011']; 'WG90003601 1/3' → ['WG90003601'];
+    'cari WG9925470433+01 dong' → ['WG9925470433']. '-' TIDAK memotong
+    (banyak PN katalog memang mengandung '-')."""
+    up = (term or "").strip().upper()
+    return [t for t in pn_tokens(up) if t != up]
+
+
+# flat(PN tanpa pemisah) → daftar PN mentah — di-cache per build index.
+_PN_FLAT_CACHE: dict = {"at": None, "map": {}}
+
+
+def _pn_flat(s: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
+
+
+def _pn_flat_map() -> dict[str, list[str]]:
+    ensure_index()
+    at = _state["indexed_at"]
+    c = _PN_FLAT_CACHE
+    if c["at"] != at:
+        m: dict[str, list[str]] = {}
+        for pn, _nm in all_parts_min():
+            m.setdefault(_pn_flat(pn), []).append(pn)
+        c["at"] = at
+        c["map"] = m
+    return c["map"]
+
+
+def smart_pn_search(term: str) -> tuple[list[dict], Optional[str]]:
+    """Fallback pintar saat pencarian PN biasa nihil. Urutan ikhtiar:
+      1) varian bersih (suffix qty/halaman dibuang) → substring biasa;
+      2) padanan BEBAS-PEMISAH persis ('202V091007926' = '202V09100-7926');
+      3) BASIS-PN: PN katalog terpanjang yang menjadi AWALAN token query
+         (PN varian panjang, mis. 'WG9525930223TQF717' → 'WG9525930223').
+    Return (rows, catatan utk user) — ([], None) bila tetap nihil."""
+    up = (term or "").strip().upper()
+    if not up:
+        return [], None
+    toks = pn_query_variants(up)
+    for v in toks:
+        rows = search_part_number(v)
+        if rows:
+            return rows, f"PN pada query dibersihkan/diekstrak menjadi '{v}' (suffix qty/halaman dibuang)."
+    tok = toks[0] if toks else re.split(r"[\s/+]+", up)[0]
+    flat = _pn_flat(tok)
+    if not looks_like_pn(flat):
+        return [], None
+    fmap = _pn_flat_map()
+    raws = fmap.get(flat)
+    if raws:
+        rows = search_exact_pns(raws)
+        if rows:
+            return rows, f"'{up}' dicocokkan tanpa memedulikan tanda pemisah ke PN katalog '{raws[0]}'."
+    # Basis-PN: prefix terpanjang yang terdaftar (min 8 char agar tak asal cocok).
+    best: list[str] = []
+    best_len = 7
+    for f, raws_ in fmap.items():
+        if len(f) > best_len and flat.startswith(f):
+            best, best_len = raws_, len(f)
+    if best:
+        rows = search_exact_pns(best)
+        if rows:
+            return rows, (
+                f"'{up}' tidak terdaftar persis, tetapi BASIS PN-nya '{best[0]}' ada di "
+                "katalog (sisanya kemungkinan kode varian/suffix). Sampaikan asumsi ini ke user."
+            )
+    return [], None
+
+
+def suggest_pns(term: str, limit: int = 5) -> list[dict]:
+    """Saran 'mungkin maksud Anda' utk PN yang 0 hasil: PN katalog paling mirip
+    (selisih 1-2 karakter — kasus nyata: user kurang/tertukar satu digit).
+    Return [{'part_number','part_name'}]."""
+    up = (term or "").strip().upper()
+    toks = pn_tokens(up)
+    tok = toks[0] if toks else up
+    flat = _pn_flat(tok)
+    if not looks_like_pn(flat):
+        return []
+    rows = all_parts_min()
+    # Bucket dulu (prefix-4 sama ATAU panjang ±1) supaya difflib murah & fokus.
+    pool: dict[str, tuple[str, str]] = {}
+    for pn, nm in rows:
+        f = _pn_flat(pn)
+        if f[:4] == flat[:4] or abs(len(f) - len(flat)) <= 1:
+            pool.setdefault(f, (pn, nm))
+    close = difflib.get_close_matches(flat, list(pool.keys()), n=limit, cutoff=0.85)
+    return [{"part_number": pool[f][0], "part_name": pool[f][1]} for f in close if f != flat]

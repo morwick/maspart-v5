@@ -246,6 +246,43 @@
       "expect": { "tools_any": ["uraikan_mesin"], "pn_any": ["1013133963", "1013133966"] }
     },
     {
+      "id": "smartpn-suffix-halaman",
+      "tags": ["lokal"],
+      "_kenapa": "Fitur PN pemaaf (2026-07-07, dari log Pencarian Nihil): user menempel PN + suffix qty/halaman ('…/7') → smart_pn_search membuang suffix, basis WG9925680011 (Oil Filter) terverifikasi ada di katalog.",
+      "question": "cek WG9925680011/7 ada stoknya?",
+      "expect": { "tools_any": ["cari_part", "detail_part"], "pn_any": ["WG9925680011"] }
+    },
+    {
+      "id": "smartpn-basis-varian",
+      "tags": ["lokal"],
+      "_kenapa": "Fitur PN pemaaf (2026-07-07): PN varian panjang 'WG9525930223TQF717' (kasus miss nyata) → basis WG9525930223 terverifikasi ada; asisten wajib menyampaikan asumsi basis-PN, bukan bilang tidak ada.",
+      "question": "part WG9525930223TQF717 ada tidak?",
+      "expect": { "tools_any": ["cari_part", "detail_part"], "pn_any": ["WG9525930223"] }
+    },
+    {
+      "id": "smartpn-multi-pn",
+      "tags": ["lokal"],
+      "_kenapa": "Fitur multi-PN (2026-07-07): beberapa PN dalam satu pertanyaan dicari satu per satu, TIDAK disamaratakan. AZ450045000026 & WG9100032311 ada di katalog lokal; AZ450045000027 tidak ada lokal tapi asisten boleh menemukannya via SIMS (detail_part) — dua-duanya benar, asal ketiga PN dibahas.",
+      "question": "tolong cek tiga PN ini: AZ450045000026 AZ450045000027 WG9100032311",
+      "expect": { "tools_any": ["cari_part", "detail_part"], "pn_all": ["AZ450045000026", "AZ450045000027", "WG9100032311"] },
+      "expect_alt": [{ "pn_all": ["AZ450045000026", "WG9100032311"], "reply_any": ["tidak"] }]
+    },
+    {
+      "id": "smartpn-saran-typo-digit",
+      "tags": ["lokal"],
+      "_kenapa": "Fitur saran PN mirip (2026-07-07): AZ40074540160 dicoba user 7x (miss nyata, kurang satu digit) → suggest_pns menawarkan AZ400745400160/AZ400745401560 (terverifikasi ada); asisten wajib menawarkan saran, bukan menyerah.",
+      "question": "cari part AZ40074540160",
+      "expect": { "tools_any": ["cari_part"], "pn_any": ["AZ400745400160", "AZ400745401560"] }
+    },
+    {
+      "id": "sinonim-lampu-belakang",
+      "tags": ["lokal"],
+      "_kenapa": "Sinonim keluarga lampu (2026-07-07, dari miss 'lampu'/'lampu besar'): 'lampu belakang' → rear lamp/tail lamp (keyword terverifikasi ada di katalog).",
+      "question": "ada lampu belakang untuk NX400?",
+      "expect": { "tools_any": ["cari_part"], "reply_any": ["rear", "tail", "lamp"] },
+      "expect_alt": [{ "reply_any": ["rangka", "vin"] }]
+    },
+    {
       "id": "epc-armada-kampas-kopling",
       "tags": ["epc"],
       "_kenapa": "Fitur banding part armada (2026-07-04): 'apakah part X sama utk semua unit PT Y' → tool banding_part_armada (populasi → rangka → konfigurasi EPC per-VIN → cek part unit wakil per kelompok → verdict sistem). PT MITRA ANGKUTAN SEJATI terverifikasi live: 155 unit, 16 kelompok engine+gearbox, verdict BERBEDA (hanya WG9114230019 sama di semua kelompok). LAMBAT (±2-3 mnt, armada besar).",

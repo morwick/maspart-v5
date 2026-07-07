@@ -126,6 +126,10 @@ def search(
 ):
     results = part_index.search_part_number(q)
     if not results:
+        # PN "pemaaf": buang suffix qty/halaman ('WG…0011/7'), cocokkan tanpa
+        # pemisah, atau temukan BASIS PN dari PN varian panjang.
+        results, _smart_note = part_index.smart_pn_search(q)
+    if not results:
         # Tidak ketemu di database lokal → cari nama part dari SIMS.
         results = _sims_fallback(q)
     elif not part_index.is_exact_match_found(q):
