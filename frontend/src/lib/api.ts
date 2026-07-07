@@ -1110,6 +1110,53 @@ export async function resolveSearchMiss(token: string, query: string): Promise<{
   return res.json();
 }
 
+// ── Kamus Sinonim (istilah lapangan → kata kunci katalog) ──
+// Perubahan langsung dipakai asisten AI (reload per-mtime, tanpa restart).
+export type SinonimEntry = {
+  grup: string;
+  triggers: string[];
+  keywords: string[];
+};
+export async function getSinonim(
+  token: string,
+): Promise<{ jumlah: number; entries: SinonimEntry[] }> {
+  const res = await fetch(`${API_BASE}/api/admin/sinonim`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+export async function addSinonim(token: string, entry: SinonimEntry): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/api/admin/sinonim`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(entry),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+export async function updateSinonim(
+  token: string,
+  index: number,
+  entry: SinonimEntry,
+): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/api/admin/sinonim/${index}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(entry),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+export async function deleteSinonim(token: string, index: number): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/api/admin/sinonim/${index}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 export type CatalogUploadResult = {
   ok: boolean;
   saved: { path: string; size: number }[];

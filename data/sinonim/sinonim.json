@@ -3758,5 +3758,15 @@
     "keywords": [
       "oil pan gasket"
     ]
+  },
+  {
+    "grup": "undercarriage",
+    "triggers": [
+      "tapak shoe"
+    ],
+    "keywords": [
+      "track plate",
+      "track shoe"
+    ]
   }
 ]

@@ -41,6 +41,7 @@ const I = {
   chat: <Ic d={<><path d="M4 5h16v11H9l-5 4z" /><path d="M8 9h8M8 12h5" /></>} />,
   pulse: <Ic d={<><path d="M3 12h4l2 6 4-14 2 8h6" /></>} />,
   searchSm: <Ic d={<><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>} />,
+  book: <Ic d={<><path d="M4 5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 1-2-2z" /><path d="M4 17a2 2 0 0 1 2-2h14M9 7h7" /></>} />,
 };
 
 type NavItem = { key?: string; href: string; label: string; icon: ReactNode; badge?: number };
@@ -66,6 +67,7 @@ const NAV_ADMIN: NavItem[] = [
   { href: "/admin/penjualan", label: "Laporan Penjualan", icon: I.chart },
   { href: "/admin/feedback", label: "Umpan Balik AI", icon: I.ai },
   { href: "/admin/search-misses", label: "Pencarian Nihil", icon: I.search },
+  { href: "/admin/sinonim", label: "Kamus Sinonim", icon: I.book },
   { href: "/admin/menu", label: "Menu Control", icon: I.shield },
   { href: "/admin/monitoring", label: "Monitoring User", icon: I.pulse },
   { href: "/admin/upload", label: "Upload Data", icon: I.upload },

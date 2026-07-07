@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import catalog_bom, gudang, gudang_config, harga, image_search, orders, part_index, permissions, populasi, presence, reservations, search_log
+from ..services import catalog_bom, gudang, gudang_config, harga, image_search, orders, part_index, permissions, populasi, presence, reservations, search_log, sinonim
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -548,3 +548,47 @@ def resolve_search_miss(body: ResolveMissRequest, _admin: dict = Depends(require
     """Tandai satu query selesai (mis. sudah ditambahkan ke sinonim.json) → hapus."""
     ok = search_log.resolve_miss(body.query)
     return {"ok": ok}
+
+
+# ── Kamus Sinonim (istilah lapangan → kata kunci katalog) ────────────────────
+# Menulis data/sinonim/sinonim.json; asisten AI memuat ulang otomatis per-mtime,
+# jadi entri baru LANGSUNG dimengerti tanpa restart.
+class SinonimEntryRequest(BaseModel):
+    grup: str = ""
+    triggers: list[str]
+    keywords: list[str]
+
+
+@router.get("/sinonim")
+def sinonim_list(_admin: dict = Depends(require_admin)):
+    entries = sinonim.load()
+    return {"jumlah": len(entries), "entries": entries}
+
+
+@router.post("/sinonim")
+def sinonim_add(body: SinonimEntryRequest, _admin: dict = Depends(require_admin)):
+    try:
+        entry = sinonim.add(body.grup, body.triggers, body.keywords)
+    except ValueError as err:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(err))
+    return {"ok": True, "entry": entry}
+
+
+@router.put("/sinonim/{index}")
+def sinonim_update(index: int, body: SinonimEntryRequest, _admin: dict = Depends(require_admin)):
+    try:
+        entry = sinonim.update(index, body.grup, body.triggers, body.keywords)
+    except ValueError as err:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(err))
+    except IndexError as err:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(err))
+    return {"ok": True, "entry": entry}
+
+
+@router.delete("/sinonim/{index}")
+def sinonim_delete(index: int, _admin: dict = Depends(require_admin)):
+    try:
+        entry = sinonim.delete(index)
+    except IndexError as err:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(err))
+    return {"ok": True, "entry": entry}

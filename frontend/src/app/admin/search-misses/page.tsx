@@ -62,7 +62,7 @@ export default function SearchMissesPage() {
         <div className="flex flex-wrap items-center gap-3" style={{ marginBottom: 14 }}>
           <p style={{ fontSize: 13.5, color: "var(--ink-500)", flex: 1, minWidth: 220 }}>
             Istilah yang dicari user (di Cari Part & Asisten) tapi <b>tidak menemukan apa pun</b>.
-            Tambahkan istilah yang relevan ke <span className="mono">data/sinonim/sinonim.json</span>,
+            Klik <b>+ Sinonim</b> untuk menambahkannya ke Kamus Sinonim,
             lalu tandai <b>Selesai</b> untuk menghapusnya dari daftar.
           </p>
           <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
@@ -97,7 +97,15 @@ export default function SearchMissesPage() {
                         <span key={s} className="pill" style={{ marginRight: 4, height: 20, fontSize: 10.5, padding: "0 7px" }}>{s}</span>
                       ))}
                     </td>
-                    <td style={{ textAlign: "right" }}>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ marginRight: 6 }}
+                        onClick={() => router.push(`/admin/sinonim?trigger=${encodeURIComponent(m.query)}`)}
+                        title="Buka Kamus Sinonim dengan istilah ini terisi"
+                      >
+                        + Sinonim
+                      </button>
                       <button className="btn btn-secondary btn-sm" onClick={() => resolve(m.query)} title="Hapus dari daftar (sudah ditangani)">
                         Selesai
                       </button>
