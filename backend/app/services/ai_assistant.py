@@ -3510,7 +3510,14 @@ def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:
                     "pengganti part X'. Tampilkan stok/harga lokal bila ada. Baris dengan "
                     "'di_dalam_assembly' = KOMPONEN/ELEMENT di dalam assembly tsb (mis. safety/"
                     "main element di dalam air filter assembly) — ini yang biasanya DIBELI saat "
-                    "servis: JANGAN dihilangkan; kelompokkan di bawah assembly induknya."),
+                    "servis: JANGAN dihilangkan; kelompokkan di bawah assembly induknya. "
+                    "⛔⛔ PN WAJIB DARI DAFTAR INI SAJA (data EPC per-VIN unit ini). DILARANG "
+                    "KERAS menamb/mengganti PN 'assembly utuh' dari katalog lokal/model lain / "
+                    "ingatan — mis. bila EPC hanya punya varian 'Front RIGHT/LEFT plate spring "
+                    "assembly' atau per-lembar (WG95…641/1, +001/1), SEBUT itu apa adanya; JANGAN "
+                    "menggantinya dgn PN 'front plate spring assembly utuh' generik yang TIDAK ada "
+                    "di daftar ini (itu bisa BEDA/ SALAH untuk unit ini). Bila tak ada 1 PN 'utuh', "
+                    "katakan apa adanya bahwa EPC memberi per-sisi/per-lembar."),
         "terpotong_walk": res.get("terpotong", False),
         **({"peringatan_tidak_lengkap":
             "⚠️ Penelusuran EPC belum tuntas (sebagian data gagal diambil/terpotong) — "
