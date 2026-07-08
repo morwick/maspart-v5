@@ -159,6 +159,25 @@ def search_name(
     user: dict = Depends(get_current_user),
 ):
     results = part_index.search_part_name(q)
+    if not results:
+        # EKSPANSI SINONIM (kamus yang sama dengan asisten AI): istilah lapangan
+        # Indonesia ('spion', 'kampas rem') → kata kunci katalog Inggris. Fallback
+        # saja (0 hasil) agar pencarian frasa persis tetap presisi. Kasus nyata
+        # log Pencarian Nihil: 'spion' miss padahal kamus punya spion→mirror —
+        # halaman search belum memakai kamus, baru asisten.
+        try:
+            from ..services.ai_assistant import _expand_query
+            terms, matched = _expand_query(q)
+            if matched:
+                seen: set = set()
+                for t in terms[1:]:
+                    for r in part_index.search_part_name(t):
+                        key = (r.get("part_number"), r.get("file"))
+                        if key not in seen:
+                            seen.add(key)
+                            results.append(r)
+        except Exception:
+            pass
     saran: list[dict] = []
     if not results:
         saran = part_index.suggest_names(q, limit=6)
