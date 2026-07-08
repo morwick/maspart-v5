@@ -110,7 +110,6 @@
     ],
     "keywords": [
       "connecting rod",
-      "Linkage assembly",
       "连杆"
     ]
   },
@@ -3848,6 +3847,124 @@
     ],
     "keywords": [
       "ceiling lamp"
+    ]
+  },
+  {
+    "grup": "undercarriage",
+    "triggers": [
+      "roller bawah",
+      "bottom roller",
+      "roller track bawah",
+      "track roller"
+    ],
+    "keywords": [
+      "track roller"
+    ]
+  },
+  {
+    "grup": "undercarriage",
+    "triggers": [
+      "roller atas",
+      "top roller",
+      "carrier roller",
+      "roller penyangga"
+    ],
+    "keywords": [
+      "carrier roller"
+    ]
+  },
+  {
+    "grup": "undercarriage",
+    "triggers": [
+      "gigi sprocket",
+      "segment sprocket",
+      "gir track",
+      "sprocket"
+    ],
+    "keywords": [
+      "sprocket"
+    ]
+  },
+  {
+    "grup": "attachment",
+    "triggers": [
+      "garu",
+      "bajak",
+      "ripper",
+      "garu belakang"
+    ],
+    "keywords": [
+      "ripper"
+    ]
+  },
+  {
+    "grup": "attachment",
+    "triggers": [
+      "end bit",
+      "sudut pisau",
+      "ujung blade"
+    ],
+    "keywords": [
+      "end bit"
+    ]
+  },
+  {
+    "grup": "attachment",
+    "triggers": [
+      "mata pisau",
+      "pisau dozer",
+      "pisau buldoser",
+      "cutting edge"
+    ],
+    "keywords": [
+      "cutting edge",
+      "blade"
+    ]
+  },
+  {
+    "grup": "attachment",
+    "triggers": [
+      "bucket",
+      "bak keruk",
+      "bucket excavator"
+    ],
+    "keywords": [
+      "bucket"
+    ]
+  },
+  {
+    "grup": "attachment",
+    "triggers": [
+      "boom",
+      "boom excavator",
+      "lengan boom"
+    ],
+    "keywords": [
+      "boom"
+    ]
+  },
+  {
+    "grup": "powertrain",
+    "triggers": [
+      "final drive",
+      "reduksi akhir",
+      "final drive alat berat"
+    ],
+    "keywords": [
+      "final drive"
+    ]
+  },
+  {
+    "grup": "swing",
+    "triggers": [
+      "swing bearing",
+      "slewing bearing",
+      "swing circle",
+      "bearing swing",
+      "lingkar putar"
+    ],
+    "keywords": [
+      "swing bearing"
     ]
   }
 ]
