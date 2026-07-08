@@ -1345,11 +1345,15 @@
       "stabilizer",
       "stabiliser",
       "anti roll",
-      "batang stabil"
+      "batang stabil",
+      "karet stabil",
+      "karet stabilizer",
+      "bushing stabilizer"
     ],
     "keywords": [
       "stabilizer",
-      "stabilizer bar"
+      "stabilizer bar",
+      "stabilizer bushing"
     ]
   },
   {
@@ -3682,7 +3686,9 @@
   {
     "grup": "suspensi",
     "triggers": [
-      "pen per"
+      "pen per",
+      "cucuk per",
+      "pin per"
     ],
     "keywords": [
       "spring pin"
