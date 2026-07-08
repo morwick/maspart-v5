@@ -308,7 +308,10 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
                 d["_bytes"] = data
             return data, d["filename"]
         if b.get("kind") == "exploded":
-            data = exploded_png(b.get("svg", ""), b.get("balon"))
+            if b.get("source") == "weichai":
+                data = exploded_png_weichai(b.get("svg", ""), b.get("rangka", ""), b.get("balon"))
+            else:
+                data = exploded_png(b.get("svg", ""), b.get("balon"))
             if data is None:
                 return None, ("Gagal mengambil/menrender gambar exploded view EPC "
                               "(file gambar tak tersedia / resvg gagal).")
@@ -436,6 +439,25 @@ def exploded_png(svg_name: str, ball=None) -> bytes | None:
         return None
     try:
         svg = epc_bom.fetch_file(svg_name)
+    except Exception:
+        return None
+    if not svg:
+        return None
+    return _svg_to_png(_highlight_ball(svg, ball))
+
+
+def exploded_png_weichai(svg_file_id: str, rangka: str, ball=None) -> bytes | None:
+    """Versi MESIN Weichai: unduh SVG exploded-view via dePreview (svgFileId +
+    token yang di-mint ulang dari `rangka` saat unduh — token pendek), highlight
+    nomor balon (orderNo), render PNG. None bila gagal."""
+    if not svg_file_id:
+        return None
+    try:
+        from . import epc_weichai as _wc
+        tok = _wc._ensure_token(rangka)
+        if not tok:
+            return None
+        svg = _wc.fetch_svg(svg_file_id, tok)
     except Exception:
         return None
     if not svg:

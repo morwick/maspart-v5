@@ -455,6 +455,45 @@ def catalog_walk(rangka: str, kategori: str) -> dict:
     return val
 
 
+def exploded_figures(rangka: str, pn: str, kategori: str = "lengkap") -> dict:
+    """FIGURE exploded-view MESIN (per-VIN) yang MEMUAT sebuah PN + NOMOR BALON-nya
+    (orderNo). Padanan Weichai dari epc_bom.exploded_figures — reuse catalog_walk
+    lalu saring figure yang punya item ber-PN sama. Untuk fitur 'tampilkan gambar
+    exploded view part MESIN ini' (inline di chat). `svg` = svgFileId (unduh via
+    fetch_svg + token). {found, frame_number, pn, figures:[{svg, balon, nama,
+    kategori, jumlah_item}]} | {found:False, _err}."""
+    pnu = (pn or "").strip().upper()
+    if not pnu:
+        return {"found": False, "_err": "input"}
+    d = catalog_walk(rangka, kategori or "lengkap")
+    if not d.get("found"):
+        return d
+    figs: list[dict] = []
+    for f in d.get("figures", []):
+        if not f.get("svg"):
+            continue
+        hit = next((it for it in (f.get("items") or [])
+                    if (it.get("pn") or "").strip().upper() == pnu), None)
+        if not hit:
+            continue
+        figs.append({
+            "svg": f["svg"],                 # svgFileId GROUP (unduh via fetch_svg)
+            "balon": hit.get("balon"),       # orderNo = nomor di gambar
+            "nama": f.get("nama"),
+            "kategori": f.get("kategori"),
+            "jumlah_item": len(f.get("items") or []),
+        })
+    return {
+        "found": bool(figs),
+        "frame_number": d.get("frame_number"),
+        "pn": pnu,
+        "figures": figs,
+        **({} if figs else {"_err": "not_found",
+                            "message": f"PN {pnu} tak muncul di figure mesin unit ini "
+                                       "(pastikan PN mesin Weichai & rangka benar)."}),
+    }
+
+
 def find_parts(rangka: str, terms: list[str]) -> dict:
     """Cari komponen mesin yg nama/PN cocok. Untuk part LANGSUNG yang cocok (mis. 'Oil
     Filter') JUGA diurai TURUNANNYA (mis. Filter Element, Seat) — on-demand, jadi cepat.

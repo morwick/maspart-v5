@@ -990,7 +990,9 @@ def _tool_specs(user: dict) -> list[dict]:
                     "memuat PN itu + NOMOR BALON-nya, lalu menyajikan gambarnya. Butuh NOMOR RANGKA "
                     "(per-VIN) + PN + KATEGORI (untuk mempersempit pencarian figure). Beda dari "
                     "katalog_kategori (itu FILE Excel seluruh kategori); ini 1 gambar untuk 1 PN "
-                    "langsung di chat. Hanya Sinotruk/HOWO/SITRAK."
+                    "langsung di chat. Ini untuk part BODI/SASIS/GARDAN/REM/KABIN Sinotruk (Parts "
+                    "Atlas). ⛔ Untuk part INTERNAL MESIN (piston, liner, klep, injektor, kruk as, "
+                    "turbo — unit bermesin Weichai) pakai gambar_exploded_mesin. Hanya Sinotruk/HOWO/SITRAK."
                 ),
                 "parameters": {
                     "type": "object",
@@ -998,6 +1000,33 @@ def _tool_specs(user: dict) -> list[dict]:
                         "rangka": {"type": "string", "description": "Nomor rangka/VIN unit (gambar diambil per-VIN)."},
                         "pn": {"type": "string", "description": "Part Number yang mau ditampilkan gambar exploded view-nya (apa adanya)."},
                         "kategori": {"type": "string", "description": "Kategori figure untuk mempersempit pencarian: tentukan dari JENIS part (bearing/hub/baut roda → 'gardan depan'/'gardan belakang'; kampas/sepatu rem → 'rem'; piston/liner/klep → 'mesin'; sinkromes/garpu → 'transmisi'; part kabin → 'kabin'; kelistrikan → 'kelistrikan'). Bila belum yakin, KOSONGKAN (tool akan meminta ditentukan)."},
+                    },
+                    "required": ["rangka", "pn"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "gambar_exploded_mesin",
+                "description": (
+                    "TAMPILKAN GAMBAR EXPLODED VIEW MESIN (Weichai) untuk SATU Part Number — gambar "
+                    "muncul INLINE di jawaban chat (bukan file unduh), SEPERTI gambar_exploded tapi "
+                    "untuk part INTERNAL MESIN unit bermesin Weichai. Panggil saat user minta 'gambar/"
+                    "skema exploded part mesin', 'lihat gambar <PN mesin>', 'part mesin ini balon "
+                    "berapa'. Menemukan FIGURE mesin resmi EPC Weichai (per-VIN) yang memuat PN + "
+                    "NOMOR BALON-nya (orderNo), lalu menyajikan gambarnya. Butuh NOMOR RANGKA + PN. "
+                    "'kategori' OPSIONAL (blok/bahan bakar/pelumas/dll) untuk mempercepat; kosong = "
+                    "cari di SELURUH kelompok mesin. Beda dari gambar_exploded (itu Parts Atlas "
+                    "Sinotruk: bodi/sasis/gardan) & katalog_mesin (itu FILE Excel/PDF). Hanya unit "
+                    "bermesin Weichai."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Nomor rangka/VIN unit (gambar diambil per-VIN)."},
+                        "pn": {"type": "string", "description": "Part Number mesin yang mau ditampilkan gambar exploded view-nya (apa adanya)."},
+                        "kategori": {"type": "string", "description": "OPSIONAL. Kelompok mesin untuk mempersempit (mis. 'blok', 'bahan bakar', 'pelumas', 'pendingin', 'turbo', 'kepala silinder'). KOSONGKAN untuk mencari di seluruh mesin (lebih lama sedikit tapi paling aman)."},
                     },
                     "required": ["rangka", "pn"],
                 },
@@ -4210,6 +4239,60 @@ def _t_gambar_exploded(args: dict, user: dict) -> dict:
     }
 
 
+def _t_gambar_exploded_mesin(args: dict, user: dict) -> dict:
+    """GAMBAR EXPLODED VIEW MESIN Weichai untuk SATU PN (inline di chat) — padanan
+    _t_gambar_exploded untuk part internal mesin. Reuse epc_weichai.exploded_figures
+    (figure=group ber-svgFileId, balon=orderNo) + render via token Weichai."""
+    rangka = (args.get("rangka") or "").strip()
+    pn = (args.get("pn") or args.get("part_number") or "").strip().upper()
+    kategori = (args.get("kategori") or "").strip() or "lengkap"
+    if not rangka:
+        return {"error": "Sebutkan nomor rangka/VIN — gambar exploded mesin diambil PER-VIN "
+                         "dari EPC Weichai."}
+    if not pn:
+        return {"error": "Sebutkan Part Number mesin yang mau ditampilkan gambar exploded view-nya."}
+
+    d = epc_weichai.exploded_figures(rangka, pn, kategori)
+    if not d.get("found"):
+        err = d.get("_err")
+        reason = d.get("reason")
+        if err == "no_link" or reason == "no_link":
+            return {"found": False, "error": ("Unit ini tidak punya link EPC Weichai (mesin non-Weichai "
+                    "atau rangka salah). Gambar exploded mesin hanya untuk unit bermesin Weichai — "
+                    "untuk part bodi/sasis/gardan Sinotruk pakai gambar_exploded.")}
+        if err == "network":
+            return {"found": False, "error": "Gagal menghubungi server EPC Weichai (jaringan). Coba lagi."}
+        if err in ("no_engine", "no_order", "empty"):
+            return {"found": False, "error": "EPC Weichai tak mengembalikan data mesin untuk unit ini."}
+        if err == "no_category":
+            return {"found": False, "error": (d.get("message") or "Kelompok mesin tak dikenal."),
+                    "saran": "Kosongkan 'kategori' agar dicari di seluruh mesin, atau sebut kelompok lain."}
+        # not_found — PN tak ada di figure mesin unit ini
+        return {"found": False,
+                "error": d.get("message") or f"PN {pn} tak muncul di figure mesin unit ini.",
+                "saran": ("Pastikan PN memang part mesin Weichai & rangka benar. Bila part terpasang "
+                          "tapi tak ber-gambar, itu tak digambar di figure EPC.")}
+    gambar = []
+    for f in d["figures"][:_MAX_EXPLODED_FIGURES]:
+        judul = f"Exploded mesin {pn} - {f.get('nama') or 'mesin'}"
+        image_id, filename = ai_export.stash_builder(
+            judul, {"kind": "exploded", "source": "weichai", "svg": f["svg"],
+                    "balon": f.get("balon"), "rangka": rangka}, ext="png")
+        gambar.append({"image_id": image_id, "filename": filename,
+                       "balon": f.get("balon"), "nama_figure": f.get("nama"),
+                       "kategori": f.get("kategori"), "jumlah_item": f.get("jumlah_item")})
+    b0 = gambar[0]
+    return {
+        "found": True, "frame_number": d.get("frame_number"), "pn": pn,
+        "jumlah_figure_cocok": len(d["figures"]), "gambar": gambar,
+        "catatan": (f"Gambar exploded view MESIN SIAP — tampil OTOMATIS (inline) di bawah jawabanmu. "
+                    f"PN {pn} = NOMOR BALON '{b0['balon']}' di figure '{b0['nama_figure']}'. "
+                    "Beri tahu user singkat: figure apa + PN ini balon nomor berapa. UNDUHAN GAMBAR "
+                    "PERTAMA bisa butuh beberapa detik (menyusun gambar). ⛔ JANGAN membuat link/"
+                    "gambar/URL sendiri; JANGAN sebut PN lain di luar data ini."),
+    }
+
+
 _DISPATCH = {
     "cari_part": _t_cari_part,
     "kategori_unit": _t_kategori_unit,
@@ -4248,6 +4331,7 @@ _DISPATCH = {
     "katalog_kategori": _t_katalog_kategori,
     "katalog_mesin": _t_katalog_mesin,
     "gambar_exploded": _t_gambar_exploded,
+    "gambar_exploded_mesin": _t_gambar_exploded_mesin,
 }
 
 
@@ -5533,7 +5617,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                     "judul": result.get("judul"), "jumlah_baris": result.get("jumlah_baris")}
             if item["id"] and item not in excel_exports:
                 excel_exports.append(item)
-        elif name == "gambar_exploded" and result.get("found"):
+        elif name in ("gambar_exploded", "gambar_exploded_mesin") and result.get("found"):
             for g in (result.get("gambar") or []):
                 item = {"id": g.get("image_id"), "pn": result.get("pn"),
                         "balon": g.get("balon"), "nama_figure": g.get("nama_figure"),
