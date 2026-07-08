@@ -2752,19 +2752,38 @@ def _t_bom_dari_rangka(args: dict, user: dict) -> dict:
     if catatan_sisi:
         base["catatan_sisi"] = catatan_sisi
 
-    # STEERING assembly struktural: bila user cari PEGAS DAUN/SUSPENSI/BRACKET, PN
-    # ASSEMBLY di Loading List bisa USANG/generik (kasus nyata WG9114520140 vs
-    # WG9525520641 Atlas). Arahkan ke part_aus (Atlas = tampilan EPC web) sbg otoritas.
+    # ASSEMBLY STRUKTURAL (pegas daun/suspensi): PN assembly di Loading List bisa
+    # USANG/generik (kasus nyata: WG9114520140 di LL vs WG9525520641 di Atlas —
+    # ground truth screenshot EPC user). Arahan teks saja TIDAK cukup (model pernah
+    # mengabaikannya) → ambil PN assembly Atlas DETERMINISTIK di sini dan sajikan
+    # sebagai data otoritatif dalam respons yang sama.
     _kl = (kata + " " + kategori).lower()
     if any(k in _kl for k in ("pegas daun", "per daun", "leaf spring", "plate spring",
-                              "suspensi", "suspension", "pegas", "spring")):
-        base["peringatan_assembly_atlas"] = (
-            "⚠️ PN ASSEMBLY pegas daun/suspensi dari Loading List ini BISA USANG/generik dan "
-            "BEDA dari katalog resmi. PN assembly OTORITATIF ada di PARTS ATLAS (sama seperti "
-            "tampilan EPC web). WAJIB panggil part_aus_dari_rangka(rangka, query='<part>') dan "
-            "pakai PN assembly dari SANA sebagai jawaban utama; JANGAN sajikan PN assembly "
-            "Loading List sebagai yang benar tanpa cek Atlas. Bila part_aus tak menemukannya, "
-            "sampaikan 'tidak ketemu di Atlas' — JANGAN mengarang/menambal.")
+                              "suspensi", "suspension", "pegas", "spring", "per assy")):
+        atlas_assy: list[dict] = []
+        try:
+            tr = epc_bom.atlas_find_in_tree(
+                rangka, ["plate spring assembly", "板簧", "钢板弹簧", "leaf spring"])
+            if tr.get("found"):
+                for p in (tr.get("parts") or []):
+                    nm = " ".join((p.get("nama") or p.get("nama_cn") or "").split())
+                    atlas_assy.append({"part_number": p.get("pn"), "nama": nm})
+        except Exception:
+            logger.exception("atlas assy utk pegas gagal (dilewati)")
+        if atlas_assy:
+            base["pn_assembly_atlas_otoritatif"] = atlas_assy[:15]
+            base["peringatan_assembly_atlas"] = (
+                "⛔⛔ PN ASSEMBLY pegas daun WAJIB dari 'pn_assembly_atlas_otoritatif' di atas "
+                "(diambil dari PARTS ATLAS = persis tampilan EPC web — SUDAH disediakan, tak "
+                "perlu tool lain). PN assembly pegas dari Loading List (mis. yang berpola "
+                "generik) USANG untuk unit ini — JANGAN disajikan sebagai PN assembly utama. "
+                "Loading List hanya untuk baut/bracket pelengkap.")
+        else:
+            base["peringatan_assembly_atlas"] = (
+                "⚠️ PN assembly pegas daun TIDAK ditemukan di Parts Atlas unit ini. JANGAN "
+                "sajikan PN assembly dari Loading List sebagai kepastian — sampaikan bahwa "
+                "assembly-nya tidak ketemu di Atlas dan tampilkan hanya komponen pelengkap "
+                "(bracket/baut) apa adanya. JANGAN mengarang.")
 
     if res.get("partial"):
         # Loading List terpotong (server EPC balas data tak lengkap). JANGAN dipakai
@@ -3296,6 +3315,14 @@ _ATLAS_MODULE_MAP = [
     (["gearbox", "transmisi", "persneling", "perseneling", "变速器", "synchronizer",
       "sincromes", "同步器", "shift fork", "garpu persneling", "拨叉"],
      ("BSX",), False),
+    # PEGAS DAUN/SUSPENSI: hidup di modul Chassis>Suspension (BUKAN poros) — part-nya
+    # ditemukan lewat perluasan pohon (atlas_find_in_tree), bukan walk CDQ/QDQ.
+    # is_axle=False PENTING: tanpa ini query pegas dianggap poros → posisi palsu +
+    # auto-gambar nyasar ke figure gardan 'Drive device' (kasus nyata PJ306941).
+    (["pegas daun", "per daun", "leaf spring", "plate spring", "板簧", "钢板弹簧",
+      "pegas", "suspensi", "suspension", "shock absorber", "stabilizer"],
+     ("CDQ", "QDQ"), False),
+
     # FILTER umum (query 'filter'/'saringan' TANPA jenis): filter tersebar di MESIN
     # (oli/solar/udara — FDJ/FDJFJ) DAN poros (filter oli gardan — CDQ/QDQ) → walk
     # SEMUA. Tanpa entri ini, 'filter' polos jatuh ke default POROS saja dan filter
