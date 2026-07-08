@@ -132,14 +132,18 @@ def test_sino_exploded_kat_mapping():
 def test_auto_exploded_gambar_helper(monkeypatch):
     monkeypatch.setattr(ai.epc_weichai, "exploded_figures", lambda r, p, k: {
         "found": True, "figures": [{"svg": "S1", "balon": 5, "nama": "Blok",
-                                    "kategori": "WP12", "jumlah_item": 3}]})
-    g = ai._auto_exploded_gambar("RJ1", "PN1", "weichai", "blok")
-    assert g and g[0]["pn"] == "PN1" and g[0]["balon"] == 5 and g[0]["image_id"]
-    # kategori kosong → tak walk, [] (hindari beban)
-    assert ai._auto_exploded_gambar("RJ1", "PN1", "sinotruk", "") == []
-    # tak ketemu → []
+                                    "kategori": "WP12", "jumlah_item": 3,
+                                    "items_ringkas": [{"balon": 5, "pn": "PN1", "nama": "Liner"},
+                                                      {"balon": 3, "pn": "PNX", "nama": "Bolt"}]}]})
+    gambar, daftar, nama = ai._auto_exploded_gambar("RJ1", "PN1", "weichai", "blok")
+    assert gambar and gambar[0]["pn"] == "PN1" and gambar[0]["balon"] == 5 and gambar[0]["image_id"]
+    assert nama == "Blok"
+    assert {d["balon"] for d in daftar} == {5, 3}          # daftar balon→part figure
+    # kategori kosong → tak walk → ([],[],'')
+    assert ai._auto_exploded_gambar("RJ1", "PN1", "sinotruk", "") == ([], [], "")
+    # tak ketemu → ([],[],'')
     monkeypatch.setattr(ai.epc_bom, "exploded_figures", lambda r, p, k: {"found": False})
-    assert ai._auto_exploded_gambar("RJ1", "PN1", "sinotruk", "rem") == []
+    assert ai._auto_exploded_gambar("RJ1", "PN1", "sinotruk", "rem") == ([], [], "")
 
 
 def test_uraikan_mesin_auto_lampirkan_gambar(monkeypatch):
