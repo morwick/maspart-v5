@@ -297,10 +297,11 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
         if b.get("kind") in ("katalog", "katalog_mesin"):
             src = "weichai" if b.get("kind") == "katalog_mesin" else "sinotruk"
             fmt = (b.get("fmt") or "excel").lower()
+            ish = bool(b.get("isi_stok_harga"))  # hanya True bila admin minta (di-set saat tool dibuat)
             if fmt == "pdf":
-                data, err = katalog_pdf(b.get("rangka", ""), b.get("kategori", ""), src)
+                data, err = katalog_pdf(b.get("rangka", ""), b.get("kategori", ""), src, isi_stok_harga=ish)
             else:
-                data, err = katalog_excel(b.get("rangka", ""), b.get("kategori", ""), src)
+                data, err = katalog_excel(b.get("rangka", ""), b.get("kategori", ""), src, isi_stok_harga=ish)
             if data is None:
                 return None, err
             with _stash_lock:
@@ -455,11 +456,13 @@ def _katalog_source(rangka: str, kategori: str, source: str):
     return _epc.catalog_walk(rangka, kategori), _epc.fetch_file
 
 
-def katalog_excel(rangka: str, kategori: str, source: str = "sinotruk") -> tuple[bytes | None, str]:
+def katalog_excel(rangka: str, kategori: str, source: str = "sinotruk",
+                  isi_stok_harga: bool = False) -> tuple[bytes | None, str]:
     """KATALOG PART BERGAMBAR satu kategori per-VIN: satu sheet per FIGURE
-    (gambar exploded view EPC + tabel part ber-nomor balon + stok/harga lokal)
-    + sheet Ringkasan. Return (bytes, filename) atau (None, pesan_error).
-    source='weichai' → katalog MESIN Weichai (figure=group, gambar via dePreview)."""
+    (gambar exploded view EPC + tabel part ber-nomor balon) + sheet Ringkasan.
+    Kolom Stok & Harga SELALU ADA tapi ISINYA KOSONG secara default; hanya diisi
+    bila isi_stok_harga=True (admin minta). Return (bytes, filename) atau
+    (None, pesan_error). source='weichai' → katalog MESIN Weichai."""
     d, _fetch = _katalog_source(rangka, kategori, source)
 
     if not d.get("found"):
@@ -612,9 +615,11 @@ def katalog_excel(rangka: str, kategori: str, source: str = "sinotruk") -> tuple
         for k, it in enumerate(items):
             lr = local.get(it["pn"], {})
             nama = " ".join((lr.get("part_name") or it["nama"] or it["nama_cn"]).split())
+            # Stok & Harga: KOSONG kecuali admin minta (isi_stok_harga). Kolomnya
+            # tetap ada agar layout konsisten; hanya nilainya yang ditahan.
             vals = [_num(it.get("balon")), it["pn"], nama, _num(it.get("qty")),
-                    _num(lr.get("stok")) if lr else None,
-                    (lr.get("harga") or None) if lr else None,
+                    (_num(lr.get("stok")) if (isi_stok_harga and lr) else None),
+                    ((lr.get("harga") or None) if (isi_stok_harga and lr) else None),
                     ", ".join(it.get("pengganti") or []) or None]
             for j, v in enumerate(vals, start=1):
                 dc = ws.cell(row=row, column=j, value=_safe(v))
@@ -644,9 +649,11 @@ def _pdf_esc(v) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def katalog_pdf(rangka: str, kategori: str, source: str = "sinotruk") -> tuple[bytes | None, str]:
+def katalog_pdf(rangka: str, kategori: str, source: str = "sinotruk",
+                isi_stok_harga: bool = False) -> tuple[bytes | None, str]:
     """Versi PDF (siap cetak/kirim) dari katalog_excel: satu bagian per FIGURE —
-    judul, gambar exploded view EPC, lalu tabel part ber-nomor balon + stok/harga.
+    judul, gambar exploded view EPC, lalu tabel part ber-nomor balon. Kolom Stok
+    & Harga SELALU ADA tapi ISINYA KOSONG kecuali isi_stok_harga=True (admin).
     Return (bytes, filename) atau (None, pesan_error).
     source='weichai' → katalog MESIN Weichai."""
     try:
@@ -745,8 +752,8 @@ def katalog_pdf(rangka: str, kategori: str, source: str = "sinotruk") -> tuple[b
                 Paragraph(_pdf_esc(it["pn"]), st_cell),
                 Paragraph(_pdf_esc(nama), st_cell),
                 Paragraph(_pdf_esc(it.get("qty")), st_cell),
-                Paragraph(_pdf_esc(lr.get("stok") if lr else ""), st_cell),
-                Paragraph(_pdf_esc(lr.get("harga") if lr else ""), st_cell),
+                Paragraph(_pdf_esc(lr.get("stok") if (isi_stok_harga and lr) else ""), st_cell),
+                Paragraph(_pdf_esc(lr.get("harga") if (isi_stok_harga and lr) else ""), st_cell),
                 Paragraph(_pdf_esc(", ".join(it.get("pengganti") or [])), st_cell),
             ])
         tbl = Table(rows, colWidths=col_w, repeatRows=1)

@@ -58,8 +58,8 @@ def test_generic_excel_id_tak_dikenal():
 def test_stash_builder_katalog_dibangun_saat_unduh(monkeypatch):
     calls = []
 
-    def _fake_katalog(rangka, kategori, source="sinotruk"):
-        calls.append((rangka, kategori, source))
+    def _fake_katalog(rangka, kategori, source="sinotruk", isi_stok_harga=False):
+        calls.append((rangka, kategori, source, isi_stok_harga))
         return b"XLSX-BYTES", "x.xlsx"
 
     monkeypatch.setattr(ai_export, "katalog_excel", _fake_katalog)
@@ -69,7 +69,8 @@ def test_stash_builder_katalog_dibangun_saat_unduh(monkeypatch):
 
     data, out_name = ai_export.generic_excel(eid)
     assert data == b"XLSX-BYTES" and out_name == fname
-    assert calls == [("SJ346500", "kabin", "sinotruk")]   # kind 'katalog' → sumber Sinotruk
+    # kind 'katalog' → sumber Sinotruk; default isi_stok_harga=False (kolom kosong)
+    assert calls == [("SJ346500", "kabin", "sinotruk", False)]
     # klik kedua: dari cache bytes, builder TIDAK dipanggil lagi
     data2, _ = ai_export.generic_excel(eid)
     assert data2 == data and len(calls) == 1

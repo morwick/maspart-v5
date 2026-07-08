@@ -66,6 +66,16 @@ def _is_pembeli(user: dict) -> bool:
     return (user.get("role") or "").lower() == "pembeli"
 
 
+def _is_admin(user: dict) -> bool:
+    return (user.get("role") or "").lower() == "admin"
+
+
+def _boleh_isi_stok_harga(args: dict, user: dict) -> bool:
+    """Katalog: stok & harga hanya DIISI bila ADMIN yang secara eksplisit meminta.
+    User non-admin TIDAK pernah bisa (walau model mengirim flag-nya)."""
+    return _is_admin(user) and bool(args.get("sertakan_stok_harga"))
+
+
 def _hide_gudang_for_buyer(result: dict, user: dict) -> dict:
     """Sembunyikan rincian stok ANTAR-CABANG dari akun pembeli. Pembeli hanya
     berhak melihat total & stok tergudang miliknya (lewat jalur web terscope),
@@ -923,8 +933,10 @@ def _tool_specs(user: dict) -> list[dict]:
                     "dengan gambar exploded view resmi EPC + nomor balon + stok/harga lokal, "
                     "menjadi FILE EXCEL (kartu unduh muncul otomatis). Kategori: kabin, mesin, "
                     "kopling, transmisi, gardan depan/belakang, kelistrikan, rem, sasis, dll. "
-                    "Proses ±1 menit — HANYA untuk permintaan KATALOG/buku part; pertanyaan part "
-                    "biasa pakai tool lain. Hanya unit Sinotruk/HOWO/SITRAK."
+                    "Kolom Stok & Harga SELALU KOSONG di file (default) — hanya terisi bila "
+                    "ADMIN secara eksplisit meminta stok/harga disertakan. Proses ±1 menit — "
+                    "HANYA untuk permintaan KATALOG/buku part; pertanyaan part biasa pakai tool "
+                    "lain. Hanya unit Sinotruk/HOWO/SITRAK."
                 ),
                 "parameters": {
                     "type": "object",
@@ -932,6 +944,7 @@ def _tool_specs(user: dict) -> list[dict]:
                         "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number 8 digit."},
                         "kategori": {"type": "string", "description": "Kategori yang mau dikatalogkan (mis. 'kabin', 'rem', 'transmisi', 'gardan belakang', 'kelistrikan', 'ac') — ATAU 'semua' untuk KATALOG LENGKAP seluruh kategori unit. HANYA diisi bila user MENYEBUTNYA; bila user belum menyebut kategori, KOSONGKAN (tool akan menyuruhmu menawarkan pilihan) — JANGAN menebak."},
                         "format": {"type": "string", "enum": ["excel", "pdf"], "description": "Format file hasil: 'excel' (.xlsx) atau 'pdf' (siap cetak). HANYA diisi bila user SUDAH memilih; bila belum, KOSONGKAN (tool akan menyuruhmu menanyakan Excel atau PDF) — JANGAN menebak/mengasumsikan."},
+                        "sertakan_stok_harga": {"type": "boolean", "description": "Isi TRUE HANYA bila user (yang seorang ADMIN) secara eksplisit minta stok & harga ikut diisi di katalog. Default kosong/false = kolom Stok/Harga dibiarkan KOSONG. Untuk user non-admin, tetap KOSONG walau diminta (sistem menahannya). JANGAN set true tanpa permintaan eksplisit."},
                     },
                     "required": ["rangka"],
                 },
@@ -947,8 +960,9 @@ def _tool_specs(user: dict) -> list[dict]:
                     "'katalog blok/piston/bahan bakar mesin', 'catalog engine + gambar'. Menyusun part "
                     "internal mesin per-KELOMPOK (blok, kepala silinder, kruk as, bahan bakar, pelumas, "
                     "pendingin, turbo, kompresor, alternator/starter, dll.) LENGKAP dengan gambar "
-                    "exploded view resmi EPC Weichai + nomor balon + stok/harga lokal, menjadi FILE "
-                    "Excel/PDF (kartu unduh otomatis). Untuk part INTERNAL MESIN — BEDA dari "
+                    "exploded view resmi EPC Weichai + nomor balon, menjadi FILE Excel/PDF (kartu "
+                    "unduh otomatis). Kolom Stok & Harga SELALU KOSONG di file (default) — hanya "
+                    "terisi bila ADMIN eksplisit minta. Untuk part INTERNAL MESIN — BEDA dari "
                     "katalog_kategori (itu bodi/sasis Sinotruk). HANYA unit bermesin Weichai (WP-series; "
                     "Sinotruk/HOWO/SITRAK bermesin Weichai). Proses ±1-3 menit."
                 ),
@@ -958,6 +972,7 @@ def _tool_specs(user: dict) -> list[dict]:
                         "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number."},
                         "kategori": {"type": "string", "description": "Bagian mesin yang mau dikatalogkan (mis. 'blok', 'kepala silinder', 'bahan bakar', 'pelumas', 'pendingin', 'turbo', 'kompresor', 'alternator') — ATAU 'lengkap'/'semua' untuk SELURUH mesin. HANYA diisi bila user MENYEBUTNYA; bila belum, KOSONGKAN (tool akan menyuruhmu menawarkan pilihan) — JANGAN menebak."},
                         "format": {"type": "string", "enum": ["excel", "pdf"], "description": "Format hasil: 'excel' atau 'pdf'. HANYA diisi bila user SUDAH memilih; bila belum, KOSONGKAN (tool akan menyuruhmu menanyakan) — JANGAN menebak."},
+                        "sertakan_stok_harga": {"type": "boolean", "description": "Isi TRUE HANYA bila user (seorang ADMIN) eksplisit minta stok & harga ikut diisi. Default kosong/false = kolom Stok/Harga KOSONG. User non-admin tetap KOSONG walau minta (ditahan sistem). JANGAN set true tanpa permintaan eksplisit."},
                     },
                     "required": ["rangka"],
                 },
@@ -4015,8 +4030,10 @@ def _t_katalog_mesin(args: dict, user: dict) -> dict:
     kat_nama = "Mesin Lengkap" if d.get("lengkap") else kategori.title()
     judul = f"Katalog {kat_nama} {frame}"
     ext = "pdf" if fmt == "pdf" else "xlsx"
+    isi_sh = _boleh_isi_stok_harga(args, user)
     export_id, filename = ai_export.stash_builder(
-        judul, {"kind": "katalog_mesin", "rangka": rangka, "kategori": kategori, "fmt": fmt}, ext=ext)
+        judul, {"kind": "katalog_mesin", "rangka": rangka, "kategori": kategori, "fmt": fmt,
+                "isi_stok_harga": isi_sh}, ext=ext)
     durasi = "±2-3 menit" if d.get("lengkap") else "±1 menit"
     fmt_label = "PDF" if fmt == "pdf" else "Excel"
     return {
@@ -4028,11 +4045,18 @@ def _t_katalog_mesin(args: dict, user: dict) -> dict:
         **({"peringatan_tidak_lengkap":
             "⚠️ Sebagian data EPC Weichai gagal diambil — katalog bisa belum lengkap; sarankan coba lagi."}
            if d.get("incomplete") else {}),
+        "stok_harga_diisi": isi_sh,
+        "info_stok_harga": (
+            "Kolom Stok & Harga DIISI (admin meminta)." if isi_sh
+            else ("Kolom Stok & Harga sengaja DIKOSONGKAN di katalog. Sebagai admin, "
+                  "kamu bisa minta 'sertakan stok & harga' untuk mengisinya."
+                  if _is_admin(user)
+                  else "Kolom Stok & Harga sengaja DIKOSONGKAN di katalog (kebijakan).")),
         "catatan": (f"Katalog mesin {fmt_label} siap — KARTU UNDUH otomatis muncul di bawah jawabanmu. "
                     "Jawab SINGKAT: sebut jumlah figure + jumlah part + bahwa tiap figure ada GAMBAR "
                     "exploded view resmi EPC Weichai dengan nomor balon, dan UNDUHAN PERTAMA butuh "
-                    f"{durasi} (menyusun gambar). ⛔ JANGAN menulis daftar part/figure satu-satu, "
-                    "JANGAN membuat link/URL sendiri."),
+                    f"{durasi} (menyusun gambar). Sampaikan juga sesuai 'info_stok_harga'. "
+                    "⛔ JANGAN menulis daftar part/figure satu-satu, JANGAN membuat link/URL sendiri."),
     }
 
 
@@ -4095,8 +4119,10 @@ def _t_katalog_kategori(args: dict, user: dict) -> dict:
         kat_nama = catalog_bom.KATEGORI_NAMA.get(d.get("kategori_kode") or "", kategori.title())
     judul = f"Katalog {kat_nama.split(' (')[0]} {frame}"
     ext = "pdf" if fmt == "pdf" else "xlsx"
+    isi_sh = _boleh_isi_stok_harga(args, user)
     export_id, filename = ai_export.stash_builder(
-        judul, {"kind": "katalog", "rangka": rangka, "kategori": kategori, "fmt": fmt}, ext=ext)
+        judul, {"kind": "katalog", "rangka": rangka, "kategori": kategori, "fmt": fmt,
+                "isi_stok_harga": isi_sh}, ext=ext)
     durasi = "±2-3 menit" if d.get("lengkap") else "±1 menit"
     fmt_label = "PDF" if fmt == "pdf" else "Excel"
     return {
@@ -4108,11 +4134,18 @@ def _t_katalog_kategori(args: dict, user: dict) -> dict:
         **({"peringatan_tidak_lengkap":
             "⚠️ Sebagian data EPC gagal diambil — katalog bisa belum lengkap; sarankan coba lagi."}
            if d.get("incomplete") else {}),
+        "stok_harga_diisi": isi_sh,
+        "info_stok_harga": (
+            "Kolom Stok & Harga DIISI (admin meminta)." if isi_sh
+            else ("Kolom Stok & Harga sengaja DIKOSONGKAN di katalog. Sebagai admin, "
+                  "kamu bisa minta 'sertakan stok & harga' untuk mengisinya."
+                  if _is_admin(user)
+                  else "Kolom Stok & Harga sengaja DIKOSONGKAN di katalog (kebijakan).")),
         "catatan": (f"Katalog {fmt_label} siap — KARTU UNDUH otomatis muncul di bawah jawabanmu. "
                     "Jawab SINGKAT: sebut jumlah figure + jumlah part + bahwa tiap figure ada "
                     "GAMBAR exploded view resmi EPC dengan nomor balon, dan UNDUHAN PERTAMA "
-                    f"butuh {durasi} (menyusun gambar). ⛔ JANGAN menulis daftar part/figure "
-                    "satu-satu, JANGAN membuat link/URL sendiri."),
+                    f"butuh {durasi} (menyusun gambar). Sampaikan juga sesuai 'info_stok_harga'. "
+                    "⛔ JANGAN menulis daftar part/figure satu-satu, JANGAN membuat link/URL sendiri."),
     }
 
 
