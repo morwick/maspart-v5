@@ -1,5 +1,6 @@
-"""Katalog bergambar MESIN Weichai — walk (figure=group, balon=lineNumber),
-pemetaan kategori, dePreview fetch, dan flow tool. Jaringan di-mock (tanpa EPC).
+"""Katalog bergambar MESIN Weichai — walk (figure=group, balon=PERINGKAT
+lineNumber), pemetaan kategori, dePreview fetch, dan flow tool. Jaringan
+di-mock (tanpa EPC).
 """
 import pytest
 
@@ -80,9 +81,41 @@ def test_walk_kategori_blok(mock_wc):
     assert fig["nama"] == "Engine Block Group"
     assert fig["svg"] == "SVG1"                     # svgFileId GROUP
     balon = {it["balon"]: it["pn"] for it in fig["items"]}
-    assert balon[110] == "612630010055"             # lineNumber = nomor balon
+    # BALON = PERINGKAT urut lineNumber (bukan lineNumber): lineNumber 10 → 1,
+    # 110 → 2. SVG exploded menggambar balon 1..N berurutan.
+    assert balon[1] == "1013955889"                 # lineNumber 10  → balon 1
+    assert balon[2] == "612630010055"               # lineNumber 110 → balon 2
+    assert "_ln" not in fig["items"][0]             # field bantu dibersihkan
     assert any(it.get("aus") for it in fig["items"])  # IsRepidWear=Y → aus
     assert d["_token"] == "TOK"
+
+
+def test_walk_balon_peringkat_lineNumber_sparse(monkeypatch):
+    """Regresi bug nyata (2026-07-08): lineNumber sparse/kelipatan-10 dgn CELAH
+    (mis. 10,20,…,90,160,210) → balon HARUS 1..N berurutan sesuai gambar SVG,
+    bukan lineNumber-nya (dulu tabel tampil 160/210 padahal gambar cuma s/d 12)."""
+    monkeypatch.setattr(wc, "_bridge", lambda f: {
+        "found": True, "token": "TOK", "dhhNumber": "DHH1", "dhhDate": "", "serial": "WP12"})
+    monkeypatch.setattr(wc.epc_bom, "_frame", lambda r: (r or "").strip().upper())
+    lns = [10, 20, 30, 40, 50, 60, 70, 80, 90, 160, 210, 230]
+    tree = {"data": [{"partName": "E", "children": [
+        {"id": "G", "partName": "Flywheel Housing Group", "svgFileId": "S", "orderNo": 1}]}]}
+    lst = {"data": [{"partNumber": f"PN{ln}", "partName": f"P{ln}", "lineNumber": ln, "iba": {}}
+                    for ln in reversed(lns)]}  # urut acak dari API
+
+    def fake_get(url, params, token):
+        return tree if url == wc._TREE_URL else (lst if url == wc._LIST_URL else {"_err": "x"})
+    monkeypatch.setattr(wc, "_get", fake_get)
+    wc._katalog_cache.clear()
+
+    d = wc.catalog_walk("RJ345233", "lengkap")
+    items = d["figures"][0]["items"]
+    balons = sorted(it["balon"] for it in items)
+    assert balons == list(range(1, 13))             # 12 part → balon 1..12 rapat
+    bymap = {it["pn"]: it["balon"] for it in items}
+    assert bymap["PN10"] == 1                        # lineNumber terkecil → balon 1
+    assert bymap["PN160"] == 10                      # celah 100..150 → tetap runtut
+    assert bymap["PN230"] == 12                      # lineNumber terbesar → balon terakhir
 
 
 def test_walk_lengkap_semua_group(mock_wc):

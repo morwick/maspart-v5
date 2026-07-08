@@ -403,7 +403,10 @@ def catalog_walk(rangka: str, kategori: str) -> dict:
                     if not nama:
                         nama = " ".join(str(iba.get("英文名称") or "").split())
                     items.append({
-                        "balon": p.get("lineNumber"),
+                        # lineNumber = kunci URUT (sparse, kelipatan 10 & ada celah),
+                        # BUKAN nomor balon. Balon diisi setelah scan = peringkat.
+                        "_ln": p.get("lineNumber"),
+                        "balon": None,
                         "pn": pn,
                         "nama": nama,
                         "nama_cn": "",
@@ -414,6 +417,15 @@ def catalog_walk(rangka: str, kategori: str) -> dict:
                 _scan(p.get("children"))
 
         _scan(raw)
+        # BALON = PERINGKAT urut lineNumber (1..N). SVG exploded Weichai menggambar
+        # balon 1..N BERURUTAN, sedangkan lineNumber sparse (mis. 10,20,…,90,160,210
+        # → ada celah), jadi lineNumber TAK cocok dgn gambar. Urutkan naik lalu
+        # nomori ulang agar nomor balon di tabel = nomor di gambar.
+        for rank, it in enumerate(
+                sorted(items, key=lambda x: (x["_ln"] is None, x["_ln"] or 0)), 1):
+            it["balon"] = rank
+        for it in items:
+            it.pop("_ln", None)
         return {
             "kategori": engine_nama,
             "nama": " ".join((g.get("partName") or "").split()) or f"Group {idx + 1}",
