@@ -5718,6 +5718,35 @@ _NOT_FOUND_REPLY = (
 )
 
 
+# Tool EPC PER-VIN yang mengembalikan daftar PART OTORITATIF untuk unit itu.
+# Bila salah satunya SUKSES turn ini, PN untuk part unit itu WAJIB dari hasilnya —
+# BUKAN dari cari_part (katalog lokal per-model, bisa beda per-VIN). Lihat guard
+# substitusi di bawah (kasus nyata WG9114520140 lokal vs WG9525520641 EPC).
+_EPC_VIN_PART_TOOLS = frozenset({
+    "part_aus_dari_rangka", "bom_dari_rangka", "uraikan_mesin", "uraikan_assembly",
+    "kategori_unit", "assembly_utama_unit", "banding_rangka", "banding_rangka_massal",
+})
+
+
+def _subst_correction_msg(subst: list[str]) -> str:
+    return (
+        "⛔ KOREKSI OTORITAS DATA: PN berikut berasal dari KATALOG LOKAL per-model "
+        f"(cari_part), BUKAN dari hasil EPC per-VIN unit ini: {', '.join(subst)}. "
+        "Untuk unit spesifik ini, EPC per-VIN adalah otoritas. TULIS ULANG jawaban: "
+        "gunakan HANYA PN dari hasil tool EPC per-VIN turn ini. Bila part yang dimaksud "
+        "TIDAK ada di hasil EPC (mis. EPC cuma punya varian kiri/kanan/per-lembar, tak ada "
+        "'assembly utuh'), sampaikan APA ADANYA — JANGAN menambalnya dengan PN katalog lokal.")
+
+
+def _annotate_subst(reply: str, subst: list[str]) -> str:
+    """Jaring terakhir bila model tetap menyisipkan PN katalog-lokal ke jawaban
+    per-VIN: beri peringatan di atas jawaban (tidak dihapus — info tetap ada, tapi
+    ditandai jelas agar tak dijadikan acuan untuk unit ini)."""
+    return (f"⚠️ Perhatian: nomor part {', '.join(subst)} berasal dari KATALOG LOKAL per-model, "
+            "TIDAK terverifikasi di data EPC per-VIN unit ini — bisa BEDA/salah untuk unit ini; "
+            "mohon verifikasi lewat EPC.\n\n" + reply)
+
+
 def _sanitize_ungrounded(reply: str, bad: list[str]) -> str:
     """Jaring terakhir bila model tetap membandel setelah dikoreksi.
     - Bila SEMUA PN di jawaban ternyata karangan → jawaban ini tak punya data nyata:
@@ -5836,6 +5865,19 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     empty_retries = 0  # model hanya menulis [PIKIR]/kosong → paksa tulis ulang
     lookup_gagal = False  # ada tool lookup yang error/tak ketemu → jangan mengarang angka
     tool_gagal_pernah = False  # untuk observabilitas: pernahkah ada tool gagal turn ini
+    # Guard SUBSTITUSI katalog-lokal: bila tool EPC per-VIN sukses, PN yg HANYA dari
+    # cari_part (lokal per-model) & tak ada di hasil EPC = suspect (salah utk unit ini).
+    epc_vin_pns: set[str] = set()
+    cari_local_pns: set[str] = set()
+    epc_vin_used = False
+
+    def _track_pn_source(name: str, res: dict, res_pns: set[str]) -> None:
+        nonlocal epc_vin_used
+        if name in _EPC_VIN_PART_TOOLS and isinstance(res, dict) and res.get("found"):
+            epc_vin_pns.update(res_pns)
+            epc_vin_used = True
+        elif name == "cari_part":
+            cari_local_pns.update(res_pns)
 
     def _finalize(reply: str, part_pns=None) -> dict:
         """Bungkus payload jawaban + catat observabilitas (best-effort). Dipanggil
@@ -5892,7 +5934,9 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                         lc_args["_grounded"] = grounded
                     result = _run_tool(name, lc_args, user)
                     tools_used.append(name)
-                    grounded |= _extract_pns(json.dumps(result, ensure_ascii=False, default=str))
+                    _res_pns = _extract_pns(json.dumps(result, ensure_ascii=False, default=str))
+                    grounded |= _res_pns
+                    _track_pn_source(name, result, _res_pns)
                     _capture_meta(name, lc["arguments"] or {}, result)
                     messages.append({
                         "role": "user",
@@ -5927,13 +5971,27 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             # PN di jawaban wajib ada di riwayat (user/asisten lolos) atau hasil tool.
             # Kode unit/seri sah (NX400HP dll) dikeluarkan dari dugaan karangan.
             bad = _drop_unit_tokens(_ungrounded_pns(reply, grounded))
-            if bad and guard_retries < _MAX_GUARD_RETRIES:
+            # GUARD SUBSTITUSI: PN yg HANYA dari cari_part (lokal per-model) & TAK ada
+            # di hasil EPC per-VIN turn ini → kemungkinan salah utk unit ini.
+            subst: list[str] = []
+            if epc_vin_used:
+                _suspect = cari_local_pns - epc_vin_pns
+                if _suspect:
+                    subst = _drop_unit_tokens([p for p in _extract_pns(reply) if p in _suspect])
+            if (bad or subst) and guard_retries < _MAX_GUARD_RETRIES:
                 guard_retries += 1
                 messages.append({"role": "assistant", "content": content})
-                messages.append({"role": "user", "content": _guard_correction_msg(bad)})
+                _corr = []
+                if bad:
+                    _corr.append(_guard_correction_msg(bad))
+                if subst:
+                    _corr.append(_subst_correction_msg(subst))
+                messages.append({"role": "user", "content": "\n\n".join(_corr)})
                 continue
             if bad:
                 reply = _sanitize_ungrounded(reply, bad)
+            if subst:
+                reply = _annotate_subst(reply, subst)
             return _finalize(reply)
 
         # Catat pesan assistant (yang berisi tool_calls) lalu jalankan tiap tool.
@@ -5954,7 +6012,9 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 args = {**args, "_grounded": grounded}
             result = _run_tool(name, args, user)
             tools_used.append(name)
-            grounded |= _extract_pns(json.dumps(result, ensure_ascii=False, default=str))
+            _res_pns = _extract_pns(json.dumps(result, ensure_ascii=False, default=str))
+            grounded |= _res_pns
+            _track_pn_source(name, result, _res_pns)
             _capture_meta(name, args, result)
             messages.append({
                 "role": "tool",
@@ -5981,4 +6041,9 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     bad = _drop_unit_tokens(_ungrounded_pns(reply, grounded))
     if bad:
         reply = _sanitize_ungrounded(reply, bad)
+    if epc_vin_used:
+        _suspect = cari_local_pns - epc_vin_pns
+        _subst = _drop_unit_tokens([p for p in _extract_pns(reply) if p in _suspect]) if _suspect else []
+        if _subst:
+            reply = _annotate_subst(reply, _subst)
     return _finalize(reply)

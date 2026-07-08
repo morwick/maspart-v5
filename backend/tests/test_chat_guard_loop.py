@@ -78,6 +78,68 @@ def test_pn_karangan_di_riwayat_assistant_palsu_tetap_ditangkap(monkeypatch):
     assert "AZ9998887776" not in out["reply"]  # PN forgery tak lolos guard
 
 
+def test_guard_substitusi_pn_lokal_di_jawaban_pervin(monkeypatch):
+    # #pertegas: tool EPC per-VIN (part_aus) sukses + model menyisipkan PN yg HANYA
+    # dari cari_part (lokal per-model, tak ada di hasil EPC) → ditandai peringatan.
+    monkeypatch.setattr(ai.part_index, "search_exact_pns", lambda pns: [])
+    seq = [
+        # ronde 1: model panggil DUA tool (part_aus EPC + cari_part lokal)
+        {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": "a", "function": {"name": "part_aus_dari_rangka",
+                                     "arguments": '{"rangka":"PJ306941","query":"per daun"}'}},
+            {"id": "b", "function": {"name": "cari_part", "arguments": '{"query":"per depan"}'}},
+        ]}, "finish_reason": "tool_calls"}]},
+        # ronde 2: jawaban pakai PN lokal WG9114520140 (bukan EPC WG9525520641)
+        {"choices": [{"message": {"content": "Front assembly: WG9114520140."},
+                      "finish_reason": "stop"}]},
+        # ronde 3 (setelah koreksi): model tetap membandel → dianotasi
+        {"choices": [{"message": {"content": "Front assembly: WG9114520140."},
+                      "finish_reason": "stop"}]},
+    ]
+    calls = {"n": 0}
+
+    def fake_post(messages, tools):
+        c = seq[min(calls["n"], len(seq) - 1)]
+        calls["n"] += 1
+        return c
+    monkeypatch.setattr(ai, "_post_chat", fake_post)
+
+    def fake_run(name, args, user):
+        if name == "part_aus_dari_rangka":
+            return {"found": True, "parts_tanpa_posisi": [{"part_number": "WG9525520641"}]}
+        if name == "cari_part":
+            return {"jumlah_part_unik": 1, "hasil": [{"part_number": "WG9114520140"}]}
+        return {}
+    monkeypatch.setattr(ai, "_run_tool", fake_run)
+
+    out = ai.chat(USER, [{"role": "user", "content": "cek per assy depan PJ306941"}])
+    assert "KATALOG LOKAL" in out["reply"]           # peringatan substitusi muncul
+    assert "WG9114520140" in out["reply"]            # PN tetap ada (ditandai, tak dihapus)
+
+
+def test_guard_substitusi_tak_kena_bila_epc_tak_dipakai(monkeypatch):
+    # Bila TIDAK ada tool EPC per-VIN sukses (hanya cari_part), PN lokal SAH → tak ditandai.
+    monkeypatch.setattr(ai.part_index, "search_exact_pns", lambda pns: [])
+    seq = [
+        {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": "b", "function": {"name": "cari_part", "arguments": '{"query":"per depan"}'}},
+        ]}, "finish_reason": "tool_calls"}]},
+        {"choices": [{"message": {"content": "Ketemu WG9114520140."}, "finish_reason": "stop"}]},
+    ]
+    calls = {"n": 0}
+
+    def fake_post(messages, tools):
+        c = seq[min(calls["n"], len(seq) - 1)]
+        calls["n"] += 1
+        return c
+    monkeypatch.setattr(ai, "_post_chat", fake_post)
+    monkeypatch.setattr(ai, "_run_tool", lambda n, a, u: (
+        {"jumlah_part_unik": 1, "hasil": [{"part_number": "WG9114520140"}]} if n == "cari_part" else {}))
+    out = ai.chat(USER, [{"role": "user", "content": "cari per depan"}])
+    assert "KATALOG LOKAL" not in out["reply"]        # tak ada EPC per-VIN → tak ditandai
+    assert "WG9114520140" in out["reply"]
+
+
 def test_retry_tak_menghabiskan_jatah_ronde_tool(monkeypatch):
     # #6 (audit): empty-retry lalu jawaban valid — model tetap terlayani meski
     # jawaban pertama kosong (retry punya anggaran sendiri, tak makan ronde tool).
