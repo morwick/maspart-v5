@@ -673,6 +673,48 @@ def snapshot() -> dict[str, dict[str, Any]]:
     return _index_cache.get("snap") or {}
 
 
+def search_index(terms: Iterable[str], *, limit: int = 8) -> list[dict[str, Any]]:
+    """Cari INDEKS stok bersama per NAMA/PN — substring, case-insensitive, murah
+    (in-memory, NON-BLOCKING: baca cache seperti snapshot(), TIDAK memicu tarikan).
+
+    Indeks stok memuat barang yang TIDAK ada di katalog Sinotruk (aftermarket/
+    lokal, sering bernama Indonesia: 'Kaca Spion LH', 'Alternator Regulator',
+    'Cucuk Per Depan Faw') — satu-satunya jalan menemukannya per kata kunci.
+    `terms` = query asli + ekspansi sinonim. Skor: frasa utuh di nama/PN lebih
+    tinggi dari kecocokan kata tunggal; hasil diurut skor, lalu stok, lalu nama.
+    [] bila indeks kosong (cold start) — pemanggil tinggal melewatkan."""
+    items = _index_cache.get("items") or []
+    if not items:
+        return []
+    # Frasa pendek/generik ('per', 'oli') terlalu banjir → minimal 4 huruf, dan
+    # cocok per BATAS KATA (bukan substring di tengah kata: 'per' ≠ 'Super').
+    frasa = [t.strip().lower() for t in terms if t and len(t.strip()) >= 4]
+    if not frasa:
+        return []
+    kata = {w for f in frasa for w in re.split(r"\s+", f) if len(w) >= 3}
+
+    def _cocok(needle: str, hay: str) -> bool:
+        return re.search(r"(?<!\w)" + re.escape(needle) + r"(?!\w)", hay) is not None
+
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for it in items:
+        hay = f"{it.get('name') or ''} {it.get('pn') or ''} {it.get('no') or ''}".lower()
+        score = 0.0
+        for f in frasa:
+            hit = (f in hay) if " " in f else _cocok(f, hay)
+            if hit:
+                score += 10.0 + len(f) / 10.0   # frasa lebih panjang = lebih spesifik
+        if not score:
+            score = sum(2.0 for w in kata if _cocok(w, hay))
+            if score < 4.0:                     # < 2 kata cocok = terlalu lemah (noise)
+                score = 0.0
+        if score:
+            scored.append((score, it))
+    scored.sort(key=lambda s: (-s[0], -(s[1].get("available_to_sell") or 0.0),
+                               s[1].get("name") or ""))
+    return [it for _s, it in scored[:limit]]
+
+
 # ── CLI selftest (tanpa server) ────────────────────────────────────────────
 if __name__ == "__main__":  # pragma: no cover
     import sys

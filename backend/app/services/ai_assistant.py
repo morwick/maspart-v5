@@ -197,6 +197,38 @@ def _expand_query(q: str) -> tuple[list[str], list[str]]:
     return terms, matched
 
 
+def _stok_lokal_rows(terms: list[str], exclude_pns: set[str],
+                     limit: int = 6) -> list[dict]:
+    """Barang STOK GUDANG (indeks Accurate bersama) yang cocok kata kunci — jalur
+    satu-satunya menemukan barang aftermarket/lokal yang TIDAK ada di katalog
+    Sinotruk (kasus nyata log: 'Alternator Regulator', 'Kaca Spion LH', 'Cucuk
+    Per Depan Faw'). Non-blocking (baca cache indeks, tanpa tarikan) & non-fatal.
+    `exclude_pns` = PN hasil katalog (ternormalisasi) agar tak dobel."""
+    try:
+        hits = accurate.search_index(terms, limit=limit + len(exclude_pns))
+    except Exception:
+        return []
+    rows: list[dict] = []
+    for h in hits:
+        pn = (h.get("pn") or "").strip().upper()
+        if accurate.norm_pn(pn) in exclude_pns:
+            continue
+        stok = h.get("available_to_sell")
+        row = {
+            "part_number": pn or (h.get("no") or ""),
+            "part_name": h.get("name") or "",
+            "stok_total": (f"{stok:.0f} {h.get('unit') or ''}".strip()
+                           if stok is not None else "—"),
+            "sumber": "Stok gudang (Accurate) — di luar katalog Sinotruk",
+        }
+        if h.get("price"):
+            row["harga_lokal"] = "Rp " + f"{int(h['price']):,}".replace(",", ".")
+        rows.append(row)
+        if len(rows) >= limit:
+            break
+    return rows
+
+
 # ── Posisi part dari NAMA (deterministik — jangan serahkan ke model) ─────────
 # 'spion kanan' dulu diputuskan model dgn membaca RH/LH sendiri → rawan salah.
 # Sekarang Python yang menandai posisi tiap part; model tinggal menyajikan.
@@ -353,8 +385,11 @@ def _tool_specs(user: dict) -> list[dict]:
                     "rem', 'saringan solar', 'gardan') dan memperluasnya ke kata kunci "
                     "katalog (yang berbahasa Inggris). Cukup teruskan istilah part dari "
                     "user APA ADANYA (Indonesia boleh). Mengembalikan PN, nama, stok "
-                    "total, stok per gudang, harga jual lokal, dan UNIT/MODEL sumber. "
-                    "Gunakan untuk 'apakah ada', 'stok berapa', 'cari part X'. "
+                    "total, stok per gudang, harga jual lokal, dan UNIT/MODEL sumber; "
+                    "plus 'stok_lokal_tambahan' = barang STOK GUDANG di luar katalog "
+                    "(aftermarket/merek lain, mis. alternator regulator, kaca spion "
+                    "aftermarket) yang cocok kata kunci. Gunakan untuk 'apakah ada', "
+                    "'stok berapa', 'cari part X', 'ada berapa <part> di stok'. "
                     "PENTING: data tersusun per unit/model truk. Bila user menyebut "
                     "unit/model (mis. NX360, HOWO-7, SITRAK, SG21), isi parameter "
                     "'unit' agar hasil discoped ke unit itu — jangan campur antar unit. "
@@ -1621,6 +1656,21 @@ def _t_cari_part(args: dict, user: dict) -> dict:
             "'hasil_sims' (nama part resmi). Sampaikan itu ke user; untuk harga/detail "
             "lanjutkan dengan detail_part atau harga_sims. JANGAN bilang part tidak ada.")
 
+    # STOK LOKAL (indeks Accurate): barang aftermarket/lokal di gudang yang TIDAK
+    # ada di katalog Sinotruk (mis. 'Alternator Regulator', 'Kaca Spion LH') —
+    # tanpa ini asisten menjawab 'tidak ada' padahal barangnya DIJUAL (kasus nyata
+    # log: 'ic regulator', 'spring assembly di stok'). Selalu dicek (murah,
+    # in-memory), di-dedup terhadap hasil katalog.
+    stok_lokal = _stok_lokal_rows(
+        search_terms, {accurate.norm_pn(p) for p in grouped})
+    if stok_lokal:
+        note = ((note + " ") if note else "") + (
+            "'stok_lokal_tambahan' = barang STOK GUDANG kami (indeks Accurate) yang "
+            "cocok kata kunci tapi DI LUAR katalog Sinotruk (aftermarket/merek lain) — "
+            "tawarkan sebagai alternatif LOKAL dengan menyebut nama barangnya PERSIS "
+            "apa adanya. ⛔ JANGAN mengklaim itu part resmi Sinotruk/kompatibel dengan "
+            "unit tertentu tanpa cek EPC.")
+
     # UMPAN BALIK KAMUS: catat pencarian yang 0 hasil. Daftar 'MISS' ini = istilah
     # lapangan yang belum dikenali sistem → kandidat tambahan untuk sinonim.json.
     # Cek log: docker logs <container> 2>&1 | grep MISS  (lihat PROJECT.md §3.5.3).
@@ -1632,9 +1682,9 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         )
         # Catat ke log persisten (halaman admin 'Pencarian Nihil') — hanya bila
         # istilah tak dikenali sinonim (yang dikenali tapi 0 hasil = data belum ada,
-        # bukan celah kamus) DAN SIMS juga tidak mengenalnya (kalau SIMS kenal,
-        # itu bukan celah kamus istilah). Best-effort.
-        if not matched_syn and not hasil_sims:
+        # bukan celah kamus) DAN SIMS/stok lokal juga tidak mengenalnya (kalau
+        # mereka kenal, itu bukan celah kamus istilah). Best-effort.
+        if not matched_syn and not hasil_sims and not stok_lokal:
             try:
                 search_log.record_miss(q, "nama", "asisten")
             except Exception:
@@ -1648,6 +1698,7 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         "jumlah_tersedia_stok": jumlah_tersedia,
         "saran_mungkin_maksud": saran,
         "hasil_sims": hasil_sims,
+        "stok_lokal_tambahan": stok_lokal,
         "urutan": "Hasil DIURUT berdasarkan KECOCOKAN/KOMPATIBILITAS part dengan katalog (BUKAN stok). Rekomendasikan part yang paling cocok untuk unit/kebutuhan user — stok hanya info, bukan dasar rekomendasi.",
         "info_stok_harga": "Stok & harga berlaku per Part Number (sama untuk semua varian unit yang memakai PN itu).",
         "hasil": out,
@@ -1678,6 +1729,29 @@ def _t_detail_part(args: dict, user: dict) -> dict:
     exact = [r for r in rows if (r.get("part_number") or "").upper() == pn.upper()]
     hits = exact or rows
     if not hits:
+        # FALLBACK STOK LOKAL: PN di luar katalog Sinotruk bisa jadi barang stok
+        # gudang aftermarket/lokal (indeks Accurate) — mis. 'Alternator Regulator'
+        # 2915YNZ-3000-W. Tanpa ini asisten bilang 'tidak ada' padahal barangnya dijual.
+        acc = None
+        if accurate.available():
+            try:
+                acc = accurate.stock_full(pn)
+            except accurate.AccurateError:
+                acc = None
+        if acc:
+            out = {
+                "found": True, "part_number": pn, "part_name": acc.get("name") or "",
+                "stok_total": f"{acc['available_to_sell']:.0f} {acc.get('unit') or ''}".strip(),
+                "stok_per_gudang": {g["gudang"]: g["qty"] for g in (acc.get("per_gudang") or [])},
+                "sumber_stok": "Accurate (sinkron berkala)",
+                "sumber": ("Barang STOK GUDANG (Accurate) — TIDAK ada di katalog Sinotruk "
+                           "(kemungkinan aftermarket/merek lain). Sebut nama barang persis "
+                           "apa adanya; ⛔ JANGAN klaim kompatibilitas unit tanpa cek EPC."),
+            }
+            if acc.get("price"):
+                out["harga_lokal"] = "Rp " + f"{int(acc['price']):,}".replace(",", ".")
+                out["sumber_harga"] = "Accurate (sinkron berkala)"
+            return _hide_gudang_for_buyer(out, user)
         return {"part_number": pn, "found": False, "pesan": "Tidak ditemukan di database lokal."}
     # Semua varian unit yang memakai PN ini.
     varian = []
