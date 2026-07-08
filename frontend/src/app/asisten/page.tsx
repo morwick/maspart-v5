@@ -14,8 +14,6 @@ import {
   exportBandingRangka,
   exportRepairKit,
   getAiStatus,
-  getPartPhotos,
-  partImageUrl,
   submitAiFeedback,
   type AIBandingExport,
   type AIChatTurn,
@@ -30,8 +28,7 @@ type Msg = AIChatTurn & {
   repairkitModels?: string[];
   bandingExports?: AIBandingExport[];
   excelExports?: AIExcelExport[];
-  explodedImages?: AIExplodedImage[]; // gambar exploded view inline
-  partPns?: string[]; // PN yang disebut asisten → thumbnail foto
+  explodedImages?: AIExplodedImage[]; // gambar exploded view inline (besar)
   at?: number; // epoch ms — jam pesan
   rating?: "up" | "down"; // umpan balik user atas jawaban ini
 };
@@ -246,7 +243,6 @@ export default function AsistenPage() {
           bandingExports: res.banding_exports,
           excelExports: res.excel_exports,
           explodedImages: res.exploded_images,
-          partPns: res.part_pns,
           at: Date.now(),
         },
       ]);
@@ -297,7 +293,6 @@ export default function AsistenPage() {
           bandingExports: res.banding_exports,
           excelExports: res.excel_exports,
           explodedImages: res.exploded_images,
-          partPns: res.part_pns,
           at: Date.now(),
         },
       ]);
@@ -601,63 +596,10 @@ export default function AsistenPage() {
   );
 }
 
-// Strip thumbnail foto part yang DISEBUT asisten (grounded). Foto diambil dari
-// SIMS via /api/parts/photos (proxy); PN tanpa foto dilewati. Klik → detail part.
-function PartThumbs({ pns }: { pns?: string[] }) {
-  const router = useRouter();
-  const [photos, setPhotos] = useState<{ pn: string; url: string }[]>([]);
-  const key = (pns || []).join(",");
-  useEffect(() => {
-    const token = getToken();
-    const list = (pns || []).slice(0, 6);
-    if (!token || list.length === 0) {
-      setPhotos([]);
-      return;
-    }
-    let alive = true;
-    (async () => {
-      const out: { pn: string; url: string }[] = [];
-      for (const pn of list) {
-        try {
-          const r = await getPartPhotos(pn, token);
-          if (r.photos && r.photos.length) out.push({ pn, url: partImageUrl(r.photos[0]) });
-        } catch {
-          /* lewati PN tanpa foto */
-        }
-      }
-      if (alive) setPhotos(out);
-    })();
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-
-  if (photos.length === 0) return null;
-  return (
-    <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-      {photos.map((p) => (
-        <button
-          key={p.pn}
-          onClick={() => router.push(`/part/${encodeURIComponent(p.pn)}`)}
-          title={`Lihat detail ${p.pn}`}
-          style={{ width: 78, borderRadius: 10, border: "1px solid var(--ink-200)", background: "var(--paper)", cursor: "pointer", overflow: "hidden", padding: 0 }}
-        >
-          <div style={{ width: "100%", height: 64, background: "var(--ink-50)" }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={p.url} alt={p.pn} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-          </div>
-          <div className="mono truncate" style={{ fontSize: 9.5, color: "var(--ink-500)", padding: "3px 4px" }}>{p.pn}</div>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// Gambar EXPLODED VIEW (tool gambar_exploded) — tampil INLINE di jawaban.
-// PNG dilayani /api/ai/excel/{id} (butuh auth) → fetch blob → objectURL utk <img>.
-// Batas selaras dgn backend (_MAX_EXPLODED_FIGURES) agar semua figure yg
-// dibangun ikut tampil.
+// Gambar EXPLODED VIEW (tool gambar_exploded) — tampil INLINE & BESAR di jawaban
+// (bukan strip thumbnail kecil, atas permintaan pemilik 2026-07-08). PNG dilayani
+// /api/ai/excel/{id} (butuh auth) → fetch blob → objectURL utk <img>. Klik → lightbox.
+// Batas selaras dgn backend (_MAX_EXPLODED_FIGURES).
 const MAX_EXPLODED = 6;
 function AiExplodedImages({ images }: { images?: AIExplodedImage[] }) {
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -698,28 +640,48 @@ function AiExplodedImages({ images }: { images?: AIExplodedImage[] }) {
   if (list.length === 0) return null;
   const zoomImg = zoomId ? list.find((i) => i.id === zoomId) : null;
   return (
-    <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 10 }}>
       {list.map((img) => (
-        // Thumbnail KECIL seukuran kartu foto (78px); klik → perbesar (lightbox).
-        <button
-          key={img.id}
-          type="button"
-          onClick={() => urls[img.id] && setZoomId(img.id)}
-          title={urls[img.id] ? "Klik untuk memperbesar exploded view" : "Memuat…"}
-          style={{ width: 78, borderRadius: 10, border: "1px solid var(--ink-200)", background: "var(--paper)", cursor: urls[img.id] ? "zoom-in" : "default", overflow: "hidden", padding: 0 }}
-        >
-          <div style={{ width: "100%", height: 64, background: "#fff", display: "grid", placeItems: "center" }}>
-            {urls[img.id] ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={urls[img.id]} alt={`Exploded view ${img.pn || ""}`} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-            ) : (
-              <span style={{ fontSize: 9, color: "var(--ink-400)" }}>{err ? "gagal" : "…"}</span>
-            )}
-          </div>
-          <div className="mono truncate" style={{ fontSize: 9.5, color: "var(--ink-500)", padding: "3px 4px" }}>
-            {img.balon != null ? `#${img.balon} ` : ""}{img.pn}
-          </div>
-        </button>
+        // Gambar BESAR: lebar penuh bubble (maks 560px), tinggi mengikuti isi.
+        <figure key={img.id} style={{ margin: 0 }}>
+          <button
+            type="button"
+            onClick={() => urls[img.id] && setZoomId(img.id)}
+            title={urls[img.id] ? "Klik untuk memperbesar" : "Memuat…"}
+            style={{
+              display: "block",
+              width: "100%",
+              maxWidth: 560,
+              border: "1px solid var(--ink-200)",
+              borderRadius: 12,
+              background: "#fff",
+              cursor: urls[img.id] ? "zoom-in" : "default",
+              overflow: "hidden",
+              padding: 0,
+            }}
+          >
+            <div style={{ width: "100%", minHeight: 220, display: "grid", placeItems: "center", padding: 10 }}>
+              {urls[img.id] ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={urls[img.id]}
+                  alt={`Exploded view ${img.pn || ""}`}
+                  loading="lazy"
+                  style={{ width: "100%", height: "auto", maxHeight: 460, objectFit: "contain", display: "block" }}
+                />
+              ) : (
+                <span style={{ fontSize: 12, color: "var(--ink-400)" }}>
+                  {err ? "Gagal memuat gambar" : "Memuat gambar…"}
+                </span>
+              )}
+            </div>
+          </button>
+          <figcaption style={{ fontSize: 11.5, color: "var(--ink-500)", marginTop: 4, paddingLeft: 2 }}>
+            {img.balon != null ? `Balon ${img.balon} · ` : ""}
+            <span className="mono">{img.pn}</span>
+            {img.nama_figure ? ` · ${img.nama_figure}` : ""}
+          </figcaption>
+        </figure>
       ))}
       {zoomImg && urls[zoomImg.id] && (
         <ImageLightbox
@@ -1129,13 +1091,11 @@ function Bubble({
         {m.excelExports?.map((exp, i) => (
           <AiExcelCard key={exp.id || i} exp={exp} />
         ))}
-        {/* Foto part + gambar exploded view BERSEBELAHAN (bukan menumpuk):
-            kartu foto di kiri, exploded view di sampingnya; membungkus ke bawah
-            di layar sempit. */}
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-          <PartThumbs pns={m.partPns} />
+        {/* Gambar exploded view → tampil BESAR & inline. Thumbnail foto part
+            (PartThumbs) tetap dimatikan atas permintaan pemilik (2026-07-08). */}
+        {m.explodedImages && m.explodedImages.length > 0 && (
           <AiExplodedImages images={m.explodedImages} />
-        </div>
+        )}
         {(tools.length > 0 || time || onFeedback) && (
           <div
             style={{

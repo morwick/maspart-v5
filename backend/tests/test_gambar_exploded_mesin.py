@@ -68,14 +68,17 @@ def test_tool_butuh_rangka_dan_pn():
     assert "error" in ai._t_gambar_exploded_mesin({"rangka": "R"}, U)  # tanpa pn
 
 
-def test_tool_sukses_dan_metadata(monkeypatch):
+def test_tool_sukses_info_teks(monkeypatch):
+    # Kartu gambar DIMATIKAN → tool balas INFO TEKS (figure + daftar balon), tanpa 'gambar'.
     monkeypatch.setattr(ai.epc_weichai, "exploded_figures", lambda r, p, k: {
         "found": True, "frame_number": "FR1", "pn": p,
         "figures": [{"svg": "SVG1", "balon": 5, "nama": "Engine Block Group",
-                     "kategori": "WP12", "jumlah_item": 15}]})
+                     "kategori": "WP12", "jumlah_item": 2,
+                     "items_ringkas": [{"balon": 5, "pn": "612630010055", "nama": "Cylinder Liner"}]}]})
     r = ai._t_gambar_exploded_mesin({"rangka": "RJ1", "pn": "612630010055"}, U)
-    assert r["found"] and r["gambar"] and r["gambar"][0]["balon"] == 5
-    assert r["gambar"][0]["image_id"]
+    assert r["found"] and not r.get("gambar")                # tak ada kartu gambar
+    assert r["daftar_balon_gambar"]                          # info balon (teks) tetap ada
+    assert "Engine Block Group" in r["catatan"]
 
 
 def test_tool_non_weichai(monkeypatch):
@@ -97,8 +100,8 @@ def test_tool_sorot_balon_tertentu(monkeypatch):
     r = ai._t_gambar_exploded_mesin({"rangka": "RJ1", "pn": "1014276820", "balon": 3}, U)
     assert r["found"]
     assert r["balon_disorot"] == 3
-    assert r["gambar"][0]["balon"] == 3                      # yg disorot = 3, bukan 2
-    assert r["part_di_balon"]["part_number"] == "1002177442"
+    assert not r.get("gambar")                              # tak ada kartu gambar
+    assert r["part_di_balon"]["part_number"] == "1002177442"  # info balon 3 (teks)
     assert "Exhaust Manifold Bolt" in (r["part_di_balon"]["nama"] or "")
 
 
@@ -110,7 +113,7 @@ def test_tool_sorot_balon_tak_ada(monkeypatch):
     r = ai._t_gambar_exploded_mesin({"rangka": "RJ1", "pn": "X", "balon": 9}, U)
     assert r["found"] and r["balon_disorot"] == 9
     assert r["part_di_balon"] is None                        # balon 9 tak ada
-    assert r["gambar"][0]["balon"] == 9                      # tetap disorot sesuai minta
+    assert not r.get("gambar")                               # tak ada kartu gambar
 
 
 def test_tool_terdaftar_dan_allowlist():
@@ -118,7 +121,7 @@ def test_tool_terdaftar_dan_allowlist():
     assert "gambar_exploded_mesin" in ai._allowed_tool_names(U)
 
 
-# ── AUTO exploded: cek part per-VIN otomatis menyertakan kartu gambar ─────────
+# ── AUTO exploded DIMATIKAN (pemilik) — _auto_exploded_gambar selalu kosong ────
 def test_sino_exploded_kat_mapping():
     assert ai._sino_exploded_kat(("FDJ", "FDJFJ"), None) == "mesin"
     assert ai._sino_exploded_kat(("LHQ",), None) == "kopling"
@@ -129,34 +132,21 @@ def test_sino_exploded_kat_mapping():
     assert ai._sino_exploded_kat(("FDJ", "FDJFJ", "CDQ", "QDQ"), None) == ""  # filter multi → skip
 
 
-def test_auto_exploded_gambar_helper(monkeypatch):
-    monkeypatch.setattr(ai.epc_weichai, "exploded_figures", lambda r, p, k: {
-        "found": True, "figures": [{"svg": "S1", "balon": 5, "nama": "Blok",
-                                    "kategori": "WP12", "jumlah_item": 3,
-                                    "items_ringkas": [{"balon": 5, "pn": "PN1", "nama": "Liner"},
-                                                      {"balon": 3, "pn": "PNX", "nama": "Bolt"}]}]})
-    gambar, daftar, nama = ai._auto_exploded_gambar("RJ1", "PN1", "weichai", "blok")
-    assert gambar and gambar[0]["pn"] == "PN1" and gambar[0]["balon"] == 5 and gambar[0]["image_id"]
-    assert nama == "Blok"
-    assert {d["balon"] for d in daftar} == {5, 3}          # daftar balon→part figure
-    # kategori kosong → tak walk → ([],[],'')
-    assert ai._auto_exploded_gambar("RJ1", "PN1", "sinotruk", "") == ([], [], "")
-    # tak ketemu → ([],[],'')
-    monkeypatch.setattr(ai.epc_bom, "exploded_figures", lambda r, p, k: {"found": False})
+def test_auto_exploded_gambar_dimatikan():
+    # Kartu thumbnail dimatikan (pemilik) → helper SELALU kosong (tanpa walk EPC).
+    assert ai._auto_exploded_gambar("RJ1", "PN1", "weichai", "blok") == ([], [], "")
     assert ai._auto_exploded_gambar("RJ1", "PN1", "sinotruk", "rem") == ([], [], "")
 
 
-def test_uraikan_mesin_auto_lampirkan_gambar(monkeypatch):
+def test_uraikan_mesin_tanpa_kartu_gambar(monkeypatch):
+    # uraikan_mesin tetap kasih daftar komponen (teks), TANPA kartu gambar.
     monkeypatch.setattr(ai.epc_weichai, "find_parts", lambda r, t: {
         "found": True, "engine": {"nama": "WP12", "model": "X", "order": "O"},
         "hasil": [{"pn": "1014276820", "nama": "Turbocharger", "group": "Turbo"}]})
     monkeypatch.setattr(ai.part_index, "search_exact_pns", lambda pns: [])
-    monkeypatch.setattr(ai.epc_weichai, "exploded_figures", lambda r, p, k: {
-        "found": True, "figures": [{"svg": "S1", "balon": 2, "nama": "Turbocharger Group",
-                                    "kategori": "WP12", "jumlah_item": 4}]})
     r = ai._t_uraikan_mesin({"rangka": "SJ346500", "part": "turbo"}, U)
-    assert r["found"] and r["gambar"] and r["gambar"][0]["pn"] == "1014276820"
-    assert r["gambar"][0]["balon"] == 2
+    assert r["found"] and r["komponen"]        # info komponen (teks) ada
+    assert not r.get("gambar")                 # tak ada kartu gambar
 
 
 def test_capture_meta_ambil_gambar_dari_uraikan_mesin():
