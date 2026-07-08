@@ -88,3 +88,49 @@ def test_tool_non_weichai(monkeypatch):
 def test_tool_terdaftar_dan_allowlist():
     assert "gambar_exploded_mesin" in ai._DISPATCH
     assert "gambar_exploded_mesin" in ai._allowed_tool_names(U)
+
+
+# ── AUTO exploded: cek part per-VIN otomatis menyertakan kartu gambar ─────────
+def test_sino_exploded_kat_mapping():
+    assert ai._sino_exploded_kat(("FDJ", "FDJFJ"), None) == "mesin"
+    assert ai._sino_exploded_kat(("LHQ",), None) == "kopling"
+    assert ai._sino_exploded_kat(("BSX",), None) == "transmisi"
+    assert ai._sino_exploded_kat(("CDQ", "QDQ"), "depan") == "gardan depan"
+    assert ai._sino_exploded_kat(("CDQ", "QDQ"), "belakang") == "gardan belakang"
+    assert ai._sino_exploded_kat(("CDQ", "QDQ"), None) == ""       # poros tanpa posisi → skip
+    assert ai._sino_exploded_kat(("FDJ", "FDJFJ", "CDQ", "QDQ"), None) == ""  # filter multi → skip
+
+
+def test_auto_exploded_gambar_helper(monkeypatch):
+    monkeypatch.setattr(ai.epc_weichai, "exploded_figures", lambda r, p, k: {
+        "found": True, "figures": [{"svg": "S1", "balon": 5, "nama": "Blok",
+                                    "kategori": "WP12", "jumlah_item": 3}]})
+    g = ai._auto_exploded_gambar("RJ1", "PN1", "weichai", "blok")
+    assert g and g[0]["pn"] == "PN1" and g[0]["balon"] == 5 and g[0]["image_id"]
+    # kategori kosong → tak walk, [] (hindari beban)
+    assert ai._auto_exploded_gambar("RJ1", "PN1", "sinotruk", "") == []
+    # tak ketemu → []
+    monkeypatch.setattr(ai.epc_bom, "exploded_figures", lambda r, p, k: {"found": False})
+    assert ai._auto_exploded_gambar("RJ1", "PN1", "sinotruk", "rem") == []
+
+
+def test_uraikan_mesin_auto_lampirkan_gambar(monkeypatch):
+    monkeypatch.setattr(ai.epc_weichai, "find_parts", lambda r, t: {
+        "found": True, "engine": {"nama": "WP12", "model": "X", "order": "O"},
+        "hasil": [{"pn": "1014276820", "nama": "Turbocharger", "group": "Turbo"}]})
+    monkeypatch.setattr(ai.part_index, "search_exact_pns", lambda pns: [])
+    monkeypatch.setattr(ai.epc_weichai, "exploded_figures", lambda r, p, k: {
+        "found": True, "figures": [{"svg": "S1", "balon": 2, "nama": "Turbocharger Group",
+                                    "kategori": "WP12", "jumlah_item": 4}]})
+    r = ai._t_uraikan_mesin({"rangka": "SJ346500", "part": "turbo"}, U)
+    assert r["found"] and r["gambar"] and r["gambar"][0]["pn"] == "1014276820"
+    assert r["gambar"][0]["balon"] == 2
+
+
+def test_capture_meta_ambil_gambar_dari_uraikan_mesin():
+    # _capture_meta harus menangkap 'gambar' dari uraikan_mesin & part_aus (bukan
+    # hanya gambar_exploded*). Diuji via alur chat singkat lebih berat; di sini
+    # cukup pastikan nama tool masuk daftar yang di-handle.
+    import inspect
+    src = inspect.getsource(ai.chat)
+    assert '"uraikan_mesin", "part_aus_dari_rangka"' in src

@@ -76,6 +76,53 @@ def _boleh_isi_stok_harga(args: dict, user: dict) -> bool:
     return _is_admin(user) and bool(args.get("sertakan_stok_harga"))
 
 
+def _auto_exploded_gambar(rangka: str, pn: str, source: str, kategori: str) -> list[dict]:
+    """BEST-EFFORT: metadata kartu GAMBAR exploded view untuk sebuah PN per-VIN —
+    dipakai agar tiap 'cek part' langsung disertai gambar di bawah jawaban.
+    source: 'weichai' (mesin) | 'sinotruk' (Parts Atlas). [] bila gagal / tak ada
+    figure / kategori kosong. Tidak pernah melempar (jawaban utama tak boleh gagal
+    gara-gara gambar)."""
+    if not (rangka and pn and kategori):
+        return []
+    try:
+        if source == "weichai":
+            ex = epc_weichai.exploded_figures(rangka, pn, kategori)
+        else:
+            ex = epc_bom.exploded_figures(rangka, pn, kategori)
+        if not ex.get("found"):
+            return []
+        out: list[dict] = []
+        for f in (ex.get("figures") or [])[:_MAX_EXPLODED_FIGURES]:
+            builder = {"kind": "exploded", "svg": f["svg"], "balon": f.get("balon")}
+            if source == "weichai":
+                builder["source"] = "weichai"
+                builder["rangka"] = rangka
+            image_id, filename = ai_export.stash_builder(
+                f"Exploded {pn} - {f.get('nama') or ''}", builder, ext="png")
+            out.append({"image_id": image_id, "filename": filename, "pn": pn,
+                        "balon": f.get("balon"), "nama_figure": f.get("nama"),
+                        "kategori": f.get("kategori"), "jumlah_item": f.get("jumlah_item")})
+        return out
+    except Exception:
+        logger.exception("auto exploded gagal (dilewati) pn=%s source=%s", pn, source)
+        return []
+
+
+def _sino_exploded_kat(modules: tuple, posisi: str | None) -> str:
+    """Domain modul Atlas (part_aus) → nama KATEGORI katalog untuk mencari figure.
+    Kosong utk kasus multi-domain (mis. 'filter' menyebar) agar tak walk berat."""
+    if modules == ("FDJ", "FDJFJ"):
+        return "mesin"
+    if modules == ("LHQ",):
+        return "kopling"
+    if modules == ("BSX",):
+        return "transmisi"
+    if modules == ("CDQ", "QDQ"):
+        return ("gardan depan" if posisi == "depan"
+                else "gardan belakang" if posisi == "belakang" else "")
+    return ""
+
+
 def _hide_gudang_for_buyer(result: dict, user: dict) -> dict:
     """Sembunyikan rincian stok ANTAR-CABANG dari akun pembeli. Pembeli hanya
     berhak melihat total & stok tergudang miliknya (lewat jalur web terscope),
@@ -3463,6 +3510,20 @@ def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:
            if res.get("incomplete") else {}),
     }
 
+    # OTOMATIS: kartu GAMBAR EXPLODED VIEW part utama (best-effort) — konsisten dgn
+    # uraikan_mesin, supaya tiap cek part per-VIN Sinotruk juga langsung disertai
+    # gambar. Kategori diturunkan dari domain modul Atlas (+ posisi utk poros);
+    # multi-domain (mis. 'filter') dilewati agar tak walk kategori berat.
+    _main = all_parts[0] if all_parts else None
+    base["gambar"] = (
+        _auto_exploded_gambar(rangka, _main["pn"], "sinotruk",
+                              _sino_exploded_kat(modules, _main.get("posisi")))
+        if _main else [])
+    if base["gambar"]:
+        base["catatan_gambar"] = ("GAMBAR exploded view part utama sudah OTOMATIS tampil (inline) "
+                                  "di bawah jawabanmu — sebut bahwa gambarnya ada; JANGAN buat "
+                                  "link/gambar sendiri.")
+
     # NON-POROS (mesin/kopling/gearbox): posisi tak relevan → daftar datar seperti biasa.
     if not is_axle:
         base["jumlah"] = len(all_parts)
@@ -3841,17 +3902,28 @@ def _t_uraikan_mesin(args: dict, user: dict) -> dict:
         return (ancillary, phrase, len(nm))
 
     rows.sort(key=_rank)
+
+    # OTOMATIS: sertakan kartu GAMBAR EXPLODED VIEW untuk komponen UTAMA (baris
+    # teratas) — supaya tiap 'cek part mesin' langsung disertai gambar di bawah
+    # jawaban (permintaan pemilik). Dipersempit dgn istilah 'part' (cepat).
+    gambar = _auto_exploded_gambar(rangka, rows[0]["part_number"], "weichai", part)
+
+    note = (f"Daftar sudah DIURUTKAN: baris teratas = komponen '{part}' itu SENDIRI "
+            "(assembly/unit utuhnya); baris berisi pipe/hose/bracket/gear = part PENYERTA. "
+            "Saat menjawab, SEBUT komponen utamanya DULU dengan PN-nya — ⛔ JANGAN "
+            "menyebut pipa/bracket/penyerta sebagai komponen utamanya. Tampilkan SEMUA "
+            "baris (utama + penyerta) dengan PN + nama + group + stok/harga. "
+            "⛔ JANGAN mengarang PN/stok/harga.")
+    if gambar:
+        note += (f" GAMBAR exploded view komponen utama ({gambar[0]['balon'] and 'balon ' + str(gambar[0]['balon'])}) "
+                 "SUDAH otomatis tampil (inline) di bawah jawabanmu — cukup sebut bahwa gambarnya "
+                 "ada, JANGAN buat link/gambar sendiri.")
     return {
-        "found": True, "mesin": engine_info, "dicari": part,
-        "jumlah_cocok": len(rows), "komponen": rows,
+        "found": True, "mesin": engine_info, "dicari": part, "pn": (rows[0]["part_number"] if rows else None),
+        "jumlah_cocok": len(rows), "komponen": rows, "gambar": gambar,
         "sumber": ("EPC Weichai resmi — komponen internal mesin PERSIS unit ini (disilang stok/harga "
                    "katalog lokal). Sistem terpisah dari EPC Sinotruk."),
-        "catatan": (f"Daftar sudah DIURUTKAN: baris teratas = komponen '{part}' itu SENDIRI "
-                    "(assembly/unit utuhnya); baris berisi pipe/hose/bracket/gear = part PENYERTA. "
-                    "Saat menjawab, SEBUT komponen utamanya DULU dengan PN-nya — ⛔ JANGAN "
-                    "menyebut pipa/bracket/penyerta sebagai komponen utamanya. Tampilkan SEMUA "
-                    "baris (utama + penyerta) dengan PN + nama + group + stok/harga. "
-                    "⛔ JANGAN mengarang PN/stok/harga."),
+        "catatan": note,
     }
 
 
@@ -5617,9 +5689,12 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                     "judul": result.get("judul"), "jumlah_baris": result.get("jumlah_baris")}
             if item["id"] and item not in excel_exports:
                 excel_exports.append(item)
-        elif name in ("gambar_exploded", "gambar_exploded_mesin") and result.get("found"):
+        elif name in ("gambar_exploded", "gambar_exploded_mesin",
+                      "uraikan_mesin", "part_aus_dari_rangka") and result.get("found"):
+            # gambar_exploded* = gambar yang diminta eksplisit; uraikan_mesin/
+            # part_aus = gambar OTOMATIS part utama yang menyertai cek part.
             for g in (result.get("gambar") or []):
-                item = {"id": g.get("image_id"), "pn": result.get("pn"),
+                item = {"id": g.get("image_id"), "pn": g.get("pn") or result.get("pn"),
                         "balon": g.get("balon"), "nama_figure": g.get("nama_figure"),
                         "kategori": g.get("kategori")}
                 if item["id"] and item not in exploded_images:
