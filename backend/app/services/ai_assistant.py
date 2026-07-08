@@ -1072,8 +1072,9 @@ def _tool_specs(user: dict) -> list[dict]:
                     "type": "object",
                     "properties": {
                         "rangka": {"type": "string", "description": "Nomor rangka/VIN unit (gambar diambil per-VIN)."},
-                        "pn": {"type": "string", "description": "Part Number mesin yang mau ditampilkan gambar exploded view-nya (apa adanya)."},
+                        "pn": {"type": "string", "description": "Part Number mesin untuk MENEMUKAN figure-nya (mis. PN assembly/utama yang sedang dibahas, spt turbocharger assembly). Gambar figure yang memuat PN ini yang ditampilkan."},
                         "kategori": {"type": "string", "description": "OPSIONAL. Kelompok mesin untuk mempersempit (mis. 'blok', 'bahan bakar', 'pelumas', 'pendingin', 'turbo', 'kepala silinder'). KOSONGKAN untuk mencari di seluruh mesin (lebih lama sedikit tapi paling aman)."},
+                        "balon": {"type": "integer", "description": "OPSIONAL. Bila user minta menyorot NOMOR BALON tertentu di gambar (mis. 'cek baut NO 3 di turbo', 'balon 5 itu apa'), isi nomornya di sini — sistem menyorot balon itu (kuning) di figure yang memuat 'pn', dan melaporkan part di balon itu. KOSONG = sorot balon PN-nya sendiri."},
                     },
                     "required": ["rangka", "pn"],
                 },
@@ -4318,6 +4319,12 @@ def _t_gambar_exploded_mesin(args: dict, user: dict) -> dict:
     rangka = (args.get("rangka") or "").strip()
     pn = (args.get("pn") or args.get("part_number") or "").strip().upper()
     kategori = (args.get("kategori") or "").strip() or "lengkap"
+    # Nomor balon yang MINTA disorot (mis. 'cek baut no 3 di turbo'): figure tetap
+    # ditemukan via PN assembly-nya, tapi yang di-highlight = balon ini, bukan balon PN.
+    try:
+        balon_req = int(args.get("balon")) if str(args.get("balon") or "").strip() else None
+    except (TypeError, ValueError):
+        balon_req = None
     if not rangka:
         return {"error": "Sebutkan nomor rangka/VIN — gambar exploded mesin diambil PER-VIN "
                          "dari EPC Weichai."}
@@ -4344,24 +4351,46 @@ def _t_gambar_exploded_mesin(args: dict, user: dict) -> dict:
                 "error": d.get("message") or f"PN {pn} tak muncul di figure mesin unit ini.",
                 "saran": ("Pastikan PN memang part mesin Weichai & rangka benar. Bila part terpasang "
                           "tapi tak ber-gambar, itu tak digambar di figure EPC.")}
+    # Bila user minta balon tertentu, cari part di balon itu (dari figure yg memuat PN).
+    part_di_balon = None
+    if balon_req is not None:
+        for f in d["figures"]:
+            hit = next((it for it in (f.get("items_ringkas") or [])
+                        if it.get("balon") == balon_req), None)
+            if hit:
+                part_di_balon = {"balon": balon_req, "part_number": hit.get("pn") or None,
+                                 "nama": hit.get("nama") or None, "figure": f.get("nama")}
+                break
+
     gambar = []
     for f in d["figures"][:_MAX_EXPLODED_FIGURES]:
+        hl = balon_req if balon_req is not None else f.get("balon")   # balon yg disorot
         judul = f"Exploded mesin {pn} - {f.get('nama') or 'mesin'}"
         image_id, filename = ai_export.stash_builder(
             judul, {"kind": "exploded", "source": "weichai", "svg": f["svg"],
-                    "balon": f.get("balon"), "rangka": rangka}, ext="png")
+                    "balon": hl, "rangka": rangka}, ext="png")
         gambar.append({"image_id": image_id, "filename": filename,
-                       "balon": f.get("balon"), "nama_figure": f.get("nama"),
+                       "balon": hl, "nama_figure": f.get("nama"),
                        "kategori": f.get("kategori"), "jumlah_item": f.get("jumlah_item")})
     b0 = gambar[0]
+    if balon_req is not None:
+        catatan = (f"Gambar exploded view MESIN SIAP — tampil OTOMATIS (inline). NOMOR BALON "
+                   f"{balon_req} sudah DISOROT (kuning) di figure '{b0['nama_figure']}'. "
+                   + (f"Balon {balon_req} = {part_di_balon.get('nama') or '—'}"
+                      + (f" (PN {part_di_balon['part_number']})" if part_di_balon and part_di_balon.get('part_number') else " — PN tak tercantum terpisah (kemungkinan termasuk dalam assembly).")
+                      if part_di_balon else f"Balon {balon_req} tak ada di daftar item figure ini.")
+                   + " Beri tahu user apa part balon itu apa adanya; ⛔ JANGAN mengarang PN. "
+                     "JANGAN buat link/gambar sendiri.")
+    else:
+        catatan = (f"Gambar exploded view MESIN SIAP — tampil OTOMATIS (inline). "
+                   f"PN {pn} = NOMOR BALON '{b0['balon']}' di figure '{b0['nama_figure']}'. "
+                   "Beri tahu user singkat: figure apa + PN ini balon nomor berapa. ⛔ JANGAN "
+                   "membuat link/gambar/URL sendiri; JANGAN sebut PN lain di luar data ini.")
     return {
         "found": True, "frame_number": d.get("frame_number"), "pn": pn,
+        "balon_disorot": balon_req, "part_di_balon": part_di_balon,
         "jumlah_figure_cocok": len(d["figures"]), "gambar": gambar,
-        "catatan": (f"Gambar exploded view MESIN SIAP — tampil OTOMATIS (inline) di bawah jawabanmu. "
-                    f"PN {pn} = NOMOR BALON '{b0['balon']}' di figure '{b0['nama_figure']}'. "
-                    "Beri tahu user singkat: figure apa + PN ini balon nomor berapa. UNDUHAN GAMBAR "
-                    "PERTAMA bisa butuh beberapa detik (menyusun gambar). ⛔ JANGAN membuat link/"
-                    "gambar/URL sendiri; JANGAN sebut PN lain di luar data ini."),
+        "catatan": catatan,
     }
 
 

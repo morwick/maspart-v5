@@ -482,6 +482,11 @@ def exploded_figures(rangka: str, pn: str, kategori: str = "lengkap") -> dict:
             "nama": f.get("nama"),
             "kategori": f.get("kategori"),
             "jumlah_item": len(f.get("items") or []),
+            # Daftar ringkas SEMUA item figure ini → utk menyorot/menjelaskan
+            # nomor balon lain yang user tanya (mis. 'balon 3 di turbo').
+            "items_ringkas": [{"balon": it.get("balon"), "pn": it.get("pn"),
+                               "nama": it.get("nama") or it.get("nama_cn")}
+                              for it in (f.get("items") or [])],
         })
     return {
         "found": bool(figs),

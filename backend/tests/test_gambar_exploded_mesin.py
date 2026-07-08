@@ -85,6 +85,34 @@ def test_tool_non_weichai(monkeypatch):
     assert not r["found"] and "Weichai" in r["error"]
 
 
+def test_tool_sorot_balon_tertentu(monkeypatch):
+    # User minta balon 3 → figure ditemukan via PN assembly, HIGHLIGHT balon 3
+    # (bukan balon PN=2), + laporkan part di balon 3.
+    monkeypatch.setattr(ai.epc_weichai, "exploded_figures", lambda r, p, k: {
+        "found": True, "frame_number": "FR1", "pn": p,
+        "figures": [{"svg": "SVG1", "balon": 2, "nama": "Turbocharger Group",
+                     "kategori": "WP12", "jumlah_item": 7,
+                     "items_ringkas": [{"balon": 2, "pn": "1014276820", "nama": "Turbocharger"},
+                                       {"balon": 3, "pn": "1002177442", "nama": "Exhaust Manifold Bolt"}]}]})
+    r = ai._t_gambar_exploded_mesin({"rangka": "RJ1", "pn": "1014276820", "balon": 3}, U)
+    assert r["found"]
+    assert r["balon_disorot"] == 3
+    assert r["gambar"][0]["balon"] == 3                      # yg disorot = 3, bukan 2
+    assert r["part_di_balon"]["part_number"] == "1002177442"
+    assert "Exhaust Manifold Bolt" in (r["part_di_balon"]["nama"] or "")
+
+
+def test_tool_sorot_balon_tak_ada(monkeypatch):
+    monkeypatch.setattr(ai.epc_weichai, "exploded_figures", lambda r, p, k: {
+        "found": True, "pn": p,
+        "figures": [{"svg": "S", "balon": 2, "nama": "Turbo", "kategori": "", "jumlah_item": 2,
+                     "items_ringkas": [{"balon": 2, "pn": "X", "nama": "Turbo"}]}]})
+    r = ai._t_gambar_exploded_mesin({"rangka": "RJ1", "pn": "X", "balon": 9}, U)
+    assert r["found"] and r["balon_disorot"] == 9
+    assert r["part_di_balon"] is None                        # balon 9 tak ada
+    assert r["gambar"][0]["balon"] == 9                      # tetap disorot sesuai minta
+
+
 def test_tool_terdaftar_dan_allowlist():
     assert "gambar_exploded_mesin" in ai._DISPATCH
     assert "gambar_exploded_mesin" in ai._allowed_tool_names(U)
