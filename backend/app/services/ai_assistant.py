@@ -727,7 +727,13 @@ def _tool_specs(user: dict) -> list[dict]:
                     "rem, transmisi, dll) PERSIS untuk unit INI — pakai ini untuk 'berapa part "
                     "<kategori> di unit ini' (JANGAN pakai isi_kategori yang per-model). Beri "
                     "arg 'kategori' untuk daftar part satu kategori unit itu. Tanpa kata_kunci & "
-                    "tanpa kategori = RINGKASAN + breakdown. HANYA unit Sinotruk/HOWO/SITRAK."
+                    "tanpa kategori = RINGKASAN + breakdown. HANYA unit Sinotruk/HOWO/SITRAK. "
+                    "⚠️ CATATAN OTORITAS: ini Loading List DATAR (BOM pabrik). Untuk PN ASSEMBLY "
+                    "STRUKTURAL — PEGAS DAUN/per daun/leaf spring, SUSPENSI, BRACKET, POROS/REM — "
+                    "Loading List kadang memuat PN assembly USANG/generik yang BEDA dari katalog "
+                    "resmi. Untuk part2 itu, UTAMAKAN part_aus_dari_rangka (Parts Atlas terstruktur "
+                    "= PERSIS seperti tampilan EPC web/figure); pakai bom_dari_rangka utk itu HANYA "
+                    "sbg pelengkap, JANGAN sebagai PN assembly utama."
                 ),
                 "parameters": {
                     "type": "object",
@@ -2745,6 +2751,20 @@ def _t_bom_dari_rangka(args: dict, user: dict) -> dict:
         base["catatan_sinonim"] = note
     if catatan_sisi:
         base["catatan_sisi"] = catatan_sisi
+
+    # STEERING assembly struktural: bila user cari PEGAS DAUN/SUSPENSI/BRACKET, PN
+    # ASSEMBLY di Loading List bisa USANG/generik (kasus nyata WG9114520140 vs
+    # WG9525520641 Atlas). Arahkan ke part_aus (Atlas = tampilan EPC web) sbg otoritas.
+    _kl = (kata + " " + kategori).lower()
+    if any(k in _kl for k in ("pegas daun", "per daun", "leaf spring", "plate spring",
+                              "suspensi", "suspension", "pegas", "spring")):
+        base["peringatan_assembly_atlas"] = (
+            "⚠️ PN ASSEMBLY pegas daun/suspensi dari Loading List ini BISA USANG/generik dan "
+            "BEDA dari katalog resmi. PN assembly OTORITATIF ada di PARTS ATLAS (sama seperti "
+            "tampilan EPC web). WAJIB panggil part_aus_dari_rangka(rangka, query='<part>') dan "
+            "pakai PN assembly dari SANA sebagai jawaban utama; JANGAN sajikan PN assembly "
+            "Loading List sebagai yang benar tanpa cek Atlas. Bila part_aus tak menemukannya, "
+            "sampaikan 'tidak ketemu di Atlas' — JANGAN mengarang/menambal.")
 
     if res.get("partial"):
         # Loading List terpotong (server EPC balas data tak lengkap). JANGAN dipakai
