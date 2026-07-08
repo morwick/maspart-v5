@@ -1,6 +1,5 @@
-"""Katalog bergambar MESIN Weichai — walk (figure=group, balon=PERINGKAT
-lineNumber), pemetaan kategori, dePreview fetch, dan flow tool. Jaringan
-di-mock (tanpa EPC).
+"""Katalog bergambar MESIN Weichai — walk (figure=group, balon=orderNo),
+pemetaan kategori, dePreview fetch, dan flow tool. Jaringan di-mock (tanpa EPC).
 """
 import pytest
 
@@ -48,13 +47,16 @@ _TREE = {"data": [{"partName": "WP12 Engine", "children": [
 ]}]}
 _LISTS = {
     "G1": {"data": [
+        # orderNo = nomor balon di gambar; lineNumber = kunci urut sparse (diabaikan).
         {"partNumber": "612630010055", "partName": "Cylinder Liner", "lineNumber": 110,
-         "iba": {"IsRepidWear": "Y"}},
+         "orderNo": 5, "iba": {"IsRepidWear": "Y"}},
         {"partNumber": "1013955889", "partName": "Engine Block Assembly", "lineNumber": 10,
-         "link": {"showRule": "绘制示意图"}, "iba": {}},
+         "orderNo": 10, "link": {"showRule": "绘制示意图"}, "iba": {}},
     ]},
-    "G2": {"data": [{"partNumber": "1000076563", "partName": "Injector", "lineNumber": 20, "iba": {}}]},
-    "G3": {"data": [{"partNumber": "1234567890", "partName": "Water Pump", "lineNumber": 30, "iba": {}}]},
+    "G2": {"data": [{"partNumber": "1000076563", "partName": "Injector", "lineNumber": 20,
+                     "orderNo": 1, "iba": {}}]},
+    "G3": {"data": [{"partNumber": "1234567890", "partName": "Water Pump", "lineNumber": 30,
+                     "orderNo": 1, "iba": {}}]},
 }
 
 
@@ -81,27 +83,29 @@ def test_walk_kategori_blok(mock_wc):
     assert fig["nama"] == "Engine Block Group"
     assert fig["svg"] == "SVG1"                     # svgFileId GROUP
     balon = {it["balon"]: it["pn"] for it in fig["items"]}
-    # BALON = PERINGKAT urut lineNumber (bukan lineNumber): lineNumber 10 → 1,
-    # 110 → 2. SVG exploded menggambar balon 1..N berurutan.
-    assert balon[1] == "1013955889"                 # lineNumber 10  → balon 1
-    assert balon[2] == "612630010055"               # lineNumber 110 → balon 2
-    assert "_ln" not in fig["items"][0]             # field bantu dibersihkan
+    # BALON = orderNo (nomor di gambar), BUKAN lineNumber: Cylinder Liner
+    # lineNumber 110 tapi orderNo 5; Engine Block lineNumber 10 tapi orderNo 10.
+    assert balon[5] == "612630010055"               # orderNo 5  (kasus nyata user)
+    assert balon[10] == "1013955889"                # orderNo 10
     assert any(it.get("aus") for it in fig["items"])  # IsRepidWear=Y → aus
     assert d["_token"] == "TOK"
 
 
-def test_walk_balon_peringkat_lineNumber_sparse(monkeypatch):
-    """Regresi bug nyata (2026-07-08): lineNumber sparse/kelipatan-10 dgn CELAH
-    (mis. 10,20,…,90,160,210) → balon HARUS 1..N berurutan sesuai gambar SVG,
-    bukan lineNumber-nya (dulu tabel tampil 160/210 padahal gambar cuma s/d 12)."""
+def test_walk_balon_dari_orderNo_bukan_lineNumber(monkeypatch):
+    """Regresi bug nyata (2026-07-08): balon = orderNo (nomor tergambar di SVG),
+    BUKAN lineNumber (kunci urut sparse). Kasus user: Cylinder Liner lineNumber
+    110 → balon 5 (orderNo). Fallback ke urutan kemunculan bila orderNo tak valid."""
     monkeypatch.setattr(wc, "_bridge", lambda f: {
         "found": True, "token": "TOK", "dhhNumber": "DHH1", "dhhDate": "", "serial": "WP12"})
     monkeypatch.setattr(wc.epc_bom, "_frame", lambda r: (r or "").strip().upper())
-    lns = [10, 20, 30, 40, 50, 60, 70, 80, 90, 160, 210, 230]
     tree = {"data": [{"partName": "E", "children": [
         {"id": "G", "partName": "Flywheel Housing Group", "svgFileId": "S", "orderNo": 1}]}]}
-    lst = {"data": [{"partNumber": f"PN{ln}", "partName": f"P{ln}", "lineNumber": ln, "iba": {}}
-                    for ln in reversed(lns)]}  # urut acak dari API
+    # lineNumber besar & acak; orderNo = balon sebenarnya; satu part orderNo hilang → fallback.
+    lst = {"data": [
+        {"partNumber": "A", "partName": "A", "lineNumber": 110, "orderNo": 5, "iba": {}},
+        {"partNumber": "B", "partName": "B", "lineNumber": 10, "orderNo": 10, "iba": {}},
+        {"partNumber": "C", "partName": "C", "lineNumber": 999, "iba": {}},  # orderNo tak ada
+    ]}
 
     def fake_get(url, params, token):
         return tree if url == wc._TREE_URL else (lst if url == wc._LIST_URL else {"_err": "x"})
@@ -109,13 +113,10 @@ def test_walk_balon_peringkat_lineNumber_sparse(monkeypatch):
     wc._katalog_cache.clear()
 
     d = wc.catalog_walk("RJ345233", "lengkap")
-    items = d["figures"][0]["items"]
-    balons = sorted(it["balon"] for it in items)
-    assert balons == list(range(1, 13))             # 12 part → balon 1..12 rapat
-    bymap = {it["pn"]: it["balon"] for it in items}
-    assert bymap["PN10"] == 1                        # lineNumber terkecil → balon 1
-    assert bymap["PN160"] == 10                      # celah 100..150 → tetap runtut
-    assert bymap["PN230"] == 12                      # lineNumber terbesar → balon terakhir
+    bymap = {it["pn"]: it["balon"] for it in d["figures"][0]["items"]}
+    assert bymap["A"] == 5                           # orderNo 5 (bukan lineNumber 110)
+    assert bymap["B"] == 10                          # orderNo 10 (bukan lineNumber 10)
+    assert bymap["C"] == 3                           # tanpa orderNo → urutan kemunculan (ke-3)
 
 
 def test_walk_lengkap_semua_group(mock_wc):

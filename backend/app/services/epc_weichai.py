@@ -394,6 +394,8 @@ def catalog_walk(rangka: str, kategori: str) -> dict:
             raw = lst.get("data") or []
         items: list[dict] = []
 
+        pos = [0]  # fallback bila orderNo tak valid: urutan kemunculan
+
         def _scan(nodes):
             for p in nodes or []:
                 pn = (p.get("partNumber") or "").strip().upper()
@@ -402,11 +404,18 @@ def catalog_walk(rangka: str, kategori: str) -> dict:
                     nama = " ".join((p.get("partName") or "").split())
                     if not nama:
                         nama = " ".join(str(iba.get("英文名称") or "").split())
+                    pos[0] += 1
+                    # BALON = orderNo (nomor yg BENAR-BENAR tergambar di SVG exploded
+                    # Weichai). BUKAN lineNumber (itu kunci urut sparse/kelipatan-10
+                    # dgn celah — mis. Cylinder Liner lineNumber 110 tapi orderNo/balon 5).
+                    try:
+                        balon = int(p.get("orderNo"))
+                        if balon <= 0:
+                            balon = pos[0]
+                    except (TypeError, ValueError):
+                        balon = pos[0]
                     items.append({
-                        # lineNumber = kunci URUT (sparse, kelipatan 10 & ada celah),
-                        # BUKAN nomor balon. Balon diisi setelah scan = peringkat.
-                        "_ln": p.get("lineNumber"),
-                        "balon": None,
+                        "balon": balon,
                         "pn": pn,
                         "nama": nama,
                         "nama_cn": "",
@@ -417,15 +426,6 @@ def catalog_walk(rangka: str, kategori: str) -> dict:
                 _scan(p.get("children"))
 
         _scan(raw)
-        # BALON = PERINGKAT urut lineNumber (1..N). SVG exploded Weichai menggambar
-        # balon 1..N BERURUTAN, sedangkan lineNumber sparse (mis. 10,20,…,90,160,210
-        # → ada celah), jadi lineNumber TAK cocok dgn gambar. Urutkan naik lalu
-        # nomori ulang agar nomor balon di tabel = nomor di gambar.
-        for rank, it in enumerate(
-                sorted(items, key=lambda x: (x["_ln"] is None, x["_ln"] or 0)), 1):
-            it["balon"] = rank
-        for it in items:
-            it.pop("_ln", None)
         return {
             "kategori": engine_nama,
             "nama": " ".join((g.get("partName") or "").split()) or f"Group {idx + 1}",
