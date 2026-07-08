@@ -38,6 +38,11 @@ sys.path.insert(0, str(_EVALS_DIR.parent))  # backend/ → agar 'app' bisa diimp
 
 from app.core.config import get_settings          # noqa: E402
 from app.services import ai_assistant             # noqa: E402
+from app.services import ai_chat_log              # noqa: E402
+
+# Eval ≠ trafik user: JANGAN menulis ke tabel observabilitas ai_chat_log produksi
+# (pernah mengotori halaman Observabilitas AI dgn pertanyaan golden berulang).
+ai_chat_log.log_turn = lambda **kw: True
 
 GOLDEN = _EVALS_DIR / "golden.json"
 LAST_RUN = _EVALS_DIR / "last_run.json"
