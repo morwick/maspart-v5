@@ -3320,7 +3320,10 @@ _ATLAS_MODULE_MAP = [
     # is_axle=False PENTING: tanpa ini query pegas dianggap poros → posisi palsu +
     # auto-gambar nyasar ke figure gardan 'Drive device' (kasus nyata PJ306941).
     (["pegas daun", "per daun", "leaf spring", "plate spring", "板簧", "钢板弹簧",
-      "pegas", "suspensi", "suspension", "shock absorber", "stabilizer"],
+      "pegas", "suspensi", "suspension", "shock absorber", "stabilizer",
+      # token tunggal juga (model kerap query EN pendek 'spring'/'leaf') — tanpa
+      # ini jatuh ke domain poros → posisi palsu + auto-gambar gardan nyasar:
+      "spring", "leaf", "钢板"],
      ("CDQ", "QDQ"), False),
 
     # FILTER umum (query 'filter'/'saringan' TANPA jenis): filter tersebar di MESIN
@@ -3578,9 +3581,21 @@ def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:
     # gambar. Kategori diturunkan dari domain modul Atlas (+ posisi utk poros);
     # multi-domain (mis. 'filter') dilewati agar tak walk kategori berat.
     _main = all_parts[0] if all_parts else None
+    # CEK RELEVANSI sebelum auto-gambar: nama part utama HARUS memuat salah satu
+    # kata yang dicari. Tanpa ini, query yang cuma nyerempet (mis. 'spring' kena
+    # spring pin di gardan) menempelkan gambar figure yang TAK relevan dgn niat
+    # user (kasus nyata: tanya pegas daun, gambar 'Drive device' gardan ikut).
+    _relevan = False
     if _main:
+        _hay = ((_main.get("nama") or "") + " " + (_main.get("nama_cn") or "")).lower()
+        _relevan = any(k.lower() in _hay for k in kws if k)
+    if _main and _relevan:
+        # posisi → kategori 'gardan' HANYA utk domain poros sungguhan (is_axle).
+        # Domain non-axle (pegas/suspensi dst) yang part-nya kebetulan dari walk
+        # CDQ/QDQ tetap TANPA kategori → tak ada gambar gardan nyasar.
         _g, _db, _nf = _auto_exploded_gambar(
-            rangka, _main["pn"], "sinotruk", _sino_exploded_kat(modules, _main.get("posisi")))
+            rangka, _main["pn"], "sinotruk",
+            _sino_exploded_kat(modules, _main.get("posisi") if is_axle else None))
     else:
         _g, _db, _nf = [], [], ""
     base["gambar"] = _g

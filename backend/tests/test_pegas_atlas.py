@@ -10,7 +10,10 @@ U = {"username": "mas", "role": "admin"}
 
 def test_atlas_modules_pegas_bukan_axle():
     # Query pegas → is_axle False (tanpa posisi palsu & tanpa auto-gambar gardan).
-    for q in ("per daun", "pegas daun", "leaf spring", "plate spring", "suspensi"):
+    # Termasuk token EN pendek 'spring'/'leaf' yang kerap dipakai model — dulu
+    # jatuh ke poros → gambar 'Drive device' nyasar (regresi screenshot user).
+    for q in ("per daun", "pegas daun", "leaf spring", "plate spring", "suspensi",
+              "spring", "leaf"):
         mods, is_axle = ai._atlas_modules_for(q)
         assert is_axle is False, q
     # Kontrol: query poros biasa tetap axle.
