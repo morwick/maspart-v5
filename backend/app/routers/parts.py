@@ -1,6 +1,7 @@
 """Router parts: pencarian Part Number + status/refresh index."""
 from __future__ import annotations
 
+import re
 from urllib.parse import urlparse
 
 import requests
@@ -19,6 +20,7 @@ from fastapi.responses import Response
 from ..deps import get_current_user, require_admin
 from ..schemas import (
     CompareResponse,
+    ImageLearnResponse,
     ImageSearchResponse,
     IndexStatus,
     PartPhotos,
@@ -286,12 +288,47 @@ async def batch_catalog(
     )
 
 
+def _overlay_stok_harga_image(results: list[dict]) -> None:
+    """Isi stok/harga/tersedia tiap hasil Cari-by-Foto — user langsung tahu mana
+    yang READY tanpa membuka detail satu-satu. Sumber sama dgn pencarian teks:
+    indeks Accurate bersama (utama) → Excel katalog (fallback). In-place, non-fatal."""
+    snap: dict = {}
+    if accurate.available():
+        try:
+            snap = accurate.snapshot()
+        except Exception:
+            snap = {}
+    for r in results:
+        pn = r.get("part_number") or ""
+        stok, harga = "", ""
+        try:
+            row = next((x for x in part_index.search_part_number(pn)
+                        if (x.get("part_number") or "").upper() == pn.upper()), None)
+        except Exception:
+            row = None
+        if row:
+            stok = str(row.get("stok") or "")
+            harga = str(row.get("harga") or "")
+        e = snap.get(accurate.norm_pn(pn))
+        if e:
+            if e.get("stok") is not None:
+                stok = f"{int(e['stok']):,}".replace(",", ".")
+            if e.get("harga"):
+                harga = "Rp " + f"{int(e['harga']):,}".replace(",", ".")
+        r["stok"] = stok or "—"
+        r["harga"] = harga or "—"
+        try:
+            r["tersedia"] = int(re.sub(r"[^\d-]", "", stok) or 0) > 0
+        except ValueError:
+            r["tersedia"] = False
+
+
 @router.post("/search-image", response_model=ImageSearchResponse)
 async def search_image(
     file: UploadFile = File(..., description="Foto part (jpg/png/webp)"),
     top_k: int = Query(12, ge=1, le=50),
     threshold: float = Query(0.30, ge=0.0, le=1.0),
-    use_tta: bool = Query(False, description="Test-time augmentation (lebih akurat, 2× lambat)"),
+    use_tta: bool = Query(True, description="Mode akurat (TTA multi-varian, sedikit lebih lambat)"),
     _user: dict = Depends(get_current_user),
 ):
     if not image_search.torch_available():
@@ -310,7 +347,57 @@ async def search_image(
         )
     except Exception as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Gagal memproses foto: {e}")
-    return ImageSearchResponse(count=len(results), results=results)
+    _overlay_stok_harga_image(results)
+    stats = image_search.index_stats()
+    pesan = None
+    if not results:
+        pesan = (
+            f"Tidak ada yang mirip di galeri ({stats['total']} foto dari {stats['parts']} part) — "
+            "part di luar galeri tidak akan ketemu lewat foto. Tips: CROP foto ke part-nya saja "
+            "(buang latar), coba sudut/pencahayaan lain, atau cari via teks (nama/PN)."
+        )
+    return ImageSearchResponse(count=len(results), results=results,
+                               galeri_total=stats["total"], galeri_parts=stats["parts"],
+                               pesan=pesan)
+
+
+@router.post("/search-image/learn", response_model=ImageLearnResponse)
+async def search_image_learn(
+    file: UploadFile = File(..., description="Foto query yang dikonfirmasi"),
+    pn: str = Form(..., min_length=3, description="Part Number yang benar untuk foto ini"),
+    user: dict = Depends(get_current_user),
+):
+    """GALERI BELAJAR: user mengonfirmasi 'foto ini = PN X' → foto diindeks ke
+    galeri sehingga pencarian berikutnya makin akurat untuk foto lapangan serupa.
+    Hanya admin/'mas' (kurasi — label salah justru meracuni galeri)."""
+    if user.get("role") != "admin" and (user.get("username") or "").lower() != "mas":
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Hanya admin yang boleh menambah galeri belajar.")
+    if not image_search.torch_available():
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "Model AI (torch) tidak tersedia di server.")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File kosong.")
+    if len(data) > _MAX_IMAGE_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Ukuran foto > 15 MB.")
+    res = image_search.learn_from_photo(data, pn, indexed_by=user.get("username") or "admin")
+    if res.get("error"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, res["error"])
+    return ImageLearnResponse(ok=True, pn=res["pn"], duplikat=bool(res.get("duplikat")),
+                              galeri_total=int(res.get("galeri_total") or 0))
+
+
+@router.get("/learned-photo/{fname}")
+def learned_photo(fname: str):
+    """Sajikan foto galeri belajar (sims_url 'learned://<fname>'). TANPA auth
+    (agar <img> bisa memuat, spt image-proxy) — nama file tervalidasi ketat &
+    hanya dari folder learned_photos."""
+    p = image_search.learned_photo_path(fname)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Foto tidak ditemukan.")
+    return Response(content=p.read_bytes(), media_type="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/compare", response_model=CompareResponse)

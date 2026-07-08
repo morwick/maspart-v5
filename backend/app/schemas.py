@@ -68,11 +68,25 @@ class ImageMatch(BaseModel):
     n_strong: int
     boost: float
     distance: float
+    stok: str = "—"      # stok total (indeks Accurate / Excel) — tanpa breakdown gudang
+    harga: str = "—"     # harga jual lokal
+    tersedia: bool = False
 
 
 class ImageSearchResponse(BaseModel):
     count: int
     results: list[ImageMatch]
+    galeri_total: int = 0     # jumlah foto terindeks di galeri
+    galeri_parts: int = 0     # jumlah part unik di galeri
+    pesan: str | None = None  # penjelasan saat 0 hasil (cakupan galeri + tips)
+
+
+class ImageLearnResponse(BaseModel):
+    ok: bool
+    pn: str
+    duplikat: bool = False
+    galeri_total: int = 0
+    error: str | None = None
 
 
 class CompareBest(BaseModel):

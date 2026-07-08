@@ -119,14 +119,26 @@ def compute_embedding(image_bytes: bytes) -> list[float]:
         return feat.squeeze(0).cpu().tolist()
 
 
+# Zoom-in tengah utk varian TTA: buang pinggiran (latar) ~15% — foto lapangan
+# biasanya menaruh part di tengah dengan latar meja/lantai di tepi.
+_TTA_ZOOM = 0.85
+
+
 def compute_embedding_tta(image_bytes: bytes) -> list[float]:
+    """TTA v2 (mode akurat): rata-rata embedding 4 VARIAN gambar dalam SATU forward
+    pass — asli, mirror, zoom-in tengah, zoom-in mirror. Varian zoom menolong foto
+    LAPANGAN yang partnya di tengah dgn latar di pinggir; mirror menolong orientasi.
+    Tetap satu ruang embedding dengan galeri (preprocess identik per varian)."""
     model, preprocess = _load_model()
     img = Image.open(io.BytesIO(image_bytes))
     img = ImageOps.exif_transpose(img).convert("RGB")
     if max(img.size) > _EMBED_PRE_RESIZE_MAX:
         img.thumbnail((_EMBED_PRE_RESIZE_MAX, _EMBED_PRE_RESIZE_MAX), Image.LANCZOS)
-    img_flipped = ImageOps.mirror(img)
-    tensor = torch.stack([preprocess(img), preprocess(img_flipped)])
+    w, h = img.size
+    m = int(min(w, h) * _TTA_ZOOM)
+    zoom = img.crop(((w - m) // 2, (h - m) // 2, (w + m) // 2, (h + m) // 2))
+    variants = [img, ImageOps.mirror(img), zoom, ImageOps.mirror(zoom)]
+    tensor = torch.stack([preprocess(v) for v in variants])
     with torch.no_grad():
         feats = model(tensor)
         feats = nn.functional.normalize(feats, p=2, dim=1)
@@ -372,6 +384,11 @@ def append_local_index(rows: list[dict]) -> dict:
     return out
 
 
+# CATATAN EKSPERIMEN (benchmark leave-one-out 60 query galeri prod, 2026-07-08):
+# α-Query-Expansion TERBUKTI MERUSAK top-1 (41.7% → 31.7%) — galeri ini penuh
+# part varian yang mirip visual sehingga ekspansi menyeret PN tetangga yang
+# salah. Voting sim^β & reciprocal-rank juga lebih buruk dari max+boost yang
+# sekarang. JANGAN tambahkan lagi tanpa benchmark yang membuktikan sebaliknya.
 def _local_search(query_vec: list[float], distance_threshold: float, fetch_count: int) -> list[dict]:
     """Top-N kandidat dari galeri lokal — bentuk hasil identik dengan RPC Supabase
     (list dict dengan part_number, sims_url, similarity)."""
@@ -447,7 +464,9 @@ def search_by_image(
 
     rows = _fetch_candidates(query_vec, distance_threshold, fetch_count)
 
-    # Group per PN: foto terbaik + statistik
+    # Group per PN: foto terbaik + statistik. Untuk TAMPILAN, foto SIMS (http)
+    # diutamakan di atas foto belajar ('learned://', dari galeri belajar) — skor
+    # tetap dari kecocokan terbaik apa pun sumbernya.
     by_pn: dict[str, dict] = {}
     for r in rows:
         pn = r.get("part_number", "")
@@ -455,10 +474,14 @@ def search_by_image(
             continue
         sim = float(r.get("similarity") or 0.0)
         url = r.get("sims_url", "")
-        entry = by_pn.setdefault(pn, {"best_url": url, "best_sim": sim, "n_matches": 0, "n_strong": 0})
+        entry = by_pn.setdefault(
+            pn, {"best_url": url, "best_sim": sim, "n_matches": 0, "n_strong": 0,
+                 "_http_url": "", "_http_sim": -1.0})
         if sim > entry["best_sim"]:
             entry["best_sim"] = sim
             entry["best_url"] = url
+        if url.startswith("http") and sim > entry["_http_sim"]:
+            entry["_http_url"], entry["_http_sim"] = url, sim
         entry["n_matches"] += 1
         if sim >= _AGG_STRONG_TH:
             entry["n_strong"] += 1
@@ -471,7 +494,7 @@ def search_by_image(
         aggregated.append({
             "part_number": pn,
             "part_name": _part_index.name_for(pn),
-            "sims_url": info["best_url"],
+            "sims_url": info["_http_url"] or info["best_url"],
             "similarity": agg_score,
             "raw_similarity": info["best_sim"],
             "n_matches": info["n_matches"],
@@ -497,6 +520,84 @@ def _index_headers(prefer: str = "") -> dict:
     if prefer:
         h["Prefer"] = prefer
     return h
+
+
+def index_stats() -> dict:
+    """Statistik galeri lokal utk UI: total embedding + jumlah PART unik.
+    {total: 0, parts: 0} bila galeri belum siap."""
+    if not local_index_available():
+        return {"total": 0, "parts": 0}
+    return {"total": int(_local_matrix.shape[0]),
+            "parts": len({p for (p, _u) in (_local_meta or [])})}
+
+
+# ── Galeri BELAJAR: indeks foto LAPANGAN yang PN-nya dikonfirmasi user ───────
+# Foto query user ≠ foto katalog SIMS (kotor/sudut/pencahayaan lapangan). Tiap
+# foto terkonfirmasi yang diindeks menutup celah domain itu → akurasi tumbuh
+# dari pemakaian nyata. File foto disimpan agar bisa ditampilkan & di-embed ulang.
+_LEARNED_DIR = "learned_photos"
+_LEARNED_SCHEME = "learned://"
+_LEARNED_FNAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def learned_dir() -> Path:
+    d = get_settings().data_path / _LEARNED_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def learned_photo_path(fname: str) -> Path | None:
+    """Path file foto belajar utk disajikan — nama file divalidasi ketat
+    (tanpa path traversal). None bila nama tak valid / file tak ada."""
+    if not fname or not _LEARNED_FNAME_RE.match(fname):
+        return None
+    p = learned_dir() / fname
+    return p if p.is_file() else None
+
+
+def learn_from_photo(image_bytes: bytes, pn: str, indexed_by: str = "") -> dict:
+    """Indeks SATU foto lapangan ke galeri di bawah PN terkonfirmasi:
+    simpan file ke data/learned_photos + embedding ke CSV/memori (langsung
+    kepakai pencarian berikutnya). Return {ok, pn, file, galeri_total, error}."""
+    import hashlib
+
+    pn = (pn or "").strip().upper()
+    out: dict = {"ok": False, "pn": pn, "file": None, "error": None}
+    if not pn:
+        out["error"] = "part_number kosong"
+        return out
+    if not _TORCH_OK:
+        out["error"] = "torch tidak tersedia"
+        return out
+    try:
+        vec = compute_embedding(image_bytes)
+    except Exception as e:
+        out["error"] = f"gagal menghitung embedding: {e}"
+        return out
+    digest = hashlib.sha1(image_bytes).hexdigest()[:12]
+    safe_pn = re.sub(r"[^A-Za-z0-9._-]", "_", pn)
+    fname = f"{safe_pn}-{digest}.jpg"
+    try:
+        # Simpan sebagai JPEG (foto HP bisa HEIC-in-JPEG container/PNG besar).
+        img = Image.open(io.BytesIO(image_bytes))
+        img = ImageOps.exif_transpose(img).convert("RGB")
+        img.thumbnail((1280, 1280), Image.LANCZOS)
+        img.save(learned_dir() / fname, "JPEG", quality=88)
+    except Exception as e:
+        out["error"] = f"gagal menyimpan foto: {e}"
+        return out
+    res = append_local_index([{
+        "part_number": pn, "sims_url": f"{_LEARNED_SCHEME}{fname}",
+        "embedding": _vec_to_str(vec), "indexed_by": indexed_by or "learn",
+    }])
+    if res.get("error"):
+        out["error"] = res["error"]
+        return out
+    out["ok"] = True
+    out["file"] = fname
+    out["duplikat"] = bool(res.get("skipped_dup"))
+    out["galeri_total"] = index_stats()["total"]
+    return out
 
 
 def index_count() -> int:

@@ -67,6 +67,10 @@ export function partImageUrl(url: string): string {
   if (typeof url === "string" && url.startsWith("http://")) {
     return `${API_BASE}/api/parts/image-proxy?url=${encodeURIComponent(url)}`;
   }
+  // Foto galeri belajar (Cari by Foto) — disajikan backend dari data/learned_photos.
+  if (typeof url === "string" && url.startsWith("learned://")) {
+    return `${API_BASE}/api/parts/learned-photo/${encodeURIComponent(url.slice("learned://".length))}`;
+  }
   return url;
 }
 
@@ -112,9 +116,18 @@ export type ImageMatch = {
   n_strong: number;
   boost: number;
   distance: number;
+  stok: string;
+  harga: string;
+  tersedia: boolean;
 };
 
-export type ImageSearchResponse = { count: number; results: ImageMatch[] };
+export type ImageSearchResponse = {
+  count: number;
+  results: ImageMatch[];
+  galeri_total: number;
+  galeri_parts: number;
+  pesan?: string | null;
+};
 
 export async function searchByImage(
   file: File,
@@ -124,11 +137,37 @@ export async function searchByImage(
   const qs = new URLSearchParams({
     top_k: String(opts.topK ?? 12),
     threshold: String(opts.threshold ?? 0.3),
-    use_tta: String(opts.useTta ?? false),
+    use_tta: String(opts.useTta ?? true),
   });
   const form = new FormData();
   form.append("file", file);
   const res = await fetch(`${API_BASE}/api/parts/search-image?${qs}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export type ImageLearnResponse = {
+  ok: boolean;
+  pn: string;
+  duplikat: boolean;
+  galeri_total: number;
+};
+
+/** GALERI BELAJAR (admin): konfirmasi "foto ini = PN X" → foto diindeks ke galeri
+ *  sehingga pencarian foto lapangan serupa berikutnya makin akurat. */
+export async function learnImageMatch(
+  file: File,
+  pn: string,
+  token: string,
+): Promise<ImageLearnResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("pn", pn);
+  const res = await fetch(`${API_BASE}/api/parts/search-image/learn`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: form,
