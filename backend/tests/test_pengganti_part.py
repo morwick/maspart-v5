@@ -76,3 +76,44 @@ def test_pengganti_kosong(monkeypatch):
 
 def test_pengganti_butuh_pn():
     assert "error" in ai._t_pengganti_part({}, ADMIN)
+
+
+# ── INDEKS persamaan penuh (paginasi) + lookup instan ───────────────────────
+def test_equivalents_index(monkeypatch):
+    page1 = [
+        {"preSpGoodsNo": "OLD1+001/1", "preGoodsName": "Old", "afterSpGoodsNo": "NEW1", "afterGoodsName": "New"},
+        {"preSpGoodsNo": "OLD2", "preGoodsName": "O2", "afterSpGoodsNo": "NEW2", "afterGoodsName": "N2"},
+    ]
+
+    def fake_page(page, page_size=500):
+        return (page1, 2) if page == 1 else ([], 2)
+
+    monkeypatch.setattr(sims, "_SIMS_OK", True)
+    monkeypatch.setattr(sims, "_sf", type("F", (), {"fetch_equivalents_page": staticmethod(fake_page)}))
+    monkeypatch.setattr(sims, "_equiv_index", {"ts": 0.0, "by_pn": {}})
+    n = sims.refresh_equivalents(force=True)
+    assert n > 0
+    # exact + base ('OLD1' tanpa suffix) sama-sama cocok
+    assert [x["pn"] for x in sims.equivalents_for("OLD1+001/1")["digantikan_oleh"]] == ["NEW1"]
+    assert [x["pn"] for x in sims.equivalents_for("OLD1")["digantikan_oleh"]] == ["NEW1"]
+    # arah balik
+    assert [x["pn"] for x in sims.equivalents_for("NEW1")["menggantikan"]] == ["OLD1+001/1"]
+    assert sims.equivalents_for("TAKADA") == {}
+
+
+# ── cari_part menyisipkan 'pengganti' dari indeks ───────────────────────────
+def test_cari_part_sisip_pengganti(monkeypatch):
+    ROW = {"part_number": "OLDPN", "part_name": "Brake Pedal", "file": "NX360", "path": "Sinotruk/NX360"}
+    monkeypatch.setattr(ai.part_index, "search_part_name", lambda t: [ROW])
+    monkeypatch.setattr(ai.part_index, "search_part_number", lambda t: [])
+    monkeypatch.setattr(ai.part_index, "correct_typos", lambda t: (t, []))
+    monkeypatch.setattr(ai.part_index, "suggest_names", lambda q, limit=6: [])
+    monkeypatch.setattr(ai.part_index, "assembly_context", lambda pn, f="": {})
+    monkeypatch.setattr(ai, "_expand_query", lambda q: (["brake pedal"], []))
+    monkeypatch.setattr(ai.sims, "equivalents_for",
+                        lambda pn: {"digantikan_oleh": [{"pn": "NEWPN", "nama": "New Pedal"}],
+                                    "menggantikan": []} if pn == "OLDPN" else {})
+    res = ai._t_cari_part({"query": "brake pedal"}, ADMIN)
+    it = next(x for x in res["hasil"] if x["part_number"] == "OLDPN")
+    assert it.get("pengganti") == [{"pn": "NEWPN", "nama": "New Pedal"}]
+    assert "info_pengganti" in res

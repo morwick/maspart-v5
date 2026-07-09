@@ -468,7 +468,9 @@ def _tool_specs(user: dict) -> list[dict]:
                     "total, stok per gudang, harga jual lokal, dan UNIT/MODEL sumber; "
                     "plus 'stok_lokal_tambahan' = barang STOK GUDANG di luar katalog "
                     "(aftermarket/merek lain, mis. alternator regulator, kaca spion "
-                    "aftermarket) yang cocok kata kunci. Gunakan untuk 'apakah ada', "
+                    "aftermarket) yang cocok kata kunci; tiap part juga bisa membawa "
+                    "field 'pengganti' = PN PERSAMAAN/pengganti resmi (supersession) bila "
+                    "ada — sebutkan ke user, terutama bila stok aslinya kosong. Gunakan untuk 'apakah ada', "
                     "'stok berapa', 'cari part X', 'ada berapa <part> di stok'. "
                     "PENTING: data tersusun per unit/model truk. Bila user menyebut "
                     "unit/model (mis. NX360, HOWO-7, SITRAK, SG21), isi parameter "
@@ -1727,6 +1729,15 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         isi = ctx.get("anggota") or []
         if isi:
             it["grup_isi"] = isi
+        # PERSAMAAN/PENGGANTI (dari INDEKS SIMS, instan) — sisipkan bila part ini
+        # punya PN pengganti resmi. Berguna terutama bila stok part ini kosong.
+        try:
+            eq = sims.equivalents_for(pn)
+        except Exception:
+            eq = {}
+        pgl = eq.get("digantikan_oleh") or []
+        if pgl:
+            it["pengganti"] = [{"pn": e["pn"], "nama": e.get("nama")} for e in pgl[:5]]
     # Catatan jumlah yang JUJUR: bila total membengkak karena kecocokan kata umum
     # (mis. 'seal' pada 'seal kruk as' → ribuan), laporkan 'jumlah_relevan_kuat'
     # agar AI tak menyebut total mentah yang menyesatkan ke user.
@@ -1822,6 +1833,15 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         "info_stok_harga": "Stok & harga berlaku per Part Number (sama untuk semua varian unit yang memakai PN itu).",
         "hasil": out,
     }
+    # Bila ada part yang punya PN pengganti (field 'pengganti'), dorong asisten
+    # menyebutkannya — terutama untuk part yang stoknya kosong (tawarkan penggantinya).
+    if any(it.get("pengganti") for it in out):
+        out_res["info_pengganti"] = (
+            "Sebagian part punya field 'pengganti' = PN PENGGANTI resmi (supersession). "
+            "SEBUTKAN persamaannya secara ringkas saat menyajikan part itu ('PN ini ada "
+            "penggantinya: …'), TERUTAMA bila stok part aslinya kosong — sarankan cek/pakai "
+            "PN pengganti. ⛔ JANGAN mengarang PN pengganti di luar daftar 'pengganti'."
+        )
     # User mencari part untuk UNIT spesifik → hasil katalog per-model hanyalah
     # PERKIRAAN. Dorong perilaku EPC-first: tanpa rangka, minta rangka di awal jawaban.
     if unit:

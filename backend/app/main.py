@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 
 from .core.config import get_settings
 from .routers import admin, ai, auth, branch, buyer, chat, geo, harga, orders, parts, populasi, repairkit, stok
-from .services import accurate, ai_sinonim_learn, image_search, part_index
+from .services import accurate, ai_sinonim_learn, image_search, part_index, sims
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,6 +59,13 @@ def _warmup():
         ai_sinonim_learn.start_scheduled_generate()
     except Exception as e:  # pragma: no cover
         print(f"[startup] scheduler usulan sinonim gagal: {e}")
+    try:
+        # Indeks persamaan/pengganti part (SIMS partEquivalentQuery, ~17rb baris)
+        # ditarik sekali di latar → cari_part bisa menyisipkan persamaan tanpa
+        # panggilan live per-part.
+        sims.start_equivalents_refresh()
+    except Exception as e:  # pragma: no cover
+        print(f"[startup] scheduler indeks persamaan gagal: {e}")
 
 
 @asynccontextmanager

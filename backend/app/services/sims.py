@@ -194,6 +194,116 @@ def get_part_equivalents(part_number: str) -> dict:
             "digantikan_oleh": diganti, "menggantikan": lama}
 
 
+# ── INDEKS PERSAMAAN/PENGGANTI (partEquivalentQuery penuh, ~17rb baris) ──────
+# Tabel penggantian jarang berubah & tak besar → ditarik SEKALI (paginasi) ke
+# indeks in-memory, dibagi ke semua fitur (mis. cari_part menyisipkan persamaan
+# TANPA panggilan live per-part). Refresh terjadwal di latar (TTL 12 jam).
+import re as _re
+import threading as _threading
+import time as _time
+
+_EQUIV_TTL = 12 * 3600
+_equiv_lock = _threading.Lock()
+_equiv_index: dict = {"ts": 0.0, "by_pn": {}}   # {norm_pn: {digantikan_oleh:[{pn,nama}], menggantikan:[{pn,nama}]}}
+_equiv_sched_started = False
+
+
+def _eq_norm(pn: str) -> str:
+    return "".join((pn or "").upper().split())
+
+
+def _eq_base(pn: str) -> str:
+    """Buang suffix varian ('+001/1', '/1') agar PN katalog tanpa suffix tetap cocok."""
+    return _re.sub(r"(\+\d+)?(/\d+)?$", "", _eq_norm(pn))
+
+
+def refresh_equivalents(force: bool = False) -> int:
+    """Bangun/segarkan indeks penggantian penuh (paginasi partEquivalentQuery).
+    Hormati TTL kecuali force. Return jumlah PN ter-indeks. Non-fatal."""
+    if not _SIMS_OK:
+        return 0
+    with _equiv_lock:
+        if not force and _equiv_index["by_pn"] and _time.time() - _equiv_index["ts"] < _EQUIV_TTL:
+            return len(_equiv_index["by_pn"])
+    page_size = 500
+    try:
+        recs, total = _sf.fetch_equivalents_page(1, page_size)
+        all_recs = list(recs)
+        pages = (total + page_size - 1) // page_size if total else 1
+        for p in range(2, pages + 1):
+            more, _t = _sf.fetch_equivalents_page(p, page_size)
+            if not more:
+                break
+            all_recs.extend(more)
+    except Exception:
+        return len(_equiv_index["by_pn"])
+    if not all_recs:
+        return len(_equiv_index["by_pn"])
+
+    idx: dict = {}
+
+    def _reg(key_pn: str, direction: str, other_pn: str, other_nm: str) -> None:
+        if not key_pn or not other_pn:
+            return
+        on = _eq_norm(other_pn)
+        for k in {_eq_norm(key_pn), _eq_base(key_pn)}:
+            if not k:
+                continue
+            e = idx.setdefault(k, {"digantikan_oleh": [], "menggantikan": []})
+            lst = e[direction]
+            if not any(_eq_norm(x["pn"]) == on for x in lst):
+                lst.append({"pn": other_pn, "nama": other_nm or None})
+
+    for r in all_recs:
+        pre = (r.get("preSpGoodsNo") or "").strip()
+        aft = (r.get("afterSpGoodsNo") or "").strip()
+        pre_nm = " ".join((r.get("preGoodsName") or "").split())
+        aft_nm = " ".join((r.get("afterGoodsName") or "").split())
+        _reg(pre, "digantikan_oleh", aft, aft_nm)   # PN lama → penggantinya
+        _reg(aft, "menggantikan", pre, pre_nm)      # PN baru → yang digantikan
+    with _equiv_lock:
+        _equiv_index["by_pn"] = idx
+        _equiv_index["ts"] = _time.time()
+    return len(idx)
+
+
+def equivalents_for(part_number: str) -> dict:
+    """{digantikan_oleh:[{pn,nama}], menggantikan:[{pn,nama}]} dari INDEKS (instan,
+    tanpa jaringan). {} bila tak ada / indeks belum siap."""
+    idx = _equiv_index["by_pn"]
+    if not idx or not part_number:
+        return {}
+    return idx.get(_eq_norm(part_number)) or idx.get(_eq_base(part_number)) or {}
+
+
+def equivalents_count() -> int:
+    return len(_equiv_index["by_pn"])
+
+
+def start_equivalents_refresh() -> bool:
+    """Thread daemon: bangun indeks penggantian sekali di awal, lalu segarkan tiap
+    _EQUIV_TTL. Idempoten. Tarikan pertama jalan segera (indeks hangat sejak awal)."""
+    global _equiv_sched_started
+    if not _SIMS_OK:
+        return False
+    with _equiv_lock:
+        if _equiv_sched_started:
+            return False
+        _equiv_sched_started = True
+
+    def _loop():
+        while True:
+            try:
+                n = refresh_equivalents(force=True)
+                print(f"[sims] indeks persamaan OK ({n} PN); berikutnya {_EQUIV_TTL // 3600} jam lagi")
+            except Exception as e:  # pragma: no cover
+                print(f"[sims] refresh indeks persamaan gagal: {e}")
+            _time.sleep(_EQUIV_TTL)
+
+    _threading.Thread(target=_loop, daemon=True, name="sims-equiv-refresh").start()
+    return True
+
+
 def price_available() -> bool:
     return _PRICE_OK
 

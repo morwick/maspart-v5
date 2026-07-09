@@ -345,6 +345,27 @@ def fetch_part_equivalents(part_number: str, page_size: int = 50) -> list:
         return []
 
 
+def fetch_equivalents_page(page: int, page_size: int = 500) -> tuple:
+    """Satu halaman partEquivalentQuery TANPA filter — untuk membangun INDEKS penuh
+    tabel penggantian (17rb+ baris). Return (records, totalCount). ([], 0) bila gagal."""
+    try:
+        token = _get_token()
+        headers = {**BASE_HEADERS, "Authorization": token}
+        params = {"currentPage": page, "pageSize": page_size}
+        resp = requests.get(PART_EQUIV_API_URL, params=params, headers=headers, timeout=30)
+        if resp.status_code in (401, 403):
+            _reset_token()
+            headers = {**BASE_HEADERS, "Authorization": _get_token()}
+            resp = requests.get(PART_EQUIV_API_URL, params=params, headers=headers, timeout=30)
+        resp.raise_for_status()
+        j = resp.json() or {}
+        recs = j.get("records") or []
+        return (recs if isinstance(recs, list) else []), int(j.get("totalCount") or 0)
+    except Exception as e:
+        print(f"[sims_fetcher] Error equiv page {page}: {e}")
+        return [], 0
+
+
 # ══════════════════════════════════════════════
 #  FETCH GAMBAR
 # ══════════════════════════════════════════════
