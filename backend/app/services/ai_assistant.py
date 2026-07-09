@@ -197,6 +197,72 @@ def _expand_query(q: str) -> tuple[list[str], list[str]]:
     return terms, matched
 
 
+# Kata KATEGORI "payung": kata polos Indonesia (+ padanan Inggris) yang mewakili
+# SELURUH keluarga sub-part. _expand_query tak mengekspansi kata polos spt 'kopling'
+# (trigger sinonim semuanya frasa: 'kampas kopling', 'matahari kopling', dst) → jadi
+# 'kopling' saja melewatkan hampir semua sub-part. _umbrella_keywords menambal ini.
+_UMBRELLA_KATEGORI = {
+    "kopling": ["kopling", "clutch"],
+    "clutch": ["kopling", "clutch"],
+    "rem": ["rem", "brake"],
+    "brake": ["rem", "brake"],
+    "gardan": ["gardan", "differential"],
+    "transmisi": ["transmisi", "transmission", "gearbox", "persneling"],
+    "kabin": ["kabin", "cabin"],
+    "mesin": ["mesin", "engine"],
+    "kelistrikan": ["kelistrikan", "electric"],
+    "filter": ["filter", "saringan"],
+    "saringan": ["filter", "saringan"],
+    "suspensi": ["suspensi", "suspension"],
+}
+
+
+def _umbrella_keywords(kata_kunci: str) -> list[str]:
+    """Bila `kata_kunci` memuat kata KATEGORI payung (mis. 'kopling', 'rem'),
+    kumpulkan keyword katalog dari SEMUA grup sinonim terkait (token payung muncul
+    di nama grup / trigger / keyword). Menjaring sub-part yang takkan muncul dari
+    pencarian nama polos: 'kopling' → driven disc, pressure plate, release bearing,
+    clutch housing, master/booster, garpu kopling. [] bila bukan kategori payung."""
+    ql = (kata_kunci or "").lower()
+
+    def _word(tok: str, text: str) -> bool:
+        return re.search(r"(?<!\w)" + re.escape(tok) + r"(?!\w)", (text or "").lower()) is not None
+
+    tokens: list[str] = []
+    for w, toks in _UMBRELLA_KATEGORI.items():
+        if _word(w, ql):
+            for t in toks:
+                if t not in tokens:
+                    tokens.append(t)
+    if not tokens:
+        return []
+    kws: list[str] = []
+    for e in _load_sinonim_entries():
+        hay = " ".join([e.get("grup") or "", *(e.get("triggers") or []),
+                        *(e.get("keywords") or [])])
+        if any(_word(tok, hay) for tok in tokens):
+            for kw in (e.get("keywords") or []):
+                if kw and kw not in kws:
+                    kws.append(kw)
+    return kws
+
+
+def _resolve_gudang(nama: str) -> str | None:
+    """Cocokkan nama gudang bebas dari user (mis. 'palembang', 'jakarta') ke nama
+    gudang KANONIK di indeks stok multi-gudang (mis. '04.Palembang'). Prefix 'NN.'
+    diabaikan saat mencocok; case-insensitive; cocok bila salah satu memuat yang
+    lain. None bila tak ada yang cocok."""
+    want = (nama or "").strip().lower()
+    if not want:
+        return None
+    for g in part_index.gudang_names():
+        base = re.sub(r"^\s*\d+\s*\.\s*", "", g).strip().lower()
+        gl = g.lower()
+        if want in (base, gl) or want in base or (len(base) >= 3 and base in want) or want in gl:
+            return g
+    return None
+
+
 def _stok_lokal_rows(terms: list[str], exclude_pns: set[str],
                      limit: int = 6) -> list[dict]:
     """Barang STOK GUDANG (indeks Accurate bersama) yang cocok kata kunci — jalur
@@ -1223,6 +1289,40 @@ def _tool_specs(user: dict) -> list[dict]:
             },
         })
 
+    # Stok per-GUDANG: daftar part 1 kategori yg READY di satu gudang. Mengungkap
+    # rincian antar-gudang → TIDAK diberikan ke pembeli.
+    if not _is_pembeli(user):
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "stok_gudang",
+                "description": (
+                    "DAFTAR PART yang stoknya READY (tersedia, qty>0) DI SATU GUDANG "
+                    "tertentu, disaring per kata kunci/kategori. Panggil untuk pola 'cek "
+                    "stok part <kategori> yang ready di <gudang>', 'part <X> apa saja yang "
+                    "ada di gudang <Y>', 'kopling yang ready di Palembang', 'filter oli "
+                    "stok di Jakarta', 'lampu apa saja ready di Medan'. Otomatis: (1) "
+                    "perluas kata kunci/kategori ke sub-part (mis. 'kopling' → driven "
+                    "disc, matahari/pressure plate, drek laher/release bearing, garpu, "
+                    "master/booster, rumah kopling); (2) filter HANYA part yg stoknya >0 "
+                    "DI GUDANG itu. Mengembalikan daftar {part_number, part_name, "
+                    "stok_di_gudang (qty di gudang itu), stok_total, harga}. BEDA dari "
+                    "cari_part (stok TOTAL semua gudang, bukan 1 gudang) & detail_part "
+                    "(hanya 1 PN). Nama gudang boleh bebas ('palembang', 'jakarta', "
+                    "'makasar', 'medan') — sistem mencocokkan ke gudang resmi."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "kata_kunci": {"type": "string", "description": "Kategori/part yg dicari (mis. 'kopling', 'kampas rem', 'filter oli', 'lampu')."},
+                        "gudang": {"type": "string", "description": "Nama gudang tujuan (mis. 'Palembang', 'Jakarta', 'Makasar', 'Medan')."},
+                        "unit": {"type": "string", "description": "Opsional. Batasi ke unit/model tertentu (mis. 'NX360')."},
+                    },
+                    "required": ["kata_kunci", "gudang"],
+                },
+            },
+        })
+
     if role == "pembeli":
         specs.append({
             "type": "function",
@@ -1717,6 +1817,106 @@ def _t_cari_part(args: dict, user: dict) -> dict:
             "tool EPC (part_aus_dari_rangka/bom_dari_rangka) alih-alih hasil ini."
         )
     return out_res
+
+
+def _t_stok_gudang(args: dict, user: dict) -> dict:
+    """DAFTAR PART yang stoknya READY (qty>0) DI SATU GUDANG tertentu, disaring per
+    kata kunci/kategori (mis. 'part kopling yang ready di Palembang'). Sumber per-
+    gudang = indeks stok multi-gudang in-memory (part_index.gudang_breakdown) —
+    murah, TANPA panggilan Accurate per-PN. Ungkap rincian antar-gudang → bukan
+    untuk pembeli."""
+    if _is_pembeli(user):
+        return {"error": "Rincian stok antar-gudang tidak tersedia untuk akun pembeli."}
+    kata = (args.get("kata_kunci") or args.get("query") or "").strip()
+    gud = (args.get("gudang") or "").strip()
+    unit = (args.get("unit") or "").strip()
+    if not kata:
+        return {"error": "Sebutkan part/kategori yang dicari (mis. 'kopling', 'kampas rem', 'filter oli')."}
+    if not gud:
+        return {"error": "Sebutkan nama gudang (mis. 'Palembang', 'Jakarta', 'Makasar')."}
+
+    gudang_kanonik = _resolve_gudang(gud)
+    if not gudang_kanonik:
+        tersedia = [re.sub(r"^\s*\d+\s*\.\s*", "", g) for g in part_index.gudang_names()]
+        return {"found": False, "gudang_diminta": gud,
+                "error": f"Gudang '{gud}' tak dikenal.",
+                "gudang_tersedia": tersedia,
+                "jawaban_wajib": "Sebutkan salah satu gudang dari 'gudang_tersedia'."}
+
+    # Istilah cari: ekspansi sinonim biasa + PAYUNG kategori (agar 'kopling' polos
+    # ikut menjaring driven disc / matahari / drek laher / garpu / rumah kopling).
+    terms, _matched = _expand_query(kata)
+    for kw in _umbrella_keywords(kata):
+        if kw not in terms:
+            terms.append(kw)
+    search_terms = list(dict.fromkeys(t for t in terms if t))
+
+    # Kandidat dari KATALOG (nama + PN), scope unit bila diminta.
+    seen: set = set()
+    rows: list[dict] = []
+    for t in search_terms:
+        for r in part_index.search_part_number(t) + part_index.search_part_name(t):
+            if unit and unit.lower() not in (r.get("file") or "").lower():
+                continue
+            pn = (r.get("part_number") or "").upper()
+            if not pn or pn in seen:
+                continue
+            seen.add(pn)
+            rows.append(r)
+
+    # + barang STOK GUDANG aftermarket (indeks Accurate) yang cocok — banyak PN
+    # aftermarket juga punya breakdown di stok multi-gudang. Non-fatal.
+    if not unit:
+        try:
+            for it in accurate.search_index(search_terms, limit=30):
+                pn = (it.get("pn") or "").upper()
+                if pn and pn not in seen:
+                    seen.add(pn)
+                    rows.append({"part_number": pn, "part_name": it.get("name"),
+                                 "harga": None, "stok": None})
+        except Exception:
+            pass
+
+    # FILTER: hanya part berstok >0 DI GUDANG itu.
+    hasil: list[dict] = []
+    for r in rows:
+        pn = (r.get("part_number") or "").upper()
+        br = part_index.gudang_breakdown(pn)
+        qty = _stok_int(br.get(gudang_kanonik))
+        if qty <= 0:
+            continue
+        hasil.append({
+            "part_number": pn,
+            "part_name": r.get("part_name") or part_index.name_for(pn),
+            "stok_di_gudang": qty,
+            "stok_total": _stok_int(r.get("stok")) or sum(_stok_int(v) for v in br.values()),
+            "harga_lokal": r.get("harga") or None,
+        })
+    hasil.sort(key=lambda x: x["stok_di_gudang"], reverse=True)
+    ditampilkan = hasil[:40]
+
+    if hasil:
+        catatan = (
+            f"{len(hasil)} part '{kata}' READY (stok>0) di gudang {gudang_kanonik}. "
+            "'stok_di_gudang' = qty DI GUDANG ITU (bukan total semua gudang). Jawab "
+            "sebagai DAFTAR ringkas (PN + nama + qty di gudang), urut stok terbanyak; "
+            "sebut nama gudang jelas. ⛔ JANGAN mengarang PN di luar daftar ini."
+        )
+    else:
+        catatan = (
+            f"Tidak ada part '{kata}' yang berstok di gudang {gudang_kanonik}. Sampaikan "
+            "jujur; part kategori itu mungkin ada di GUDANG LAIN — tawarkan cek gudang "
+            "lain atau total stok (detail_part/stok_accurate untuk 1 PN)."
+        )
+    return {
+        "found": True,
+        "gudang": gudang_kanonik,
+        "kata_kunci": kata,
+        "kata_kunci_diperluas": [t for t in search_terms if t.lower() != kata.lower()][:20],
+        "jumlah_part_ready": len(hasil),
+        "ditampilkan": ditampilkan,
+        "catatan": catatan,
+    }
 
 
 def _t_daftar_unit(args: dict, user: dict) -> dict:
@@ -4638,6 +4838,7 @@ _DISPATCH = {
     "stok_accurate": _t_stok_accurate,
     "harga_sims": _t_harga_sims,
     "info_aplikasi": _t_info_aplikasi,
+    "stok_gudang": _t_stok_gudang,
     "daftar_unit": _t_daftar_unit,
     "cari_kode_kesalahan": _t_cari_kode_kesalahan,
     "cari_filter_shantui": _t_cari_filter_shantui,
@@ -5095,6 +5296,14 @@ def _system_prompt(user: dict) -> str:
         "sebutkan SINGKAT: figure apa & PN itu balon nomor berapa; gambarnya sudah tampil sendiri "
         "— ⛔ JANGAN buat link/gambar/URL sendiri. Untuk katalog banyak-part bergambar (file), "
         "pakai katalog_kategori/katalog_mesin (Excel/PDF).\n"
+        "- 🏬 STOK PER-GUDANG (part 1 kategori yg READY di 1 gudang): bila user tanya 'cek stok "
+        "part <kategori> yang ready/ada di <gudang>', 'kopling apa saja yang ready di Palembang', "
+        "'filter oli stok di Jakarta', 'lampu ready di Medan' → panggil stok_gudang(kata_kunci=<part/"
+        "kategori>, gudang=<nama gudang>). Tool memperluas kategori ke sub-part & MENYARING hanya "
+        "yang stoknya >0 di gudang itu. Jawab sebagai DAFTAR (PN + nama + qty di gudang), urut stok "
+        "terbanyak; 'stok_di_gudang' = qty DI GUDANG ITU (bukan total). Bedakan: cari_part = stok "
+        "TOTAL semua gudang; detail_part = 1 PN; stok_gudang = daftar per-kategori di SATU gudang. "
+        "Bila kosong, sampaikan jujur & tawarkan cek gudang lain. (Tool ini tak tersedia utk pembeli.)\n"
         "- 📥 EXPORT EXCEL (kartu unduh): bila user minta file Excel dari data yang dibahas "
         "('buatkan excelnya', 'export ke excel/xlsx/spreadsheet', 'bikin filenya', 'unduh "
         "sebagai excel') → panggil buat_excel(judul, kolom, baris). Isi 'baris' disalin PERSIS "
