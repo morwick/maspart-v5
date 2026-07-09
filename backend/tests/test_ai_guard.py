@@ -81,3 +81,30 @@ def test_sebagian_karangan_disamarkan_yang_asli_dipertahankan():
     assert "WG2210040097" in out          # PN nyata tetap tampil
     assert "tak terverifikasi" in out      # penanda samaran
     assert out.startswith("⚠️")            # peringatan di awal
+
+
+# ── _drop_unit_tokens: kode unit & nama gudang bukan PN karangan ─────────────
+
+def test_kode_unit_dengan_klitik_tidak_disamarkan(monkeypatch):
+    # Kasus nyata (probe 2026-07-09): model menulis 'unit NX360-mu' → token
+    # 'NX360-MU' dianggap PN karangan & disamarkan. Klitik -mu/-nya di ujung
+    # kode unit harus dikecualikan.
+    monkeypatch.setitem(ai._UNIT_TOKEN_CACHE, "tokens", {"NX360HP", "NX360", "SITRAK"})
+    monkeypatch.setitem(ai._UNIT_TOKEN_CACHE, "at", __import__("time").time())
+    assert ai._drop_unit_tokens(["NX360-MU"]) == []
+    assert ai._drop_unit_tokens(["SITRAK-NYA"]) == []
+    # PN asli berujung '-LH' (basis BUKAN nama unit) tetap dianggap dugaan.
+    assert ai._drop_unit_tokens(["AZ9998887776-LH"]) == ["AZ9998887776-LH"]
+
+
+def test_nama_gudang_dikecualikan_dari_guard(monkeypatch):
+    # Nama gudang kanonik ('01.Jakarta') kini ada di system prompt (ai_knowledge)
+    # → model bisa menyebutnya tanpa tool; guard tak boleh menyamarkannya.
+    from app.services import gudang_config
+    monkeypatch.setattr(gudang_config, "coords_map",
+                        lambda: {"01.Jakarta": (0, 0), "25. PT BJM": (0, 0)})
+    monkeypatch.setitem(ai._UNIT_TOKEN_CACHE, "tokens", set())
+    monkeypatch.setitem(ai._UNIT_TOKEN_CACHE, "at", 0.0)  # paksa rebuild cache
+    toks = ai._extract_pns("Stok ada di 01.Jakarta")
+    assert toks  # memang tertangkap regex mirip-PN…
+    assert ai._drop_unit_tokens(sorted(toks)) == []  # …tapi dikecualikan guard

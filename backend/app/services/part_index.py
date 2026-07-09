@@ -732,15 +732,25 @@ def search_part_name(term: str) -> list[dict]:
                 mask = pn_up.str.contains(kw_up, regex=False) | rm_up.str.contains(kw_up, regex=False)
                 matching_indices.update(int(i) for i in df.index[mask])
 
-        for idx in matching_indices:
-            row = df.iloc[idx]
-            pname = str(row["part_name"]) if pd.notna(row["part_name"]) else ""
-            remark = str(row["remark"]).strip() if pd.notna(row.get("remark")) else ""
+        if not matching_indices:
+            continue
+        # Ambil kolom SEKALI per file (batch) — df.iloc[idx] per baris memicu
+        # fast_xs pandas per baris (terukur ±37 dtk utk 61 ribu baris pada satu
+        # pencarian 'lampu'); tolist() kolom sub-frame memangkasnya drastis.
+        idxs = sorted(matching_indices)
+        sub = df.iloc[idxs]
+        col_pn = sub["part_number"].tolist()
+        col_nm = sub["part_name"].tolist()
+        col_qty = sub["quantity"].tolist()
+        col_rm = sub["remark"].tolist()
+        for pos, idx in enumerate(idxs):
+            pname = str(col_nm[pos]) if pd.notna(col_nm[pos]) else ""
+            remark = str(col_rm[pos]).strip() if pd.notna(col_rm[pos]) else ""
             # Cocokkan ke nama ATAU keterangan (kata kunci bisa berasal dari remark).
             haystack = f"{pname} {remark}".upper()
             if not any(_phrase_or_allwords(haystack, kw.upper()) for kw in search_keywords):
                 continue
-            pn_value = str(row["part_number"]).strip() if pd.notna(row["part_number"]) else "N/A"
+            pn_value = str(col_pn[pos]).strip() if pd.notna(col_pn[pos]) else "N/A"
             pn_key = pn_value.upper()
             results.append({
                 "file": fi["simple_name"],
@@ -749,7 +759,7 @@ def search_part_name(term: str) -> list[dict]:
                 "part_number": pn_value,
                 "part_name": pname if pname else "N/A",
                 "keterangan": remark,
-                "quantity": str(row["quantity"]) if pd.notna(row["quantity"]) else "N/A",
+                "quantity": str(col_qty[pos]) if pd.notna(col_qty[pos]) else "N/A",
                 "stok": stok_cache.get(pn_key, "—"),
                 "harga": harga_lookup.get(pn_key, "—"),
                 "berat": harga.weight_for(pn_key),

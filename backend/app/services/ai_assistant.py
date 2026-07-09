@@ -20,9 +20,9 @@ import time
 import requests
 
 from ..core.config import get_settings
-from . import (accurate, ai_chat_log, ai_export, catalog_bom, epc, epc_bom, epc_weichai, fault_codes,
-               filter_ref, gudang, gudang_config, harga, orders, part_index, populasi, repairkit,
-               search_log, sims)
+from . import (accurate, ai_chat_log, ai_export, ai_knowledge, catalog_bom, epc, epc_bom,
+               epc_weichai, fault_codes, filter_ref, gudang, gudang_config, harga, orders,
+               part_index, populasi, repairkit, search_log, sims)
 
 logger = logging.getLogger("maspart.ai")
 
@@ -5581,6 +5581,40 @@ def _system_prompt(user: dict) -> str:
         "- Pahami MAKSUD di balik pertanyaan: 'ada gak', 'masih ada?', 'ready?' = cek "
         "stok; 'berapaan', 'harganya' = harga; 'buat unit apa aja', 'cocok di mana' = "
         "varian_unit; 'kenapa/rusak/gejala' = bantu telusuri part terkait.\n"
+        "- KOREKSI/NEGASI dari user ('eh salah, maksudku yang depan', 'bukan yang itu', "
+        "'bukan howo, sitrak') = MENGGANTI SATU syarat pada permintaan sebelumnya; syarat "
+        "lain TETAP. Ulangi pencarian/tool dengan syarat terkoreksi — jangan mulai dari "
+        "nol, jangan minta user mengetik ulang semuanya, dan jangan lanjut memakai "
+        "jawaban lama yang sudah dikoreksi.\n"
+    )
+
+    # ── Permintaan olah data & hitung: filter, urut, total, banding, laporan ──
+    olah_block = (
+        "\nOLAH DATA & HITUNG (permintaan yang butuh mengolah hasil tool — kerjakan, "
+        "jangan menolak; SEMUA angka sumbernya hasil tool, hitungannya kamu):\n"
+        "- KUANTITAS & TOTAL: bila user menyebut jumlah ('mau ambil 4 pcs X dan 2 pcs Y, "
+        "totalnya berapa?'), ambil harga tiap PN dari tool, hitung subtotal per item "
+        "(harga × qty) dan TOTAL di dalam [PIKIR] dengan teliti, lalu sajikan rinciannya. "
+        "Bila sebagian item belum ada data harga, hitung total dari yang ada dan katakan "
+        "jelas item mana yang belum ada harganya — JANGAN menebak harga.\n"
+        "- FILTER & URUT lanjutan ('yang di bawah 1 juta', 'yang ready aja', 'urutkan "
+        "termurah', 'top 5'): terapkan pada data hasil tool yang sudah ada di percakapan "
+        "— saring & urutkan ANGKANYA persis, kerjakan perbandingannya di [PIKIR]. Bila "
+        "datanya belum lengkap untuk filter itu, panggil tool lagi dulu.\n"
+        "- BANDING 2+ PN ('mending mana A atau B?', 'bedanya apa'): panggil detail_part "
+        "tiap PN (± unit_dari_part untuk kecocokan unit), lalu bandingkan FAKTA-nya: nama/"
+        "fungsi, unit pemakai, harga, stok, spesifikasi. Simpulkan mana yang sesuai "
+        "kebutuhan user DARI fakta itu (mis. 'A yang memang tercatat untuk unitmu') — "
+        "JANGAN mengklaim soal kualitas/keawetan yang tak ada datanya.\n"
+        "- PERMINTAAN DATA/LAPORAN bebas ('buatkan data semua X yang ada stoknya', "
+        "'rekap part Y per gudang', 'listkan semua Z'): rencanakan panggilan tool yang "
+        "mengumpulkan datanya (boleh beberapa panggilan), saring sesuai syarat user, "
+        "sajikan rapi; tawarkan/buat Excel (buat_excel) bila user minta file. Ini "
+        "permintaan wajar — jangan jawab 'tidak bisa' selama datanya ada di tool.\n"
+        "- DI LUAR KEMAMPUAN (buat/ubah PO & pesanan, kasih diskon, ubah harga/stok): "
+        "katakan singkat itu di luar wewenangmu, LALU tawarkan yang terdekat yang BISA: "
+        "siapkan daftar part + stok/harga (bisa Excel) untuk diteruskan ke admin/menu "
+        "pemesanan. Jangan berhenti di 'tidak bisa' polos.\n"
     )
 
     return (
@@ -5634,6 +5668,7 @@ def _system_prompt(user: dict) -> str:
         + units_block
         + persona_block
         + konteks_block
+        + olah_block
         + berpikir_block
         + agentik_block
         + "\nATURAN PENTING:\n"
@@ -5771,7 +5806,11 @@ def _system_prompt(user: dict) -> str:
         "hitam', 'setir berat'), simpulkan dulu part yang paling mungkin terkait lalu "
         "cari & tawarkan (mis. overheat → radiator, thermostat, water pump, kipas; setir "
         "berat → power steering pump, oli ps). Jelaskan alasannya singkat, jangan "
-        "mendiagnosis berlebihan.\n"
+        "mendiagnosis berlebihan. ⚠️ Bila user JUGA menanyakan stok/harga/ketersediaan "
+        "('ada stok ga', 'ready?'), JANGAN berhenti di daftar tersangka + minta VIN: "
+        "TETAP panggil cari_part untuk part tersangka utama dan sertakan stok/harganya "
+        "(labeli perkiraan per-model bila tanpa rangka) — permintaan VIN cukup jadi "
+        "catatan, bukan pengganti jawaban.\n"
         "- SATU ENTRI PER PART NUMBER: sajikan hasil sebagai daftar PER Part Number, "
         "BUKAN tabel yang menggabung beberapa PN di bawah satu judul unit. DILARANG "
         "membuat kategori 'Part tambahan'/'Part lain'/'lainnya'. Tampilkan tiap PN "
@@ -5786,6 +5825,10 @@ def _system_prompt(user: dict) -> str:
         + pop_note
         + lapangan_note
         + domain_block
+        # Pengetahuan ter-derive dari data nyata (pola prefix PN, gudang, cakupan)
+        # — dibangun tools/build_ai_knowledge.py; '' bila file belum ada. Stabil
+        # per mtime file → prompt-cache tetap aman.
+        + ai_knowledge.knowledge_block(user)
     )
 
 
@@ -6133,6 +6176,14 @@ def _unit_name_tokens() -> set[str]:
         toks |= _extract_pns(" ".join(catalog_bom.list_units()))
     except Exception:
         pass
+    # Nama GUDANG kanonik ('01.Jakarta', '25. PT BJM') juga tertangkap regex
+    # mirip-PN. Sejak daftar gudang ada di system prompt (ai_knowledge), model
+    # bisa menyebutnya TANPA tool → tanpa pengecualian ini guard menyamarkannya
+    # jadi '⟨PN tak terverifikasi⟩'. Nama gudang = token sah, bukan PN.
+    try:
+        toks |= _extract_pns(" ".join(gudang_config.coords_map().keys()))
+    except Exception:
+        pass
     if toks:
         _UNIT_TOKEN_CACHE["tokens"] = toks
         _UNIT_TOKEN_CACHE["at"] = now
@@ -6140,12 +6191,24 @@ def _unit_name_tokens() -> set[str]:
 
 
 def _drop_unit_tokens(bad: list[str]) -> list[str]:
-    """Keluarkan kode unit/seri sah dari daftar dugaan PN karangan. Dipanggil
-    HANYA saat ada dugaan (lazy) agar tak membangun index di jalur bersih."""
+    """Keluarkan kode unit/seri & nama gudang sah dari daftar dugaan PN karangan.
+    Dipanggil HANYA saat ada dugaan (lazy) agar tak membangun index di jalur bersih."""
     if not bad:
         return bad
     unit_toks = _unit_name_tokens()
-    return [p for p in bad if p not in unit_toks]
+    out: list[str] = []
+    for p in bad:
+        if p in unit_toks:
+            continue
+        # Klitik Indonesia menempel di kode unit ('NX360-mu', 'SITRAK-nya') ikut
+        # tertangkap regex mirip-PN (kasus nyata: 'unit NX360-mu' disamarkan guard).
+        # Buang HANYA bila hasil melepas '-<1-3 huruf>' di ujung = token unit sah —
+        # PN asli berujung '-LH'/'-RH' tak terpengaruh (basisnya bukan nama unit).
+        base = re.sub(r"-[A-Z]{1,3}$", "", p)
+        if base != p and base in unit_toks:
+            continue
+        out.append(p)
+    return out
 
 
 def _guard_correction_msg(bad: list[str]) -> str:
@@ -6160,6 +6223,25 @@ def _guard_correction_msg(bad: list[str]) -> str:
         "istilah yang benar untuk mendapat PN asli. ⚠️ JANGAN minta maaf, JANGAN menyebut/"
         "menjelaskan koreksi ini ke user — langsung tulis jawaban bersih seolah dari awal."
     )
+
+
+# Model kadang MENGKLAIM 'file Excel sudah siap / kartu unduh di bawah' padahal
+# buat_excel tidak pernah dieksekusi (mis. panggilannya bocor sebagai teks lalu
+# terbuang) → user melihat janji file yang tidak ada. Deteksi klaimnya lalu
+# paksa model memanggil buat_excel sungguhan atau menghapus klaim itu.
+_EXCEL_CLAIM_RE = re.compile(
+    r"excel|kartu unduh|file(?:nya)? (?:sudah|siap)", re.IGNORECASE)
+_EXCEL_CLAIM_DONE_RE = re.compile(
+    r"sudah|siap|terlampir|di bawah|otomatis|👇", re.IGNORECASE)
+_EXCEL_CLAIM_CORRECTION = (
+    "[SISTEM — KOREKSI WAJIB] Jawabanmu MENGKLAIM file Excel/kartu unduh sudah "
+    "siap, padahal tool buat_excel TIDAK berhasil dijalankan pada giliran ini — "
+    "TIDAK ADA kartu unduh yang muncul untuk user. Pilih salah satu SEKARANG: "
+    "(a) panggil tool buat_excel dengan data hasil tool yang sudah ada di "
+    "percakapan ini (judul, kolom, baris disalin persis), ATAU (b) tulis ulang "
+    "jawaban TANPA klaim file (boleh tawarkan 'mau saya buatkan file Excel-nya?'). "
+    "⚠️ Jangan minta maaf & jangan menyebut koreksi ini ke user."
+)
 
 
 _NOT_FOUND_REPLY = (
@@ -6317,6 +6399,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             pass  # gagal cek katalog → jangan ground dari assistant (aman by default)
     guard_retries = 0
     empty_retries = 0  # model hanya menulis [PIKIR]/kosong → paksa tulis ulang
+    excel_claim_retried = False  # klaim 'file Excel siap' tanpa kartu → 1x koreksi
     lookup_gagal = False  # ada tool lookup yang error/tak ketemu → jangan mengarang angka
     tool_gagal_pernah = False  # untuk observabilitas: pernahkah ada tool gagal turn ini
     # Guard SUBSTITUSI katalog-lokal: bila tool EPC per-VIN sukses, PN yg HANYA dari
@@ -6363,7 +6446,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     # counter-nya sendiri; _iters = pagar total agar mustahil loop selamanya.
     tool_rounds = 0
     _iters = 0
-    _MAX_ITERS = _MAX_TOOL_ROUNDS + _MAX_EMPTY_RETRIES + _MAX_GUARD_RETRIES + 2
+    _MAX_ITERS = _MAX_TOOL_ROUNDS + _MAX_EMPTY_RETRIES + _MAX_GUARD_RETRIES + 3
+    #            (+1 utk koreksi klaim-Excel; +2 pagar lama)
     while _iters < _MAX_ITERS:
         _iters += 1
         tools_habis = tool_rounds >= _MAX_TOOL_ROUNDS
@@ -6377,7 +6461,15 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
         # Tangani pemanggilan tool yang BOCOR sebagai teks (model menulisnya alih-alih
         # memakai field tool_calls API): jalankan tool-nya, jangan biarkan ke layar.
         if not tool_calls:
-            leaked = [] if tools_habis else _parse_leaked_tool_calls(content)
+            _leaked_all = _parse_leaked_tool_calls(content)
+            # Ronde tool habis = paksa jawaban final — TAPI buat_excel tetap
+            # dijalankan bila bocor sebagai teks: itu tahap PENYAJIAN (murah,
+            # lokal), dan tanpa ini model menghabiskan seluruh ronde untuk
+            # mengumpulkan data lalu MENGKLAIM 'file Excel siap' padahal kartu
+            # unduh tak pernah dibuat (kasus nyata probe 'data lampu howo').
+            # Aman dari loop: _iters tetap membatasi total putaran.
+            leaked = (_leaked_all if not tools_habis
+                      else [c for c in _leaked_all if c["name"] == "buat_excel"])
             if leaked:
                 tool_rounds += 1  # leaked = tool BENAR dijalankan → ronde produktif
                 messages.append({"role": "assistant", "content": _strip_tool_markup(content)})
@@ -6421,6 +6513,17 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 reply = _EMPTY_FINAL_MSG
             elif _finish_reason(data) == "length":
                 reply += _TRUNCATED_NOTE
+            # GUARD KLAIM FILE: jawaban menjanjikan Excel/kartu unduh padahal tak
+            # ada satu pun kartu (buat_excel/katalog/banding) yang berhasil dibuat
+            # giliran ini → paksa buat sungguhan atau hapus klaimnya (sekali saja).
+            if (not excel_claim_retried
+                    and not (excel_exports or banding_exports or repairkit_models)
+                    and _EXCEL_CLAIM_RE.search(reply)
+                    and _EXCEL_CLAIM_DONE_RE.search(reply)):
+                excel_claim_retried = True
+                messages.append({"role": "assistant", "content": content})
+                messages.append({"role": "user", "content": _EXCEL_CLAIM_CORRECTION})
+                continue
             # GUARD anti-halusinasi: SELALU cek (termasuk follow-up TANPA tool) —
             # PN di jawaban wajib ada di riwayat (user/asisten lolos) atau hasil tool.
             # Kode unit/seri sah (NX400HP dll) dikeluarkan dari dugaan karangan.

@@ -296,6 +296,56 @@
       "_kenapa": "Fitur banding part armada (2026-07-04): 'apakah part X sama utk semua unit PT Y' → tool banding_part_armada (populasi → rangka → konfigurasi EPC per-VIN → cek part unit wakil per kelompok → verdict sistem). PT MITRA ANGKUTAN SEJATI terverifikasi live: 155 unit, 16 kelompok engine+gearbox, verdict BERBEDA (hanya WG9114230019 sama di semua kelompok). LAMBAT (±2-3 mnt, armada besar).",
       "question": "cek kampas kopling untuk unit PT MITRA ANGKUTAN SEJATI apakah sama semua",
       "expect": { "tools_any": ["banding_part_armada"], "reply_any": ["kopling"] }
+    },
+    {
+      "id": "olah-total-qty",
+      "tags": ["lokal"],
+      "_kenapa": "Blok OLAH DATA & HITUNG (2026-07-09): user menyebut qty → hitung subtotal & total dari harga hasil tool (3×153.000 + 2×112.000 = 683.000; harga dari data harga lokal).",
+      "question": "mau ambil 3 pcs AZ450045000024 sama 2 pcs AZ450045000042, totalnya berapa ya?",
+      "expect": { "tools_any": ["detail_part", "cari_part"], "reply_all": ["683.000"], "no_new_pn": true }
+    },
+    {
+      "id": "olah-urut-termurah",
+      "tags": ["lokal"],
+      "_kenapa": "Blok OLAH DATA & HITUNG (2026-07-09): filter+urut lanjutan atas hasil yang sudah ditampilkan ('yang ada harganya aja, urut termurah') dikerjakan dari angka tool, tanpa PN baru karangan.",
+      "turns": [
+        { "role": "user", "content": "kampas rem howo yang belakang ada?" },
+        { "role": "assistant", "content": "Perkiraan per-model untuk HOWO (poros belakang): AZ450045000024 Brake friction plate Rp 153.000 stok 1.331; AZ450045000042 Brake friction plate Rp 112.000 stok 3.010; WG9761450185 Brake friction plate 410×220 (belum ada data harga) stok 1.314." },
+        { "role": "user", "content": "urutin dari yang termurah dong, yg ada harganya aja" }
+      ],
+      "expect": { "pn_all": ["AZ450045000042", "AZ450045000024"], "reply_any": ["termurah", "murah"], "no_new_pn": true }
+    },
+    {
+      "id": "koreksi-posisi-depan",
+      "tags": ["lokal"],
+      "_kenapa": "Aturan KOREKSI/NEGASI (2026-07-09, dari probe): 'eh salah, maksudku yang depan' = ganti satu syarat, syarat lain tetap → cari ulang kampas rem DEPAN howo, bukan mulai dari nol/minta ketik ulang.",
+      "turns": [
+        { "role": "user", "content": "kampas rem howo yang belakang ada?" },
+        { "role": "assistant", "content": "Perkiraan per-model untuk HOWO (poros belakang): AZ450045000024 Brake friction plate Rp 153.000 stok 1.331. Biar persis, kirim nomor rangka (VIN) ya." },
+        { "role": "user", "content": "eh salah, maksudku yang depan" }
+      ],
+      "expect": { "tools_any": ["cari_part", "part_aus_dari_rangka"], "reply_any": ["depan"], "no_new_pn": true }
+    },
+    {
+      "id": "batas-kemampuan-po",
+      "tags": ["lokal"],
+      "_kenapa": "Blok DI LUAR KEMAMPUAN (2026-07-09): minta buat PO → tolak jujur TAPI tawarkan jalan terdekat (daftar part+stok/harga sebagai bahan PO), bukan 'tidak bisa' polos.",
+      "question": "tolong buatin PO 10 pcs filter udara howo ke gudang jakarta",
+      "expect": { "reply_any": ["tidak bisa", "di luar", "wewenang", "hanya membaca", "tidak dapat membuat"], "no_new_pn": true }
+    },
+    {
+      "id": "gejala-plus-stok",
+      "tags": ["lokal"],
+      "_kenapa": "Perbaikan gejala+stok (2026-07-09, dari probe): user tanya gejala DAN 'ada stok ga' → wajib tetap cek stok part tersangka via cari_part (perkiraan), bukan berhenti di daftar tersangka + minta VIN.",
+      "question": "truk sitrak saya ngebul putih terus tenaga drop, kira2 apanya ya? part yang perlu dicek ada stok ga",
+      "expect": { "tools_any": ["cari_part"], "reply_any": ["injector", "injektor", "nozzle"], "no_new_pn": true }
+    },
+    {
+      "id": "pengetahuan-prefix-pn",
+      "tags": ["lokal"],
+      "_kenapa": "Blok PENGETAHUAN DARI DATA NYATA (2026-07-09): pola prefix PN di-mining dari catalog_bom (WG2229 → dominan Transmisi/Gearbox) — asisten menjawab keluarga part dari fakta terhitung, bukan hafalan.",
+      "question": "part number yang awalannya WG2229 itu biasanya part bagian apa sih?",
+      "expect": { "reply_any": ["transmisi", "gearbox"], "no_new_pn": true }
     }
   ]
 }

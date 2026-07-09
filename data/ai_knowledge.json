@@ -1,0 +1,607 @@
+{
+ "generated_at": "2026-07-09T14:40:07+00:00",
+ "sumber": [
+  "catalog_bom.json (EPC Sinotruk per-model)",
+  "gudang_config.json"
+ ],
+ "cakupan": {
+  "unit_katalog_bom": 40,
+  "pn_unik_bom": 18098
+ },
+ "prefix_pn": [
+  {
+   "prefix": "WG",
+   "jumlah_pn": 6785,
+   "kategori_top": [
+    [
+     "Sasis / Chassis (底盘)",
+     29
+    ],
+    [
+     "Transmisi / Gearbox (变速箱)",
+     20
+    ],
+    [
+     "Kabin (Driver's cab)",
+     19
+    ]
+   ],
+   "kata_nama_top": [
+    "PLATE",
+    "SPRING",
+    "PIECE",
+    "BRACKET"
+   ]
+  },
+  {
+   "prefix": "AZ",
+   "jumlah_pn": 1982,
+   "kategori_top": [
+    [
+     "Kabin (Driver's cab)",
+     21
+    ],
+    [
+     "Sasis / Chassis (底盘)",
+     18
+    ],
+    [
+     "Transmisi / Gearbox (变速箱)",
+     18
+    ]
+   ],
+   "kata_nama_top": [
+    "SHAFT",
+    "BRACKET",
+    "GEAR",
+    "PLATE"
+   ]
+  },
+  {
+   "prefix": "YZ",
+   "jumlah_pn": 1094,
+   "kategori_top": [
+    [
+     "Kabin (Driver's cab)",
+     43
+    ],
+    [
+     "Aksesori powertrain (动力总成附件)",
+     18
+    ],
+    [
+     "Sistem rem (Brake system)",
+     13
+    ]
+   ],
+   "kata_nama_top": [
+    "BRACKET",
+    "PIPE",
+    "PLATE",
+    "MAX"
+   ]
+  },
+  {
+   "prefix": "Q",
+   "jumlah_pn": 891,
+   "kategori_top": [
+    [
+     "Kabin (Driver's cab)",
+     32
+    ],
+    [
+     "Transmisi / Gearbox (变速箱)",
+     13
+    ],
+    [
+     "Kelistrikan (Electrical system)",
+     12
+    ]
+   ],
+   "kata_nama_top": [
+    "HEAD",
+    "HEXAGON",
+    "SCREW",
+    "WASHER"
+   ]
+  },
+  {
+   "prefix": "ZQ",
+   "jumlah_pn": 674,
+   "kategori_top": [
+    [
+     "Sasis / Chassis (底盘)",
+     25
+    ],
+    [
+     "Kabin (Driver's cab)",
+     22
+    ],
+    [
+     "Aksesori powertrain (动力总成附件)",
+     20
+    ]
+   ],
+   "kata_nama_top": [
+    "BOLT",
+    "HEXAGON",
+    "FLANGE",
+    "HEAD"
+   ]
+  },
+  {
+   "prefix": "EZ",
+   "jumlah_pn": 533,
+   "kategori_top": [
+    [
+     "Kabin (Driver's cab)",
+     45
+    ],
+    [
+     "Aksesori powertrain (动力总成附件)",
+     17
+    ],
+    [
+     "Kelistrikan (Electrical system)",
+     15
+    ]
+   ],
+   "kata_nama_top": [
+    "BRACKET",
+    "PIPE",
+    "DOOR",
+    "MOUNTING"
+   ]
+  },
+  {
+   "prefix": "712W",
+   "jumlah_pn": 523,
+   "kategori_top": [
+    [
+     "Kabin (Driver's cab)",
+     31
+    ],
+    [
+     "Poros penggerak / Drive axle (驱动桥)",
+     19
+    ],
+    [
+     "Sasis / Chassis (底盘)",
+     18
+    ]
+   ],
+   "kata_nama_top": [
+    "BRACKET",
+    "MIRROR",
+    "STEERING",
+    "PIPE"
+   ]
+  },
+  {
+   "prefix": "FG",
+   "jumlah_pn": 515,
+   "kategori_top": [
+    [
+     "Sasis / Chassis (底盘)",
+     27
+    ],
+    [
+     "Aksesori powertrain (动力总成附件)",
+     19
+    ],
+    [
+     "Kabin (Driver's cab)",
+     16
+    ]
+   ],
+   "kata_nama_top": [
+    "SPRING",
+    "PLATE",
+    "BRACKET",
+    "PIPE"
+   ]
+  },
+  {
+   "prefix": "YG",
+   "jumlah_pn": 511,
+   "kategori_top": [
+    [
+     "Kabin (Driver's cab)",
+     44
+    ],
+    [
+     "Aksesori powertrain (动力总成附件)",
+     21
+    ],
+    [
+     "Kelistrikan (Electrical system)",
+     17
+    ]
+   ],
+   "kata_nama_top": [
+    "BRACKET",
+    "AIR",
+    "DOOR",
+    "PIPE"
+   ]
+  },
+  {
+   "prefix": "810W",
+   "jumlah_pn": 481,
+   "kategori_top": [
+    [
+     "Kabin (Driver's cab)",
+     56
+    ],
+    [
+     "Poros penggerak / Drive axle (驱动桥)",
+     34
+    ],
+    [
+     "Sasis / Chassis (底盘)",
+     4
+    ]
+   ],
+   "kata_nama_top": [
+    "ADJUSTING",
+    "SHIM",
+    "COVER",
+    "BRACKET"
+   ]
+  },
+  {
+   "prefix": "LG",
+   "jumlah_pn": 368,
+   "kategori_top": [
+    [
+     "Kabin (Driver's cab)",
+     56
+    ],
+    [
+     "Sasis / Chassis (底盘)",
+     13
+    ],
+    [
+     "Kelistrikan (Electrical system)",
+     10
+    ]
+   ],
+   "kata_nama_top": [
+    "BRACKET",
+    "AIR",
+    "PLATE",
+    "DOOR"
+   ]
+  },
+  {
+   "prefix": "MQ",
+   "jumlah_pn": 310,
+   "kategori_top": [
+    [
+     "Mesin / Powertrain (动力总成)",
+     67
+    ],
+    [
+     "Poros penggerak / Drive axle (驱动桥)",
+     18
+    ],
+    [
+     "Kabin (Driver's cab)",
+     7
+    ]
+   ],
+   "kata_nama_top": [
+    "BOLT",
+    "MAN",
+    "HEXAGON",
+    "FLANGE"
+   ]
+  }
+ ],
+ "sub_prefix_pn": [
+  {
+   "prefix": "WG1642",
+   "jumlah_pn": 397,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "DOOR",
+    "LOCK",
+    "BRACKET",
+    "JIANGSU"
+   ]
+  },
+  {
+   "prefix": "WG2229",
+   "jumlah_pn": 319,
+   "kategori_dominan": "Transmisi / Gearbox (变速箱)",
+   "kata_nama_top": [
+    "PLATE",
+    "SHAFT",
+    "GEAR",
+    "COVER"
+   ]
+  },
+  {
+   "prefix": "WG1671",
+   "jumlah_pn": 314,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "BRACKET",
+    "DOOR",
+    "LIFTER",
+    "AIR"
+   ]
+  },
+  {
+   "prefix": "YZ1671",
+   "jumlah_pn": 240,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "BRACKET",
+    "MAX",
+    "TRIM",
+    "SEAT"
+   ]
+  },
+  {
+   "prefix": "WG9931",
+   "jumlah_pn": 183,
+   "kategori_dominan": "Sasis / Chassis (底盘)",
+   "kata_nama_top": [
+    "PLATE",
+    "SPRING",
+    "PIECE",
+    "THICKNESS"
+   ]
+  },
+  {
+   "prefix": "AZ2203",
+   "jumlah_pn": 173,
+   "kategori_dominan": "Transmisi / Gearbox (变速箱)",
+   "kata_nama_top": [
+    "SHAFT",
+    "GEAR",
+    "SHIFT",
+    "FORK"
+   ]
+  },
+  {
+   "prefix": "YG1671",
+   "jumlah_pn": 171,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "BRACKET",
+    "DOOR",
+    "COVER",
+    "PLATE"
+   ]
+  },
+  {
+   "prefix": "WG1662",
+   "jumlah_pn": 159,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "SEAT",
+    "BACKREST",
+    "TRIM",
+    "COVER"
+   ]
+  },
+  {
+   "prefix": "WG9003",
+   "jumlah_pn": 151,
+   "kategori_dominan": "Transmisi / Gearbox (变速箱)",
+   "kata_nama_top": [
+    "BEARING",
+    "BOLT",
+    "RING",
+    "GLUED"
+   ]
+  },
+  {
+   "prefix": "WG9000",
+   "jumlah_pn": 143,
+   "kategori_dominan": "Sistem rem (Brake system)",
+   "kata_nama_top": [
+    "BODY",
+    "AIR",
+    "JOINT",
+    "VALVE"
+   ]
+  },
+  {
+   "prefix": "WG2203",
+   "jumlah_pn": 116,
+   "kategori_dominan": "Transmisi / Gearbox (变速箱)",
+   "kata_nama_top": [
+    "VOITH",
+    "GEAR",
+    "PIPE",
+    "RANGE"
+   ]
+  },
+  {
+   "prefix": "WG1664",
+   "jumlah_pn": 103,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "AIR",
+    "BODY",
+    "DUCT",
+    "WIDE"
+   ]
+  },
+  {
+   "prefix": "LG1611",
+   "jumlah_pn": 95,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "DOOR",
+    "BRACKET",
+    "GLASS",
+    "LIGHT"
+   ]
+  },
+  {
+   "prefix": "WG9531",
+   "jumlah_pn": 94,
+   "kategori_dominan": "Sasis / Chassis (底盘)",
+   "kata_nama_top": [
+    "SPRING",
+    "PLATE",
+    "PIECE",
+    "FANGDA"
+   ]
+  },
+  {
+   "prefix": "WG2210",
+   "jumlah_pn": 93,
+   "kategori_dominan": "Transmisi / Gearbox (变速箱)",
+   "kata_nama_top": [
+    "GEAR",
+    "SHAFT",
+    "MAIN",
+    "SLEEVE"
+   ]
+  },
+  {
+   "prefix": "AZ1600",
+   "jumlah_pn": 92,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "BRACKET",
+    "INSULATION",
+    "FENDER",
+    "THERMAL"
+   ]
+  },
+  {
+   "prefix": "YZ1771",
+   "jumlah_pn": 90,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "MAX",
+    "MOUNTED",
+    "PLATE",
+    "MIRROR"
+   ]
+  },
+  {
+   "prefix": "EZ1642",
+   "jumlah_pn": 90,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "FENDER",
+    "BRACKET",
+    "PLATE",
+    "COVER"
+   ]
+  },
+  {
+   "prefix": "WG1646",
+   "jumlah_pn": 88,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "MIRROR",
+    "COVER",
+    "INSTRUMENT",
+    "SIDE"
+   ]
+  },
+  {
+   "prefix": "AZ9925",
+   "jumlah_pn": 85,
+   "kategori_dominan": "Sasis / Chassis (底盘)",
+   "kata_nama_top": [
+    "SPRING",
+    "BOLT",
+    "BRACKET",
+    "TANK"
+   ]
+  },
+  {
+   "prefix": "AZ7127",
+   "jumlah_pn": 84,
+   "kategori_dominan": "Poros penggerak / Drive axle (驱动桥)",
+   "kata_nama_top": [
+    "PLANETARY",
+    "WHEEL",
+    "AXLE",
+    "GEAR"
+   ]
+  },
+  {
+   "prefix": "AZ1671",
+   "jumlah_pn": 84,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "BRACKET",
+    "SEAT",
+    "PLATE",
+    "SUPPORT"
+   ]
+  },
+  {
+   "prefix": "YZ9725",
+   "jumlah_pn": 74,
+   "kategori_dominan": "Aksesori powertrain (动力总成附件)",
+   "kata_nama_top": [
+    "PIPE",
+    "BRACKET",
+    "STEEL",
+    "HOSE"
+   ]
+  },
+  {
+   "prefix": "WG9716",
+   "jumlah_pn": 66,
+   "kategori_dominan": "Kelistrikan (Electrical system)",
+   "kata_nama_top": [
+    "RELAY",
+    "CHIP",
+    "FUSE",
+    "XIAOHANG"
+   ]
+  },
+  {
+   "prefix": "EZ1600",
+   "jumlah_pn": 65,
+   "kategori_dominan": "Kabin (Driver's cab)",
+   "kata_nama_top": [
+    "BRACKET",
+    "MOUNTING",
+    "PEDAL",
+    "CAB"
+   ]
+  },
+  {
+   "prefix": "WG1034",
+   "jumlah_pn": 61,
+   "kategori_dominan": "Kelistrikan (Electrical system)",
+   "kata_nama_top": [
+    "UREA",
+    "SCR",
+    "SYSTEM",
+    "SOLUTION"
+   ]
+  }
+ ],
+ "gudang": [
+  "01.Jakarta",
+  "02.Pekanbaru",
+  "03.Balikpapan",
+  "04.Palembang",
+  "05.Makasar",
+  "06.B80 H1",
+  "07.B80 H2",
+  "08.TJP Jambi",
+  "09.Kerinci pku",
+  "10.Banjarbaru",
+  "11.Muara Teweh",
+  "18.Pontianak",
+  "23.Medan",
+  "25. PT BJM",
+  "26. BELOPA",
+  "28.Ruko Stadion"
+ ]
+}

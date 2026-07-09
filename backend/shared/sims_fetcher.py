@@ -190,15 +190,27 @@ def _save_json(data: dict):
 # ══════════════════════════════════════════════
 #  LOAD & SAVE part_info.json
 # ══════════════════════════════════════════════
+# Memo per-(mtime,size): _load_part_info_json dipanggil PER BARIS oleh jalur
+# cepat pencarian (harga.weight_for → sims.get_part_weight_grams_cached) —
+# tanpa memo, SATU cari_part bisa mem-parse ulang file ini belasan ribu kali
+# (terukur ±80 dtk dari 128 dtk per pencarian). Tulisan lewat
+# _save_part_info_json mengubah mtime → otomatis dimuat ulang.
+_part_info_memo: dict = {"sig": None, "data": {}}
+
 def _load_part_info_json() -> dict:
-    PART_INFO_JSON.parent.mkdir(parents=True, exist_ok=True)
-    if PART_INFO_JSON.exists():
+    try:
+        st = PART_INFO_JSON.stat()
+    except OSError:                      # belum ada file → kosong (tanpa mkdir)
+        return {}
+    sig = (st.st_mtime_ns, st.st_size)
+    if _part_info_memo["sig"] != sig:
         try:
             with open(PART_INFO_JSON, "r", encoding="utf-8") as f:
-                return json.load(f)
+                _part_info_memo["data"] = json.load(f)
+            _part_info_memo["sig"] = sig
         except Exception:
-            pass
-    return {}
+            return _part_info_memo["data"] or {}
+    return _part_info_memo["data"]
 
 def _save_part_info_json(data: dict):
     PART_INFO_JSON.parent.mkdir(parents=True, exist_ok=True)

@@ -141,6 +141,70 @@
 > nyata = **crop + galeri belajar + cakupan foto**. Indeks foto part bertambah + kamus `cn_en` diperkaya
 > dari sesi indexing. Deploy container Coolify: `build.sh all` → `docker compose up -d --force-recreate`
 > (situs live = container Traefik 80/443, BUKAN systemd — lihat `deploy/DEPLOY.md`). 251 unit test lolos.
+> Update **2026-07-09**: (a) **Gambar exploded view SELEKTIF** (`25fd699`) — inline di chat kembali ON
+> **saat DIMINTA** (tool `gambar_exploded`/`gambar_exploded_mesin`, besar + lightbox); auto-attach &
+> thumbnail foto part TETAP OFF. (b) **Tool `stok_gudang`** (`792cd2a`) — "cek stok part <kategori> yang
+> ready di <gudang>" → daftar part 1 kategori berstok>0 di SATU gudang (mis. "kopling ready di Palembang");
+> payung kategori `_umbrella_keywords` (kopling→18 sub-part), resolusi gudang dari config, bukan utk pembeli.
+> (c) **Stok per-GUDANG DI-INDEKS** (`9782afa`) — rincian per-gudang ditarik SEKALI per siklus 5-jam
+> (enrichment latar `accurate.enrich_warehouses` ~3.666 PN/~9 mnt) → `_index_cache['by_gudang']`, DIBAGI ke
+> semua fitur; `stock_full`/`detail_part`/`stok_accurate`/`stok_gudang` baca per-gudang dari indeks (tanpa
+> panggilan live per-PN; query stok_gudang ~0,1 dtk). Accurate men-serialkan per-sesi → live per-PN utk
+> daftar = ~2 mnt (dihindari). (d) **`pengganti_part` — supersession Sinotruk TERPECAHKAN** (`84ae1eb`)
+> via endpoint SIMS **`partEquivalentQuery`** (tabel penggantian resmi 17rb+ relasi, `partCode` dua-arah;
+> beda dari endpoint EPC 7001 lama yg buntu/role-gated). Tool kini GABUNG SIMS (part SASIS Sinotruk/HOWO) +
+> EPC Weichai (mesin), silang stok lokal — §3.5.5. (e) **`cari_part` sarankan PERSAMAAN otomatis** (`00a5160`)
+> — seluruh tabel partEquivalentQuery di-INDEKS in-memory (`sims.refresh_equivalents`, ~33.566 PN, refresh
+> latar TTL 12 jam) → tiap part ditampilkan dapat field `pengganti` (lookup instan) + `info_pengganti`;
+> asisten menyarankan PN pengganti saat user cari part (utamakan bila stok kosong). ⚙️ Indeks stok/persamaan
+> = IN-MEMORY (RAM proses, ~5–8 MB total, MENIMPA tiap siklus bukan menumpuk; tak ditulis ke disk; rebuild
+> saat restart). 278 unit test lolos.
+> Referensi/backlog **2026-07-09** (belum dikerjakan — "nanti"): **SIMS `partInfo/pageDealer` (tanpa filter)
+> = MASTER SELURUH part Sinotruk, `totalCount` ≈ 670.990 baris**; filter server-side `partCode` (PN, LIKE)
+> ATAU `partName` (nama Inggris, LIKE); field: `partCode`, `partName`, `originalPartCode` (nomor pabrik asli/
+> OEM — sering kosong), `hsCode`, berat/dimensi, `hasPhoto`. Dipakai SEKARANG: berat/dimensi (§3.5.4) +
+> fallback SIMS `cari_part` **hanya via PN**. **Ide belum dibangun**: (1) fallback pencarian **NAMA** ke master
+> 670k (katalog Excel lokal cuma subset) — pakai kata kunci hasil ekspansi sinonim (ID→EN); (2) **validasi PN
+> anti-halusinasi** silang ke master (PN sahih/tidak); (3) **PN "pemaaf"** LIKE ke master (PN parsial→PN+nama
+> resmi); (4) cross-ref `originalPartCode`/OEM (cek cakupan dulu); (5) kode HS/bea-cukai; (6) penanda foto
+> `hasPhoto`. Auth = `sims_fetcher._get_token` (Bearer), reuse pola `fetch_part_equivalents`.
+> Referensi/backlog **2026-07-09 — SIMS EOL AI (asisten DIAGNOSA/PERBAIKAN bawaan Sinotruk)** (TERUJI, belum
+> diintegrasi — "lanjut nanti"): SIMS punya AI diagnostik RAG atas **manual perbaikan resmi + kasus kerusakan +
+> materi pelatihan Sinotruk**. **Endpoint TANYA (JALAN dgn Bearer kita):** `GET {8082}/intlapi/intl.service.basic/
+> tKnowledgeBases/eolQuestStreamingLexiangOriginalTrans?query=<q>&language=id` → **SSE streaming**: akumulasi
+> field `delta_content` (jawaban; saat `processes.stage`='thinking' itu nalar), berakhir `is_stop:true` + `logId`.
+> Auth = **token sims_fetcher standar** (401 hanya bila token basi → `_reset_token()`); header `sw8`/`x-shsnc-*`/
+> `_dd_s` di cURL browser = telemetri SkyWalking/Datadog, TAK perlu. Latensi ~30–90 dtk. **Endpoint LOG:**
+> `GET tKnowledgeBases/eolAiLogBySessionId/<sessionId>` → Q&A lampau (field query/content/reasoningContent/
+> queryTrans/contentOrig/feedbackTag…). **Evaluasi:** kuat utk KODE (SPN/FMI, mis. 520208 FMI 5 presisi; gejala
+> "RPM terkunci 1500"→ dikaitkan P100E/P0698) & diagnosa gejala; JUJUR balas "konten belum tersedia" saat tak ada
+> (mis. SPN 520252 FMI 2); LEMAH: terjemahan CN→ID kasar, salah-tafsir istilah ambigu (rem angin→damper AC),
+> cakupan bercelah. Lokal `cari_kode_kesalahan` bahkan lebih terbatas (semua SPN uji tak ada) → EOL AI memperluas
+> jauh. **Sumber dokumen TAK diekspos** (stream cuma sebut JUMLAH "5 资料", log tanpa field sumber, endpoint
+> sumber-by-logId 404); atribusi hanya inline di teks jawaban. Open Q: apakah UI SIMS punya panel sumber (perlu
+> tangkap request DevTools). **Rencana bangun (pagar):** tool AI `diagnosa` → teruskan pertanyaan perbaikan/
+> gejala/kode ke EOL AI (konsumsi SSE, timeout ~70s); perjelas query ("truk Sinotruk/HOWO, sistem …") lawan
+> salah-tafsir; fallback `cari_kode_kesalahan` saat "belum tersedia"; disclaimer + "cek manual, ~1 mnt".
+> Update **2026-07-09 (malam) — asisten LEBIH PAHAM KONTEKS + pengetahuan dari data**: (a) **`ai_knowledge`
+> baru** — pengetahuan di-MINING dari data fakta (`tools/build_ai_knowledge.py` → `data/ai_knowledge.json`,
+> sumber `catalog_bom.json` 18.098 PN unik + `gudang_config`): pola prefix PN → keluarga part (mis. WG2229…
+> → Transmisi 12 prefix + 26 sub-prefix), daftar gudang kanonik (utk paham 'jkt'/'plg'; disembunyikan dari
+> pembeli), cakupan data; disuntik ke system prompt (stabil per-mtime → prompt-cache aman; TANPA PN utuh,
+> anti-papagal). (b) **Blok prompt `OLAH DATA & HITUNG`** — qty×harga+total, filter/urut lanjutan ('di bawah
+> 1 jt', 'termurah'), banding 2 PN berbasis fakta, permintaan data/laporan bebas, tolak PO dgn alternatif;
+> plus aturan **KOREKSI/NEGASI** ('eh salah, maksudku yang depan' = ganti 1 syarat) & **gejala+stok** (tetap
+> cek stok part tersangka, bukan cuma minta VIN). (c) **Guard fix**: klitik di kode unit ('NX360-mu') & nama
+> gudang ('01.Jakarta') tak lagi disamarkan '⟨PN tak terverifikasi⟩' (false-positive nyata dari probe).
+> Diverifikasi dgn PROBE user-manusia via chat() nyata (multi-intent slang, hitung total, filter harga,
+> koreksi posisi, banding 2 PN, minta PO — jawaban tergrounding baik). +6 kasus golden (45 total).
+> (d) **PERF cari_part 4–11× lebih cepat** (akar timeout/jawaban kosong): `sims_fetcher._load_part_info_json`
+> di-parse ulang per-BARIS hasil (13.965×/pencarian, ±80 dtk) → kini memo per-mtime; `part_index.
+> search_part_name` akses df.iloc per-baris (61 rb × fast_xs) → batch tolist() per file. Terukur:
+> 'kampas kopling' 96→8,7 dtk; 'lampu' 128→10,4 dtk (hasil identik). (e) **Guard klaim Excel palsu**:
+> kasus nyata — model menghabiskan 8 ronde tool utk kumpul data, panggilan buat_excel BOCOR sbg teks saat
+> jatah habis lalu dibuang, jawaban mengklaim 'file Excel siap 👇' tanpa kartu → kini buat_excel bocor
+> TETAP dieksekusi saat ronde habis + koreksi 1× bila jawaban mengklaim file tanpa kartu unduh
+> (test_excel_claim_guard.py). 289 unit test lolos.
 
 ---
 
@@ -337,6 +401,7 @@ kamus sinonim **juga disuntikkan ke system prompt** ("KAMUS ISTILAH LAPANGAN"). 
 | `cari_part` | cari PN+nama sekaligus, auto ekspansi sinonim, bisa scope `unit` | semua |
 | `detail_part` | detail 1 PN (STOK **live dari Accurate** = utama, total+per gudang, `stok.xlsx` fallback; harga; spesifikasi SIMS) — tool utama pertanyaan stok 1 PN (§3.5.5i) | semua |
 | `stok_accurate` | **STOK LIVE ERP Accurate** per PN: `stok_dapat_dijual` + `stok_per_gudang` (rincian per gudang/cabang, mis. 01.Jakarta/05.Makasar) (§3.5.5i) | semua |
+| `stok_gudang` | **DAFTAR part 1 KATEGORI yang READY (stok>0) di SATU GUDANG** — "cek stok part kopling yang ready di Palembang"; payung kategori (kopling→driven disc/matahari/drek laher/…), per-gudang dari INDEKS Accurate (enrichment 5-jam, instan); mengungkap antar-gudang → **BUKAN pembeli** | semua kecuali pembeli |
 | `info_aplikasi` | ringkasan index/stok/harga/gudang/kurs | semua |
 | `daftar_unit` | daftar unit/model truk tersedia | semua |
 | `cari_kode_kesalahan` | DTC/fault code Sinotruk-HOWO (ECU Bosch) via SPN+FMI / P-code / kata kunci | semua |
@@ -353,7 +418,7 @@ kamus sinonim **juga disuntikkan ke system prompt** ("KAMUS ISTILAH LAPANGAN"). 
 | `uraikan_assembly` | **urai 1 ASSEMBLY → komponennya** (karet/seal/pin dari v-stay dll), per PN/nama, per-VIN (§3.5.5d) | semua |
 | `uraikan_mesin` | **part INTERNAL MESIN Weichai per-VIN** (piston/kruk as/liner/cylinder head…) — EPC Weichai auto-SSO (§3.5.5e) | semua |
 | `repair_kit_mesin` | **repair kit (维修包) MESIN Weichai per-VIN** — paket komponen servis/overhaul mesin dari nomor rangka; bila mesin tak punya kit terdefinisi → jujur + sarankan `uraikan_mesin` | semua |
-| `pengganti_part` | **PERSAMAAN/SUPERSESSION part MESIN Weichai** — 'PN ini diganti nomor berapa?' (data 替换/ECN resmi, per PN, global) + silang stok/harga lokal | semua |
+| `pengganti_part` | **PERSAMAAN/SUPERSESSION part** — 'PN ini diganti nomor berapa?' — GABUNG 2 sumber: **SIMS `partEquivalentQuery`** (part SASIS Sinotruk/HOWO, tabel 17rb+ relasi, dua-arah) + **EPC Weichai** 替换/ECN (part mesin); per PN global + silang stok/harga lokal. NB: `cari_part` juga auto-sisip field `pengganti` dari indeks persamaan (§update 2026-07-09) | semua |
 | `part_aus_dari_rangka` | **part servis/aus persis per-VIN** dari EPC Parts Atlas — auto pilih modul (rem/kopling/filter/dll); WAJIB utk part aus per-rangka, jangan cari_part lokal | semua |
 | `assembly_utama_unit` | daftar **ASSEMBLY UTAMA terpasang** satu unit per-VIN ('four-assembly': kabin, gardan, mesin, transmisi, kopling — PN assy nyata) | semua |
 | `banding_rangka` | **bandingkan part DUA unit via dua nomor rangka** (Loading List per-VIN) — part sama/beda per kategori; memicu kartu unduh Excel di UI (§3.5.5g) | semua |
