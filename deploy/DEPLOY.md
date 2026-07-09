@@ -1,8 +1,56 @@
-# Deploy MASPART ke VPS Hostinger (Ubuntu 22.04/24.04) — via SSH
+# Deploy MASPART ke VPS
 
-Arsitektur: **Nginx** (port 80) di depan; **FastAPI** (uvicorn 127.0.0.1:8001) +
-**Next.js** (127.0.0.1:3000) di belakang, dijalankan **systemd**. Supabase tetap
-remote. Cari-by-Foto mencocokkan dari **CSV lokal** (tanpa database).
+## ⚠️ STATUS SEKARANG (per 2026-07-09) — BACA DULU
+
+Produksi **sudah pindah ke Coolify + Traefik (Docker)**. `maspart.tech`
+(port 80/443) dilayani **container** `frontend-jmmamc7kvqr6nlev97r79j5q` &
+`backend-jmmamc7kvqr6nlev97r79j5q` di belakang **coolify-proxy (Traefik)**.
+Host: `root@maspart.tech` (= `72.62.244.233`, SSH key passwordless terpasang).
+
+> ⛔ **JEBAKAN:** setup **systemd + nginx** di bawah (§1–§9) sudah **di-cutover**
+> ke container (`deploy/coolify/cutover.sh`) dan **TIDAK lagi melayani traffic
+> publik**. nginx `inactive`; port 8090/3000/8001 systemd = instance paralel mati/
+> tak-dipakai. `deploy/redeploy.sh` (yang me-restart systemd) **tidak** meng-update
+> situs live — jangan pakai untuk deploy produksi. Panduan §1–§9 disimpan hanya
+> sebagai riwayat bootstrap pertama kali.
+
+### Redeploy produksi yang BENAR (terbukti tayang)
+
+Semua dari komputer lokal (Git Bash), `<IP>` = `72.62.244.233`:
+
+```bash
+# 1) Kirim kode terbaru ke /opt/maspart di server (sumber build image)
+bash deploy/coolify/push.sh            # backend + frontend  (atau: push.sh backend / frontend)
+
+# 2) Rebuild image :latest DI SERVER
+ssh root@maspart.tech "bash /opt/maspart/deploy/coolify/build.sh all"
+
+# 3) Recreate container dari image baru (setara klik REDEPLOY di Coolify)
+ssh root@maspart.tech "cd /data/coolify/services/jmmamc7kvqr6nlev97r79j5q && docker compose up -d --force-recreate"
+
+# 4) Verifikasi (warmup torch+DINOv2+galeri ~5-15 dtk)
+ssh root@maspart.tech "curl -s https://maspart.tech/health; echo; \
+  curl -s -o /dev/null -w 'situs %{http_code}\n' https://maspart.tech"
+```
+
+Catatan penting saat verifikasi:
+- Cek health lewat **`https://maspart.tech/health`**, BUKAN `curl 127.0.0.1:8090`
+  (nginx 8090 mati → 000) atau `curl -k https://127.0.0.1/` tanpa Host header
+  (Traefik tak punya rute → **503**). Selalu sertakan host `maspart.tech`.
+- **Data-saja** (mis. `data/sinonim/sinonim.json`): cukup `scp` ke
+  `/opt/maspart/data/...` — aktif seketika tanpa rebuild (volume `-v /opt/maspart/data:/app/data`).
+- Compose service: `/data/coolify/services/jmmamc7kvqr6nlev97r79j5q/docker-compose.yml`
+  (`image: maspart-{backend,frontend}:latest`, `pull_policy: never` — image dibangun
+  di luar compose oleh `build.sh`).
+
+---
+
+## Riwayat: bootstrap pertama (systemd + nginx) — SUDAH di-cutover ke container
+
+> Arsitektur asli sebelum migrasi Coolify: **Nginx** (port 80) di depan; **FastAPI**
+> (uvicorn 127.0.0.1:8001) + **Next.js** (127.0.0.1:3000) di belakang, dijalankan
+> **systemd**. Disimpan untuk referensi provisioning awal. Untuk deploy harian
+> pakai bagian **Redeploy produksi yang BENAR** di atas.
 
 Metode transfer: **kirim arsip lewat SSH** (tanpa GitHub). Arsip
 `maspart-deploy.tar.gz` sudah dibuatkan di komputer Anda (`D:\maspart-deploy.tar.gz`,

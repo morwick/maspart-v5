@@ -4,7 +4,7 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-07-03** (oleh inspeksi langsung repo lokal + SSH ke server).
+> Terakhir diverifikasi: **2026-07-09** (oleh inspeksi langsung repo lokal + SSH ke server).
 > Ditambah **§3.5 — Cara Kerja Aplikasi (deep-dive fungsional)** pada 2026-06-25 agar AI/dev
 > langsung paham domain, alur data, logika pencarian + sinonim, AI tools, API & frontend.
 > Update **2026-06-27**: tambah fitur **Repair Kit Transmisi** (data + tool AI + endpoint +
@@ -109,6 +109,38 @@
 > (detail part / `detail_part`/`stok_accurate`) baca agregat+harga dari indeks — panggilan massal
 > Accurate kini **1× per 5 jam utk seluruh app**; rincian per-gudang tetap live per-PN (kecil,
 > cache 90 dtk). Label "live" diganti "sinkron berkala". Lihat §3.5.5i/l. 145 unit test lolos.
+> Update **2026-07-06 (sore)**: (a) **Menu Stok** — daftar stok live seluruh barang Accurate +
+> **rincian per gudang/cabang** saat baris diklik (§3.5.5l). (b) **Beranda dashboard staf** —
+> user/cabang mendarat di dashboard ringkas (bukan langsung katalog). (c) **/download** menyajikan
+> `MasPart.apk` (18 MB). (d) Asisten kenali **nama sbg CUSTOMER**, bukan cuma model unit.
+> Update **2026-07-07**: (a) **Gambar EXPLODED VIEW inline di chat** — tool `gambar_exploded`
+> (1 PN Sinotruk), bisa **diklik→lightbox zoom**, **highlight kuning nomor balon**, tampil s/d 6
+> gambar bersebelahan kartu foto. (b) **`katalog_mesin`** — katalog bergambar MESIN Weichai per-VIN
+> (walk group→figure, `orderNo`=balon; reuse builder Sinotruk source=weichai). (c) **Asisten belajar
+> sendiri** — loop usulan sinonim otomatis (miss→LLM usul→validasi katalog→approve admin di UI
+> Pencarian Nihil) + `bom_dari_rangka` fuzzy/posisi RH-LH; **Kamus Sinonim** dikelola admin (langsung
+> dipakai AI). (d) **Pencarian PN "pemaaf"** + saran PN mirip + fallback SIMS `cari_part` + saran
+> "mungkin maksud" web. (e) **Audit hardening asisten** — 7 temuan diperbaiki (stok gudang bocor ke
+> pembeli, allow-list tool, guard riwayat palsu, error tool→fiktif…); test scoping peran didahulukan.
+> (f) **Observabilitas** — `ai_chat_log` 1 baris/giliran ke Supabase (⚠️ tabel WAJIB dibuat manual,
+> `migrations/016`) + halaman `/admin/chat-log`. (g) **Batch** — pilih kolom katalog (foto/stok/harga
+> SIMS/Accurate), harga hanya admin/`mas`. (h) Populasi: tombol **Salin No. Rangka** seluruh hasil filter.
+> Update **2026-07-08**: (a) **STOK GUDANG aftermarket (di luar katalog Sinotruk)** kini terjangkau
+> asisten — barang spt Alternator Regulator, Kaca Spion, Cucuk Per via `accurate.search_index`
+> (`cari_part` field `stok_lokal_tambahan` + fallback `detail_part`) — §3.5.5i. (b) ⚠️ **KEPUTUSAN
+> PEMILIK — kartu gambar exploded & thumbnail foto DIMATIKAN** di jawaban chat (`88a61de`); asisten
+> menjawab **teks** (figure + nomor balon), `gambar_exploded*` = info teks. **Katalog Excel bergambar
+> tetap hidup**; jangan hidupkan lagi tanpa diminta. (c) **Pegas daun/suspensi** utamakan **Parts Atlas**
+> (`part_aus`), PN assembly diambil DETERMINISTIK; domain suspensi ≠ axle. (d) **Guard substitusi PN** —
+> larang PN katalog-lokal diselipkan ke jawaban EPC per-VIN (ditandai). (e) Sinonim: 10 grup **ALAT BERAT
+> Shantui** + `karet stabil→stabilizer bushing`, `cucuk/pin per→spring pin`; **halaman Cari Part** kini
+> pakai kamus sinonim (fallback 0 hasil). (f) **CARI BY FOTO v2 — LIVE prod 2026-07-08/09** (`1034ab7`):
+> **crop** area part sebelum cari, **kamera HP** (ambil foto langsung), **galeri belajar** (belajar dari
+> foto dikonfirmasi), **stok & harga** di hasil, **TTA v2** (test-time augmentation). Baseline top-1
+> **41,7%**; ⛔ terbukti αQE/query-expansion, voting, RRF **MERUSAK** akurasi — jangan diulang; lever
+> nyata = **crop + galeri belajar + cakupan foto**. Indeks foto part bertambah + kamus `cn_en` diperkaya
+> dari sesi indexing. Deploy container Coolify: `build.sh all` → `docker compose up -d --force-recreate`
+> (situs live = container Traefik 80/443, BUKAN systemd — lihat `deploy/DEPLOY.md`). 251 unit test lolos.
 
 ---
 
