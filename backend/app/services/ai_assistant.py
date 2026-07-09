@@ -1081,11 +1081,13 @@ def _tool_specs(user: dict) -> list[dict]:
             "function": {
                 "name": "gambar_exploded",
                 "description": (
-                    "INFO FIGURE & NOMOR BALON (TEKS) untuk SATU Part Number — panggil saat user "
-                    "tanya 'part ini nomor balon berapa', 'ada di figure apa', 'balon N itu part apa'. "
-                    "Menemukan FIGURE resmi EPC (Parts Atlas per-VIN) yang memuat PN itu + NOMOR "
-                    "BALON-nya + daftar balon→part figure itu. ⚠️ TAMPILAN GAMBAR DIMATIKAN — jawab "
-                    "dalam TEKS saja (figure + nomor balon); JANGAN klaim/menampilkan gambar. Butuh "
+                    "TAMPILKAN GAMBAR EXPLODED VIEW untuk SATU Part Number (gambar muncul INLINE di "
+                    "jawaban chat, bukan file unduh) — panggil saat user minta 'tampilkan/lihat "
+                    "gambar exploded view part ini', 'gambar/skema part <PN>', 'part ini nomor balon "
+                    "berapa di gambar'. Menemukan FIGURE resmi EPC (Parts Atlas per-VIN) yang memuat "
+                    "PN itu + NOMOR BALON-nya, lalu menyajikan gambarnya + daftar balon→part figure "
+                    "itu. Gambar hanya muncul saat DIMINTA lewat tool ini (tidak auto-nempel di tiap "
+                    "cek part). Butuh "
                     "NOMOR RANGKA (per-VIN) + PN + KATEGORI (mempersempit pencarian figure). Untuk "
                     "part BODI/SASIS/GARDAN/REM/KABIN Sinotruk (Parts "
                     "Atlas). ⛔ Untuk part INTERNAL MESIN (piston, liner, klep, injektor, kruk as, "
@@ -1108,12 +1110,13 @@ def _tool_specs(user: dict) -> list[dict]:
             "function": {
                 "name": "gambar_exploded_mesin",
                 "description": (
-                    "INFO FIGURE & NOMOR BALON (TEKS) MESIN (Weichai) untuk SATU Part Number — "
-                    "SEPERTI gambar_exploded tapi untuk part INTERNAL MESIN unit bermesin Weichai. "
-                    "Panggil saat user tanya 'part mesin ini balon berapa', 'balon N mesin itu apa', "
-                    "'ada di figure mesin apa'. Menemukan FIGURE mesin resmi EPC Weichai (per-VIN) yang "
-                    "memuat PN + NOMOR BALON-nya (orderNo) + daftar balon→part. ⚠️ TAMPILAN GAMBAR "
-                    "DIMATIKAN — jawab TEKS saja; JANGAN klaim/menampilkan gambar. Butuh NOMOR RANGKA + PN. "
+                    "TAMPILKAN GAMBAR EXPLODED VIEW MESIN (Weichai) untuk SATU Part Number — gambar "
+                    "muncul INLINE di jawaban chat (bukan file unduh), SEPERTI gambar_exploded tapi "
+                    "untuk part INTERNAL MESIN unit bermesin Weichai. Panggil saat user minta 'gambar/"
+                    "skema exploded part mesin', 'lihat gambar <PN mesin>', 'part mesin ini balon "
+                    "berapa'. Menemukan FIGURE mesin resmi EPC Weichai (per-VIN) yang memuat PN + "
+                    "NOMOR BALON-nya (orderNo), lalu menyajikan gambarnya + daftar balon→part. Gambar "
+                    "hanya muncul saat DIMINTA lewat tool ini (tidak auto-nempel). Butuh NOMOR RANGKA + PN. "
                     "'kategori' OPSIONAL (blok/bahan bakar/pelumas/dll) untuk mempercepat; kosong = "
                     "cari di SELURUH kelompok mesin. Beda dari gambar_exploded (itu Parts Atlas "
                     "Sinotruk: bodi/sasis/gardan) & katalog_mesin (itu FILE Excel/PDF). Hanya unit "
@@ -4475,36 +4478,45 @@ def _t_gambar_exploded(args: dict, user: dict) -> dict:
                                  "nama": hit.get("nama") or None, "figure": f.get("nama")}
                 break
 
-    # Kartu gambar DIMATIKAN (pemilik) → tak perlu stash PNG. Cukup info teks.
+    # Gambar exploded view DIMINTA EKSPLISIT lewat tool ini → stash PNG utk tampil
+    # INLINE di chat. (2026-07-09: pemilik minta gambar muncul saat DIMINTA.) Auto-
+    # attach (uraikan_mesin/part_aus) TETAP mati — lihat _auto_exploded_gambar.
     gambar: list[dict] = []
     daftar_balon: list[dict] = []
+    for f in d["figures"][:_MAX_EXPLODED_FIGURES]:   # batas figure agar tak membanjiri chat
+        hl = balon_req if balon_req is not None else f.get("balon")   # balon yg disorot
+        judul = f"Exploded {pn} - {f.get('nama') or kategori}"
+        image_id, filename = ai_export.stash_builder(
+            judul, {"kind": "exploded", "svg": f["svg"], "balon": hl}, ext="png")
+        gambar.append({"image_id": image_id, "filename": filename,
+                       "balon": hl, "nama_figure": f.get("nama"),
+                       "kategori": f.get("kategori"), "jumlah_item": f.get("jumlah_item")})
     # Daftar balon→part figure pertama = konteks utk follow-up 'cek no N'.
     if d["figures"]:
         daftar_balon = [{"balon": it.get("balon"), "pn": it.get("pn"), "nama": it.get("nama")}
                         for it in (d["figures"][0].get("items_ringkas") or [])][:40]
-    b0 = gambar[0] if gambar else {"nama_figure": (d["figures"][0].get("nama") if d.get("figures") else ""),
-                                   "balon": (d["figures"][0].get("balon") if d.get("figures") else None)}
-    # Kartu GAMBAR tidak ditampilkan lagi (permintaan pemilik) — jawab dalam TEKS:
-    # figure + nomor balon. 'daftar_balon_gambar' tetap dikirim sbg konteks.
+    b0 = gambar[0]
     if balon_req is not None:
-        catatan = (f"Di figure '{b0['nama_figure']}', NOMOR BALON {balon_req} = "
-                   + (f"{part_di_balon.get('nama') or '—'}"
+        catatan = (f"Gambar exploded view SIAP (tampil INLINE di bawah jawabanmu). NOMOR BALON "
+                   f"{balon_req} DISOROT (kuning) di figure '{b0['nama_figure']}'. "
+                   + (f"Balon {balon_req} = {part_di_balon.get('nama') or '—'}"
                       + (f" (PN {part_di_balon['part_number']})" if part_di_balon and part_di_balon.get('part_number')
                          else " — PN tak tercantum terpisah (kemungkinan termasuk dalam assembly).")
-                      if part_di_balon else f"(balon {balon_req} tak ada di daftar item figure ini).")
-                   + " Sampaikan dalam TEKS apa adanya; ⛔ JANGAN mengarang PN; JANGAN klaim/menautkan gambar "
-                     "(tampilan gambar dimatikan).")
+                      if part_di_balon else f"Balon {balon_req} tak ada di daftar item figure ini.")
+                   + " Jawab SINGKAT (figure + isi balon); gambar sudah tampil sendiri — "
+                     "⛔ JANGAN mengarang PN; JANGAN buat link/gambar/URL sendiri.")
     else:
-        catatan = (f"PN {pn} = NOMOR BALON '{b0['balon']}' di figure '{b0['nama_figure']}'. "
-                   "'daftar_balon_gambar' = SEMUA balon di figure + part-nya; jawab dalam TEKS. Bila user "
-                   "lanjut tanya 'no N itu apa'/'cek baut no N', jawab dari daftar itu (boleh panggil lagi "
-                   "dengan 'balon'=N untuk info balon itu). ⛔ JANGAN klaim/menautkan/menampilkan gambar "
-                   "(tampilan gambar dimatikan); JANGAN sebut PN lain di luar data ini.")
+        catatan = (f"Gambar exploded view SIAP — tampil OTOMATIS (inline) di bawah jawabanmu. "
+                   f"PN {pn} = NOMOR BALON '{b0['balon']}' di figure '{b0['nama_figure']}'. "
+                   "'daftar_balon_gambar' berisi SEMUA balon di gambar + part-nya — bila user lanjut "
+                   "tanya 'no N itu apa'/'cek baut no N', jawab dari daftar itu DAN panggil lagi "
+                   "gambar_exploded dengan 'balon'=N agar balon itu disorot. ⛔ JANGAN buat link/"
+                   "gambar/URL sendiri; JANGAN sebut PN lain di luar data ini.")
     return {
         "found": True, "frame_number": d.get("frame_number"), "pn": pn, "kategori": kategori,
         "balon_disorot": balon_req, "part_di_balon": part_di_balon,
         "daftar_balon_gambar": daftar_balon,
-        "jumlah_figure_cocok": len(d["figures"]),
+        "jumlah_figure_cocok": len(d["figures"]), "gambar": gambar,
         "catatan": catatan,
     }
 
@@ -4559,28 +4571,42 @@ def _t_gambar_exploded_mesin(args: dict, user: dict) -> dict:
                                  "nama": hit.get("nama") or None, "figure": f.get("nama")}
                 break
 
-    # Kartu gambar DIMATIKAN (pemilik) — jawab dalam TEKS: figure + nomor balon.
+    # Gambar exploded MESIN DIMINTA EKSPLISIT → stash PNG utk tampil INLINE.
+    # Auto-attach tetap mati (_auto_exploded_gambar). (2026-07-09)
+    gambar: list[dict] = []
+    for f in d["figures"][:_MAX_EXPLODED_FIGURES]:
+        hl = balon_req if balon_req is not None else f.get("balon")   # balon yg disorot
+        judul = f"Exploded mesin {pn} - {f.get('nama') or 'mesin'}"
+        image_id, filename = ai_export.stash_builder(
+            judul, {"kind": "exploded", "source": "weichai", "svg": f["svg"],
+                    "balon": hl, "rangka": rangka}, ext="png")
+        gambar.append({"image_id": image_id, "filename": filename,
+                       "balon": hl, "nama_figure": f.get("nama"),
+                       "kategori": f.get("kategori"), "jumlah_item": f.get("jumlah_item")})
     fig0 = d["figures"][0] if d.get("figures") else {}
     nama_fig = fig0.get("nama") or "mesin"
     daftar_balon = [{"balon": it.get("balon"), "pn": it.get("pn"), "nama": it.get("nama")}
                     for it in (fig0.get("items_ringkas") or [])][:40]
+    b0 = gambar[0]
     if balon_req is not None:
-        catatan = (f"Di figure '{nama_fig}', NOMOR BALON {balon_req} = "
-                   + (f"{part_di_balon.get('nama') or '—'}"
+        catatan = (f"Gambar exploded view MESIN SIAP — tampil INLINE. NOMOR BALON "
+                   f"{balon_req} DISOROT (kuning) di figure '{nama_fig}'. "
+                   + (f"Balon {balon_req} = {part_di_balon.get('nama') or '—'}"
                       + (f" (PN {part_di_balon['part_number']})" if part_di_balon and part_di_balon.get('part_number')
                          else " — PN tak tercantum terpisah (kemungkinan termasuk dalam assembly).")
-                      if part_di_balon else f"(balon {balon_req} tak ada di daftar item figure ini).")
-                   + " Sampaikan dalam TEKS apa adanya; ⛔ JANGAN mengarang PN; JANGAN klaim/menampilkan gambar "
-                     "(tampilan gambar dimatikan).")
+                      if part_di_balon else f"Balon {balon_req} tak ada di daftar item figure ini.")
+                   + " Jawab SINGKAT; gambar sudah tampil sendiri — ⛔ JANGAN mengarang PN; "
+                     "JANGAN buat link/gambar sendiri.")
     else:
-        catatan = (f"PN {pn} = NOMOR BALON '{fig0.get('balon')}' di figure '{nama_fig}'. "
-                   "'daftar_balon_gambar' = SEMUA balon di figure + part-nya; jawab dalam TEKS. ⛔ JANGAN "
-                   "klaim/menampilkan gambar (tampilan gambar dimatikan); JANGAN sebut PN lain di luar data ini.")
+        catatan = (f"Gambar exploded view MESIN SIAP — tampil OTOMATIS (inline). "
+                   f"PN {pn} = NOMOR BALON '{b0['balon']}' di figure '{nama_fig}'. "
+                   "Jawab SINGKAT: figure apa + PN ini balon nomor berapa. ⛔ JANGAN "
+                   "membuat link/gambar/URL sendiri; JANGAN sebut PN lain di luar data ini.")
     return {
         "found": True, "frame_number": d.get("frame_number"), "pn": pn,
         "balon_disorot": balon_req, "part_di_balon": part_di_balon,
         "daftar_balon_gambar": daftar_balon,
-        "jumlah_figure_cocok": len(d["figures"]),
+        "jumlah_figure_cocok": len(d["figures"]), "gambar": gambar,
         "catatan": catatan,
     }
 
@@ -5059,15 +5085,16 @@ def _system_prompt(user: dict) -> str:
         "kategori='lengkap' utk seluruh mesin. Sama seperti katalog lain: bila user belum menyebut "
         "bagian/format, TANYAKAN dulu (tool memandu); jawab SINGKAT setelah kartu unduh muncul. "
         "HANYA unit bermesin Weichai (WP-series).\n"
-        "- 🖼️ INFO FIGURE & NOMOR BALON SATU PN (TEKS — tampilan GAMBAR inline DIMATIKAN): "
-        "bila user minta 'gambar/skema/exploded view part ini', 'part ini nomor balon berapa', "
-        "'balon N itu apa' → panggil gambar_exploded(rangka, pn, kategori); jawab TEKS: figure "
-        "apa + PN itu balon nomor berapa (+ isi balon lain dari 'daftar_balon_gambar' bila "
-        "ditanya). Butuh RANGKA (per-VIN) + tentukan KATEGORI dari jenis part (bearing/hub → "
-        "gardan; rem → rem; piston → mesin; dst). ⛔ JANGAN mengklaim/menautkan gambar di chat "
-        "— tampilan gambar dimatikan. Bila user INGIN MELIHAT gambarnya, tawarkan KATALOG "
-        "BERGAMBAR (katalog_kategori/katalog_mesin — file Excel berisi gambar exploded view "
-        "resmi + nomor balon).\n"
+        "- 🖼️ GAMBAR EXPLODED VIEW SATU PN (inline di chat, BUKAN file): bila user minta "
+        "'tampilkan/lihat GAMBAR exploded view part ini', 'gambar/skema PN <X>', 'part ini "
+        "nomor balon berapa' → panggil gambar_exploded(rangka, pn, kategori) [mesin Weichai: "
+        "gambar_exploded_mesin]. Gambar figure resmi EPC yang memuat PN itu muncul LANGSUNG di "
+        "jawaban + kita tahu NOMOR BALON-nya. Gambar HANYA muncul saat DIMINTA lewat tool ini — "
+        "jangan auto-tempel di tiap cek part. Butuh RANGKA (per-VIN) + tentukan KATEGORI dari "
+        "jenis part (bearing/hub → gardan; rem → rem; piston → mesin; dst). Setelah tool sukses, "
+        "sebutkan SINGKAT: figure apa & PN itu balon nomor berapa; gambarnya sudah tampil sendiri "
+        "— ⛔ JANGAN buat link/gambar/URL sendiri. Untuk katalog banyak-part bergambar (file), "
+        "pakai katalog_kategori/katalog_mesin (Excel/PDF).\n"
         "- 📥 EXPORT EXCEL (kartu unduh): bila user minta file Excel dari data yang dibahas "
         "('buatkan excelnya', 'export ke excel/xlsx/spreadsheet', 'bikin filenya', 'unduh "
         "sebagai excel') → panggil buat_excel(judul, kolom, baris). Isi 'baris' disalin PERSIS "

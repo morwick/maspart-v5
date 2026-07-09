@@ -68,17 +68,18 @@ def test_tool_butuh_rangka_dan_pn():
     assert "error" in ai._t_gambar_exploded_mesin({"rangka": "R"}, U)  # tanpa pn
 
 
-def test_tool_sukses_info_teks(monkeypatch):
-    # Kartu gambar DIMATIKAN → tool balas INFO TEKS (figure + daftar balon), tanpa 'gambar'.
+def test_tool_sukses_kartu_gambar(monkeypatch):
+    # Diminta eksplisit → tool stash PNG & balas 'gambar' (kartu inline) + daftar balon.
     monkeypatch.setattr(ai.epc_weichai, "exploded_figures", lambda r, p, k: {
         "found": True, "frame_number": "FR1", "pn": p,
         "figures": [{"svg": "SVG1", "balon": 5, "nama": "Engine Block Group",
                      "kategori": "WP12", "jumlah_item": 2,
                      "items_ringkas": [{"balon": 5, "pn": "612630010055", "nama": "Cylinder Liner"}]}]})
     r = ai._t_gambar_exploded_mesin({"rangka": "RJ1", "pn": "612630010055"}, U)
-    assert r["found"] and not r.get("gambar")                # tak ada kartu gambar
+    assert r["found"] and r.get("gambar")                    # kartu gambar inline ada
+    assert r["gambar"][0]["image_id"]                        # PNG di-stash (id tersedia)
     assert r["daftar_balon_gambar"]                          # info balon (teks) tetap ada
-    assert "Engine Block Group" in r["catatan"]
+    assert "Engine Block Group" in r["gambar"][0]["nama_figure"]
 
 
 def test_tool_non_weichai(monkeypatch):
@@ -100,7 +101,7 @@ def test_tool_sorot_balon_tertentu(monkeypatch):
     r = ai._t_gambar_exploded_mesin({"rangka": "RJ1", "pn": "1014276820", "balon": 3}, U)
     assert r["found"]
     assert r["balon_disorot"] == 3
-    assert not r.get("gambar")                              # tak ada kartu gambar
+    assert r.get("gambar") and r["gambar"][0]["balon"] == 3  # balon 3 yg disorot di gambar
     assert r["part_di_balon"]["part_number"] == "1002177442"  # info balon 3 (teks)
     assert "Exhaust Manifold Bolt" in (r["part_di_balon"]["nama"] or "")
 
@@ -113,7 +114,7 @@ def test_tool_sorot_balon_tak_ada(monkeypatch):
     r = ai._t_gambar_exploded_mesin({"rangka": "RJ1", "pn": "X", "balon": 9}, U)
     assert r["found"] and r["balon_disorot"] == 9
     assert r["part_di_balon"] is None                        # balon 9 tak ada
-    assert not r.get("gambar")                               # tak ada kartu gambar
+    assert r.get("gambar")                                   # gambar tetap dibangun (figure ada)
 
 
 def test_tool_terdaftar_dan_allowlist():
