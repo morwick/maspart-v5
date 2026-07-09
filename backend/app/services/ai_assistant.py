@@ -1042,18 +1042,20 @@ def _tool_specs(user: dict) -> list[dict]:
             "function": {
                 "name": "pengganti_part",
                 "description": (
-                    "PERSAMAAN/PENGGANTI (supersession) part MESIN Weichai — jawab 'PN ini diganti "
-                    "nomor berapa?', 'part X sudah diskontinu, gantinya apa?', 'persamaan PN Y'. "
-                    "Data替换/ECN resmi Weichai (per Part Number, global — tak perlu rangka). "
-                    "Mengembalikan PN pengganti terbaru + PN lama + tanggal + tipe (searah/dua-arah), "
-                    "disilang ke stok/harga lokal. Untuk part MESIN Weichai (PN numerik). Sesi Weichai "
-                    "perlu aktif (kalau belum, cek satu unit mesin dulu)."
+                    "PERSAMAAN/PENGGANTI (supersession) part — jawab 'PN ini diganti nomor berapa?', "
+                    "'part X sudah diskontinu, gantinya apa?', 'persamaan PN Y'. Cek DUA sumber resmi "
+                    "sekaligus (global by PN, tak perlu rangka): (1) SIMS Sinotruk/HOWO — tabel "
+                    "penggantian part SASIS/bodi (17rb+ relasi, dua-arah: PN lama→baru & sebaliknya); "
+                    "(2) EPC Weichai 替换/ECN untuk part MESIN. Mengembalikan 'digantikan_oleh' (PN "
+                    "pengganti baru) + 'menggantikan' (PN lama), disilang ke stok/harga lokal supaya "
+                    "tahu mana yang ready. Berlaku untuk PN SASIS Sinotruk (HD/WG/AZ/LZ…) MAUPUN PN "
+                    "mesin Weichai (numerik)."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "part_number": {"type": "string", "description": "Part Number mesin yang mau dicek penggantinya (mis. '1000076563')."},
-                        "rangka": {"type": "string", "description": "Opsional. Nomor rangka unit (untuk mengaktifkan sesi Weichai bila belum aktif)."},
+                        "part_number": {"type": "string", "description": "Part Number yang mau dicek penggantinya (mis. 'FG7101204246+001/1' atau '1000076563')."},
+                        "rangka": {"type": "string", "description": "Opsional. Nomor rangka unit (untuk mengaktifkan sesi Weichai bila mengecek part mesin)."},
                     },
                     "required": ["part_number"],
                 },
@@ -4327,19 +4329,54 @@ def _t_uraikan_mesin(args: dict, user: dict) -> dict:
 
 
 def _t_pengganti_part(args: dict, user: dict) -> dict:
-    """PERSAMAAN/PENGGANTI (supersession) part MESIN Weichai — 'PN lama X diganti PN
-    baru Y'. Global by PN (data替换/ECN resmi Weichai). Silang PN pengganti ke stok/
-    harga lokal supaya tahu mana yang ready."""
+    """PERSAMAAN/PENGGANTI (supersession) part — 'PN lama X diganti PN baru Y'. DUA
+    sumber resmi digabung: SIMS partEquivalentQuery (Sinotruk/HOWO SASIS, tabel 17k
+    baris, global by PN) + EPC Weichai 替换/ECN (part MESIN). Silang PN pengganti ke
+    stok/harga lokal supaya tahu mana yang ready."""
     pn = (args.get("part_number") or args.get("pn") or "").strip()
     if not pn:
         return {"error": "Sebutkan Part Number yang mau dicek penggantinya."}
     rangka = (args.get("rangka") or "").strip()
-    res = epc_weichai.replace_part(pn, rangka)
-    if not res.get("found"):
-        return {"found": False, "error": res.get("message") or "Data pengganti tak ditemukan."}
+
+    diganti: list[dict] = []   # PN pengganti (part baru)
+    lama: list[dict] = []      # PN lama yang digantikan
+    seen_d: set[str] = set()
+    seen_m: set[str] = set()
+
+    def _add(dst: list, seen: set, pn_: str, nama=None, **extra) -> None:
+        k = "".join((pn_ or "").upper().split())
+        if not pn_ or k in seen:
+            return
+        seen.add(k)
+        dst.append({"pn": pn_, "nama": nama, **extra})
+
+    # 1) SIMS (Sinotruk/HOWO sasis) — global by PN, tanpa rangka.
+    try:
+        sres = sims.get_part_equivalents(pn)
+    except Exception:
+        sres = {}
+    for x in (sres.get("digantikan_oleh") or []):
+        _add(diganti, seen_d, x.get("pn"), x.get("nama"), sumber="SIMS")
+    for x in (sres.get("menggantikan") or []):
+        _add(lama, seen_m, x.get("pn"), x.get("nama"), sumber="SIMS")
+
+    # 2) EPC Weichai (part MESIN) — data 替换/ECN.
+    try:
+        wres = epc_weichai.replace_part(pn, rangka)
+    except Exception:
+        wres = {}
+    if wres.get("found"):
+        for x in (wres.get("digantikan_oleh") or []):
+            _add(diganti, seen_d, x.get("pn"), None, tanggal=x.get("tanggal"), tipe=x.get("tipe"), sumber="Weichai")
+        for x in (wres.get("menggantikan") or []):
+            _add(lama, seen_m, x.get("pn"), None, tanggal=x.get("tanggal"), tipe=x.get("tipe"), sumber="Weichai")
+
+    if not diganti and not lama:
+        return {"found": False, "part_number": pn,
+                "error": "Tidak ada data persamaan/pengganti untuk PN ini (dicek SIMS Sinotruk & EPC Weichai)."}
 
     # Silang PN pengganti/lama ke katalog lokal (stok+harga+nama).
-    all_pn = [x["pn"] for x in res.get("digantikan_oleh", [])] + [x["pn"] for x in res.get("menggantikan", [])]
+    all_pn = [x["pn"] for x in diganti] + [x["pn"] for x in lama]
     local: dict[str, dict] = {}
     for r in part_index.search_exact_pns(all_pn):
         p = (r.get("part_number") or "").upper()
@@ -4347,26 +4384,32 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
             local[p] = r
 
     def _row(x: dict) -> dict:
-        lr = local.get(x["pn"], {})
+        lr = local.get((x["pn"] or "").upper(), {})
         row = {"part_number": x["pn"],
-               "nama": " ".join((lr.get("part_name") or "").split()) or None,
-               "tanggal": x.get("tanggal"), "tipe": x.get("tipe")}
+               "nama": x.get("nama") or " ".join((lr.get("part_name") or "").split()) or None,
+               "sumber": x.get("sumber")}
+        if x.get("tanggal"):
+            row["tanggal"] = x["tanggal"]
+        if x.get("tipe"):
+            row["tipe"] = x["tipe"]
         if lr:
             row["stok_total"] = lr.get("stok")
             row["harga_lokal"] = lr.get("harga")
-            row["stok_per_gudang"] = lr.get("gudang") or {}
+            row["ada_di_katalog"] = True
         else:
             row["catatan"] = "belum ada di katalog lokal"
         return row
 
     return {
-        "found": True, "part_number": res["part_number"],
-        "digantikan_oleh": [_row(x) for x in res.get("digantikan_oleh", [])],
-        "menggantikan": [_row(x) for x in res.get("menggantikan", [])],
-        "sumber": res.get("sumber"),
-        "catatan": ("'digantikan_oleh' = PN pengganti TERBARU (sarankan ini bila PN yang ditanya "
-                    "diskontinu/kosong stok). 'menggantikan' = PN lama. Sebutkan tanggal & tipe "
-                    "(searah/dua-arah). ⛔ JANGAN mengarang PN — hanya yang ADA di hasil ini."),
+        "found": True, "part_number": pn,
+        "digantikan_oleh": [_row(x) for x in diganti],
+        "menggantikan": [_row(x) for x in lama],
+        "sumber": sorted({x.get("sumber") for x in (diganti + lama) if x.get("sumber")}),
+        "catatan": ("'digantikan_oleh' = PN PENGGANTI (part baru) — sarankan ini bila PN yang "
+                    "ditanya diskontinu/kosong stok; cek 'stok_total' mana yang ready. "
+                    "'menggantikan' = PN LAMA yang digantikan part ini. 'sumber' SIMS = data "
+                    "resmi Sinotruk/HOWO (sasis); Weichai = part mesin. ⛔ JANGAN mengarang PN — "
+                    "hanya yang ADA di hasil ini."),
     }
 
 
@@ -5200,11 +5243,12 @@ def _system_prompt(user: dict) -> str:
         "→ LANGSUNG panggil uraikan_mesin(rangka, part) — JANGAN berhenti / menyimpulkan "
         "'terintegrasi di engine assembly'. ⛔ JANGAN pakai part_aus_dari_rangka/bom_dari_rangka "
         "untuk part mesin Weichai, dan JANGAN mengarang PN.\n"
-        "- PERSAMAAN/PENGGANTI part MESIN Weichai (supersession): 'PN <nomor> diganti nomor "
-        "berapa', 'part X diskontinu gantinya apa', 'persamaan PN Y' untuk part MESIN (PN numerik "
-        "Weichai) -> panggil pengganti_part(part_number). Sebut 'digantikan_oleh' (PN pengganti "
-        "terbaru + stok/harga) + tanggal + tipe. Sesi Weichai perlu aktif; bila tool minta cek unit "
-        "dulu, sarankan user cek satu unit bermesin Weichai. JANGAN mengarang PN.\n"
+        "- 🔀 PERSAMAAN/PENGGANTI part (supersession) — GLOBAL by PN, tak perlu rangka: 'PN <nomor> "
+        "diganti nomor berapa', 'part X diskontinu gantinya apa', 'persamaan PN Y' → panggil "
+        "pengganti_part(part_number). Mengecek DUA sumber resmi: SIMS Sinotruk/HOWO (part SASIS/bodi, "
+        "tabel penggantian 17rb+ relasi) + EPC Weichai (part MESIN). Sebut 'digantikan_oleh' (PN "
+        "pengganti baru + stok/harga lokal — sarankan yang ready) & 'menggantikan' (PN lama); sebut "
+        "'sumber' tiap PN. ⛔ JANGAN mengarang PN.\n"
         "- 🔬 BANDING DUA RANGKA (sama/beda part): bila user beri DUA nomor rangka & tanya 'apakah "
         "part X (kabin/rem/mesin/dll) sama?' / 'ada yang beda?' / 'cocok semua?' → WAJIB panggil "
         "banding_rangka(rangka_1, rangka_2, kategori=<kabin/rem/…, opsional>). Itu membandingkan "
@@ -5285,13 +5329,11 @@ def _system_prompt(user: dict) -> str:
         "model; jangan dump 100 baris mentah. Bila found=false tapi ada 'kandidat', tawarkan PN "
         "mirip itu.\n"
         "- 🔀 PERSAMAAN / PART PENGGANTI (supersesi): bila user tanya 'persamaan part X', 'pengganti "
-        "PN X', 'PN X diganti apa', 'ada substitusi-nya?' → sumbernya EPC, ada di field "
-        "'part_pengganti' hasil part_aus_dari_rangka (PN lama→PN baru resmi EPC). Karena data ini "
-        "EPC simpan PER-VIN (TIDAK ada pencarian global PN-saja untuk akun ini), kamu BUTUH nomor "
-        "rangka: bila user menyebut rangka, panggil part_aus_dari_rangka(rangka, query=<part/PN>) "
-        "lalu baca 'part_pengganti'. Bila user TIDAK menyebut rangka, JANGAN menebak persamaannya — "
-        "minta nomor rangka unit itu dulu ('biar kuambil persamaan resmi dari EPC'). JANGAN "
-        "mengarang PN pengganti dari kemiripan kode. (SIMS tidak menyediakan data persamaan.)\n"
+        "PN X', 'PN X diganti apa', 'ada substitusi-nya?' → UTAMAKAN pengganti_part(part_number) — "
+        "GLOBAL by PN (tanpa rangka), cek SIMS Sinotruk (sasis) + Weichai (mesin) sekaligus. Bila PN "
+        "tak ada di situ TAPI user menyebut nomor rangka, jalur kedua: part_aus_dari_rangka(rangka, "
+        "query=<part/PN>) lalu baca 'part_pengganti' (persamaan per-VIN dari EPC). ⛔ JANGAN mengarang "
+        "PN pengganti dari kemiripan kode; kalau dua sumber kosong, katakan tak ada data persamaannya.\n"
         "- 📚 KATALOG BERGAMBAR (exploded view): bila user minta 'berikan/buatkan KATALOG "
         "<kategori> <rangka>', 'katalog kabin unit X', 'buku part rem unit ini', 'catalog + "
         "gambar' → WAJIB panggil katalog_kategori(rangka, kategori). Bila user minta KATALOG "

@@ -22,6 +22,11 @@ IMAGES_JSON   = Path("images") / "image_links.json"
 PART_INFO_JSON = Path("images") / "part_info.json"
 PHOTO_API_URL = f"{SIMS_BASE_URL}/intlapi/intl.service.basic/partPhoto/getPhotoUrlByPartCode"
 PART_INFO_API_URL = f"{SIMS_BASE_URL}/intlapi/intl.service.basic/partInfo/pageDealer"
+# Persamaan/pengganti part (supersession) resmi Sinotruk — tabel "Parts Replacement
+# Relationship" (17k+ baris). Param `partCode` menyaring DUA arah (kolom sebelum &
+# sesudah). Response: {totalCount, records:[{preSpGoodsNo, preGoodsName, afterSpGoodsNo,
+# afterGoodsName, afterReplacePartIsSale}]}.
+PART_EQUIV_API_URL = f"{SIMS_BASE_URL}/intlapi/intl.service.basic/partInfo/partEquivalentQuery"
 
 BASE_HEADERS = {
     "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -309,6 +314,35 @@ def get_sims_part_info(part_number: str, force_refresh: bool = False) -> tuple:
         return fetch_sims_part_info(part_number, force_refresh=force_refresh), None
     except Exception as e:
         return {}, f"Error: {e}"
+
+
+# ══════════════════════════════════════════════
+#  FETCH PART EQUIVALENTS (supersession / pengganti)
+# ══════════════════════════════════════════════
+def fetch_part_equivalents(part_number: str, page_size: int = 50) -> list:
+    """Persamaan/pengganti part resmi Sinotruk (tabel partEquivalentQuery). `partCode`
+    menyaring DUA arah (kolom sebelum & sesudah), jadi PN yang dicari bisa muncul sbg
+    `preSpGoodsNo` (part LAMA → penggantinya = afterSpGoodsNo) ATAU `afterSpGoodsNo`
+    (part BARU → yang digantikan = preSpGoodsNo). Return list record mentah SIMS. []
+    bila kosong/gagal (non-fatal)."""
+    pn = str(part_number or "").strip()
+    if not pn:
+        return []
+    try:
+        token = _get_token()
+        headers = {**BASE_HEADERS, "Authorization": token}
+        params = {"partCode": pn, "currentPage": 1, "pageSize": page_size}
+        resp = requests.get(PART_EQUIV_API_URL, params=params, headers=headers, timeout=15)
+        if resp.status_code in (401, 403):
+            _reset_token()
+            headers = {**BASE_HEADERS, "Authorization": _get_token()}
+            resp = requests.get(PART_EQUIV_API_URL, params=params, headers=headers, timeout=15)
+        resp.raise_for_status()
+        recs = (resp.json() or {}).get("records") or []
+        return recs if isinstance(recs, list) else []
+    except Exception as e:
+        print(f"[sims_fetcher] Error fetch equivalents '{pn}': {e}")
+        return []
 
 
 # ══════════════════════════════════════════════

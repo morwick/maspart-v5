@@ -150,6 +150,50 @@ def get_part_spec(part_number: str) -> dict:
     return out
 
 
+def get_part_equivalents(part_number: str) -> dict:
+    """Persamaan/pengganti part resmi Sinotruk (tabel partEquivalentQuery SIMS).
+    Klasifikasi arah relatif terhadap PN yang ditanya:
+      - `digantikan_oleh` = PN PENGGANTI (part baru) bila PN ditanya = part LAMA.
+      - `menggantikan`    = PN LAMA yang digantikan bila PN ditanya = part BARU.
+    Return {found, part_number, digantikan_oleh:[{pn,nama}], menggantikan:[{pn,nama}]}.
+    Non-fatal: {} bila SIMS tak tersedia / kosong."""
+    pn = (part_number or "").strip()
+    if not _SIMS_OK or not pn:
+        return {}
+    try:
+        recs = _sf.fetch_part_equivalents(pn)
+    except Exception:
+        return {}
+    if not recs:
+        return {"found": False, "part_number": pn}
+
+    def _norm(x: str) -> str:
+        return "".join((x or "").upper().split())
+
+    q = _norm(pn)
+    diganti: list[dict] = []   # PN pengganti (part baru)
+    lama: list[dict] = []      # PN lama yang digantikan
+    seen: set[tuple[str, str]] = set()
+    for r in recs:
+        pre_pn = (r.get("preSpGoodsNo") or "").strip()
+        aft_pn = (r.get("afterSpGoodsNo") or "").strip()
+        pre_nm = " ".join((r.get("preGoodsName") or "").split())
+        aft_nm = " ".join((r.get("afterGoodsName") or "").split())
+        pre_n, aft_n = _norm(pre_pn), _norm(aft_pn)
+        # PN ditanya muncul di kolom SEBELUM → penggantinya = kolom SESUDAH.
+        if q and (q in pre_n or pre_n in q) and aft_pn:
+            key = ("d", aft_n)
+            if key not in seen:
+                seen.add(key); diganti.append({"pn": aft_pn, "nama": aft_nm or None})
+        # PN ditanya muncul di kolom SESUDAH → yang digantikannya = kolom SEBELUM.
+        elif q and (q in aft_n or aft_n in q) and pre_pn:
+            key = ("m", pre_n)
+            if key not in seen:
+                seen.add(key); lama.append({"pn": pre_pn, "nama": pre_nm or None})
+    return {"found": bool(diganti or lama), "part_number": pn,
+            "digantikan_oleh": diganti, "menggantikan": lama}
+
+
 def price_available() -> bool:
     return _PRICE_OK
 
