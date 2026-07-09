@@ -21,7 +21,8 @@ import requests
 
 from ..core.config import get_settings
 from . import (accurate, ai_chat_log, ai_export, catalog_bom, epc, epc_bom, epc_weichai, fault_codes,
-               filter_ref, gudang, harga, orders, part_index, populasi, repairkit, search_log, sims)
+               filter_ref, gudang, gudang_config, harga, orders, part_index, populasi, repairkit,
+               search_log, sims)
 
 logger = logging.getLogger("maspart.ai")
 
@@ -247,18 +248,31 @@ def _umbrella_keywords(kata_kunci: str) -> list[str]:
     return kws
 
 
+def _norm_gudang(nama: str) -> str:
+    """Nama gudang → basis untuk cocok: buang prefix 'NN.' + spasi + lowercase
+    ('04.Palembang' → 'palembang', '25. PT BJM' → 'pt bjm')."""
+    return re.sub(r"^\s*\d+\s*\.\s*", "", (nama or "")).strip().lower()
+
+
+def _gudang_list() -> list[str]:
+    """Daftar nama gudang KANONIK dari KONFIGURASI (gudang_config; format 'NN.Nama')
+    — bukan dari stok.xlsx. Dipakai resolusi & saran gudang tersedia."""
+    try:
+        return list(gudang_config.coords_map().keys())
+    except Exception:
+        return []
+
+
 def _resolve_gudang(nama: str) -> str | None:
     """Cocokkan nama gudang bebas dari user (mis. 'palembang', 'jakarta') ke nama
-    gudang KANONIK di indeks stok multi-gudang (mis. '04.Palembang'). Prefix 'NN.'
-    diabaikan saat mencocok; case-insensitive; cocok bila salah satu memuat yang
-    lain. None bila tak ada yang cocok."""
-    want = (nama or "").strip().lower()
+    gudang KANONIK config (mis. '04.Palembang'). Prefix 'NN.' diabaikan; case-
+    insensitive; cocok bila salah satu memuat yang lain. None bila tak dikenal."""
+    want = _norm_gudang(nama)
     if not want:
         return None
-    for g in part_index.gudang_names():
-        base = re.sub(r"^\s*\d+\s*\.\s*", "", g).strip().lower()
-        gl = g.lower()
-        if want in (base, gl) or want in base or (len(base) >= 3 and base in want) or want in gl:
+    for g in _gudang_list():
+        base = _norm_gudang(g)
+        if want == base or want in base or (len(base) >= 3 and base in want):
             return g
     return None
 
@@ -1305,7 +1319,7 @@ def _tool_specs(user: dict) -> list[dict]:
                     "perluas kata kunci/kategori ke sub-part (mis. 'kopling' → driven "
                     "disc, matahari/pressure plate, drek laher/release bearing, garpu, "
                     "master/booster, rumah kopling); (2) filter HANYA part yg stoknya >0 "
-                    "DI GUDANG itu. Mengembalikan daftar {part_number, part_name, "
+                    "DI GUDANG itu (sumber: stok Accurate, sinkron berkala). Mengembalikan daftar {part_number, part_name, "
                     "stok_di_gudang (qty di gudang itu), stok_total, harga}. BEDA dari "
                     "cari_part (stok TOTAL semua gudang, bukan 1 gudang) & detail_part "
                     "(hanya 1 PN). Nama gudang boleh bebas ('palembang', 'jakarta', "
@@ -1819,12 +1833,21 @@ def _t_cari_part(args: dict, user: dict) -> dict:
     return out_res
 
 
+def _acc_qty(v) -> int:
+    """Kuantitas Accurate (float, mis. 8.0) → int bulat. BEDA dari _stok_int yang
+    membuang titik desimal ala pemisah ribuan Excel (salah untuk float Accurate)."""
+    try:
+        return int(round(float(v)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _t_stok_gudang(args: dict, user: dict) -> dict:
     """DAFTAR PART yang stoknya READY (qty>0) DI SATU GUDANG tertentu, disaring per
-    kata kunci/kategori (mis. 'part kopling yang ready di Palembang'). Sumber per-
-    gudang = indeks stok multi-gudang in-memory (part_index.gudang_breakdown) —
-    murah, TANPA panggilan Accurate per-PN. Ungkap rincian antar-gudang → bukan
-    untuk pembeli."""
+    kata kunci/kategori (mis. 'part kopling yang ready di Palembang'). Sumber per-gudang
+    = INDEKS ACCURATE (accurate.gudang_breakdown) — rincian per-gudang ditarik SEKALI
+    per siklus 5-jam (enrichment latar) & dibagi ke semua fitur, jadi query INSTAN tanpa
+    panggilan live per-PN. Ungkap rincian antar-gudang → bukan untuk pembeli."""
     if _is_pembeli(user):
         return {"error": "Rincian stok antar-gudang tidak tersedia untuk akun pembeli."}
     kata = (args.get("kata_kunci") or args.get("query") or "").strip()
@@ -1837,10 +1860,9 @@ def _t_stok_gudang(args: dict, user: dict) -> dict:
 
     gudang_kanonik = _resolve_gudang(gud)
     if not gudang_kanonik:
-        tersedia = [re.sub(r"^\s*\d+\s*\.\s*", "", g) for g in part_index.gudang_names()]
         return {"found": False, "gudang_diminta": gud,
                 "error": f"Gudang '{gud}' tak dikenal.",
-                "gudang_tersedia": tersedia,
+                "gudang_tersedia": [_norm_gudang(g) for g in _gudang_list()],
                 "jawaban_wajib": "Sebutkan salah satu gudang dari 'gudang_tersedia'."}
 
     # Istilah cari: ekspansi sinonim biasa + PAYUNG kategori (agar 'kopling' polos
@@ -1851,62 +1873,68 @@ def _t_stok_gudang(args: dict, user: dict) -> dict:
             terms.append(kw)
     search_terms = list(dict.fromkeys(t for t in terms if t))
 
-    # Kandidat dari KATALOG (nama + PN), scope unit bila diminta.
-    seen: set = set()
-    rows: list[dict] = []
-    for t in search_terms:
-        for r in part_index.search_part_number(t) + part_index.search_part_name(t):
-            if unit and unit.lower() not in (r.get("file") or "").lower():
-                continue
-            pn = (r.get("part_number") or "").upper()
-            if not pn or pn in seen:
-                continue
-            seen.add(pn)
-            rows.append(r)
-
-    # + barang STOK GUDANG aftermarket (indeks Accurate) yang cocok — banyak PN
-    # aftermarket juga punya breakdown di stok multi-gudang. Non-fatal.
-    if not unit:
-        try:
-            for it in accurate.search_index(search_terms, limit=30):
-                pn = (it.get("pn") or "").upper()
+    # KANDIDAT: part yang "ready di gudang" PASTI ada di Accurate → pindai INDEKS
+    # ACCURATE in-memory (cepat, satu pass) utk nama yg cocok kategori. Menghindari
+    # pemindaian katalog per-term (lambat utk payung 50+ keyword). Scope unit → pakai
+    # katalog (bawa info model/file; lebih sempit jadi tetap cepat).
+    cand: dict[str, dict] = {}   # PN -> {part_name, harga}
+    if unit:
+        seen: set = set()
+        for t in search_terms:
+            for r in part_index.search_part_name(t):
+                if unit.lower() not in (r.get("file") or "").lower():
+                    continue
+                pn = (r.get("part_number") or "").upper()
                 if pn and pn not in seen:
                     seen.add(pn)
-                    rows.append({"part_number": pn, "part_name": it.get("name"),
-                                 "harga": None, "stok": None})
-        except Exception:
-            pass
+                    cand[pn] = {"part_name": r.get("part_name"), "harga": r.get("harga")}
+    else:
+        for it in accurate.items_matching(search_terms, limit=400):
+            pn = (it.get("pn") or "").upper()
+            if pn and pn not in cand:
+                price = it.get("price")
+                harga = f"Rp {int(price):,}".replace(",", ".") if price else None
+                cand[pn] = {"part_name": it.get("name"), "harga": harga}
 
-    # FILTER: hanya part berstok >0 DI GUDANG itu.
+    # RINCIAN PER-GUDANG dari INDEKS Accurate (enrichment 5-jam) — instan, tanpa
+    # panggilan live per-PN. want_g = nama basis gudang utk cocok lintas penamaan
+    # (config vs Accurate warehouseName sama-sama 'NN.Nama').
+    want_g = _norm_gudang(gudang_kanonik)
     hasil: list[dict] = []
-    for r in rows:
-        pn = (r.get("part_number") or "").upper()
-        br = part_index.gudang_breakdown(pn)
-        qty = _stok_int(br.get(gudang_kanonik))
+    for pn, meta in cand.items():
+        br = accurate.gudang_breakdown(pn)
+        qty = next((_acc_qty(v) for g, v in br.items() if _norm_gudang(g) == want_g), 0)
         if qty <= 0:
             continue
         hasil.append({
             "part_number": pn,
-            "part_name": r.get("part_name") or part_index.name_for(pn),
+            "part_name": meta.get("part_name") or part_index.name_for(pn),
             "stok_di_gudang": qty,
-            "stok_total": _stok_int(r.get("stok")) or sum(_stok_int(v) for v in br.values()),
-            "harga_lokal": r.get("harga") or None,
+            "stok_total": sum(_acc_qty(v) for v in br.values()),
+            "harga_lokal": meta.get("harga") or None,
         })
     hasil.sort(key=lambda x: x["stok_di_gudang"], reverse=True)
     ditampilkan = hasil[:40]
 
+    # Indeks per-gudang belum terisi (mis. ~8 mnt pertama setelah server nyala) →
+    # jangan salah lapor "tidak ada"; beri tahu apa adanya.
+    if not hasil and accurate.gudang_enriched_count() == 0:
+        return {"found": False, "gudang": gudang_kanonik,
+                "error": "Indeks stok per-gudang sedang disiapkan (baru mulai) — coba lagi beberapa menit.",
+                "kata_kunci": kata}
+
     if hasil:
         catatan = (
             f"{len(hasil)} part '{kata}' READY (stok>0) di gudang {gudang_kanonik}. "
-            "'stok_di_gudang' = qty DI GUDANG ITU (bukan total semua gudang). Jawab "
-            "sebagai DAFTAR ringkas (PN + nama + qty di gudang), urut stok terbanyak; "
-            "sebut nama gudang jelas. ⛔ JANGAN mengarang PN di luar daftar ini."
+            "'stok_di_gudang' = qty DI GUDANG ITU (bukan total semua gudang). Jawab sebagai "
+            "DAFTAR ringkas (PN + nama + qty di gudang), urut stok terbanyak; sebut nama "
+            "gudang jelas. ⛔ JANGAN mengarang PN di luar daftar ini."
         )
     else:
         catatan = (
             f"Tidak ada part '{kata}' yang berstok di gudang {gudang_kanonik}. Sampaikan "
-            "jujur; part kategori itu mungkin ada di GUDANG LAIN — tawarkan cek gudang "
-            "lain atau total stok (detail_part/stok_accurate untuk 1 PN)."
+            "jujur; part kategori itu mungkin ada di GUDANG LAIN — tawarkan cek gudang lain "
+            "atau total stok (detail_part/stok_accurate untuk 1 PN)."
         )
     return {
         "found": True,

@@ -449,22 +449,30 @@ def stock_full(part_number: str) -> dict[str, Any] | None:
     if not entry:
         return _cache(None)
     base = dict(entry)
-    per: list[dict[str, Any]] = []
-    try:
-        wd = _warehouse_retry(base.get("accurate_id")).get("d") or {}
-        for w in wd.get("detailWarehouseData") or []:
-            qty = _num(w.get("balance"))
-            if qty <= 0:
-                continue
-            per.append({
-                "gudang": w.get("warehouseName") or w.get("name") or "",
-                "deskripsi": w.get("description") or "",
-                "qty": qty,
-                "gudang_id": w.get("id"),
-            })
-        per.sort(key=lambda x: x["qty"], reverse=True)
-    except AccurateError:
-        per = []  # non-fatal: agregat tetap tampil
+    # Rincian per-gudang: UTAMA dari INDEKS (enrichment 5-jam, dibagi ke semua fitur —
+    # tanpa panggilan live). Fallback SATU panggilan live per-PN hanya bila PN belum
+    # ter-enrich (mis. window ~8 mnt setelah boot / barang baru berstok).
+    gmap = (_index_cache.get("by_gudang") or {}).get(want)
+    if gmap is not None:
+        per = [{"gudang": g, "qty": q} for g, q in
+               sorted(gmap.items(), key=lambda kv: kv[1], reverse=True)]
+    else:
+        per = []
+        try:
+            wd = _warehouse_retry(base.get("accurate_id")).get("d") or {}
+            for w in wd.get("detailWarehouseData") or []:
+                qty = _num(w.get("balance"))
+                if qty <= 0:
+                    continue
+                per.append({
+                    "gudang": w.get("warehouseName") or w.get("name") or "",
+                    "deskripsi": w.get("description") or "",
+                    "qty": qty,
+                    "gudang_id": w.get("id"),
+                })
+            per.sort(key=lambda x: x["qty"], reverse=True)
+        except AccurateError:
+            per = []  # non-fatal: agregat tetap tampil
     base["per_gudang"] = per
     return _cache(base)
 
@@ -544,7 +552,10 @@ def normalize_item(it: dict[str, Any]) -> dict[str, Any]:
 
 # ── Indeks stok (cache TTL) ────────────────────────────────────────────────
 _index_lock = threading.Lock()
-_index_cache: dict[str, Any] = {"ts": 0.0, "items": [], "by_pn": {}}
+# by_gudang: {norm_pn: {warehouseName: qty}} — rincian per-gudang, diisi enrichment
+# latar (enrich_warehouses) sekali per siklus 5-jam & DIBAGI ke semua fitur (stock_full,
+# stok_gudang) tanpa panggilan live per-PN. gudang_ts = kapan enrichment terakhir tuntas.
+_index_cache: dict[str, Any] = {"ts": 0.0, "items": [], "by_pn": {}, "by_gudang": {}, "gudang_ts": 0.0}
 
 
 def _build_by_pn(items: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -578,6 +589,76 @@ def refresh(force: bool = False) -> dict[str, Any]:
         }
         _index_cache["ts"] = time.time()
         return _index_cache
+
+
+# ── Enrichment stok PER-GUDANG ke indeks ────────────────────────────────────
+# Rincian per-gudang TIDAK ikut tarikan massal search-item.do (itu agregat "[Semua
+# Cabang]"); hanya endpoint per-item (view-itemstock-bywarehouse.do) yang punya. Karena
+# Accurate men-serialkan panggilan per-sesi (~0,12 dtk/barang; ~8 mnt utk ~3.700 barang
+# berstok), enrichment dijalankan SERIAL di THREAD LATAR (bukan di refresh() yang bisa
+# dipicu on-demand) sekali per siklus 5-jam, lalu HASILNYA DIBAGI ke semua fitur.
+_GUDANG_ENRICH_PUBLISH_EVERY = 100   # terbitkan hasil parsial tiap N barang
+_gudang_enrich_running = False
+_gudang_enrich_lock = threading.Lock()
+
+
+def _warehouse_map(item_id: Any) -> dict[str, float]:
+    """{warehouseName: qty>0} untuk 1 item id (live, 1 panggilan). {} bila gagal."""
+    try:
+        wd = _warehouse_retry(item_id).get("d") or {}
+    except AccurateError:
+        return {}
+    out: dict[str, float] = {}
+    for w in wd.get("detailWarehouseData") or []:
+        qty = _num(w.get("balance"))
+        if qty > 0:
+            name = w.get("warehouseName") or w.get("name") or ""
+            if name:
+                out[name] = qty
+    return out
+
+
+def gudang_breakdown(part_number: str) -> dict[str, float]:
+    """Rincian stok {warehouseName: qty} 1 PN dari INDEKS (hasil enrichment 5-jam).
+    {} bila belum ter-enrich / PN tak ada. Non-blocking, tanpa panggilan live."""
+    key = _norm_pn(part_number)
+    if not key:
+        return {}
+    return dict((_index_cache.get("by_gudang") or {}).get(key, {}))
+
+
+def gudang_enriched_count() -> int:
+    """Jumlah PN yang sudah punya rincian per-gudang di indeks (0 = belum siap)."""
+    return len(_index_cache.get("by_gudang") or {})
+
+
+def enrich_warehouses() -> int:
+    """Isi indeks per-gudang: tarik rincian gudang utk SEMUA barang berstok>0 (serial,
+    santun ke Accurate) → simpan ke _index_cache['by_gudang'] = {norm_pn:{gudang:qty}}.
+    Terbitkan parsial berkala agar query dapat data lebih awal. Return jumlah PN
+    ter-enrich. Dipanggil dari thread latar terjadwal; skip bila sedang berjalan."""
+    global _gudang_enrich_running
+    with _gudang_enrich_lock:
+        if _gudang_enrich_running:
+            return gudang_enriched_count()
+        _gudang_enrich_running = True
+    try:
+        if not available():
+            return gudang_enriched_count()
+        idx = refresh(force=False)
+        in_stock = [(k, v) for k, v in (idx.get("by_pn") or {}).items()
+                    if _num(v.get("available_to_sell")) > 0 and v.get("accurate_id") is not None]
+        built: dict[str, dict[str, float]] = {}
+        for i, (key, v) in enumerate(in_stock, 1):
+            built[key] = _warehouse_map(v.get("accurate_id"))
+            if i % _GUDANG_ENRICH_PUBLISH_EVERY == 0:
+                _index_cache["by_gudang"] = dict(built)   # publish parsial
+        _index_cache["by_gudang"] = built
+        _index_cache["gudang_ts"] = time.time()
+        return len(built)
+    finally:
+        with _gudang_enrich_lock:
+            _gudang_enrich_running = False
 
 
 def stock_for(part_number: str, force: bool = False) -> dict[str, Any] | None:
@@ -626,8 +707,20 @@ def _scheduled_refresh_once() -> float:
             refresh(force=True)
             logger.info(
                 "[accurate] refresh terjadwal indeks stok OK (%d barang); "
-                "berikutnya %d mnt lagi", len(_index_cache["items"]), _INDEX_TTL // 60,
+                "mulai enrichment per-gudang…", len(_index_cache["items"]),
             )
+            # Rincian per-gudang ditarik SEKALI di sini (serial, ~8 mnt utk ~3.700
+            # barang berstok) → dibagi ke semua fitur via indeks. Latar, tak ada user
+            # menunggu. NON-FATAL: kegagalan enrichment TIDAK mengorbankan refresh
+            # agregat yang sudah sukses — tetap tunggu siklus penuh (data lama dipakai).
+            try:
+                n = enrich_warehouses()
+                logger.info(
+                    "[accurate] enrichment per-gudang OK (%d PN); berikutnya %d mnt lagi",
+                    n, _INDEX_TTL // 60,
+                )
+            except Exception as e:
+                logger.warning("[accurate] enrichment per-gudang gagal (%s) — data lama dipakai", e)
         # Accurate tak dikonfigurasi → tak ada yang bisa ditarik; cek lagi
         # nanti (murah, tanpa jaringan) kalau-kalau file sesi manual muncul.
         return _INDEX_TTL
@@ -671,6 +764,28 @@ def snapshot() -> dict[str, dict[str, Any]]:
     """{norm_pn: {stok,harga,unit}} dari indeks 5-jam bersama (tanpa tarikan
     terpisah). Bisa kosong (cold start / Accurate down) — pemanggil fallback Excel."""
     return _index_cache.get("snap") or {}
+
+
+def items_matching(terms: Iterable[str], *, limit: int = 400) -> list[dict[str, Any]]:
+    """Barang di indeks yang NAMA/PN-nya memuat SALAH SATU `terms` (word-boundary,
+    case-insensitive). Beda dari search_index (yg skor+batas kecil utk aftermarket):
+    ini mengumpulkan SEMUA yang cocok (utk daftar kategori spt 'kopling'/'rem') —
+    in-memory, cepat (satu pindai). Return normalize_item (pn, name, price…)."""
+    items = _index_cache.get("items") or []
+    if not items:
+        return []
+    pats = [re.compile(r"(?<!\w)" + re.escape(t.strip().lower()) + r"(?!\w)")
+            for t in terms if t and len(t.strip()) >= 3]
+    if not pats:
+        return []
+    out: list[dict[str, Any]] = []
+    for it in items:
+        hay = f"{it.get('name') or ''} {it.get('pn') or ''}".lower()
+        if any(p.search(hay) for p in pats):
+            out.append(it)
+            if len(out) >= limit:
+                break
+    return out
 
 
 def search_index(terms: Iterable[str], *, limit: int = 8) -> list[dict[str, Any]]:

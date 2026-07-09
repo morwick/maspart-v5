@@ -1,6 +1,6 @@
 """Tool stok_gudang: daftar part 1 kategori yang READY (stok>0) di SATU gudang.
-Sumber per-gudang = part_index.gudang_breakdown (indeks stok multi-gudang in-memory).
-Semua akses data di-mock (tanpa Excel/Accurate).
+Sumber per-gudang = INDEKS Accurate (accurate.gudang_breakdown; enrichment 5-jam).
+Nama gudang dari gudang_config. Semua akses data di-mock (tanpa Excel/HTTP).
 """
 import pytest
 
@@ -22,38 +22,46 @@ _SIN = [
      "keywords": ["fuel filter"]},  # NON-kopling → tak boleh ikut umbrella 'kopling'
 ]
 
-_GUDANG = ["01.Jakarta", "02.Pekanbaru", "04.Palembang", "05.Makasar", "23.Medan"]
+# Gudang KANONIK dari config (coords_map: nama -> koordinat).
+_COORDS = {"01.Jakarta": (0, 0), "02.Pekanbaru": (0, 0), "04.Palembang": (0, 0),
+           "05.Makasar": (0, 0), "23.Medan": (0, 0)}
 
-# Breakdown stok {PN: {gudang: qty}}
+# Rincian per-gudang dari INDEKS Accurate {PN: {gudang: qty}} (float → uji _acc_qty).
 _BREAK = {
-    "CLUTCH1": {"04.Palembang": 5, "01.Jakarta": 2},
-    "CLUTCH2": {"01.Jakarta": 3},                    # tak ada di Palembang
-    "CLUTCH3": {"04.Palembang": 1},
-    "REMX": {"04.Palembang": 9},                     # bukan hasil pencarian kopling
+    "CLUTCH1": {"04.Palembang": 5.0, "01.Jakarta": 2.0},
+    "CLUTCH2": {"01.Jakarta": 3.0},                   # tak ada di Palembang
+    "CLUTCH3": {"04.Palembang": 1.0},
 }
 
-# Katalog: apa pun term-nya, kembalikan 3 part kopling (dedup by PN menangani ulangan).
+# Kandidat dari INDEKS Accurate (jalur cepat no-unit): item {pn, name, price}.
+_ITEMS = [
+    {"pn": "CLUTCH1", "name": "Clutch Driven Disc", "price": 100000.0},
+    {"pn": "CLUTCH2", "name": "Clutch Pressure Plate", "price": 200000.0},
+    {"pn": "CLUTCH3", "name": "Clutch Release Bearing", "price": 0.0},
+]
+# Katalog (jalur scope unit): baris dgn kolom 'file'.
 _ROWS = [
-    {"part_number": "CLUTCH1", "part_name": "Clutch Driven Disc", "file": "NX360.xlsx", "stok": "7", "harga": "Rp 100"},
-    {"part_number": "CLUTCH2", "part_name": "Clutch Pressure Plate", "file": "NX360.xlsx", "stok": "3", "harga": "Rp 200"},
-    {"part_number": "CLUTCH3", "part_name": "Clutch Release Bearing", "file": "HOWO.xlsx", "stok": "1", "harga": ""},
+    {"part_number": "CLUTCH1", "part_name": "Clutch Driven Disc", "file": "NX360.xlsx", "harga": "Rp 100"},
+    {"part_number": "CLUTCH2", "part_name": "Clutch Pressure Plate", "file": "NX360.xlsx", "harga": "Rp 200"},
+    {"part_number": "CLUTCH3", "part_name": "Clutch Release Bearing", "file": "HOWO.xlsx", "harga": ""},
 ]
 
 
 @pytest.fixture
 def patched(monkeypatch):
     monkeypatch.setattr(ai, "_load_sinonim_entries", lambda: _SIN)
-    monkeypatch.setattr(ai.part_index, "gudang_names", lambda: list(_GUDANG))
-    monkeypatch.setattr(ai.part_index, "gudang_breakdown", lambda pn: dict(_BREAK.get((pn or "").upper(), {})))
+    monkeypatch.setattr(ai.gudang_config, "coords_map", lambda: dict(_COORDS))
+    monkeypatch.setattr(ai.accurate, "items_matching", lambda terms, limit=400: list(_ITEMS))
     monkeypatch.setattr(ai.part_index, "search_part_name", lambda t: list(_ROWS))
-    monkeypatch.setattr(ai.part_index, "search_part_number", lambda t: [])
     monkeypatch.setattr(ai.part_index, "name_for", lambda pn: "")
-    monkeypatch.setattr(ai.accurate, "search_index", lambda terms, limit=8: [])
+    monkeypatch.setattr(ai.accurate, "gudang_breakdown",
+                        lambda pn: dict(_BREAK.get((pn or "").upper(), {})))
+    monkeypatch.setattr(ai.accurate, "gudang_enriched_count", lambda: len(_BREAK))
 
 
-# ── resolusi gudang ──────────────────────────────────────────────────────────
+# ── resolusi gudang (dari config) ────────────────────────────────────────────
 def test_resolve_gudang(monkeypatch):
-    monkeypatch.setattr(ai.part_index, "gudang_names", lambda: list(_GUDANG))
+    monkeypatch.setattr(ai.gudang_config, "coords_map", lambda: dict(_COORDS))
     assert ai._resolve_gudang("palembang") == "04.Palembang"
     assert ai._resolve_gudang("PALEMBANG") == "04.Palembang"
     assert ai._resolve_gudang("jakarta") == "01.Jakarta"
@@ -63,46 +71,57 @@ def test_resolve_gudang(monkeypatch):
     assert ai._resolve_gudang("") is None
 
 
+def test_acc_qty():
+    assert ai._acc_qty(8.0) == 8            # float Accurate → 8 (BUKAN 80)
+    assert ai._acc_qty("55") == 55
+    assert ai._acc_qty(None) == 0
+    assert ai._acc_qty("x") == 0
+
+
 # ── umbrella kategori ────────────────────────────────────────────────────────
 def test_umbrella_kopling(monkeypatch):
     monkeypatch.setattr(ai, "_load_sinonim_entries", lambda: _SIN)
     kws = ai._umbrella_keywords("kopling")
-    # Ketiga grup kopling ikut (trigger/keyword memuat 'kopling'/'clutch')…
     assert "driven disc" in kws and "pressure plate" in kws and "release bearing" in kws
-    # …tapi grup NON-kopling (saringan solar) TIDAK ikut.
-    assert "fuel filter" not in kws
+    assert "fuel filter" not in kws          # grup NON-kopling tak ikut
 
 
 def test_umbrella_bukan_kategori(monkeypatch):
     monkeypatch.setattr(ai, "_load_sinonim_entries", lambda: _SIN)
-    # 'baut roda' bukan kata payung → tak ada tambahan dari umbrella.
     assert ai._umbrella_keywords("baut roda") == []
 
 
-# ── handler: filter part berstok di gudang ───────────────────────────────────
+# ── handler: filter part berstok di gudang (via indeks Accurate) ─────────────
 def test_stok_gudang_palembang(patched):
     r = ai._t_stok_gudang({"kata_kunci": "kopling", "gudang": "palembang"}, ADMIN)
     assert r["found"] and r["gudang"] == "04.Palembang"
     pns = [x["part_number"] for x in r["ditampilkan"]]
-    # Hanya part kopling yg berstok di Palembang (CLUTCH1, CLUTCH3); CLUTCH2 (cuma
-    # Jakarta) dibuang; REMX (bukan hasil pencarian kopling) tak muncul.
-    assert pns == ["CLUTCH1", "CLUTCH3"]              # urut stok menurun (5, 1)
-    assert r["ditampilkan"][0]["stok_di_gudang"] == 5
+    # Hanya kopling berstok di Palembang (CLUTCH1=5, CLUTCH3=1); CLUTCH2 (Jakarta) dibuang.
+    assert pns == ["CLUTCH1", "CLUTCH3"]
+    assert r["ditampilkan"][0]["stok_di_gudang"] == 5      # float 5.0 → 5 (bukan 50)
+    assert r["ditampilkan"][0]["stok_total"] == 7          # 5+2 dari breakdown
     assert r["jumlah_part_ready"] == 2
 
 
 def test_stok_gudang_kosong(patched):
-    # Gudang tanpa stok kopling → daftar kosong + catatan jujur.
     r = ai._t_stok_gudang({"kata_kunci": "kopling", "gudang": "medan"}, ADMIN)
     assert r["found"] and r["gudang"] == "23.Medan"
     assert r["jumlah_part_ready"] == 0 and r["ditampilkan"] == []
     assert "gudang lain" in r["catatan"].lower()
 
 
+def test_indeks_belum_siap(patched, monkeypatch):
+    # by_gudang belum terisi (enrichment belum jalan) → jangan salah lapor "tidak ada".
+    monkeypatch.setattr(ai.accurate, "gudang_breakdown", lambda pn: {})
+    monkeypatch.setattr(ai.accurate, "gudang_enriched_count", lambda: 0)
+    r = ai._t_stok_gudang({"kata_kunci": "kopling", "gudang": "medan"}, ADMIN)
+    assert not r["found"] and "disiapkan" in r["error"].lower()
+
+
 def test_gudang_tak_dikenal(patched):
     r = ai._t_stok_gudang({"kata_kunci": "kopling", "gudang": "singapura"}, ADMIN)
     assert not r["found"] and "gudang_tersedia" in r
-    assert "Palembang" in r["gudang_tersedia"]
+    assert any("palembang" in g.lower() for g in r["gudang_tersedia"])
 
 
 def test_argumen_kurang(patched):
