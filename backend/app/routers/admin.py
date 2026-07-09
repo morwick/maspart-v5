@@ -603,6 +603,17 @@ def chat_log_list(limit: int = 200, _admin: dict = Depends(require_admin)):
             "log": ai_chat_log.list_logs(max(1, min(limit, 1000)))}
 
 
+@router.delete("/chat-log")
+def chat_log_delete(before_days: int | None = None, _admin: dict = Depends(require_admin)):
+    """Hapus log observabilitas AI. `before_days` = hapus yang LEBIH TUA dari N hari;
+    tanpa arg (atau <=0) = hapus SEMUA. (Retensi 30-hari juga jalan otomatis di latar.)"""
+    ok, n = ai_chat_log.delete_before(before_days) if (before_days and before_days > 0) \
+        else ai_chat_log.delete_all()
+    if not ok:
+        raise HTTPException(status_code=500, detail="Gagal menghapus log (Supabase/tabel).")
+    return {"ok": True, "dihapus": n}
+
+
 # ── Usulan Sinonim OTOMATIS (loop belajar: miss → LLM → validasi → approve) ──
 class UsulanGenerateRequest(BaseModel):
     limit: int = 10

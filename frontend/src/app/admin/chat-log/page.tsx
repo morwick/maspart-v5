@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import {
   ApiError,
+  deleteChatLog,
   getChatLog,
   type ChatLogRow,
   type ChatLogSummary,
@@ -26,7 +27,9 @@ export default function ChatLogPage() {
   const [summary, setSummary] = useState<ChatLogSummary | null>(null);
   const [rows, setRows] = useState<ChatLogRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -49,6 +52,31 @@ export default function ChatLogPage() {
     }
   }, [router]);
 
+  const hapus = useCallback(async (beforeDays?: number) => {
+    const token = getToken();
+    if (!token) return router.replace("/login");
+    const pesan = beforeDays
+      ? `Hapus log yang lebih tua dari ${beforeDays} hari?`
+      : "Hapus SEMUA log observabilitas AI? Tindakan ini tidak bisa dibatalkan.";
+    if (!window.confirm(pesan)) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const r = await deleteChatLog(token, beforeDays);
+      setNotice(`${r.dihapus >= 0 ? r.dihapus.toLocaleString("id-ID") : "Sejumlah"} baris dihapus.`);
+      await load();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearSession();
+        return router.replace("/login");
+      }
+      setError(err instanceof Error ? err.message : "Gagal menghapus");
+    } finally {
+      setBusy(false);
+    }
+  }, [router, load]);
+
   useEffect(() => {
     if (getUser()?.role !== "admin") {
       router.replace("/search");
@@ -67,11 +95,24 @@ export default function ChatLogPage() {
             Ringkasan dari maksimal 1000 giliran chat terakhir — pakai untuk memantau latensi,
             seberapa sering guard anti-halusinasi menyala, dan tool mana yang paling dipakai.
           </p>
-          <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
+          <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading || busy}>
             {loading ? "Memuat…" : "↻ Muat ulang"}
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => hapus(30)} disabled={loading || busy}
+                  title="Hapus baris yang lebih tua dari 30 hari">
+            🧹 Hapus &gt;30 hari
+          </button>
+          <button className="btn btn-danger btn-sm" onClick={() => hapus()} disabled={loading || busy}
+                  title="Hapus SEMUA log">
+            {busy ? "Menghapus…" : "🗑️ Hapus semua"}
           </button>
         </div>
 
+        <p style={{ fontSize: 12, color: "var(--ink-500)", marginTop: -6, marginBottom: 12 }}>
+          Log &gt;30 hari juga terhapus <b>otomatis</b> (retensi harian).
+        </p>
+
+        {notice && <div className="alert alert-success" style={{ marginBottom: 14 }}>{notice}</div>}
         {error && <div className="alert alert-error" style={{ marginBottom: 14 }}>{error}</div>}
 
         {empty && (

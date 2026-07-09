@@ -12,6 +12,7 @@ dan TIDAK pernah menjatuhkan jawaban chat. DDL ada di create_table_sql().
 """
 from __future__ import annotations
 
+import threading
 import time
 
 import requests
@@ -23,6 +24,11 @@ _TIMEOUT = 10
 
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _cutoff(days: int) -> str:
+    """ISO UTC untuk (now - days hari) — batas 'lebih tua dari'."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
 
 
 def create_table_sql() -> str:
@@ -97,6 +103,71 @@ def list_logs(limit: int = 200) -> list[dict]:
         return r.json() or []
     except Exception:
         return []
+
+
+def _delete(params: dict) -> tuple[bool, int]:
+    """DELETE ke Supabase dgn filter `params`. Return (ok, jumlah_terhapus | -1).
+    PostgREST butuh minimal 1 filter (safety); count=exact → header Content-Range."""
+    try:
+        r = requests.delete(
+            _rest_url("ai_chat_log"),
+            headers=_service_headers("return=minimal,count=exact"),
+            params=params,
+            timeout=_TIMEOUT,
+        )
+        if r.status_code not in (200, 204):
+            return False, -1
+        n = -1
+        cr = r.headers.get("Content-Range", "")
+        if "/" in cr:
+            tail = cr.rsplit("/", 1)[-1].strip()
+            if tail.isdigit():
+                n = int(tail)
+        return True, n
+    except Exception:
+        return False, -1
+
+
+def delete_before(days: int) -> tuple[bool, int]:
+    """Hapus baris lebih tua dari `days` hari. days<=0 → hapus SEMUA."""
+    if days <= 0:
+        return delete_all()
+    return _delete({"created_at": f"lt.{_cutoff(days)}"})
+
+
+def delete_all() -> tuple[bool, int]:
+    """Hapus SEMUA baris (filter created_at<=now mencocokkan semua)."""
+    return _delete({"created_at": f"lte.{_now()}"})
+
+
+# ── Retensi otomatis: hapus baris lebih tua dari _RETENTION_DAYS di latar ────
+_RETENTION_DAYS = 30
+_RETENTION_INTERVAL = 24 * 3600     # cek harian
+_retention_lock = threading.Lock()
+_retention_started = False
+
+
+def start_retention() -> bool:
+    """Thread daemon: hapus baris >_RETENTION_DAYS hari, sekali di awal lalu harian.
+    Idempoten & best-effort (tabel absen/Supabase down → diam)."""
+    global _retention_started
+    with _retention_lock:
+        if _retention_started:
+            return False
+        _retention_started = True
+
+    def _loop():
+        while True:
+            try:
+                ok, n = delete_before(_RETENTION_DAYS)
+                if ok and n > 0:
+                    print(f"[chat_log] retensi: {n} baris >{_RETENTION_DAYS} hari dihapus")
+            except Exception:  # pragma: no cover
+                pass
+            time.sleep(_RETENTION_INTERVAL)
+
+    threading.Thread(target=_loop, daemon=True, name="chat-log-retention").start()
+    return True
 
 
 def summary() -> dict:

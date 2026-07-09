@@ -1216,6 +1216,20 @@ export async function getChatLog(
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
 }
+// Hapus log observabilitas. beforeDays > 0 = hapus yang lebih tua dari N hari;
+// tanpa arg = hapus SEMUA. Return jumlah baris terhapus.
+export async function deleteChatLog(
+  token: string,
+  beforeDays?: number,
+): Promise<{ ok: boolean; dihapus: number }> {
+  const qs = beforeDays && beforeDays > 0 ? `?before_days=${beforeDays}` : "";
+  const res = await fetch(`${API_BASE}/api/admin/chat-log${qs}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
 
 // ── Usulan Sinonim OTOMATIS (LLM belajar dari pencarian nihil) ──
 // generate → LLM memetakan istilah lapangan gagal → keyword EN (divalidasi ke
