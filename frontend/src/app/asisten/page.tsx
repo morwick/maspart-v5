@@ -172,6 +172,9 @@ export default function AsistenPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [available, setAvailable] = useState<boolean | null>(null);
+  // File yang sudah DIPILIH tapi BELUM dikirim — user mengetik dulu maunya apa
+  // ("isikan stok"), baru tekan Kirim. Gaya Claude.
+  const [pendingSheet, setPendingSheet] = useState<File | null>(null);
   // Lampiran Excel aktif: dipegang server (TTL 2 jam). Dikirim ulang tiap giliran
   // agar follow-up "isikan stoknya" tetap mengacu ke file yang sama.
   const [sheetId, setSheetId] = useState("");
@@ -244,7 +247,10 @@ export default function AsistenPage() {
 
   async function send(text: string) {
     const body = text.trim();
-    if (!body || busy) return;
+    if (busy) return;
+    // File yang baru dilampirkan dikirim bersama pesan ini (bukan saat dipilih).
+    if (pendingSheet) return sendWithSheet(pendingSheet, body);
+    if (!body) return;
     const token = getToken();
     if (!token) return router.replace("/login");
 
@@ -335,17 +341,13 @@ export default function AsistenPage() {
   }
 
   // Unggah Excel: server membaca kolomnya & menyimpan sheet (TTL 2 jam) → sheet_id
-  // dipakai giliran berikutnya ("isikan stoknya di kolom D").
-  async function sendWithSheet(file: File) {
+  // dipakai giliran berikutnya ("isikan stoknya di kolom D"). Dipanggil dari send()
+  // saat user menekan Kirim — memilih file hanya MELAMPIRKAN, tidak mengirim.
+  async function sendWithSheet(file: File, caption: string) {
     if (busy) return;
     const token = getToken();
     if (!token) return router.replace("/login");
-    if (!/\.(xlsx|xlsm)$/i.test(file.name)) {
-      setError("File harus Excel .xlsx atau .xlsm (bukan .xls / .csv).");
-      return;
-    }
     setError(null);
-    const caption = input.trim();
     const userText = caption || `Saya lampirkan ${file.name}. Isinya apa saja?`;
     const next: Msg[] = [
       ...msgs,
@@ -353,6 +355,7 @@ export default function AsistenPage() {
     ];
     setMsgs(next);
     setInput("");
+    setPendingSheet(null);
     resetTextarea();
     setBusy(true);
     try {
@@ -382,6 +385,9 @@ export default function AsistenPage() {
         return router.replace("/login");
       }
       setError(err instanceof Error ? err.message : "Gagal mengunggah Excel.");
+      // Kembalikan lampiran & teks agar user bisa langsung coba kirim lagi.
+      setPendingSheet(file);
+      setInput(caption);
       setMsgs((m) => m.slice(0, -1));
     } finally {
       setBusy(false);
@@ -395,6 +401,8 @@ export default function AsistenPage() {
     setError(null);
     setSheetId("");
     setSheetName("");
+    setPendingSheet(null);
+    if (sheetRef.current) sheetRef.current.value = "";
     try {
       sessionStorage.removeItem(CHAT_KEY);
     } catch {
@@ -583,7 +591,19 @@ export default function AsistenPage() {
 
           {/* Input */}
           <div style={{ borderTop: "1px solid var(--ink-150)", background: "var(--paper)", padding: "10px 12px 8px" }}>
-            {sheetName && (
+            {/* File dipilih tapi BELUM dikirim — kartu pratinjau gaya Claude.
+                User mengetik maunya ("isikan stok") lalu tekan Kirim. */}
+            {pendingSheet && (
+              <FilePreviewCard
+                name={pendingSheet.name}
+                onRemove={() => {
+                  setPendingSheet(null);
+                  if (sheetRef.current) sheetRef.current.value = "";
+                }}
+              />
+            )}
+            {/* Lampiran yang SUDAH terkirim & masih aktif di server (follow-up). */}
+            {!pendingSheet && sheetName && (
               <div
                 style={{
                   display: "inline-flex",
@@ -640,7 +660,16 @@ export default function AsistenPage() {
                 style={{ display: "none" }}
                 onChange={(e) => {
                   const f = e.target.files?.[0];
-                  if (f) sendWithSheet(f);
+                  if (!f) return;
+                  if (!/\.(xlsx|xlsm)$/i.test(f.name)) {
+                    setError("File harus Excel .xlsx atau .xlsm (bukan .xls / .csv).");
+                    if (sheetRef.current) sheetRef.current.value = "";
+                    return;
+                  }
+                  // Hanya DILAMPIRKAN. Terkirim saat user menekan Kirim.
+                  setError(null);
+                  setPendingSheet(f);
+                  taRef.current?.focus();
                 }}
               />
               <button
@@ -669,7 +698,13 @@ export default function AsistenPage() {
                   autoGrow();
                 }}
                 onKeyDown={onKeyDown}
-                placeholder={available === false ? "Asisten belum aktif…" : "Tulis pertanyaan…"}
+                placeholder={
+                  available === false
+                    ? "Asisten belum aktif…"
+                    : pendingSheet
+                      ? "Mau diapakan filenya? mis. “isikan stok di kolom D”"
+                      : "Tulis pertanyaan…"
+                }
                 disabled={busy || available === false}
                 rows={1}
                 style={{
@@ -688,7 +723,8 @@ export default function AsistenPage() {
               <button
                 className="btn btn-primary"
                 onClick={() => send(input)}
-                disabled={busy || !input.trim() || available === false}
+                // Ada lampiran menunggu → boleh kirim walau teks kosong.
+                disabled={busy || (!input.trim() && !pendingSheet) || available === false}
                 style={{ gap: 6 }}
               >
                 <Icon d={IC.send} size={14} /> Kirim
@@ -959,6 +995,68 @@ function AiExcelCard({ exp }: { exp: AIExcelExport }) {
       err={err}
       onDownload={download}
     />
+  );
+}
+
+// Kartu file yang MENUNGGU dikirim (gaya Claude): tampil di atas kotak ketik
+// setelah user memilih file, sebelum ia mengetik maunya & menekan Kirim.
+function FilePreviewCard({ name, onRemove }: { name: string; onRemove: () => void }) {
+  const ext = (name.split(".").pop() || "").toUpperCase();
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div
+        style={{
+          position: "relative",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          width: 150,
+          height: 96,
+          padding: "10px 10px 8px",
+          border: "1px solid var(--ink-200)",
+          borderRadius: 12,
+          background: "var(--paper)",
+          boxShadow: "var(--shadow-1)",
+        }}
+      >
+        <div
+          className="truncate"
+          style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-900)", paddingRight: 18 }}
+          title={name}
+        >
+          {name}
+        </div>
+        <span
+          className="pill"
+          style={{ alignSelf: "flex-start", height: 19, fontSize: 10, padding: "0 7px", gap: 4 }}
+        >
+          <Icon d={IC.sheet} size={11} /> {ext}
+        </span>
+        <button
+          onClick={onRemove}
+          title="Buang lampiran"
+          aria-label="Buang lampiran"
+          style={{
+            position: "absolute",
+            top: -7,
+            right: -7,
+            width: 20,
+            height: 20,
+            borderRadius: 99,
+            border: "1px solid var(--ink-200)",
+            background: "var(--paper)",
+            color: "var(--ink-600)",
+            cursor: "pointer",
+            display: "grid",
+            placeItems: "center",
+            padding: 0,
+            boxShadow: "var(--shadow-1)",
+          }}
+        >
+          <Icon d={IC.x} size={11} />
+        </button>
+      </div>
+    </div>
   );
 }
 
