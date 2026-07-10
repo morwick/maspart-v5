@@ -16,17 +16,22 @@
 # BATAS MEMORI: server 3,8 GB RAM. Tanpa mem_limit, satu container yang membengkak
 # bisa memicu OOM killer kernel yang membunuh proses LAIN (Coolify/Traefik) → situs
 # mati total. Dengan batas, container itu sendiri yang di-restart oleh Docker.
-#   backend ~950 MB idle (torch + DINOv2) → 1,8 GB memberi ruang lonjakan.
-#   frontend ~70 MB (Next.js server)      → 384 MB sudah longgar.
-# memswap_limit = mem_limit → container tidak boleh melahap swap 2 GB milik host.
+#
+# Angka backend DIUKUR, bukan ditebak (2026-07-10): memuat torch + DINOv2 memuncak
+# di ~1,48 GB anon-RSS, di atas base uvicorn ~200 MB → puncak nyata ~1,7 GB. Plafon
+# 1,8 GB pernah dicoba dan TERLALU MEPET (OOM saat warmup model). 2,5 GB memberi
+# ruang lonjakan inference; memswap_limit 3 GB = bantalan swap 500 MB agar lonjakan
+# sesaat melambat, bukan langsung dibunuh.
+#   Total terburuk: 2,5 (be) + 0,38 (fe) + ~0,26 (stack Coolify) ≈ 3,15 GB < 3,8 GB.
+#   frontend diukur 51-66 MB → 384 MB sudah sangat longgar.
 
 services:
   backend:
     image: maspart-backend:latest
     pull_policy: never
     restart: unless-stopped
-    mem_limit: 1800m
-    memswap_limit: 1800m
+    mem_limit: 2500m
+    memswap_limit: 3000m
     # Kredensial sekarang dikelola sbg Environment Variables di Coolify (di-inject
     # ke container), TIDAK lagi mount file .env dari host. Edit lewat dashboard
     # Coolify → service maspart → Environment Variables.
