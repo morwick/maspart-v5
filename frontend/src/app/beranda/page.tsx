@@ -68,7 +68,7 @@ export default function BerandaPage() {
       return;
     }
     if (u?.role === "pembeli") {
-      router.replace("/search");
+      router.replace("/toko");
       return;
     }
     setUname(u?.username ?? "");

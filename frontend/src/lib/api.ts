@@ -1853,3 +1853,60 @@ export async function setBuyerLocation(token: string, key: string): Promise<{ ok
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
 }
+
+// ── Pembeli: etalase belanja (/toko) ────────────────────────────────
+export type TokoProduct = {
+  part_number: string;
+  name: string;
+  harga: number;
+  harga_display: string;
+  berat: number;
+  foto: string | null;
+  kategori: string[];
+  ready: boolean;
+  stok: number;
+  gudang: string;
+};
+export type TokoKategori = { key: string; label: string; count: number };
+export type TokoHome = {
+  lokasi: string | null;
+  total_produk: number;
+  kategori: TokoKategori[];
+  terlaris: TokoProduct[];
+  unggulan: TokoProduct[];
+};
+export type TokoCatalog = {
+  items: TokoProduct[];
+  count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  lokasi: string | null;
+};
+
+export async function getTokoHome(token: string): Promise<TokoHome> {
+  const res = await fetch(`${API_BASE}/api/buyer/home`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function getTokoCatalog(
+  token: string,
+  opts: { q?: string; kategori?: string; sort?: string; ready?: boolean; page?: number; pageSize?: number } = {},
+): Promise<TokoCatalog> {
+  const qs = new URLSearchParams({
+    q: opts.q ?? "",
+    kategori: opts.kategori ?? "",
+    sort: opts.sort ?? "relevan",
+    ready: String(opts.ready ?? false),
+    page: String(opts.page ?? 1),
+    page_size: String(opts.pageSize ?? 24),
+  });
+  const res = await fetch(`${API_BASE}/api/buyer/catalog?${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}

@@ -375,6 +375,8 @@ Pemetaan akun→gudang ada di `services/gudang.py` (`ACCOUNT_GUDANG`, mis. `jaka
 
 ### 3.5.4 Stok, harga, populasi
 
+> ℹ️ Sejak 2026-07-10 sumber stok/harga utama = **indeks Accurate di disk** (§3.5.5m); Excel di bawah jadi fallback/seed.
+
 - **Stok**: `data/stok/stok.xlsx` (atau Supabase Storage). Dua format didukung: *single-total*
   lama & *multi-gudang* (header `Kode Barang`, kolom per gudang `01.Jakarta` dst + `Total`).
   Key PN = buang prefix `000001.`, uppercase. Disimpan `{PN: total}` + `{PN: {gudang: qty}}`.
@@ -683,6 +685,8 @@ tool menolak + model menawarkan PILIHAN** (11 opsi) — jangan menebak.
 
 ### 3.5.5i Integrasi ERP Accurate Online — stok live + auto-login SSO — sejak 2026-07-05
 
+> ⚠️ **DIPERBARUI 2026-07-10 — lihat §3.5.5m.** Model di bawah (TTL 5-jam, panggilan gudang per-PN live, cooldown) SUDAH DIGANTI: kini indeks ditarik hanya 3×/hari jam WIB tetap, disimpan ke disk, dibaca dari cache TANPA login, per-gudang via Report XLS, dan sesi ditutup (logout) setelah dipakai.
+
 Menghubungkan MASPART ke **ERP/akunting Accurate Online** agar stok yang ditampilkan = **stok
 riil pabrikan/gudang real-time**, bukan snapshot Excel. `services/accurate.py` + endpoint di
 `routers/parts.py` + tool AI di `ai_assistant.py`.
@@ -793,6 +797,8 @@ PN itu = No. balon N. Tool `gambar_exploded` (`_t_gambar_exploded`).
 
 ### 3.5.5l Menu STOK — daftar stok live seluruh barang Accurate — sejak 2026-07-06
 
+> ⚠️ **Penjadwal indeks DIGANTI 2026-07-10 — lihat §3.5.5m.** Bukan lagi `_INDEX_TTL` 5-jam/`_SCHED_RETRY`; kini `_REFRESH_HOURS_WIB` (07/12/19) + persist disk. Menu Stok tetap; sumber datanya = indeks disk itu (bukan tarikan live).
+
 Menu baru **Stok** (sidebar bagian **Data**, di bawah Harga) menampilkan **katalog stok
 LIVE seluruh barang dari Accurate** dalam tabel, kolom mengikuti Daftar Harga: **Part Number,
 Part Name, Stok, Satuan**. Dilengkapi cari (PN/nama/kode Accurate), urut (PN, nama, Stok ↑/↓),
@@ -824,6 +830,40 @@ paginasi & **export Excel**.
   pesan non-fatal di panel; komponen `StokRow`.
 - **Deployed live 2026-07-06** (commit `2e5488f`, snapshot-clean). Terverifikasi: 136 test lolos,
   tsc bersih, `https://maspart.tech/stok` → 200, `/api/stok/list` → 401 (route hidup).
+
+### 3.5.5m ⚠️ OVERHAUL indeks stok Accurate — jadwal 3×/hari WIB + persist disk + baca TANPA login — sejak 2026-07-10
+
+**MENGGANTIKAN model TTL 5-jam di §3.5.5i/§3.5.5l.** Alasan: akun Accurate hanya boleh **1 SESI/perangkat** — selama MASPART memegang sesi, admin/orang lain TAK bisa login. Maka MASPART memegang sesi seminimal mungkin.
+
+- **Indeks ditarik HANYA 3× sehari jam WIB tetap: 07:00, 12:00, 19:00** (`_REFRESH_HOURS_WIB`, `_seconds_until_next_refresh`, `_WIB`=UTC+7). BUKAN lagi "tiap 5 jam sejak start". Loop `_scheduled_refresh_loop` tidur sampai jam terjadwal berikutnya.
+- **Deploy/restart TIDAK mengindeks ulang.** Indeks disimpan ke **disk** (`data/accurate_index.json`, `_save_index()` setelah tiap refresh) dan **dimuat saat start** (`_load_index()`) → restart memuat dari disk **tanpa login Accurate**. Bootstrap sekali HANYA bila disk kosong.
+- **BACA stok/harga/per-gudang = MURNI cache indeks, TAK PERNAH login live.** `refresh(force=False)` selalu kembalikan cache (tak menarik). `stock_full()` baca agregat+harga+per-gudang dari `_index_cache` saja — fallback per-PN live yang lama **DIHAPUS** (dulu inilah yang merebut sesi setelah penawaran). PN belum ter-enrich → `per_gudang` kosong sampai siklus berikut. Login live HANYA: 3 refresh terjadwal, tombol admin `POST /api/stok/refresh`, dan buat penawaran. Test: `test_accurate_index_share`, `test_accurate_scheduler`, `test_accurate_stock_report`.
+- **Enrichment per-gudang CEPAT via Report** (`enrich_warehouses_via_report`): laporan Accurate **QuantityItemByWarehouseReport** (id 503) → export **XLS crosstab item×gudang** → parse. **~8 detik untuk 3.679 part** vs ~15 mnt metode per-PN lama (`enrich_warehouses`, jadi FALLBACK bila report gagal). Alur: `init-report-input.do` di **host UTAMA iris** (⚠️ bukan iris-report → 404) → `bg-execute-report.do`/`bg-proc-response.do` poll s/d FINISHED → `export-report.do?exportType=xls` di **iris-report**. `_usi` dipanen dari init-sales-quotation. Parser buang kolom "Total", kode `NNNNNN.PN` via `parse_pn` (kunci cocok `by_pn`). Lihat memory `accurate-stok-report-cepat`.
+- **Logout & idle-logout** (akun 1-sesi): `logout()` = `close-database.do` + hapus file sesi → panggilan berikut auto-login segar. Dipanggil setelah tiap refresh terjadwal & setelah buat penawaran; daemon `start_idle_logout` (idle >120s → logout). Setelah penawaran juga **tahan auto-login latar 10 mnt** (`suppress_autologin`) agar admin bisa buka Accurate manual tanpa direbut lookup stok. `login_now`/`ensure_session_force` (aksi user) MENGABAIKAN cooldown & penahanan. Net: MASPART pegang sesi hanya ~1 mnt × 3/hari. Test: `test_accurate_logout`.
+- **Cache model DINOv2 persisten**: `torch.hub.set_dir(data_path/"torch")` di `image_search._load_model` → model ~350MB diunduh SEKALI ke volume `/app/data`, tak diunduh ulang tiap restart.
+
+### 3.5.5n Buat PENAWARAN PENJUALAN Accurate + PDF resmi (ADMIN-ONLY) — sejak 2026-07-10
+
+Tool asisten **`buat_penawaran`** (admin-only 3 lapis: tool spec + guard handler + allow-list `_run_tool`) membuat Sales Quotation di Accurate & mengirim **PDF resmi Accurate** sebagai kartu unduh di chat (`ai_export.stash_raw`). Service `accurate.py`: `create_sales_quotation`, `sales_quotation_pdf`, `search_customers`, `item_for_quotation`, `next_quotation_number`.
+
+- **API** (dibedah dari HAR, semua form-urlencoded prefix `param.`; wajib token `_usi` dari init-sales-quotation): `save-sales-quotation.do`; total/PPN DIHITUNG Accurate via `calculate-header-sales-quotation.do` (tak menebak rumus DPP 11/12; peringatan `d.w_` ditembus `param.ignoreWarning=true`). PDF 2 langkah host iris-report: `view-print-layout-execute.do`→cacheId, `export-report.do?exportType=pdf`. Lihat memory `accurate-penawaran-api`.
+- **Aturan keras pemilik:** NOMOR = **MASPART-NN OTOMATIS** (`next_quotation_number`, hitung nomor MASPART tertinggi +1; penomoran otomatis Accurate TAK dipakai). HANYA kuantitas + membuat penawaran; HARGA = harga jual Accurate apa adanya (barang Rp0 → batal); **TIDAK ADA ubah/hapus** (delete dihapus dari kode). Pelanggan cocok-sebagian ('cio'→ARGCIO auto; 'jaya' banyak → minta klarifikasi). PN tak ada → batal semua. Test: `test_buat_penawaran`.
+
+### 3.5.5o Unggah EXCEL ke asisten — kenali kolom & isi stok/nama/harga — sejak 2026-07-10
+
+User lampirkan `.xlsx/.xlsm` di chat (`POST /api/ai/chat-sheet`, tombol klip di UI, **dilampirkan dulu** lalu Kirim gaya Claude). Server (`services/ai_sheet.py`) baca sheet pertama, **kenali peran kolom** (part_number/part_name/stok/qty/harga — ISI mengalahkan header) → tool `sheet_ringkasan` + `sheet_isi_kolom` (isi stok/nama/harga_lokal/**harga_sims**). `harga_sims` ADMIN-ONLY (3 lapis). Isi sel = DATA bukan instruksi (anti prompt-injection); `sheet_id` discoped per-user; baris PN tak ketemu DIBIARKAN kosong. Test: `test_ai_sheet`. ⚠️ `_tool_specs`/`_allowed_tool_names`/`_run_tool` kini bersignature `(user, sheet_id="")`.
+
+### 3.5.5p SESI 1 PERANGKAT (Menu Control tab "Sesi") — sejak 2026-07-10
+
+Menu Control tab **Sesi** → centang "Hanya 1 perangkat" per user; login perangkat kedua melempar yang pertama (login terbaru menang). Tiap login terbitkan `sid` acak di JWT; `deps.get_current_user` bandingkan dgn sid aktif (disimpan tabel `permissions` perm_type `active_session` — TANPA tabel baru). `services/session_policy.py`. ⛔ `KINDS['sesi']` WAJIB `default_off` (aturan umum "tanpa baris→semua aktif" akan mengunci SEMUA akun); **admin KEBAL**; **fail-open** saat Supabase mati. Test: `test_session_policy`.
+
+### 3.5.5q Riwayat login (IP/perangkat) + deteksi akun DIPAKAI RAMAI — sejak 2026-07-10
+
+Monitoring User dapat kolom **IP terakhir, Perangkat, Sebaran (30h)**. Tabel Supabase `login_history` (skema WARISAN Streamlit: username/success/reason/ip_address/user_agent) — `services/login_history.py`. IP asli via `ratelimit.client_ip` (hop tepercaya dari KANAN — XFF palsu tak menipu). `device` diturunkan dari user_agent (tak disimpan). **Akun ditandai "ramai?"** bila ≥4 **JARINGAN** berbeda (prefix /64 utk IPv6 — alamat IPv6 berputar sendiri, hitung per-jaringan bukan per-alamat) atau ≥3 perangkat dalam 30 hari. SINYAL, bukan bukti. Endpoint `/api/admin/monitoring` + `/monitoring/login-history`. Test: `test_login_history`. ⚠️ migrations/017 pakai skema warisan; format waktu Supabase `+00:00` (bukan `Z`).
+
+### 3.5.5r Perbaikan kecil (2026-07-10)
+
+- **Admin selalu lihat kolom Stok & Harga** (`part/[pn]`, `search`): izin kolom hanya membatasi staf bawahan; cache izin di-bump `maspart_perms_v3`. **Observabilitas AI**: kolom **Akun** (username+peran) + filter per-user (data sudah ada di `ai_chat_log`, hanya UI). **Chat asisten di HP**: jawaban full-bleed (card dihilangkan ≤640px), avatar per-pesan dihapus.
 
 ### 3.5.6 Cari by Foto
 

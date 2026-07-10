@@ -331,6 +331,12 @@ body {
   display: inline-block;
 }
 
+/* Skeleton kartu produk etalase (/toko) saat memuat */
+@keyframes pulse {
+  0%, 100% { opacity: .55; }
+  50% { opacity: .3; }
+}
+
 /* ── Tabs (segmented underline) ── */
 .tabs {
   display: flex;

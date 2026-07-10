@@ -448,6 +448,13 @@ def gudang_breakdown(pn: str) -> dict:
     return dict(_state["gudang_cache"].get((pn or "").strip().upper(), {}))
 
 
+def harga_map() -> dict[str, str]:
+    """Lookup harga Excel {PN_UPPER: 'Rp x'} apa adanya — dipakai etalase pembeli
+    sebagai fallback bila PN tak ada di indeks Accurate. Jangan dimutasi."""
+    ensure_index()
+    return _state["harga_lookup"]
+
+
 def name_for(pn: str) -> str:
     """Nama part untuk satu Part Number (exact, uppercase). '' bila tak ada."""
     ensure_index()

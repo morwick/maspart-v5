@@ -51,7 +51,7 @@ export default function PilihLokasiPage() {
     try {
       const res = await setBuyerLocation(token, selected);
       setUserGudang(res.key);
-      router.replace("/search");
+      router.replace("/toko");
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearSession();

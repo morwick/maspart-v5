@@ -1,14 +1,39 @@
-"""Router pembeli: daftar lokasi gudang + pilih lokasi sebelum belanja."""
+"""Router pembeli: etalase belanja (katalog produk) + lokasi gudang."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from ..deps import require_buyer
-from ..services import gudang
+from ..services import buyer_catalog, gudang
 from ..services import supabase_client as sb
 
 router = APIRouter(prefix="/api/buyer", tags=["buyer"])
+
+
+@router.get("/home")
+def home(buyer: dict = Depends(require_buyer)):
+    """Data beranda etalase: lokasi, kategori, terlaris, unggulan."""
+    key = sb.get_user_gudang(buyer["username"])
+    return buyer_catalog.home_payload(buyer["username"], key)
+
+
+@router.get("/catalog")
+def catalog(
+    q: str = Query("", description="Kata kunci: PN atau nama part (sinonim ikut)"),
+    kategori: str = Query("", description="Key kategori etalase (mis. 'rem')"),
+    sort: str = Query("relevan", description="relevan|harga_asc|harga_desc|nama|stok"),
+    ready: bool = Query(False, description="Hanya yang READY di lokasi pembeli"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(24, ge=1, le=100),
+    buyer: dict = Depends(require_buyer),
+):
+    """Katalog produk siap-jual, stok di-scope ke lokasi pembeli."""
+    key = sb.get_user_gudang(buyer["username"])
+    return buyer_catalog.catalog_page(
+        buyer["username"], key, q=q, kategori=kategori, sort=sort,
+        ready_only=ready, page=page, page_size=page_size,
+    )
 
 
 class SetLocationRequest(BaseModel):

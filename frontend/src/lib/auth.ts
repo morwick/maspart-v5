@@ -57,11 +57,12 @@ export function getUser(): UserOut | null {
   }
 }
 
-/** Halaman tujuan setelah login sesuai role. Pembeli wajib pilih lokasi dulu;
- *  admin mendarat di Dashboard Command Center; internal lain (cabang/user) ke Beranda. */
+/** Halaman tujuan setelah login sesuai role. Pembeli wajib pilih lokasi dulu,
+ *  lalu mendarat di etalase belanja (/toko); admin ke Dashboard Command Center;
+ *  internal lain (cabang/user) ke Beranda. */
 export function landingPath(user: UserOut | null): string {
   if (!user) return "/login";
-  if (user.role === "pembeli") return user.gudang ? "/search" : "/pilih-lokasi";
+  if (user.role === "pembeli") return user.gudang ? "/toko" : "/pilih-lokasi";
   if (user.role === "admin") return "/dashboard";
   return "/beranda";
 }

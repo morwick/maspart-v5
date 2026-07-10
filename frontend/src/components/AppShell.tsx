@@ -80,6 +80,7 @@ const NAV_ADMIN: NavItem[] = [
 
 // Akun pembeli hanya melihat alur belanja.
 const NAV_BUYER: NavItem[] = [
+  { href: "/toko", label: "Belanja", icon: I.cart },
   { href: "/search", label: "Cari Part", icon: I.search },
   { href: "/asisten", label: "Asisten AI", icon: I.ai },
   { href: "/chat", label: "Chat", icon: I.chat },
@@ -132,7 +133,7 @@ export default function AppShell({
     setIsAdmin(u?.role === "admin");
     setIsBuyer(u?.role === "pembeli");
     if (u?.role === "pembeli" && (active.startsWith("/admin") || BUYER_DENY.includes(active))) {
-      router.replace("/search");
+      router.replace("/toko");
       return;
     }
     if (u?.role !== "pembeli") {

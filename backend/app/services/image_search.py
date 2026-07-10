@@ -275,6 +275,34 @@ def preload_local_index() -> None:
     _load_local_index()
 
 
+# Peta PN→URL foto utk etalase pembeli — build SEKALI per isi galeri (kunci cache
+# = jumlah baris; galeri hanya bertambah lewat append). Jangan panggil
+# indexed_urls() per-PN utk ribuan produk: itu scan seluruh meta tiap panggilan.
+_photo_map_cache: dict = {"n": -1, "map": {}}
+
+
+def photo_url_map() -> dict[str, str]:
+    """{PN_UPPER: url foto} satu foto per part dari galeri lokal Cari-by-Foto.
+    Utamakan URL http (foto SIMS resmi) di atas learned:// (foto lapangan user).
+    {} bila galeri belum siap."""
+    if not local_index_available():
+        return {}
+    meta = _local_meta or []
+    c = _photo_map_cache
+    if c["n"] != len(meta):
+        m: dict[str, str] = {}
+        for pn, url in meta:
+            if not url:
+                continue
+            key = pn.strip().upper()
+            cur = m.get(key)
+            if cur is None or (cur.startswith(_LEARNED_SCHEME) and url.startswith("http")):
+                m[key] = url
+        c["n"] = len(meta)
+        c["map"] = m
+    return c["map"]
+
+
 def reload_local_index() -> dict:
     """Muat ULANG galeri dari CSV (mis. setelah file diperbarui) tanpa restart server.
     Mengembalikan ringkasan: berhasil/tidak, jumlah embedding, path, error."""
