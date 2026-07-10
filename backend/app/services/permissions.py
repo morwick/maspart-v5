@@ -34,12 +34,22 @@ HARGA_SUBTABS: dict[str, str] = {
     "subtab_cari_harga": "Cari Harga",
     "subtab_batch_harga": "Batch Cari Harga",
 }
+SESI_KEYS: dict[str, str] = {
+    "single_device": "Hanya 1 perangkat",
+}
 
 # kind → (perm_type, semua key+label, key yang selalu aktif)
+#
+# `default_off`: kind ini BUKAN daftar izin melainkan PEMBATASAN. Aturan umum
+# "tanpa baris → semua key aktif" akan mengunci SEMUA akun ke satu perangkat
+# begitu fitur ini terpasang. Untuk kind ber-default_off, tanpa baris = KOSONG
+# (pembatasan mati), harus dicentang admin secara sadar.
 KINDS: dict[str, dict] = {
     "menu": {"perm_type": "nav", "all": MENU_TABS, "always": {"search"}},
     "column": {"perm_type": "column", "all": COLUMN_KEYS, "always": set()},
     "harga": {"perm_type": "harga_subtab", "all": HARGA_SUBTABS, "always": set()},
+    "sesi": {"perm_type": "session_policy", "all": SESI_KEYS, "always": set(),
+             "default_off": True},
 }
 
 
@@ -50,15 +60,18 @@ def is_valid_kind(kind: str) -> bool:
 def effective(kind: str, username: str, role: str) -> list[str]:
     cfg = KINDS[kind]
     all_keys = list(cfg["all"].keys())
+    off = cfg.get("default_off", False)
     if role == "admin":
-        return all_keys
+        # Admin punya semua IZIN, tapi tak pernah kena PEMBATASAN (default_off).
+        # Tanpa ini, mencentang 'sesi' berisiko mengunci admin dari sistemnya sendiri.
+        return [] if off else all_keys
     data = perms_load(cfg["perm_type"])
     if username in data:
         allowed = set(data[username])
     elif "__default__" in data:
         allowed = set(data["__default__"])
     else:
-        allowed = set(all_keys)
+        allowed = set() if off else set(all_keys)
     allowed |= cfg["always"]
     return [k for k in all_keys if k in allowed]
 
@@ -82,11 +95,13 @@ def overview(kind: str) -> dict:
     cfg = KINDS[kind]
     data = perms_load(cfg["perm_type"])
     all_keys = list(cfg["all"].keys())
+    # default_off → baris "Default (user baru)" mulai TIDAK tercentang.
+    bawaan = [] if cfg.get("default_off") else all_keys
     return {
         "kind": kind,
         "all_keys": cfg["all"],
         "always": sorted(cfg["always"]),
-        "default": data.get("__default__", all_keys),
+        "default": data.get("__default__", bawaan),
         "permissions": {u: k for u, k in data.items() if u != "__default__"},
         "users": list_users(),
     }

@@ -17,7 +17,16 @@ const KINDS: [PermKind, string][] = [
   ["menu", "Menu"],
   ["column", "Kolom"],
   ["harga", "Sub-tab Harga"],
+  ["sesi", "Sesi"],
 ];
+
+// Tab 'sesi' berbeda sifatnya: centang = MEMBATASI, bukan memberi akses.
+const KETERANGAN: Partial<Record<PermKind, string>> = {
+  sesi:
+    "Centang “Hanya 1 perangkat” agar akun tidak bisa dipakai bersamaan di dua tempat. " +
+    "Saat orang lain login dengan akun itu, perangkat yang lama otomatis keluar. " +
+    "Admin tidak pernah dibatasi.",
+};
 
 export default function AdminMenuPage() {
   const router = useRouter();
@@ -135,6 +144,12 @@ export default function AdminMenuPage() {
             </button>
           ))}
         </div>
+
+        {KETERANGAN[kind] && (
+          <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200">
+            {KETERANGAN[kind]}
+          </p>
+        )}
 
         {error && (
           <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">

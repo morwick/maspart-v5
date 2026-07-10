@@ -1,5 +1,7 @@
 // Klien API tipis untuk backend FastAPI MASPART.
 
+import { setLogoutReason } from "./auth";
+
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://127.0.0.1:8001";
 
@@ -51,14 +53,22 @@ export class ApiError extends Error {
 }
 
 async function parseError(res: Response): Promise<string> {
+  let msg = `HTTP ${res.status}`;
   try {
     const data = await res.json();
-    if (typeof data?.detail === "string") return data.detail;
-    if (Array.isArray(data?.detail)) return data.detail.map((d: { msg?: string }) => d.msg).join(", ");
+    if (typeof data?.detail === "string") msg = data.detail;
+    else if (Array.isArray(data?.detail))
+      msg = data.detail.map((d: { msg?: string }) => d.msg).join(", ");
   } catch {
     /* ignore */
   }
-  return `HTTP ${res.status}`;
+  // 401 karena akun dipakai di perangkat lain → simpan alasannya supaya halaman
+  // login bisa menjelaskan, bukan sekadar melempar user tanpa keterangan.
+  // (auth.ts hanya mengimpor TYPE dari sini, jadi tak ada siklus saat runtime.)
+  if (res.status === 401 && /perangkat lain/i.test(msg)) {
+    setLogoutReason(msg);
+  }
+  return msg;
 }
 
 /** Gambar SIMS pakai http://. Saat situs dibuka via HTTPS, browser memblokir gambar
@@ -795,7 +805,8 @@ export async function getMyPermissions(token: string): Promise<MyPermissions> {
   return res.json();
 }
 
-export type PermKind = "menu" | "column" | "harga";
+/** 'sesi' bukan izin melainkan PEMBATASAN (mis. hanya 1 perangkat). */
+export type PermKind = "menu" | "column" | "harga" | "sesi";
 
 export type PermOverview = {
   kind: string;

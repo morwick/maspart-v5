@@ -84,3 +84,28 @@ export function clearSession() {
   });
   clearSessionCaches();
 }
+
+// Alasan user terlempar keluar (mis. akunnya dipakai login di perangkat lain).
+// Ditulis saat 401 diterima, dibaca SEKALI oleh halaman login lalu dibuang —
+// tanpa ini user cuma mendarat di form login tanpa tahu apa yang terjadi.
+const LOGOUT_REASON_KEY = "maspart_logout_reason";
+
+export function setLogoutReason(msg: string) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(LOGOUT_REASON_KEY, msg);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function takeLogoutReason(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const v = sessionStorage.getItem(LOGOUT_REASON_KEY) ?? "";
+    sessionStorage.removeItem(LOGOUT_REASON_KEY);
+    return v;
+  } catch {
+    return "";
+  }
+}

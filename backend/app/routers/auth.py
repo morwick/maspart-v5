@@ -9,7 +9,7 @@ from ..core.security import create_access_token
 from ..deps import get_current_user
 from ..schemas import LoginRequest, TokenResponse, UserOut
 from ..services.auth import authenticate
-from ..services import login_history, permissions, presence
+from ..services import login_history, permissions, presence, session_policy
 from ..services import supabase_client as sb
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -39,7 +39,13 @@ def login(body: LoginRequest, request: Request):
     sb.log_activity(user["username"], "login")
     # Riwayat permanen utk deteksi akun dipakai ramai — diam bila tabel belum ada.
     login_history.record(user["username"], user.get("role", ""), ip, ua)
-    token = create_access_token(user["username"], user["role"])
+
+    # Akun dibatasi 1 perangkat → terbitkan sesi baru; sesi lama otomatis batal
+    # (perangkat sebelumnya akan dapat 401 pada request berikutnya).
+    sid = ""
+    if session_policy.enabled(user["username"], user["role"]):
+        sid = session_policy.start_session(user["username"])
+    token = create_access_token(user["username"], user["role"], sid)
     return TokenResponse(
         access_token=token,
         expires_in=get_settings().jwt_expire_minutes * 60,

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { login } from "@/lib/api";
-import { landingPath, saveSession } from "@/lib/auth";
+import { landingPath, saveSession, takeLogoutReason } from "@/lib/auth";
 
 function Logo({ onGreen = false }: { onGreen?: boolean }) {
   return (
@@ -34,6 +34,12 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Alasan user terlempar ke sini (mis. akunnya dipakai login di perangkat lain).
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    setNotice(takeLogoutReason());
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -138,6 +144,7 @@ export default function LoginPage() {
               Ingat saya di device ini
             </label>
 
+            {notice && !error && <div className="alert alert-error">{notice}</div>}
             {error && <div className="alert alert-error">{error}</div>}
 
             <button type="submit" className="btn btn-primary btn-lg" style={{ width: "100%" }} disabled={loading}>

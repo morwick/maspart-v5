@@ -57,7 +57,9 @@ def verify_password(plain: str, stored_hash: str = "", legacy_plain: str = "") -
 
 
 # ── JWT ──────────────────────────────────────────────────────────────
-def create_access_token(username: str, role: str) -> str:
+def create_access_token(username: str, role: str, sid: str = "") -> str:
+    """`sid` = session id untuk kebijakan 'hanya 1 perangkat' (services/
+    session_policy). Kosong bila kebijakan mati — token lama tanpa sid tetap sah."""
     s = get_settings()
     now = datetime.now(timezone.utc)
     payload = {
@@ -66,6 +68,8 @@ def create_access_token(username: str, role: str) -> str:
         "iat": now,
         "exp": now + timedelta(minutes=s.jwt_expire_minutes),
     }
+    if sid:
+        payload["sid"] = sid
     return jwt.encode(payload, s.jwt_secret, algorithm=s.jwt_algorithm)
 
 

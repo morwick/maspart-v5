@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .core.security import decode_access_token
-from .services import gudang, presence
+from .services import gudang, presence, session_policy
 from .services import supabase_client as sb
 
 _bearer = HTTPBearer(auto_error=True)
@@ -67,6 +67,15 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Akun tidak aktif atau tidak ditemukan. Silakan login ulang.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    # Kebijakan "hanya 1 perangkat": token dari perangkat lama (sid tak cocok
+    # dengan sesi aktif) ditolak. Peran diambil dari DB, bukan klaim token.
+    if not session_policy.session_valid(username, str(payload.get("sid") or ""), resolved["role"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Akun ini sedang dipakai di perangkat lain. "
+                   "Akun dibatasi hanya 1 perangkat — silakan login ulang.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return {"username": resolved["username"], "role": resolved["role"]}

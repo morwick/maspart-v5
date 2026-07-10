@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import ai_chat_log, ai_sinonim_learn, catalog_bom, gudang, gudang_config, harga, image_search, login_history, orders, part_index, permissions, populasi, presence, reservations, search_log, sinonim
+from ..services import ai_chat_log, ai_sinonim_learn, catalog_bom, gudang, gudang_config, harga, image_search, login_history, orders, part_index, permissions, populasi, presence, reservations, search_log, session_policy, sinonim
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -79,6 +79,7 @@ def perms_set(kind: str, body: SetPermRequest, _admin: dict = Depends(require_ad
     ok = permissions.set_perm(kind, body.username.strip().lower(), body.keys)
     if not ok:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Gagal menyimpan ke Supabase")
+    session_policy.invalidate_cache()   # centang 'sesi' berlaku seketika
     return {"ok": True}
 
 
@@ -86,6 +87,7 @@ def perms_set(kind: str, body: SetPermRequest, _admin: dict = Depends(require_ad
 def perms_reset(kind: str, username: str, _admin: dict = Depends(require_admin)):
     _check_kind(kind)
     permissions.reset_perm(kind, username.strip().lower())
+    session_policy.invalidate_cache()
     return {"ok": True}
 
 
