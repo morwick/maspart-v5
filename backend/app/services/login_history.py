@@ -16,6 +16,11 @@ dari berapa IP berbeda & berapa perangkat berbeda. Banyak IP/perangkat berbeda
 Resilient: bila tabel belum dibuat / Supabase down, semua fungsi diam (best-effort)
 dan TIDAK pernah menjatuhkan login. DDL ada di create_table_sql() & migrations/017.
 
+⚠️ SKEMA WARISAN: tabel `login_history` sudah ada sejak aplikasi Streamlit lama
+dengan kolom username/success/reason/ip_address/user_agent/created_at. Kita PAKAI
+apa adanya (tak ada kolom `ip`/`device`/`role`): `device` diturunkan dari
+`user_agent` saat dibaca, `role` diambil dari roster user di panel Monitoring.
+
 PRIVASI: IP & perangkat = data pribadi. Hanya admin (require_admin) yang bisa
 melihatnya. Retensi otomatis: baris lebih tua dari _RETENTION_DAYS dibuang.
 """
@@ -41,15 +46,21 @@ def _cutoff(days: int) -> str:
 
 
 def create_table_sql() -> str:
-    """DDL Supabase (jalankan sekali di SQL Editor). Identik dgn migrations/017."""
+    """DDL Supabase (jalankan sekali di SQL Editor). Identik dgn migrations/017.
+
+    ⚠️ Skema ini MENGIKUTI tabel `login_history` yang sudah ada sejak aplikasi
+    Streamlit lama (username/success/reason/ip_address/user_agent/created_at) —
+    bukan bikin kolom baru. `device` TIDAK disimpan; ia diturunkan dari
+    `user_agent` saat dibaca (device_label), jadi tak ada data ganda.
+    """
     return (
         "create table if not exists login_history (\n"
         "  id bigint generated always as identity primary key,\n"
         "  created_at timestamptz not null default now(),\n"
         "  username text not null,\n"
-        "  role text,\n"
-        "  ip text,\n"
-        "  device text,\n"
+        "  success boolean not null default true,\n"
+        "  reason text,\n"
+        "  ip_address text,\n"
         "  user_agent text\n"
         ");\n"
         "create index if not exists login_history_created_idx on login_history (created_at desc);\n"
@@ -94,8 +105,11 @@ def device_label(user_agent: str) -> str:
     return br or os_name or "Tidak dikenal"
 
 
-def record(username: str, role: str, ip: str, user_agent: str) -> bool:
-    """Simpan satu login. Best-effort — False bila gagal/tabel absen, tak melempar."""
+def record(username: str, role: str, ip: str, user_agent: str,
+           success: bool = True, reason: str = "") -> bool:
+    """Simpan satu login. Best-effort — False bila gagal/tabel absen, tak melempar.
+    `role` tak disimpan (tabel tak punya kolomnya); peran diambil dari roster user
+    di panel Monitoring."""
     u = (username or "").strip().lower()
     if not u:
         return False
@@ -105,9 +119,9 @@ def record(username: str, role: str, ip: str, user_agent: str) -> bool:
             headers=_service_headers("return=minimal"),
             json={
                 "username": u,
-                "role": (role or None),
-                "ip": (ip or None),
-                "device": device_label(user_agent),
+                "success": bool(success),
+                "reason": (reason or None),
+                "ip_address": (ip or None),
                 "user_agent": (user_agent or "")[:400] or None,
                 "created_at": _now(),
             },
@@ -118,7 +132,9 @@ def record(username: str, role: str, ip: str, user_agent: str) -> bool:
         return False
 
 
-def _fetch(params: dict) -> list[dict]:
+def _fetch(params: dict) -> list[dict] | None:
+    """None = tabel absen / Supabase error. [] = tabel ADA tapi kosong.
+    Bedanya penting: panel hanya menyuruh admin membuat tabel bila benar None."""
     try:
         r = requests.get(
             _rest_url("login_history"),
@@ -129,19 +145,36 @@ def _fetch(params: dict) -> list[dict]:
         r.raise_for_status()
         return r.json() or []
     except Exception:
-        return []
+        return None
+
+
+def table_ready() -> bool:
+    """True bila tabel `login_history` bisa dibaca (walau masih 0 baris)."""
+    return _fetch({"select": "id", "limit": "1"}) is not None
+
+
+def _row_out(r: dict) -> dict:
+    """Baris DB → bentuk yang dipakai UI. `device` DITURUNKAN dari user_agent."""
+    return {
+        "id": r.get("id"),
+        "created_at": r.get("created_at"),
+        "username": r.get("username"),
+        "ip": r.get("ip_address"),
+        "device": device_label(r.get("user_agent") or ""),
+        "success": r.get("success", True),
+    }
 
 
 def list_logins(username: str = "", limit: int = 200) -> list[dict]:
     """Riwayat login terbaru dulu; `username` kosong = semua user."""
     params = {
-        "select": "id,created_at,username,role,ip,device",
+        "select": "id,created_at,username,ip_address,user_agent,success",
         "order": "created_at.desc",
         "limit": str(max(1, min(limit, 1000))),
     }
     if username.strip():
         params["username"] = f"eq.{username.strip().lower()}"
-    return _fetch(params)
+    return [_row_out(r) for r in (_fetch(params) or [])]
 
 
 def sharing_summary(days: int = 30) -> dict[str, dict]:
@@ -149,13 +182,15 @@ def sharing_summary(days: int = 30) -> dict[str, dict]:
         {username: {ip_count, device_count, login_count, ips[], devices[],
                     last_ip, last_device, last_at}}
     Dipakai panel Monitoring untuk menandai akun yang kemungkinan dipakai ramai.
-    Kosong ({}) bila tabel belum ada — pemanggil harus tahan terhadap itu."""
+    Hanya login BERHASIL yang dihitung — percobaan gagal bukan bukti pemakaian.
+    Kosong ({}) bila tabel belum ada ATAU belum ada login tercatat."""
     rows = _fetch({
-        "select": "created_at,username,ip,device",
+        "select": "created_at,username,ip_address,user_agent,success",
         "created_at": f"gte.{_cutoff(days)}",
+        "success": "is.true",
         "order": "created_at.desc",
         "limit": "5000",
-    })
+    }) or []
     out: dict[str, dict] = {}
     for r in rows:
         u = (r.get("username") or "").strip().lower()
@@ -163,16 +198,17 @@ def sharing_summary(days: int = 30) -> dict[str, dict]:
             continue
         d = out.setdefault(u, {"ips": [], "devices": [], "login_count": 0,
                                "last_ip": None, "last_device": None, "last_at": None})
+        ip = r.get("ip_address")
+        dev = device_label(r.get("user_agent") or "")
         # rows terurut terbaru dulu → yang pertama ditemui = login terakhir.
         if d["last_at"] is None:
             d["last_at"] = r.get("created_at")
-            d["last_ip"] = r.get("ip")
-            d["last_device"] = r.get("device")
+            d["last_ip"] = ip
+            d["last_device"] = dev
         d["login_count"] += 1
-        ip, dev = r.get("ip"), r.get("device")
         if ip and ip not in d["ips"]:
             d["ips"].append(ip)
-        if dev and dev not in d["devices"]:
+        if dev and dev != "Tidak dikenal" and dev not in d["devices"]:
             d["devices"].append(dev)
     for d in out.values():
         d["ip_count"] = len(d["ips"])

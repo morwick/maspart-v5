@@ -265,7 +265,8 @@ def monitoring(_admin: dict = Depends(require_admin)):
     permanen `login_history`. Bila tabel login_history belum dibuat, ringkasannya
     kosong dan panel tetap jalan (hanya tanpa kolom sharing)."""
     users = sb.list_users_full()
-    share = login_history.sharing_summary(_SHARE_DAYS)   # {} bila tabel belum ada
+    share = login_history.sharing_summary(_SHARE_DAYS)   # {} bila belum ada login
+    riwayat_siap = login_history.table_ready()           # tabel ADA (walau 0 baris)
     out_users: list[dict] = []
     online_count = 0
     for u in users:
@@ -307,7 +308,9 @@ def monitoring(_admin: dict = Depends(require_admin)):
         "share_days": _SHARE_DAYS,
         "share_ip_min": _SHARE_IP_MIN,
         "share_device_min": _SHARE_DEVICE_MIN,
-        "riwayat_tersedia": bool(share),
+        # Tabel ADA (walau masih 0 baris) — bedakan dari "tabel belum dibuat",
+        # supaya panduan DDL tak muncul terus di hari pertama.
+        "riwayat_tersedia": riwayat_siap,
         "users": out_users,
         "recent_activity": activity,
     }
@@ -322,8 +325,7 @@ def monitoring_login_history(
     """Riwayat login mentah (kapan, siapa, IP, perangkat) — untuk menelusuri akun
     yang ditandai 'kemungkinan dipakai ramai'. Kosong bila tabel belum dibuat."""
     rows = login_history.list_logins(username=username, limit=limit)
-    return {"jumlah": len(rows), "riwayat": rows,
-            "tabel_siap": bool(rows) or bool(login_history.list_logins(limit=1))}
+    return {"jumlah": len(rows), "riwayat": rows, "tabel_siap": login_history.table_ready()}
 
 
 @router.get("/monitoring/sql")
