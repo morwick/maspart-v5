@@ -76,6 +76,15 @@ def _load_model():
         return _model, _preprocess
     with _model_lock:
         if _model is None:
+            # Persist cache torch.hub (repo DINOv2 + checkpoint ~350MB) ke volume
+            # /app/data supaya TIDAK diunduh ulang tiap restart/deploy container
+            # (dulu ~1 mnt + bandwidth setiap kali). Volume bertahan lintas recreate.
+            try:
+                cache = get_settings().data_path / "torch"
+                cache.mkdir(parents=True, exist_ok=True)
+                torch.hub.set_dir(str(cache))
+            except Exception:  # pragma: no cover
+                pass            # gagal set → pakai default (~/.cache), tetap jalan
             try:
                 m = torch.hub.load(
                     DINOV2_REPO, DINOV2_MODEL_NAME, trust_repo=True, skip_validation=True
