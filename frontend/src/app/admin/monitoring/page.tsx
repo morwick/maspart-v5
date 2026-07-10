@@ -15,10 +15,19 @@ import { clearSession, getToken, getUser } from "@/lib/auth";
 
 const REFRESH_MS = 15_000; // auto-refresh tiap 15 detik
 
+// Timestamp bisa datang dalam dua bentuk: presence mengirim '…SSZ', Supabase
+// mengirim '…SS+00:00'. Hanya tambahkan 'Z' bila BENAR-BENAR tak ada zona waktu —
+// dulu '+00:00' ikut ditambahi 'Z' → '…+00:00Z' → Invalid Date.
+function toDate(ts: string): Date {
+  const punyaZona = /(Z|[+-]\d{2}:?\d{2})$/.test(ts);
+  return new Date(punyaZona ? ts : ts + "Z");
+}
+
 function fmt(ts?: string | null) {
   if (!ts) return "—";
   try {
-    return new Date(ts.includes("Z") ? ts : ts + "Z").toLocaleString("id-ID");
+    const d = toDate(ts);
+    return isNaN(d.getTime()) ? ts : d.toLocaleString("id-ID");
   } catch {
     return ts;
   }
@@ -28,7 +37,8 @@ function fmt(ts?: string | null) {
 function ago(ts?: string | null) {
   if (!ts) return "—";
   try {
-    const d = new Date(ts.includes("Z") ? ts : ts + "Z").getTime();
+    const d = toDate(ts).getTime();
+    if (isNaN(d)) return "—";
     const s = Math.max(0, Math.floor((Date.now() - d) / 1000));
     if (s < 60) return "baru saja";
     const m = Math.floor(s / 60);
@@ -196,9 +206,10 @@ export default function AdminMonitoringPage() {
                   ⚠️ {flagged} akun mungkin dipakai beramai-ramai
                 </p>
                 <p className="mt-1 text-amber-800">
-                  Ditandai bila dalam {shareDays} hari terakhir login dari ≥{data.share_ip_min ?? 4} IP
+                  Ditandai bila dalam {shareDays} hari terakhir login dari ≥{data.share_ip_min ?? 4} jaringan
                   atau ≥{data.share_device_min ?? 3} perangkat berbeda. Ini <b>sinyal, bukan bukti</b> —
-                  IP bisa berubah sendiri saat ganti WiFi/kuota. Klik <b>riwayat</b> untuk menelusuri.
+                  orang yang sama bisa berpindah WiFi/kuota, dan satu kantor berbagi satu jaringan.
+                  Klik <b>riwayat</b> untuk menelusuri.
                 </p>
               </div>
             )}
@@ -226,7 +237,11 @@ export default function AdminMonitoringPage() {
                     <th className="px-3 py-2 font-medium">Role</th>
                     <th className="px-3 py-2 font-medium">IP terakhir</th>
                     <th className="px-3 py-2 font-medium">Perangkat</th>
-                    <th className="px-3 py-2 font-medium" title={`IP berbeda / perangkat berbeda dalam ${shareDays} hari`}>
+                    <th
+                      className="px-3 py-2 font-medium"
+                      title={`Jaringan berbeda / perangkat berbeda dalam ${shareDays} hari. ` +
+                        "Alamat IPv6 dari satu WiFi dihitung sebagai SATU jaringan."}
+                    >
                       Sebaran ({shareDays}h)
                     </th>
                     <th className="px-3 py-2 font-medium">Aktif terakhir</th>
@@ -272,9 +287,12 @@ export default function AdminMonitoringPage() {
                           <button
                             onClick={() => openHistory(u.username)}
                             className="text-brand hover:underline"
-                            title={`${u.login_count} login tercatat — klik lihat riwayat`}
+                            title={
+                              `${u.login_count} login tercatat dari ${u.alamat_count ?? u.ip_count} alamat ` +
+                              `(${u.ip_count} jaringan) — klik lihat riwayat`
+                            }
                           >
-                            {u.ip_count} IP · {u.device_count} perangkat
+                            {u.ip_count} jaringan · {u.device_count} perangkat
                           </button>
                         ) : (
                           "—"

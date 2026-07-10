@@ -77,6 +77,46 @@ def test_sharing_summary_hitung_ip_dan_perangkat_unik(monkeypatch):
     assert s["ani"]["ip_count"] == 1
 
 
+@pytest.mark.parametrize("ip,harap", [
+    # IPv6 privacy extensions: 64 bit belakang berputar, jaringan tetap sama.
+    ("2001:448a:8080:50f:c1fe:7ae2:e8e6:ae4e", "2001:448a:8080:50f::/64"),
+    ("2001:448a:8080:50f:74a9:a65b:670a:df02", "2001:448a:8080:50f::/64"),
+    # Jaringan lain → prefix berbeda.
+    ("2404:c0:1234:abcd:1:2:3:4", "2404:c0:1234:abcd::/64"),
+    ("36.70.144.64", "36.70.144.64"),   # IPv4 dipakai utuh
+    ("", ""),
+])
+def test_ip_network(ip, harap):
+    assert lh.ip_network(ip) == harap
+
+
+def test_ipv6_yang_berputar_dihitung_satu_jaringan(monkeypatch):
+    """Kasus nyata (2026-07-10): user 'mas' tampak '2 IP' padahal satu WiFi,
+    karena Windows memutar 64 bit belakang alamat IPv6-nya."""
+    _rows(monkeypatch, [
+        {"created_at": "2026-07-10T09:00:00Z", "username": "mas",
+         "ip_address": "2001:448a:8080:50f:c1fe:7ae2:e8e6:ae4e", "user_agent": _WIN},
+        {"created_at": "2026-07-10T08:00:00Z", "username": "mas",
+         "ip_address": "2001:448a:8080:50f:74a9:a65b:670a:df02", "user_agent": _WIN},
+    ])
+    s = lh.sharing_summary(30)["mas"]
+    assert s["ip_count"] == 1          # satu jaringan → TIDAK ditandai 'ramai'
+    assert s["alamat_count"] == 2      # tapi alamat penuhnya tetap dua
+    assert s["device_count"] == 1
+
+
+def test_jaringan_benar_benar_berbeda_tetap_terhitung(monkeypatch):
+    _rows(monkeypatch, [
+        {"created_at": "2026-07-10T09:00:00Z", "username": "budi",
+         "ip_address": "2001:448a:8080:50f:c1fe:7ae2:e8e6:ae4e", "user_agent": _WIN},
+        {"created_at": "2026-07-10T08:00:00Z", "username": "budi",
+         "ip_address": "2404:c0:9999:1111:a:b:c:d", "user_agent": _WIN},
+        {"created_at": "2026-07-09T08:00:00Z", "username": "budi",
+         "ip_address": "36.70.144.64", "user_agent": _WIN},
+    ])
+    assert lh.sharing_summary(30)["budi"]["ip_count"] == 3
+
+
 def test_sharing_summary_abaikan_user_agent_tak_dikenal(monkeypatch):
     """UA aneh (curl/bot) tak boleh ikut menaikkan hitungan 'perangkat berbeda'."""
     _rows(monkeypatch, [

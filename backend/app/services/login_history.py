@@ -153,6 +153,23 @@ def table_ready() -> bool:
     return _fetch({"select": "id", "limit": "1"}) is not None
 
 
+def ip_network(ip: str) -> str:
+    """Alamat → identitas JARINGAN, untuk menghitung 'berapa lokasi berbeda'.
+
+    IPv6 dgn privacy extensions (Windows/Android) MENGGANTI 64 bit belakang tiap
+    beberapa jam, jadi satu orang di satu WiFi tampak punya belasan 'IP berbeda'.
+    Yang menandakan jaringan adalah 64 bit DEPAN (prefix /64) — itu yang kita
+    hitung. IPv4 dipakai utuh (satu alamat = satu titik keluar).
+      2001:448a:8080:50f:c1fe:… ─┐
+      2001:448a:8080:50f:74a9:… ─┴→ 2001:448a:8080:50f::/64  (1 jaringan)
+    """
+    s = (ip or "").strip()
+    if not s or ":" not in s:
+        return s                      # IPv4 / kosong
+    groups = s.split(":")[:4]         # 4 grup pertama = /64
+    return ":".join(groups) + "::/64"
+
+
 def _row_out(r: dict) -> dict:
     """Baris DB → bentuk yang dipakai UI. `device` DITURUNKAN dari user_agent."""
     return {
@@ -183,6 +200,9 @@ def sharing_summary(days: int = 30) -> dict[str, dict]:
                     last_ip, last_device, last_at}}
     Dipakai panel Monitoring untuk menandai akun yang kemungkinan dipakai ramai.
     Hanya login BERHASIL yang dihitung — percobaan gagal bukan bukti pemakaian.
+    `ip_count` menghitung JARINGAN unik (ip_network), bukan alamat unik: IPv6
+    memutar alamatnya sendiri, dan tanpa ini satu orang tampak seperti banyak.
+    `ips` tetap berisi alamat penuh untuk ditampilkan apa adanya.
     Kosong ({}) bila tabel belum ada ATAU belum ada login tercatat."""
     rows = _fetch({
         "select": "created_at,username,ip_address,user_agent,success",
@@ -196,7 +216,7 @@ def sharing_summary(days: int = 30) -> dict[str, dict]:
         u = (r.get("username") or "").strip().lower()
         if not u:
             continue
-        d = out.setdefault(u, {"ips": [], "devices": [], "login_count": 0,
+        d = out.setdefault(u, {"ips": [], "devices": [], "jaringan": [], "login_count": 0,
                                "last_ip": None, "last_device": None, "last_at": None})
         ip = r.get("ip_address")
         dev = device_label(r.get("user_agent") or "")
@@ -206,12 +226,17 @@ def sharing_summary(days: int = 30) -> dict[str, dict]:
             d["last_ip"] = ip
             d["last_device"] = dev
         d["login_count"] += 1
-        if ip and ip not in d["ips"]:
-            d["ips"].append(ip)
+        if ip:
+            if ip not in d["ips"]:
+                d["ips"].append(ip)
+            net = ip_network(ip)
+            if net not in d["jaringan"]:
+                d["jaringan"].append(net)
         if dev and dev != "Tidak dikenal" and dev not in d["devices"]:
             d["devices"].append(dev)
     for d in out.values():
-        d["ip_count"] = len(d["ips"])
+        d["ip_count"] = len(d["jaringan"])   # jaringan unik, bukan alamat unik
+        d["alamat_count"] = len(d["ips"])
         d["device_count"] = len(d["devices"])
     return out
 

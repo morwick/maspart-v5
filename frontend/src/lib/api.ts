@@ -1106,8 +1106,10 @@ export type MonitoringUser = {
   /** IP & perangkat login terakhir. */
   last_ip?: string | null;
   last_device?: string | null;
-  /** Berapa IP / perangkat / login berbeda dalam `share_days` hari terakhir. */
+  /** Jaringan unik (/64 utk IPv6) dalam `share_days` hari — bukan alamat unik. */
   ip_count?: number;
+  /** Alamat unik (IPv6 memutar alamatnya sendiri, jadi ini bisa jauh lebih besar). */
+  alamat_count?: number;
   device_count?: number;
   login_count?: number;
   ips?: string[];
