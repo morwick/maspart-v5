@@ -117,10 +117,9 @@ const IC = {
   sheet: "M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M4 9h16 M4 15h16 M10 3v18",
 };
 
-function Avatar({ size = 30, className }: { size?: number; className?: string }) {
+function Avatar({ size = 30 }: { size?: number }) {
   return (
     <div
-      className={className}
       style={{
         width: size,
         height: size,
@@ -483,7 +482,6 @@ export default function AsistenPage() {
 
             {busy && (
               <div className="chat-bubble-in chat-row-ai">
-                <Avatar className="chat-avatar" />
                 <div className="chat-bubble-ai">
                   <span className="typing-dots">
                     <span />
@@ -1046,7 +1044,6 @@ function Bubble({
   const tools = Array.from(new Set(m.tools || []));
   return (
     <div className="chat-bubble-in chat-row-ai">
-      <Avatar className="chat-avatar" />
       <div style={{ minWidth: 0, flex: 1 }}>
         <div className="chat-bubble-ai">
           <Markdown content={m.content} />

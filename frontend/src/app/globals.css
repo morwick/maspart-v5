@@ -517,9 +517,9 @@ body {
   display: inline-block;
 }
 
-/* Layout chat: di desktop jawaban asisten tampil sebagai kartu ber-avatar;
-   di HP (≤640px) kartu dihilangkan — jawaban full-bleed selebar layar agar
-   ruang sempit termanfaatkan maksimal (permintaan pemilik 2026-07-10). */
+/* Layout chat: di desktop jawaban asisten tampil sebagai kartu (tanpa avatar
+   per-pesan — dihapus atas permintaan pemilik 2026-07-10); di HP (≤640px)
+   kartu juga dihilangkan — jawaban full-bleed selebar layar. */
 .chat-head {
   display: flex;
   align-items: center;
@@ -534,7 +534,6 @@ body {
 }
 .chat-row-ai {
   display: flex;
-  gap: 10px;
   align-items: flex-start;
   max-width: 96%;
 }
@@ -564,10 +563,6 @@ body {
   }
   .chat-row-ai {
     max-width: 100%;
-    gap: 0;
-  }
-  .chat-row-ai .chat-avatar {
-    display: none;
   }
   .chat-bubble-ai {
     padding: 0;
