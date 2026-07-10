@@ -71,11 +71,13 @@ export default function SearchPage() {
     }
     // Pembeli: kolom stok tidak ditampilkan di hasil pencarian (hanya di detail part).
     const buyer = getUser()?.role === "pembeli";
+    const admin = getUser()?.role === "admin";
     setIsBuyer(buyer);
     ensurePerms().then((p) => {
       if (p) {
-        setShowStok(buyer ? false : p.columns.includes("col_stok"));
-        setShowHarga(p.columns.includes("col_harga"));
+        // Admin selalu lihat stok & harga (izin kolom hanya utk staf bawahan).
+        setShowStok(buyer ? false : (admin || p.columns.includes("col_stok")));
+        setShowHarga(admin || p.columns.includes("col_harga"));
       }
     });
     if (buyer) setShowStok(false);

@@ -41,10 +41,13 @@ export default function PartDetailPage() {
       const t = getToken();
       if (t) getBuyerLocations(t).then((d) => setBuyerLocs(d.locations)).catch(() => {});
     }
+    // Admin selalu melihat stok & harga — izin kolom hanya membatasi staf bawahan,
+    // bukan admin (samakan dgn backend yang memberi admin semua kolom).
+    const admin = getUser()?.role === "admin";
     ensurePerms().then((p) => {
       if (p) {
-        setShowStok(p.columns.includes("col_stok"));
-        setShowHarga(p.columns.includes("col_harga"));
+        setShowStok(admin || p.columns.includes("col_stok"));
+        setShowHarga(admin || p.columns.includes("col_harga"));
       }
     });
   }, []);

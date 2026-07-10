@@ -4,8 +4,9 @@ import { getMyPermissions, type MyPermissions } from "./api";
 import { getToken } from "./auth";
 
 // Versi cache — naikkan saat daftar menu/izin berubah agar cache lama otomatis
-// diabaikan (mis. penambahan menu "Asisten AI").
-const SS_KEY = "maspart_perms_v2";
+// diabaikan (mis. penambahan menu "Asisten AI"). v3: buang cache usang yang bisa
+// menahan admin dari kolom Harga (izin kolom lama tersimpan tanpa col_harga).
+const SS_KEY = "maspart_perms_v3";
 
 export function getCachedPerms(): MyPermissions | null {
   if (typeof window === "undefined") return null;
