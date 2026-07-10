@@ -762,8 +762,9 @@ def _stock_report_xls(session: dict[str, str]) -> bytes:
     hdr = _sq_headers(dsi, jsid)
     usi = _harvest_usi(session)
 
-    # 1) input default laporan (berisi 31 gudang + role + [Semua Cabang])
-    r1 = requests.post(f"{rep}/accurate/report/init-report-input.do",
+    # 1) input default laporan (berisi 31 gudang + role + [Semua Cabang]).
+    #    init-report-input.do ada di host UTAMA (iris), bukan iris-report.
+    r1 = requests.post(f"{_base()}/accurate/report/init-report-input.do",
                        data={"id": _STOCK_REPORT_ID, "planId": _STOCK_REPORT_PLAN, "_dsi": dsi},
                        headers=hdr, timeout=_HTTP_TIMEOUT, allow_redirects=False)
     if _looks_expired(r1):
