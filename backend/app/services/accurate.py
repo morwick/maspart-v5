@@ -28,6 +28,7 @@ Field penting per item (dari response nyata):
 from __future__ import annotations
 
 import base64
+import datetime as _dt
 import html as _html
 import json
 import logging
@@ -57,9 +58,9 @@ _UA = (
 _PAGE_SIZE = 200
 _HTTP_TIMEOUT = 30
 
-# TTL cache indeks stok penuh (detik). Menu Stok cukup segar tiap 5 JAM
-# (permintaan pemilik 2026-07-06); butuh angka terkini sekarang → admin punya
-# endpoint refresh(force=True) (POST /api/stok/refresh).
+# (Deprecated) TTL lama 5 jam. Sejak 2026-07-10 indeks TIDAK lagi berbasis TTL:
+# ditarik pada JAM WIB TETAP 3×/hari (_REFRESH_HOURS_WIB) & dimuat dari disk saat
+# restart. Konstanta dipertahankan hanya utk referensi doc lama.
 _INDEX_TTL = 5 * 60 * 60
 
 
@@ -529,7 +530,8 @@ def _warehouse_retry(item_id: Any) -> dict[str, Any]:
 
 def stock_full(part_number: str) -> dict[str, Any] | None:
     """Stok Accurate 1 PN: agregat + harga + rincian per-gudang, SEMUA dari
-    **INDEKS BERSAMA** (tarikan terjadwal tiap ``_INDEX_TTL``).
+    **INDEKS BERSAMA** (tarikan terjadwal 3×/hari jam WIB tetap; dimuat dari disk
+    saat restart).
 
     ⛔ ATURAN KERAS PEMILIK: BACA HANYA DARI CACHE — TIDAK PERNAH login/menembak
     Accurate live per-PN. Semua login untuk baca terjadi SEKALI per 5 jam
@@ -653,11 +655,15 @@ def _build_by_pn(items: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 
 def refresh(force: bool = False) -> dict[str, Any]:
-    """Bangun/segarkan indeks stok penuh. Hormati TTL kecuali ``force``."""
+    """Bangun/segarkan indeks stok penuh dari Accurate.
+
+    ⛔ ATURAN KERAS PEMILIK: indeks HANYA diperbarui pada jadwal tetap (3×/hari)
+    ATAU permintaan admin eksplisit (force=True). ``force=False`` SELALU
+    mengembalikan cache apa adanya — TAK PERNAH menarik/login on-demand, sekalipun
+    cache tua. Jadi buka part/cari/harga tak pernah menyentuh Accurate."""
+    if not force:
+        return _index_cache
     with _index_lock:
-        age = time.time() - _index_cache["ts"]
-        if not force and _index_cache["items"] and age < _INDEX_TTL:
-            return _index_cache
         items = fetch_all_items()
         _index_cache["items"] = [normalize_item(x) for x in items]
         _index_cache["by_pn"] = _build_by_pn(items)
@@ -770,74 +776,120 @@ def available() -> bool:
         return False
 
 
-# ── Refresh indeks TERJADWAL (latar) ─────────────────────────────────────────
-# Tanpa ini, tarikan penuh hanya terjadi saat ada user membuka menu Stok setelah
-# cache kedaluwarsa → user pertama tiap periode menunggu ±45 dtk. Thread ini
-# menarik indeks tiap _INDEX_TTL di belakang layar sehingga cache SELALU hangat
-# dan tak ada user yang kena tunggu. Beban Accurate tetap 1 tarikan/periode.
-_SCHED_RETRY = 15 * 60  # gagal (sesi/jaringan/throttle) → coba lagi 15 menit
+# ── Refresh indeks TERJADWAL (jam WIB tetap) + PERSISTENSI DISK ──────────────
+# ⛔ ATURAN KERAS PEMILIK: indeks ditarik dari Accurate HANYA 3× sehari pada jam
+# WIB tetap (07:00, 12:00, 19:00). DEPLOY/RESTART TIDAK menarik ulang — indeks
+# dimuat dari DISK (tanpa login). Jadi sesi Accurate hanya dipegang di 3 window
+# itu (± enrichment ~8 mnt), lalu LANGSUNG dilepas (logout). Bootstrap SEKALI
+# hanya bila disk kosong sama sekali (agar stok/harga tak kosong).
+_REFRESH_HOURS_WIB = (7, 12, 19)
+_WIB = _dt.timezone(_dt.timedelta(hours=7))
 _sched_lock = threading.Lock()
 _sched_started = False
 
 
-def _scheduled_refresh_once() -> float:
-    """Satu iterasi refresh terjadwal; return detik tunggu sampai iterasi berikut."""
+def _index_file() -> Path:
+    return get_settings().data_path / "accurate_index.json"
+
+
+def _save_index() -> None:
+    """Simpan indeks ke disk (JSON, atomik) → restart berikutnya muat tanpa login."""
     try:
-        if available():
-            refresh(force=True)
-            logger.info(
-                "[accurate] refresh terjadwal indeks stok OK (%d barang); "
-                "mulai enrichment per-gudang…", len(_index_cache["items"]),
-            )
-            # Rincian per-gudang ditarik SEKALI di sini (serial, ~8 mnt utk ~3.700
-            # barang berstok) → dibagi ke semua fitur via indeks. Latar, tak ada user
-            # menunggu. NON-FATAL: kegagalan enrichment TIDAK mengorbankan refresh
-            # agregat yang sudah sukses — tetap tunggu siklus penuh (data lama dipakai).
-            try:
-                n = enrich_warehouses()
-                logger.info(
-                    "[accurate] enrichment per-gudang OK (%d PN); berikutnya %d mnt lagi",
-                    n, _INDEX_TTL // 60,
-                )
-            except Exception as e:
-                logger.warning("[accurate] enrichment per-gudang gagal (%s) — data lama dipakai", e)
-        # Accurate tak dikonfigurasi → tak ada yang bisa ditarik; cek lagi
-        # nanti (murah, tanpa jaringan) kalau-kalau file sesi manual muncul.
-        return _INDEX_TTL
+        c = _index_cache
+        payload = {k: c.get(k) for k in ("items", "by_pn", "by_gudang", "snap", "ts", "gudang_ts")}
+        fp = _index_file()
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        tmp = fp.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(fp)
+    except Exception as e:  # pragma: no cover
+        logger.warning("[accurate] simpan indeks ke disk gagal: %s", e)
+
+
+def _load_index() -> bool:
+    """Muat indeks dari disk (TANPA login). True bila ada & berisi."""
+    try:
+        raw = json.loads(_index_file().read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError):
+        return False
+    if not raw.get("items"):
+        return False
+    with _index_lock:
+        for k in ("items", "by_pn", "by_gudang", "snap", "ts", "gudang_ts"):
+            if k in raw:
+                _index_cache[k] = raw[k]
+    logger.info("[accurate] indeks dimuat dari DISK (%d barang) — tanpa login Accurate",
+                len(raw["items"]))
+    return True
+
+
+def _seconds_until_next_refresh() -> float:
+    """Detik sampai jam refresh WIB terjadwal berikutnya (07/12/19 WIB)."""
+    now = _dt.datetime.now(_WIB)
+    cands = []
+    for d in (0, 1):
+        day = (now + _dt.timedelta(days=d))
+        for h in _REFRESH_HOURS_WIB:
+            cands.append(day.replace(hour=h, minute=0, second=0, microsecond=0))
+    nxt = min(t for t in cands if t > now)
+    return max(1.0, (nxt - now).total_seconds())
+
+
+def _do_scheduled_refresh() -> None:
+    """Satu refresh terjadwal: tarik agregat + enrichment per-gudang → SIMPAN ke
+    disk → LEPAS sesi (logout). Best-effort; kegagalan tak menjatuhkan loop."""
+    if not available():
+        return
+    try:
+        refresh(force=True)
+        logger.info("[accurate] refresh terjadwal OK (%d barang); enrichment per-gudang…",
+                    len(_index_cache["items"]))
+        try:
+            n = enrich_warehouses()
+            logger.info("[accurate] enrichment per-gudang OK (%d PN)", n)
+        except Exception as e:
+            logger.warning("[accurate] enrichment per-gudang gagal (%s) — agregat tetap dipakai", e)
+        _save_index()
     except Exception as e:
-        logger.warning(
-            "[accurate] refresh terjadwal gagal (%s) — coba lagi %d mnt",
-            e, _SCHED_RETRY // 60,
-        )
-        return _SCHED_RETRY
+        logger.warning("[accurate] refresh terjadwal gagal: %s", e)
+    finally:
+        # Lepas sesi SEGERA setelah window — jangan pegang di luar 3 jam terjadwal
+        # (akun 1-sesi; admin harus bisa buka Accurate manual).
+        try:
+            logout()
+        except Exception:  # pragma: no cover
+            pass
 
 
 def _scheduled_refresh_loop() -> None:
     while True:
-        time.sleep(_scheduled_refresh_once())
+        time.sleep(_seconds_until_next_refresh())
+        _do_scheduled_refresh()
 
 
 def start_scheduled_refresh() -> bool:
-    """Mulai thread daemon refresh indeks berkala. Idempoten (aman dipanggil
-    berulang); return True hanya saat thread baru benar-benar dimulai.
-    Tarikan pertama berjalan segera → cache hangat sejak server nyala."""
+    """Mulai penjadwalan refresh indeks. Idempoten. Muat indeks dari DISK dulu
+    (tanpa login); bootstrap SEKALI hanya bila disk kosong. Loop menunggu jam
+    WIB terjadwal berikutnya — TIDAK menarik saat start/deploy."""
     global _sched_started
     with _sched_lock:
         if _sched_started:
             return False
         _sched_started = True
-    threading.Thread(
-        target=_scheduled_refresh_loop, daemon=True, name="accurate-index-refresh"
-    ).start()
+    loaded = _load_index()
+    if not loaded and available():
+        # Disk kosong (mis. pertama kali) → bootstrap SEKALI agar stok tak kosong.
+        threading.Thread(target=_do_scheduled_refresh, daemon=True,
+                         name="accurate-index-bootstrap").start()
+    threading.Thread(target=_scheduled_refresh_loop, daemon=True,
+                     name="accurate-index-refresh").start()
     return True
 
 
 # ── Snapshot utk overlay hasil PENCARIAN — VIEW dari indeks bersama ─────────
-# Dulu snapshot menarik katalog penuh SENDIRI tiap 30 mnt (duplikat tarikan
-# massal). Sejak 2026-07-06 (permintaan pemilik: "ambil stok 5 jam sekali,
-# dibagi ke semua fitur") sumbernya SATU: indeks terjadwal `_INDEX_TTL`
-# (start_scheduled_refresh). View "snap" dibangun saat refresh() — di sini
-# tinggal baca, non-blocking, request pencarian tak pernah menunggu tarikan.
+# Sumber SATU: indeks terjadwal 3×/hari (start_scheduled_refresh), dibagi ke
+# semua fitur. View "snap" dibangun saat refresh() — di sini tinggal baca,
+# non-blocking, request pencarian tak pernah menunggu tarikan / login.
 
 
 def snapshot() -> dict[str, dict[str, Any]]:
