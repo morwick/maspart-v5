@@ -30,6 +30,8 @@ export default function ChatLogPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Filter per akun: klik nama user di tabel → lihat pertanyaan dia saja.
+  const [filterUser, setFilterUser] = useState("");
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -86,6 +88,15 @@ export default function ChatLogPage() {
   }, [router, load]);
 
   const empty = !loading && summary && summary.total === 0;
+
+  // Siapa saja yang bertanya, diurut dari yang paling sering — konteks cepat
+  // sebelum menyelami tabel.
+  const perUser = (() => {
+    const n = new Map<string, number>();
+    for (const r of rows) n.set(r.username || "(tanpa nama)", (n.get(r.username || "(tanpa nama)") ?? 0) + 1);
+    return [...n.entries()].sort((a, b) => b[1] - a[1]);
+  })();
+  const tampil = filterUser ? rows.filter((r) => (r.username || "") === filterUser) : rows;
 
   return (
     <AppShell active="/admin/chat-log" title="Observabilitas AI" sub="Metrik tiap giliran chat asisten">
@@ -153,16 +164,57 @@ export default function ChatLogPage() {
                   </div>
                 ))}
               </div>
+              {/* Siapa yang paling banyak bertanya (dari baris yang dimuat). */}
+              <div className="surface" style={{ padding: 14, flex: 1, minWidth: 240 }}>
+                <div className="stat-label" style={{ marginBottom: 8 }}>Penanya tersering</div>
+                {perUser.slice(0, 8).map(([u, n]) => (
+                  <button
+                    key={u}
+                    onClick={() => setFilterUser(filterUser === u ? "" : u)}
+                    className="flex w-full items-center justify-between"
+                    style={{
+                      fontSize: 12.5,
+                      padding: "2px 0",
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      color: filterUser === u ? "var(--brand-700)" : "var(--ink-800)",
+                      fontWeight: filterUser === u ? 600 : 400,
+                    }}
+                    title={filterUser === u ? "Klik untuk tampilkan semua" : `Tampilkan pertanyaan ${u} saja`}
+                  >
+                    <span>{u}</span>
+                    <span style={{ color: "var(--ink-500)" }}>{n}</span>
+                  </button>
+                ))}
+                {perUser.length === 0 && (
+                  <div style={{ fontSize: 12, color: "var(--ink-500)" }}>—</div>
+                )}
+              </div>
             </div>
           </>
         )}
 
         {rows.length > 0 && (
           <div className="surface" style={{ overflow: "auto" }}>
+            {filterUser && (
+              <div
+                className="flex items-center justify-between"
+                style={{ padding: "8px 12px", borderBottom: "1px solid var(--ink-150)", fontSize: 12.5 }}
+              >
+                <span>
+                  Menampilkan <b>{tampil.length}</b> giliran dari akun <b>{filterUser}</b>
+                </span>
+                <button className="btn btn-secondary btn-sm" onClick={() => setFilterUser("")}>
+                  Tampilkan semua
+                </button>
+              </div>
+            )}
             <table className="tbl">
               <thead>
                 <tr>
                   <th>Waktu</th>
+                  <th style={{ width: 120 }}>Akun</th>
                   <th>Pertanyaan</th>
                   <th style={{ width: 120 }}>Tool</th>
                   <th className="num" style={{ width: 70 }}>Ronde</th>
@@ -171,10 +223,35 @@ export default function ChatLogPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {tampil.map((r) => (
                   <tr key={r.id}>
                     <td style={{ fontSize: 11.5, color: "var(--ink-500)", whiteSpace: "nowrap" }}>
                       {new Date(r.created_at).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" })}
+                    </td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button
+                        onClick={() => setFilterUser(filterUser === r.username ? "" : r.username || "")}
+                        title={r.role ? `Peran: ${r.role}` : undefined}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          padding: 0,
+                          cursor: "pointer",
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          color: "var(--ink-800)",
+                        }}
+                      >
+                        {r.username || "—"}
+                      </button>
+                      {r.role && (
+                        <span
+                          className="pill"
+                          style={{ marginLeft: 6, height: 17, fontSize: 9.5, padding: "0 5px" }}
+                        >
+                          {r.role}
+                        </span>
+                      )}
                     </td>
                     <td style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.question || ""}>
                       {r.question || "—"}
