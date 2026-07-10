@@ -12,11 +12,21 @@
 # Saat cutover, file manual /data/coolify/proxy/dynamic/maspart.yaml DIHAPUS agar
 # router lama (file-provider) tidak bentrok dengan router container ini.
 
+#
+# BATAS MEMORI: server 3,8 GB RAM. Tanpa mem_limit, satu container yang membengkak
+# bisa memicu OOM killer kernel yang membunuh proses LAIN (Coolify/Traefik) → situs
+# mati total. Dengan batas, container itu sendiri yang di-restart oleh Docker.
+#   backend ~950 MB idle (torch + DINOv2) → 1,8 GB memberi ruang lonjakan.
+#   frontend ~70 MB (Next.js server)      → 384 MB sudah longgar.
+# memswap_limit = mem_limit → container tidak boleh melahap swap 2 GB milik host.
+
 services:
   backend:
     image: maspart-backend:latest
     pull_policy: never
     restart: unless-stopped
+    mem_limit: 1800m
+    memswap_limit: 1800m
     # Kredensial sekarang dikelola sbg Environment Variables di Coolify (di-inject
     # ke container), TIDAK lagi mount file .env dari host. Edit lewat dashboard
     # Coolify → service maspart → Environment Variables.
@@ -39,6 +49,8 @@ services:
     image: maspart-frontend:latest
     pull_policy: never
     restart: unless-stopped
+    mem_limit: 384m
+    memswap_limit: 384m
     depends_on:
       - backend
     networks:

@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import io
 import re
+import shutil
+import tempfile
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -246,6 +249,53 @@ _STASH_MAX = 200               # plafon entri (jaga memori)
 _stash_lock = threading.Lock()
 _stash: dict[str, dict] = {}   # id -> {at, judul, kolom, baris, filename}
 
+# Hasil build yang BERAT (katalog bergambar bisa >2 MB, PNG exploded) di-cache ke
+# DISK, bukan RAM: 200 entri × beberapa MB akan menggerus memori server (3,8 GB,
+# backend sudah ~1 GB krn torch/DINOv2). Disk punya puluhan GB nganggur.
+# File dibuang saat entri kedaluwarsa/ditendang, dan seluruh folder dibersihkan
+# saat proses start (sisa dari proses sebelumnya yang mati mendadak).
+_CACHE_DIR = Path(tempfile.gettempdir()) / "maspart_export_cache"
+
+
+def _cache_init() -> None:
+    try:
+        shutil.rmtree(_CACHE_DIR, ignore_errors=True)
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass  # disk read-only/penuh → cache dinonaktifkan, build ulang tiap unduh
+
+
+_cache_init()
+
+
+def _cache_write(export_id: str, data: bytes) -> Path | None:
+    """Tulis bytes hasil build ke disk. Return path, atau None bila gagal."""
+    p = _CACHE_DIR / export_id
+    try:
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".part")   # tulis atomik: cegah pembaca lihat file separuh
+        tmp.write_bytes(data)
+        tmp.replace(p)
+        return p
+    except OSError:
+        return None
+
+
+def _cache_read(p: Path) -> bytes | None:
+    try:
+        return p.read_bytes()
+    except OSError:
+        return None
+
+
+def _cache_drop(entry: dict) -> None:
+    p = entry.get("_path")
+    if p:
+        try:
+            Path(p).unlink(missing_ok=True)
+        except OSError:
+            pass
+
 # Header kolom yang isinya kode/PN → font mono di Excel.
 _MONO_HEAD_RE = re.compile(r"\b(part\s*number|part\s*no|pn|nomor\s*part|kode)\b", re.IGNORECASE)
 
@@ -257,9 +307,9 @@ def _stash_put(entry: dict, judul: str, ext: str = "xlsx") -> tuple[str, str]:
     export_id = uuid.uuid4().hex
     with _stash_lock:
         for k in [k for k, v in _stash.items() if now - v["at"] > _STASH_TTL_SEC]:
-            _stash.pop(k, None)
+            _cache_drop(_stash.pop(k, None) or {})
         while len(_stash) >= _STASH_MAX:   # buang paling tua
-            _stash.pop(min(_stash, key=lambda k: _stash[k]["at"]), None)
+            _cache_drop(_stash.pop(min(_stash, key=lambda k: _stash[k]["at"]), None) or {})
         _stash[export_id] = {"at": now, "judul": judul, "filename": filename, **entry}
     return export_id, filename
 
@@ -281,18 +331,22 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
     with _stash_lock:
         d = _stash.get(export_id)
         if d and time.monotonic() - d["at"] > _STASH_TTL_SEC:
-            _stash.pop(export_id, None)
+            _cache_drop(_stash.pop(export_id, None) or {})
             d = None
     if not d:
         return None, ("File sudah kedaluwarsa / tidak ditemukan. Minta asisten "
                       "buatkan Excel-nya lagi.")
 
-    # Entri ber-'builder' = dibangun saat diunduh (berat); bytes di-cache di entri
-    # supaya klik berikutnya instan.
+    # Entri ber-'builder' = dibangun saat diunduh (berat); hasilnya di-cache ke
+    # DISK supaya klik berikutnya instan tanpa menahan MB di RAM.
     if d.get("builder"):
-        cached = d.get("_bytes")
-        if cached:
-            return cached, d["filename"]
+        cached_path = d.get("_path")
+        if cached_path:
+            cached = _cache_read(Path(cached_path))
+            if cached:
+                return cached, d["filename"]
+            with _stash_lock:      # file cache hilang → bangun ulang
+                d.pop("_path", None)
         b = d["builder"]
         if b.get("kind") in ("katalog", "katalog_mesin"):
             src = "weichai" if b.get("kind") == "katalog_mesin" else "sinotruk"
@@ -304,8 +358,10 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
                 data, err = katalog_excel(b.get("rangka", ""), b.get("kategori", ""), src, isi_stok_harga=ish)
             if data is None:
                 return None, err
-            with _stash_lock:
-                d["_bytes"] = data
+            p = _cache_write(export_id, data)
+            if p:
+                with _stash_lock:
+                    d["_path"] = str(p)
             return data, d["filename"]
         if b.get("kind") == "exploded":
             if b.get("source") == "weichai":
@@ -315,8 +371,10 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
             if data is None:
                 return None, ("Gagal mengambil/menrender gambar exploded view EPC "
                               "(file gambar tak tersedia / resvg gagal).")
-            with _stash_lock:
-                d["_bytes"] = data
+            p = _cache_write(export_id, data)
+            if p:
+                with _stash_lock:
+                    d["_path"] = str(p)
             return data, d["filename"]
         return None, "Jenis export tidak dikenal."
 

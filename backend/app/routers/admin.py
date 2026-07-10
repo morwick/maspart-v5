@@ -21,6 +21,27 @@ _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 # kind dataset → nama file di Storage bucket "data"
 _DATASETS = {"stok": "stok.xlsx", "harga": "harga.xlsx", "populasi": "populasi.xlsx"}
 
+# Plafon ukuran file Excel. .xlsx = arsip ZIP: file kecil bisa mengembang jadi
+# ratusan MB saat di-parse (pandas butuh ~5-20x ukuran file). Server hanya punya
+# 3,8 GB RAM, jadi baca file BERTAHAP dan tolak begitu melewati plafon — jangan
+# `await file.read()` polos yang menelan seluruh isi lebih dulu.
+_MAX_XLSX_BYTES = 25 * 1024 * 1024   # 25 MB (stok.xlsx nyata ~2 MB)
+_XLSX_CHUNK = 1024 * 1024
+
+
+async def _read_capped(file: UploadFile, limit: int = _MAX_XLSX_BYTES) -> bytes:
+    """Baca UploadFile per-potongan, batalkan bila melewati `limit`.
+    Raise HTTPException 413 — pemanggil di loop multi-file boleh menangkapnya."""
+    buf = bytearray()
+    while chunk := await file.read(_XLSX_CHUNK):
+        buf.extend(chunk)
+        if len(buf) > limit:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                f"File terlalu besar (maksimum {limit // (1024 * 1024)} MB).",
+            )
+    return bytes(buf)
+
 
 class SetPermRequest(BaseModel):
     username: str
@@ -80,7 +101,7 @@ async def upload_data(
     name = (file.filename or "").lower()
     if not name.endswith((".xlsx", ".xls", ".xlsm")):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File harus Excel (.xlsx/.xls/.xlsm).")
-    data = await file.read()
+    data = await _read_capped(file)
     if not data:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File kosong.")
     # Validasi ringan: pastikan bisa dibaca sebagai Excel.
@@ -179,7 +200,11 @@ async def upload_catalog(
         if not safe_name:
             errors.append({"file": name, "error": "Nama file tidak valid."})
             continue
-        data = await file.read()
+        try:
+            data = await _read_capped(file)
+        except HTTPException as e:
+            errors.append({"file": safe_name, "error": str(e.detail)})
+            continue
         if not data:
             errors.append({"file": safe_name, "error": "File kosong."})
             continue
