@@ -13,7 +13,7 @@ USER = {"username": "tester", "role": "user"}
 def _hermetik(monkeypatch):
     # Hindari membangun system prompt besar / daftar tool / index nyata — bukan fokus test.
     monkeypatch.setattr(ai, "_system_prompt", lambda user: "system uji")
-    monkeypatch.setattr(ai, "_tool_specs", lambda user: [])
+    monkeypatch.setattr(ai, "_tool_specs", lambda user, sheet_id="": [])
     monkeypatch.setattr(ai, "_unit_name_tokens", lambda: set())
 
 
@@ -104,7 +104,7 @@ def test_guard_substitusi_pn_lokal_di_jawaban_pervin(monkeypatch):
         return c
     monkeypatch.setattr(ai, "_post_chat", fake_post)
 
-    def fake_run(name, args, user):
+    def fake_run(name, args, user, sheet_id=""):
         if name == "part_aus_dari_rangka":
             return {"found": True, "parts_tanpa_posisi": [{"part_number": "WG9525520641"}]}
         if name == "cari_part":
@@ -133,7 +133,7 @@ def test_guard_substitusi_tak_kena_bila_epc_tak_dipakai(monkeypatch):
         calls["n"] += 1
         return c
     monkeypatch.setattr(ai, "_post_chat", fake_post)
-    monkeypatch.setattr(ai, "_run_tool", lambda n, a, u: (
+    monkeypatch.setattr(ai, "_run_tool", lambda n, a, u, sheet_id="": (
         {"jumlah_part_unik": 1, "hasil": [{"part_number": "WG9114520140"}]} if n == "cari_part" else {}))
     out = ai.chat(USER, [{"role": "user", "content": "cari per depan"}])
     assert "KATALOG LOKAL" not in out["reply"]        # tak ada EPC per-VIN → tak ditandai

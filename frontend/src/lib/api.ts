@@ -1590,6 +1590,24 @@ export type AIChatResult = {
   exploded_images?: AIExplodedImage[];
   /** PN yang disebut asisten (grounded) → tampilkan thumbnail foto part. */
   part_pns?: string[];
+  /** Lampiran Excel: id sheet di server (kirim lagi di giliran berikutnya). */
+  sheet_id?: string;
+  /** Ringkasan isi Excel yang baru diunggah. */
+  sheet?: AISheetSummary;
+};
+
+/** Ringkasan Excel unggahan user — kolom + peran yang dikenali server. */
+export type AISheetSummary = {
+  filename: string;
+  sheet: string;
+  sheet_lain: string[];
+  jumlah_baris: number;
+  jumlah_kolom: number;
+  kolom: { nama: string; peran: string }[];
+  kolom_part_number: string | null;
+  part_number_dikenal_di_katalog: number;
+  contoh_baris: string[][];
+  terpotong: boolean;
 };
 
 /** Unduh Excel hasil perbandingan part dua unit (banding_rangka). */
@@ -1626,11 +1644,15 @@ export async function getAiStatus(token: string): Promise<{ available: boolean }
   return res.json();
 }
 
-export async function aiChat(token: string, messages: AIChatTurn[]): Promise<AIChatResult> {
+export async function aiChat(
+  token: string,
+  messages: AIChatTurn[],
+  sheetId?: string,
+): Promise<AIChatResult> {
   const res = await fetch(`${API_BASE}/api/ai/chat`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, sheet_id: sheetId || "" }),
   });
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
@@ -1711,6 +1733,26 @@ export async function aiChatImage(
   form.append("messages", JSON.stringify(messages));
   form.append("file", file);
   const res = await fetch(`${API_BASE}/api/ai/chat-image`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+// Chat dengan LAMPIRAN EXCEL: server membaca kolomnya, asisten bisa mengisi
+// stok/nama/harga lalu mengeluarkan Excel baru. Balasan memuat `sheet_id` yang
+// harus dikirim ulang di giliran berikutnya agar file tetap terlampir.
+export async function aiChatSheet(
+  token: string,
+  messages: AIChatTurn[],
+  file: File,
+): Promise<AIChatResult> {
+  const form = new FormData();
+  form.append("messages", JSON.stringify(messages));
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/api/ai/chat-sheet`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: form,

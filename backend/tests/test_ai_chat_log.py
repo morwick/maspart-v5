@@ -68,7 +68,7 @@ def test_summary_kosong(monkeypatch):
 
 def _hermetik(monkeypatch):
     monkeypatch.setattr(ai, "_system_prompt", lambda user: "sys")
-    monkeypatch.setattr(ai, "_tool_specs", lambda user: [])
+    monkeypatch.setattr(ai, "_tool_specs", lambda user, sheet_id="": [])
     monkeypatch.setattr(ai, "_unit_name_tokens", lambda: set())
 
 

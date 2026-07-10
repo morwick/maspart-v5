@@ -16,7 +16,7 @@ USER = {"username": "tester", "role": "user"}
 @pytest.fixture(autouse=True)
 def _hermetik(monkeypatch):
     monkeypatch.setattr(ai, "_system_prompt", lambda user: "system uji")
-    monkeypatch.setattr(ai, "_tool_specs", lambda user: [])
+    monkeypatch.setattr(ai, "_tool_specs", lambda user, sheet_id="": [])
     monkeypatch.setattr(ai, "_unit_name_tokens", lambda: set())
 
 
@@ -59,7 +59,7 @@ def test_buat_excel_bocor_saat_ronde_habis_tetap_dieksekusi(monkeypatch):
     monkeypatch.setattr(ai, "_MAX_TOOL_ROUNDS", 0)
     ran = {}
 
-    def fake_run_tool(name, args, user):
+    def fake_run_tool(name, args, user, sheet_id=""):
         ran["name"] = name
         return {"found": True, "export_id": "x1", "filename": "data.xlsx",
                 "judul": "Data Lampu", "jumlah_baris": 2}
@@ -83,7 +83,7 @@ def test_tool_lain_bocor_saat_ronde_habis_tetap_dibuang(monkeypatch):
     monkeypatch.setattr(ai, "_MAX_TOOL_ROUNDS", 0)
     ran = {}
     monkeypatch.setattr(ai, "_run_tool",
-                        lambda name, args, user: ran.setdefault("name", name) or {})
+                        lambda name, args, user, sheet_id="": ran.setdefault("name", name) or {})
     leaked = ('<invoke name="cari_part"><parameter name="query">lampu</parameter></invoke>'
               " Sebentar ya.")
     _stub_model(monkeypatch, [leaked, "Data lampu tidak saya temukan."])

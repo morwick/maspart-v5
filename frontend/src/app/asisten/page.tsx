@@ -9,6 +9,7 @@ import {
   ApiError,
   aiChat,
   aiChatImage,
+  aiChatSheet,
   downloadBlob,
   exportAiExcel,
   exportBandingRangka,
@@ -19,12 +20,15 @@ import {
   type AIChatTurn,
   type AIExcelExport,
   type AIExplodedImage,
+  type AISheetSummary,
 } from "@/lib/api";
 import { clearSession, getToken } from "@/lib/auth";
 
 type Msg = AIChatTurn & {
   tools?: string[];
   photo?: string;
+  sheetName?: string;  // nama file Excel yang dilampirkan user di pesan ini
+  sheet?: AISheetSummary; // ringkasan kolom hasil deteksi server
   repairkitModels?: string[];
   bandingExports?: AIBandingExport[];
   excelExports?: AIExcelExport[];
@@ -74,6 +78,18 @@ const TOOL_LABELS: Record<string, string> = {
   harga_sims: "Harga SIMS",
   buat_excel: "Export Excel",
   katalog_kategori: "EPC · katalog bergambar",
+  sheet_ringkasan: "Excel lampiran",
+  sheet_isi_kolom: "Excel lampiran · isi kolom",
+};
+
+// Peran kolom hasil deteksi server → label ramah.
+const PERAN_LABEL: Record<string, string> = {
+  part_number: "Part Number",
+  part_name: "Nama part",
+  stok: "Stok",
+  qty: "Qty",
+  harga: "Harga",
+  lain: "—",
 };
 
 // Kunci penyimpanan chat agar tidak hilang saat pindah menu lalu kembali.
@@ -115,6 +131,9 @@ const IC = {
   thumbUp: "M7 10v11 M2 13v6a2 2 0 0 0 2 2h13.5a2 2 0 0 0 2-1.7l1.2-8A1.5 1.5 0 0 0 18.2 9H14V5a2 2 0 0 0-2-2l-3 7H7",
   thumbDown: "M17 14V3 M22 11V5a2 2 0 0 0-2-2H6.5a2 2 0 0 0-2 1.7l-1.2 8A1.5 1.5 0 0 0 4.8 15H9v4a2 2 0 0 0 2 2l3-7h3",
   sheet: "M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M4 9h16 M4 15h16 M10 3v18",
+  paperclip:
+    "M21.4 11.05 12.25 20.2a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48",
+  x: "M18 6 6 18 M6 6l12 12",
 };
 
 function Avatar({ size = 30 }: { size?: number }) {
@@ -153,9 +172,14 @@ export default function AsistenPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [available, setAvailable] = useState<boolean | null>(null);
+  // Lampiran Excel aktif: dipegang server (TTL 2 jam). Dikirim ulang tiap giliran
+  // agar follow-up "isikan stoknya" tetap mengacu ke file yang sama.
+  const [sheetId, setSheetId] = useState("");
+  const [sheetName, setSheetName] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const sheetRef = useRef<HTMLInputElement>(null);
   const firstSave = useRef(true);
 
   useEffect(() => {
@@ -232,7 +256,7 @@ export default function AsistenPage() {
     setBusy(true);
     try {
       const payload: AIChatTurn[] = next.map((m) => ({ role: m.role, content: m.content }));
-      const res = await aiChat(token, payload);
+      const res = await aiChat(token, payload, sheetId);
       setMsgs((m) => [
         ...m,
         {
@@ -310,9 +334,67 @@ export default function AsistenPage() {
     }
   }
 
+  // Unggah Excel: server membaca kolomnya & menyimpan sheet (TTL 2 jam) → sheet_id
+  // dipakai giliran berikutnya ("isikan stoknya di kolom D").
+  async function sendWithSheet(file: File) {
+    if (busy) return;
+    const token = getToken();
+    if (!token) return router.replace("/login");
+    if (!/\.(xlsx|xlsm)$/i.test(file.name)) {
+      setError("File harus Excel .xlsx atau .xlsm (bukan .xls / .csv).");
+      return;
+    }
+    setError(null);
+    const caption = input.trim();
+    const userText = caption || `Saya lampirkan ${file.name}. Isinya apa saja?`;
+    const next: Msg[] = [
+      ...msgs,
+      { role: "user", content: userText, sheetName: file.name, at: Date.now() },
+    ];
+    setMsgs(next);
+    setInput("");
+    resetTextarea();
+    setBusy(true);
+    try {
+      const payload: AIChatTurn[] = next.map((m) => ({ role: m.role, content: m.content }));
+      const res = await aiChatSheet(token, payload, file);
+      if (res.sheet_id) {
+        setSheetId(res.sheet_id);
+        setSheetName(file.name);
+      }
+      setMsgs((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: res.reply || "(tidak ada jawaban)",
+          tools: res.tools_used,
+          repairkitModels: res.repairkit_models,
+          bandingExports: res.banding_exports,
+          excelExports: res.excel_exports,
+          explodedImages: res.exploded_images,
+          sheet: res.sheet,
+          at: Date.now(),
+        },
+      ]);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearSession();
+        return router.replace("/login");
+      }
+      setError(err instanceof Error ? err.message : "Gagal mengunggah Excel.");
+      setMsgs((m) => m.slice(0, -1));
+    } finally {
+      setBusy(false);
+      if (sheetRef.current) sheetRef.current.value = "";
+      taRef.current?.focus();
+    }
+  }
+
   function clearChat() {
     setMsgs([]);
     setError(null);
+    setSheetId("");
+    setSheetName("");
     try {
       sessionStorage.removeItem(CHAT_KEY);
     } catch {
@@ -501,6 +583,45 @@ export default function AsistenPage() {
 
           {/* Input */}
           <div style={{ borderTop: "1px solid var(--ink-150)", background: "var(--paper)", padding: "10px 12px 8px" }}>
+            {sheetName && (
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 7,
+                  fontSize: 11.5,
+                  color: "var(--brand-700)",
+                  background: "var(--brand-50)",
+                  border: "1px solid var(--brand-100)",
+                  borderRadius: 99,
+                  padding: "4px 6px 4px 10px",
+                  marginBottom: 8,
+                  maxWidth: "100%",
+                }}
+                title="File ini masih terlampir — asisten bisa mengisi kolomnya"
+              >
+                <Icon d={IC.sheet} size={13} />
+                <span className="truncate" style={{ maxWidth: 200 }}>{sheetName}</span>
+                <button
+                  onClick={() => {
+                    setSheetId("");
+                    setSheetName("");
+                  }}
+                  title="Lepas lampiran"
+                  aria-label="Lepas lampiran"
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    cursor: "pointer",
+                    color: "var(--brand-700)",
+                    display: "inline-flex",
+                    padding: 2,
+                  }}
+                >
+                  <Icon d={IC.x} size={12} />
+                </button>
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
               <input
                 ref={fileRef}
@@ -512,6 +633,16 @@ export default function AsistenPage() {
                   if (f) sendWithPhoto(f);
                 }}
               />
+              <input
+                ref={sheetRef}
+                type="file"
+                accept=".xlsx,.xlsm"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) sendWithSheet(f);
+                }}
+              />
               <button
                 className="btn btn-ghost"
                 title="Cari part dari foto"
@@ -520,6 +651,15 @@ export default function AsistenPage() {
                 style={{ padding: "0 10px", color: "var(--ink-600)" }}
               >
                 <Icon d={IC.camera} size={19} />
+              </button>
+              <button
+                className="btn btn-ghost"
+                title="Lampirkan Excel (.xlsx) — asisten bisa isi stok/nama part/harga"
+                onClick={() => sheetRef.current?.click()}
+                disabled={busy || available === false}
+                style={{ padding: "0 10px", color: "var(--ink-600)" }}
+              >
+                <Icon d={IC.paperclip} size={18} />
               </button>
               <textarea
                 ref={taRef}
@@ -822,6 +962,58 @@ function AiExcelCard({ exp }: { exp: AIExcelExport }) {
   );
 }
 
+// Ringkasan Excel unggahan: kolom apa saja yang server kenali. Ditampilkan sekali
+// di bawah jawaban pertama setelah file diunggah, agar user bisa langsung melihat
+// kalau deteksi kolomnya meleset dan mengoreksinya lewat kalimat.
+function SheetCard({ s }: { s: AISheetSummary }) {
+  const dikenali = s.kolom.filter((k) => k.peran !== "lain");
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        maxWidth: 480,
+        border: "1px solid var(--ink-200)",
+        borderRadius: 12,
+        background: "var(--paper)",
+        padding: "10px 12px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+        <span style={{ color: "var(--brand-700)", display: "inline-flex" }}>
+          <Icon d={IC.sheet} size={16} />
+        </span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="truncate" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-900)" }}>
+            {s.filename}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--ink-500)" }}>
+            Sheet “{s.sheet}” · {s.jumlah_baris} baris × {s.jumlah_kolom} kolom
+            {s.terpotong ? " (dipotong)" : ""}
+          </div>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+        {dikenali.length === 0 ? (
+          <span style={{ fontSize: 11.5, color: "var(--ink-500)" }}>
+            Tidak ada kolom yang dikenali otomatis — sebutkan kolom mana yang berisi Part Number.
+          </span>
+        ) : (
+          dikenali.map((k) => (
+            <span key={k.nama} className="pill" style={{ height: 21, fontSize: 10.5, padding: "0 8px" }}>
+              {k.nama} → {PERAN_LABEL[k.peran] || k.peran}
+            </span>
+          ))
+        )}
+      </div>
+      {s.kolom_part_number && (
+        <div style={{ fontSize: 11, color: "var(--ink-500)", marginTop: 7 }}>
+          {s.part_number_dikenal_di_katalog} dari {s.jumlah_baris} Part Number dikenal di katalog.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RepairKitDownloads({ models }: { models: string[] }) {
   const [dl, setDl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -1030,6 +1222,25 @@ function Bubble({
               style={{ maxWidth: 200, borderRadius: 10, marginBottom: m.content ? 8 : 0, display: "block" }}
             />
           )}
+          {m.sheetName && (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                background: "rgba(255,255,255,.18)",
+                border: "1px solid rgba(255,255,255,.28)",
+                borderRadius: 8,
+                padding: "5px 9px",
+                marginBottom: m.content ? 8 : 0,
+                fontSize: 12.5,
+                maxWidth: "100%",
+              }}
+            >
+              <Icon d={IC.sheet} size={14} />
+              <span className="truncate">{m.sheetName}</span>
+            </div>
+          )}
           {m.content}
         </div>
         {time && (
@@ -1048,6 +1259,7 @@ function Bubble({
         <div className="chat-bubble-ai">
           <Markdown content={m.content} />
         </div>
+        {m.sheet && <SheetCard s={m.sheet} />}
         {m.repairkitModels && m.repairkitModels.length > 0 && (
           <RepairKitDownloads models={m.repairkitModels} />
         )}

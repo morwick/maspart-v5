@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from ..core.config import get_settings
 from ..core.ratelimit import limit
 from ..deps import get_current_user, require_admin
-from ..services import ai_assistant, ai_export, ai_feedback, image_search
+from ..services import ai_assistant, ai_export, ai_feedback, ai_sheet, image_search
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -25,6 +25,9 @@ class ChatTurn(BaseModel):
 
 class AIChatRequest(BaseModel):
     messages: list[ChatTurn] = Field(default_factory=list)
+    # Lampiran Excel dari giliran sebelumnya (dari /chat-sheet). Server memverifikasi
+    # id ini milik user yang sama; kalau tidak, lampiran diabaikan diam-diam.
+    sheet_id: str = ""
 
 
 class FeedbackRequest(BaseModel):
@@ -47,7 +50,7 @@ def ai_chat(body: AIChatRequest, user: dict = Depends(get_current_user)):
     if not any(m["role"] == "user" and m["content"].strip() for m in history):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pesan kosong.")
     try:
-        result = ai_assistant.chat(user, history)
+        result = ai_assistant.chat(user, history, sheet_id=(body.sheet_id or "").strip())
     except ai_assistant.AINotConfigured:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -190,4 +193,57 @@ async def ai_chat_image(
         }
         for c in (candidates or [])[:6]
     ]
+    return result
+
+
+@router.post("/chat-sheet", dependencies=[Depends(limit("ai_sheet", 10, 60))])
+async def ai_chat_sheet(
+    messages: str = Form("[]", description="Riwayat chat (JSON list {role, content})."),
+    file: UploadFile = File(..., description="File Excel (.xlsx/.xlsm) yang diunggah user."),
+    user: dict = Depends(get_current_user),
+):
+    """Chat dengan LAMPIRAN EXCEL. File dibaca di server (kolom dikenali otomatis),
+    disimpan sementara (TTL 2 jam, discoped per-user), lalu asisten menjawab dengan
+    tool `sheet_ringkasan`/`sheet_isi_kolom`.
+
+    Isi file TIDAK pernah masuk ke system prompt — hanya lewat hasil tool, agar
+    kalimat di dalam sel tak bisa menyetir asisten (prompt injection)."""
+    try:
+        raw = json.loads(messages or "[]")
+    except Exception:
+        raw = []
+    history = [
+        {"role": m.get("role"), "content": str(m.get("content") or "")}
+        for m in (raw or [])
+        if isinstance(m, dict) and m.get("role")
+    ]
+
+    # Baca BERTAHAP dgn plafon — .xlsx itu ZIP, file kecil bisa mengembang ratusan MB.
+    buf = bytearray()
+    while chunk := await file.read(1024 * 1024):
+        buf.extend(chunk)
+        if len(buf) > ai_sheet.MAX_BYTES:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                f"File maksimal {ai_sheet.MAX_BYTES // 1024 // 1024} MB.",
+            )
+
+    parsed = ai_sheet.parse_upload(bytes(buf), file.filename or "")
+    if not parsed.get("ok"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, parsed.get("error") or "File tidak terbaca.")
+
+    sheet_id = ai_sheet.put_sheet(user.get("username", ""), parsed)
+    try:
+        result = ai_assistant.chat(user, history, sheet_id=sheet_id)
+    except ai_assistant.AINotConfigured:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Asisten AI belum dikonfigurasi (DEEPSEEK_API_KEY kosong).",
+        )
+    except Exception as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Asisten AI gagal merespons: {e}")
+
+    # Frontend menyimpan sheet_id & menampilkan ringkasan lampiran.
+    result["sheet_id"] = sheet_id
+    result["sheet"] = ai_sheet.ringkas(parsed)
     return result
