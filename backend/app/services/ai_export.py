@@ -326,6 +326,20 @@ def stash_builder(judul: str, builder: dict, ext: str = "xlsx") -> tuple[str, st
     return _stash_put({"builder": builder}, judul, ext=ext)
 
 
+def stash_raw(judul: str, data: bytes, filename: str) -> tuple[str, str]:
+    """Simpan BYTES jadi (mis. PDF penawaran dari Accurate) → (export_id, filename).
+    Bytes langsung ditulis ke cache disk; generic_excel menyajikannya apa adanya."""
+    ext = filename.rsplit(".", 1)[-1] if "." in filename else "pdf"
+    export_id, _fn = _stash_put({"raw": True}, judul, ext=ext)
+    with _stash_lock:
+        _stash[export_id]["filename"] = filename   # pertahankan nama asli
+    p = _cache_write(export_id, data)
+    if p:
+        with _stash_lock:
+            _stash[export_id]["_path"] = str(p)
+    return export_id, filename
+
+
 def generic_excel(export_id: str) -> tuple[bytes | None, str]:
     """Bangun workbook dari payload tersimpan. (bytes, filename) atau (None, pesan)."""
     with _stash_lock:
@@ -336,6 +350,14 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
     if not d:
         return None, ("File sudah kedaluwarsa / tidak ditemukan. Minta asisten "
                       "buatkan Excel-nya lagi.")
+
+    # Entri ber-'raw' = bytes jadi (PDF penawaran) sudah di cache disk.
+    if d.get("raw"):
+        p = d.get("_path")
+        data = _cache_read(Path(p)) if p else None
+        if data:
+            return data, d["filename"]
+        return None, "File sudah kedaluwarsa — minta asisten buatkan lagi."
 
     # Entri ber-'builder' = dibangun saat diunduh (berat); hasilnya di-cache ke
     # DISK supaya klik berikutnya instan tanpa menahan MB di RAM.

@@ -830,6 +830,308 @@ def search_index(terms: Iterable[str], *, limit: int = 8) -> list[dict[str, Any]
     return [it for _s, it in scored[:limit]]
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  PENAWARAN PENJUALAN (Sales Quotation / SQ) — buat dokumen + tarik PDF resmi
+#
+#  Dibedah dari HAR UI Accurate (2026-07-10). Kunci yang tak terlihat dari luar:
+#    • SEMUA field header/detail berprefix `param.` (form-urlencoded, bukan JSON)
+#    • WAJIB token `_usi` (user-session-id) DI SAMPING `_dsi`; `_usi` dipanen dari
+#      respons init-sales-quotation.do (tertanam sbg `_usi=…` di dalam teks)
+#    • Total & pajak DIHITUNG Accurate via calculate-header (config-agnostic) —
+#      kita TIDAK menebak rumus PPN
+#  PDF resmi ditarik 2 langkah dari host `*-report.accurate.id`.
+#  Lihat memory: accurate-penawaran-api.
+# ═══════════════════════════════════════════════════════════════════════════
+_USI_RE = re.compile(r"_usi=([A-Za-z0-9+/=]{40,})")
+_qdefaults_cache: dict[str, Any] = {"at": 0.0, "val": None}
+_QDEFAULTS_TTL = 6 * 3600
+
+
+def _report_base() -> str:
+    """Host mesin cetak: iris.accurate.id → iris-report.accurate.id."""
+    return f"https://{get_settings().accurate_host}".replace(".accurate.id", "-report.accurate.id")
+
+
+def _harvest_usi(session: dict[str, str]) -> str:
+    """Ambil token `_usi` dari respons init-sales-quotation.do (satu-satunya sumber)."""
+    dsi = session["dsi"]
+    headers = {
+        "User-Agent": _UA, "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest", "Origin": _base(),
+        "Referer": f"{_base()}/accurate/?_dsi={dsi}",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Cookie": f"JSESSIONID={session['jsessionid']}",
+    }
+    r = requests.post(f"{_base()}/accurate/customer/init-sales-quotation.do",
+                      data={"_dsi": dsi}, headers=headers, timeout=_HTTP_TIMEOUT, allow_redirects=False)
+    if _looks_expired(r):
+        raise AccurateSessionExpired("Sesi Accurate kadaluarsa saat init penawaran.")
+    m = _USI_RE.search(r.text)
+    if not m:
+        raise AccurateError("Gagal memperoleh token _usi dari init penawaran.")
+    return m.group(1)
+
+
+def _company_defaults(session: dict[str, str]) -> dict[str, Any]:
+    """Default header perusahaan (branch/currency/tax1/warehouse) dari dokumen
+    terbaru — dibaca sekali & di-cache. Menghindari hardcode id yang bisa beda
+    antar-perusahaan. countAutoNumber dari view dokumen."""
+    now = time.time()
+    if _qdefaults_cache["val"] and (now - _qdefaults_cache["at"]) < _QDEFAULTS_TTL:
+        return _qdefaults_cache["val"]
+    rows = _call(session, "customer/search-sales-quotation.do", {"start": 0, "limit": 1}).get("d") or []
+    if not rows:
+        raise AccurateError("Tak ada dokumen penawaran acuan untuk membaca default perusahaan.")
+    v = _call(session, "customer/view-sales-quotation.do", {"id": rows[0]["id"]}).get("d") or {}
+    det0 = (v.get("detailItem") or [{}])[0]
+    val = {
+        "branchId": v.get("branchId") or 50,
+        "currencyId": v.get("currencyId") or 50,
+        "tax1Id": v.get("tax1Id") or 50,
+        "warehouseId": det0.get("warehouseId") or v.get("branchId") or 50,
+        "countAutoNumber": v.get("countAutoNumber") or 3,
+    }
+    _qdefaults_cache.update(at=now, val=val)
+    return val
+
+
+def _sq_headers(dsi: str, jsessionid: str) -> dict[str, str]:
+    return {
+        "User-Agent": _UA, "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest", "Origin": _base(),
+        "Referer": f"{_base()}/accurate/?_dsi={dsi}",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Cookie": f"JSESSIONID={jsessionid}",
+    }
+
+
+def search_customers(keyword: str, *, limit: int = 15) -> list[dict[str, Any]]:
+    """Cari pelanggan (untuk field 'Dipesan oleh'). Auto-login saat sesi habis."""
+    kw = (keyword or "").strip()
+    if not kw:
+        return []
+
+    def _do(sess):
+        rows = _call(sess, "customer/search-customer.do",
+                     {"start": 0, "limit": limit, "keywords": kw}).get("d") or []
+        return [{"id": r.get("id"), "no": r.get("customerNo"), "name": (r.get("name") or "").strip()}
+                for r in rows]
+
+    sess = _ensure_session()
+    try:
+        return _do(sess)
+    except AccurateSessionExpired:
+        if not credentials_configured():
+            raise
+        return _do(_refresh_session())
+
+
+def item_for_quotation(part_number: str) -> dict[str, Any] | None:
+    """Cari 1 barang untuk baris penawaran: {id, no, pn, name, unit_id, unit, price}.
+    PN harus PERSIS cocok (hindari salah barang). None bila tak ada."""
+    want = _norm_pn(part_number)
+    if not want:
+        return None
+    hits = search_by_keyword(part_number, limit=50)  # normalize_item; punya accurate_id
+    exact = [h for h in hits if _norm_pn(h["pn"]) == want]
+    if not exact:
+        return None
+    best = max(exact, key=lambda h: h["available_to_sell"])
+    # unit1.id tak disimpan normalize_item → ambil dari hasil mentah search-item sekali.
+    unit_id = 100
+    sess = _ensure_session()
+    try:
+        rd = _search_items_raw(sess, keywords=part_number, start=0, limit=50).get("d") or []
+    except AccurateSessionExpired:
+        rd = _search_items_raw(_refresh_session(), keywords=part_number, start=0, limit=50).get("d") or []
+    for it in rd:
+        if it.get("id") == best["accurate_id"]:
+            unit_id = ((it.get("unit1") or {}) or {}).get("id") or 100
+            break
+    return {
+        "id": best["accurate_id"], "no": best["no"], "pn": best["pn"],
+        "name": best["name"], "unit_id": unit_id, "unit": best["unit"],
+        "price": best["price"], "available": best["available_to_sell"],
+    }
+
+
+def _calc_totals(session, usi, defaults, customer_id, lines, taxable, inclusive):
+    """Minta Accurate menghitung subTotal/pajak/total (config-agnostic)."""
+    body = {
+        "_dsi": session["dsi"], "_usi": usi,
+        "param.customerId": customer_id, "param.currencyId": defaults["currencyId"],
+        "param.rate": 1, "param.branchId": defaults["branchId"],
+        "param.tax1Id": defaults["tax1Id"],
+        "param.taxable": "true" if taxable else "false",
+        "param.inclusiveTax": "true" if inclusive else "false",
+        "param.forceCalculatePercentTaxable": "true",
+    }
+    for i, ln in enumerate(lines):
+        p = f"param.detailItem[{i}]."
+        body[p + "seq"] = i + 1
+        body[p + "itemId"] = ln["item_id"]
+        body[p + "quantity"] = ln["qty"]
+        body[p + "unitPrice"] = ln["unit_price"]
+        body[p + "itemUnitId"] = ln.get("unit_id", 100)
+        body[p + "useTax1"] = "true" if taxable else "false"
+    r = requests.post(f"{_base()}/accurate/customer/calculate-header-sales-quotation.do",
+                      data=body, headers=_sq_headers(session["dsi"], session["jsessionid"]),
+                      timeout=_HTTP_TIMEOUT, allow_redirects=False)
+    if _looks_expired(r):
+        raise AccurateSessionExpired("Sesi kadaluarsa saat hitung total.")
+    j = r.json()
+    if not j.get("s"):
+        raise AccurateError(f"Hitung total ditolak: {str(j.get('d'))[:150]}")
+    return j.get("d") or {}
+
+
+def _save_quotation(session, usi, defaults, *, number, customer_id, lines,
+                    transdate, taxable, inclusive, description, totals,
+                    ignore_warning=False):
+    """POST save-sales-quotation.do. Return dict hasil ('r').
+    Accurate bisa membalas PERINGATAN (d.w_) — mis. anjuran setel DPP 11/12 —
+    yang di UI ditembus dgn tombol 'lanjutkan'. Kita kirim ulang sekali dgn
+    ignoreWarning=true (setara klik 'lanjutkan'), bukan menganggapnya gagal."""
+    body = {
+        "_dsi": session["dsi"], "_usi": usi,
+        "param.uniqueDataNumber": int(time.time() * 1000),
+        "param.needDetailResult": "false",
+        "param.ignoreWarning": "true" if ignore_warning else "false",
+        "param.number": number,                       # MANUAL — bukan penomoran otomatis
+        "param.countAutoNumber": defaults["countAutoNumber"],
+        "param.customerId": customer_id,
+        "param.currencyId": defaults["currencyId"], "param.rate": 1,
+        "param.transDate": transdate,
+        "param.branchId": defaults["branchId"],
+        "param.tax1Id": defaults["tax1Id"],
+        "param.taxable": "true" if taxable else "false",
+        "param.inclusiveTax": "true" if inclusive else "false",
+        "param.forceCalculatePercentTaxable": "true",
+        "param.saveAsStatusType": "UNAPPROVED",
+        "param.transactionCurrencyId": defaults["currencyId"],
+        "param.attachments": "[]",
+        "param.description": description or "",
+        "param.cashDiscount": 0, "param.lastCashDiscount": 0, "param.totalExpense": 0,
+        # total & pajak DIHITUNG Accurate (bukan tebakan kita)
+        "param.subTotal": totals.get("subTotal", 0),
+        "param.totalAmount": totals.get("subTotal", 0) if inclusive else totals.get("totalAmount", 0),
+        "param.tax1Amount": totals.get("tax1Amount", 0),
+        "param.tax2Amount": 0, "param.tax3Amount": 0, "param.tax4Amount": 0,
+        "param.tax1Rate": totals.get("tax1Rate", 0),
+        "param.percentTaxable": totals.get("percentTaxable", 100),
+    }
+    for i, ln in enumerate(lines):
+        p = f"param.detailItem[{i}]."
+        qty, price = ln["qty"], ln["unit_price"]
+        body[p + "_status"] = "insert"
+        body[p + "seq"] = i + 1
+        body[p + "itemId"] = ln["item_id"]
+        body[p + "detailName"] = ln.get("name", "")
+        body[p + "quantity"] = qty
+        body[p + "itemUnitId"] = ln.get("unit_id", 100)
+        body[p + "unitRatio"] = 1
+        body[p + "unitPrice"] = price
+        body[p + "totalPrice"] = round(qty * price, 2)
+        body[p + "warehouseId"] = defaults["warehouseId"]
+        body[p + "useTax1"] = "true" if taxable else "false"
+        body[p + "useTax2"] = "false"
+        body[p + "useTax3"] = "false"
+        body[p + "useTax4"] = "false"
+    r = requests.post(f"{_base()}/accurate/customer/save-sales-quotation.do",
+                      data=body, headers=_sq_headers(session["dsi"], session["jsessionid"]),
+                      timeout=_HTTP_TIMEOUT + 15, allow_redirects=False)
+    if _looks_expired(r):
+        raise AccurateSessionExpired("Sesi kadaluarsa saat simpan penawaran.")
+    j = r.json()
+    if not j.get("s"):
+        d = j.get("d") or {}
+        # PERINGATAN saja (bukan error validasi) & belum coba abaikan → ulangi
+        # sekali dgn ignoreWarning=true (setara tombol 'lanjutkan' di UI).
+        if not ignore_warning and isinstance(d, dict) and set(d.keys()) <= {"w_"}:
+            return _save_quotation(session, usi, defaults, number=number, customer_id=customer_id,
+                                   lines=lines, transdate=transdate, taxable=taxable,
+                                   inclusive=inclusive, description=description, totals=totals,
+                                   ignore_warning=True)
+        raise AccurateError(f"Accurate menolak simpan penawaran: {str(d)[:200]}")
+    return j.get("r") or {}
+
+
+def create_sales_quotation(*, number: str, customer_id: int, lines: list[dict],
+                           transdate: str, taxable: bool = True, inclusive: bool = True,
+                           description: str = "") -> dict[str, Any]:
+    """Buat Penawaran Penjualan. `lines` = [{item_id, name, qty, unit_price, unit_id}].
+    `number` WAJIB (manual). Return {id, number, total}. Auto-login saat sesi habis."""
+    if not number.strip():
+        raise AccurateError("Nomor penawaran wajib diisi (manual).")
+    if not lines:
+        raise AccurateError("Minimal satu baris barang.")
+
+    def _flow(sess):
+        usi = _harvest_usi(sess)
+        defs = _company_defaults(sess)
+        totals = _calc_totals(sess, usi, defs, customer_id, lines, taxable, inclusive)
+        return _save_quotation(sess, usi, defs, number=number, customer_id=customer_id,
+                               lines=lines, transdate=transdate, taxable=taxable,
+                               inclusive=inclusive, description=description, totals=totals)
+
+    sess = _ensure_session()
+    try:
+        r = _flow(sess)
+    except AccurateSessionExpired:
+        if not credentials_configured():
+            raise
+        r = _flow(_refresh_session())
+    return {"id": r.get("id"), "number": r.get("number") or number,
+            "total": _num(r.get("totalAmount"))}
+
+
+def sales_quotation_pdf(quotation_id: int, *, layout_id: int = 50) -> bytes:
+    """Tarik PDF RESMI Accurate untuk 1 penawaran (2 langkah, host *-report).
+    layout_id: 50=Default, 551=after disc, 700=Service-JNT, 450=Proforma."""
+
+    def _flow(sess):
+        usi = _harvest_usi(sess)
+        rep, dsi = _report_base(), sess["dsi"]
+        hdr = _sq_headers(dsi, sess["jsessionid"])
+        r1 = requests.post(f"{rep}/accurate/company/view-print-layout-execute.do",
+                           data={"dataId": quotation_id, "printLayoutId": layout_id,
+                                 "transactionType": "SQ", "_usi": usi, "_dsi": dsi},
+                           headers=hdr, timeout=_HTTP_TIMEOUT, allow_redirects=False)
+        if _looks_expired(r1):
+            raise AccurateSessionExpired("Sesi kadaluarsa saat siapkan cetak.")
+        cache_id = ((r1.json().get("d") or {}) or {}).get("cacheId")
+        if not cache_id:
+            raise AccurateError(f"Gagal menyiapkan cetak: {r1.text[:150]}")
+        r2 = requests.get(f"{rep}/accurate/report/export-report.do",
+                          params={"_dsi": dsi, "_usi": usi, "cacheId": cache_id, "exportType": "pdf"},
+                          headers=hdr, timeout=_HTTP_TIMEOUT + 30, allow_redirects=False)
+        if r2.content[:4] != b"%PDF":
+            raise AccurateError("Respons cetak bukan PDF (sesi/izin?).")
+        return r2.content
+
+    sess = _ensure_session()
+    try:
+        return _flow(sess)
+    except AccurateSessionExpired:
+        if not credentials_configured():
+            raise
+        return _flow(_refresh_session())
+
+
+def delete_sales_quotation(quotation_id: int) -> bool:
+    """Hapus penawaran (untuk pembatalan/uji). True bila sukses."""
+    def _do(sess):
+        j = _call(sess, "customer/delete-sales-quotation.do", {"id": quotation_id})
+        return bool(j.get("s"))
+    sess = _ensure_session()
+    try:
+        return _do(sess)
+    except AccurateSessionExpired:
+        if not credentials_configured():
+            raise
+        return _do(_refresh_session())
+
+
 # ── CLI selftest (tanpa server) ────────────────────────────────────────────
 if __name__ == "__main__":  # pragma: no cover
     import sys

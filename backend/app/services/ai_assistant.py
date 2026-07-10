@@ -1406,6 +1406,51 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         })
 
+    # Penawaran Penjualan Accurate — HANYA admin (memuat harga jual & mengikat
+    # perusahaan; samakan dgn harga SIMS). Nomor WAJIB manual.
+    if _is_admin(user):
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "buat_penawaran",
+                "description": (
+                    "Buat Penawaran Penjualan (Sales Quotation) di Accurate untuk seorang "
+                    "pelanggan berisi daftar barang, lalu hasilkan PDF resmi Accurate yang "
+                    "bisa diunduh/dikirim. HANYA admin. WAJIB minta NOMOR penawaran dari "
+                    "user (diisi manual — penomoran otomatis TIDAK dipakai). Pelanggan "
+                    "dicocokkan dari nama; tiap barang dari Part Number (harus ada di "
+                    "Accurate). Harga per barang boleh ditentukan user; bila tidak, pakai "
+                    "harga jual Accurate. Konfirmasikan ringkasan sebelum membuat bila ragu."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "nomor": {"type": "string",
+                                  "description": "Nomor penawaran MANUAL dari user (mis. 'PN-2026-001'). WAJIB."},
+                        "pelanggan": {"type": "string",
+                                      "description": "Nama pelanggan (dicari di Accurate)."},
+                        "barang": {
+                            "type": "array",
+                            "description": "Daftar barang penawaran.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "part_number": {"type": "string", "description": "Part Number barang (harus ada di Accurate)."},
+                                    "qty": {"type": "number", "description": "Kuantitas."},
+                                    "harga": {"type": "number", "description": "Harga jual satuan (opsional; default harga Accurate)."},
+                                },
+                                "required": ["part_number", "qty"],
+                            },
+                        },
+                        "tanggal": {"type": "string",
+                                    "description": "Tanggal dd/mm/yyyy (opsional; default hari ini)."},
+                        "catatan": {"type": "string", "description": "Keterangan (opsional)."},
+                    },
+                    "required": ["nomor", "pelanggan", "barang"],
+                },
+            },
+        })
+
     # Excel unggahan user — tool ini HANYA ada bila ada file terlampir di
     # percakapan ini. Tanpa lampiran, model tak melihatnya sama sekali.
     if sheet_id:
@@ -2171,6 +2216,93 @@ def _t_harga_sims(args: dict, user: dict) -> dict:
         }
     except Exception as e:  # pragma: no cover
         return {"error": f"gagal ambil harga SIMS: {e}"}
+
+
+def _t_buat_penawaran(args: dict, user: dict) -> dict:
+    """Buat Penawaran Penjualan Accurate + PDF resmi. Admin-only (dijaga 2 lapis:
+    tool spec + guard di sini + allow-list terpusat)."""
+    if not _is_admin(user):
+        return {"denied": True, "error": "Buat penawaran hanya untuk admin."}
+    if not accurate.available():
+        return {"error": "Accurate belum terkonfigurasi/aktif."}
+
+    nomor = (args.get("nomor") or "").strip()
+    if not nomor:
+        return {"error": "Nomor penawaran wajib (manual) — minta ke user."}
+    nama_pel = (args.get("pelanggan") or "").strip()
+    barang = args.get("barang") or []
+    if not nama_pel:
+        return {"error": "Nama pelanggan wajib."}
+    if not isinstance(barang, list) or not barang:
+        return {"error": "Daftar barang kosong."}
+
+    try:
+        # 1) pelanggan — cocokkan dari nama
+        cust = accurate.search_customers(nama_pel, limit=15)
+        if not cust:
+            return {"found": False, "error": f"Pelanggan '{nama_pel}' tidak ditemukan di Accurate."}
+        exact = [c for c in cust if (c["name"] or "").strip().lower() == nama_pel.lower()]
+        if len(cust) > 1 and not exact:
+            return {"found": False, "perlu_klarifikasi": True,
+                    "pesan": f"Ada {len(cust)} pelanggan cocok '{nama_pel}'. Sebutkan yang tepat.",
+                    "kandidat": [{"nama": c["name"], "no": c["no"]} for c in cust[:8]]}
+        pel = exact[0] if exact else cust[0]
+
+        # 2) barang — resolve tiap PN; kumpulkan yang tak ketemu
+        lines, tak_ada = [], []
+        for b in barang:
+            pn = str(b.get("part_number") or "").strip()
+            qty = float(b.get("qty") or 0)
+            if not pn or qty <= 0:
+                continue
+            it = accurate.item_for_quotation(pn)
+            if not it:
+                tak_ada.append(pn)
+                continue
+            harga = b.get("harga")
+            unit_price = float(harga) if harga not in (None, "") else float(it["price"] or 0)
+            lines.append({"item_id": it["id"], "name": it["name"], "qty": qty,
+                          "unit_price": unit_price, "unit_id": it["unit_id"], "pn": it["pn"]})
+        if tak_ada:
+            return {"found": False, "error": "Sebagian Part Number tak ada di Accurate — "
+                    "batalkan & sampaikan ke user, jangan buat penawaran sebagian.",
+                    "part_tidak_ditemukan": tak_ada}
+        if not lines:
+            return {"found": False, "error": "Tak ada baris barang valid."}
+
+        # 3) buat penawaran
+        tanggal = (args.get("tanggal") or "").strip() or time.strftime("%d/%m/%Y")
+        res = accurate.create_sales_quotation(
+            number=nomor, customer_id=pel["id"], lines=lines, transdate=tanggal,
+            description=(args.get("catatan") or ""))
+        qid = res.get("id")
+        if not qid:
+            return {"found": False, "error": "Penawaran gagal dibuat (tak ada id)."}
+
+        # 4) PDF resmi → kartu unduh
+        pdf = accurate.sales_quotation_pdf(int(qid))
+        judul = f"Penawaran {res.get('number') or nomor} — {pel['name']}"
+        fname = f"Penawaran_{(res.get('number') or nomor)}.pdf".replace("/", "-").replace(" ", "_")
+        export_id, filename = ai_export.stash_raw(judul, pdf, fname)
+
+        return {
+            "found": True,
+            "nomor": res.get("number") or nomor,
+            "pelanggan": pel["name"],
+            "jumlah_barang": len(lines),
+            "total": res.get("total"),
+            "barang": [{"pn": l["pn"], "nama": l["name"], "qty": l["qty"],
+                        "harga": l["unit_price"]} for l in lines],
+            "export_id": export_id, "filename": filename, "judul": judul,
+            "catatan": ("Penawaran DIBUAT di Accurate & PDF resmi siap. 📎 Kartu unduh PDF "
+                        "muncul di bawah jawaban — beri tahu user. Sebut nomor, pelanggan, "
+                        "jumlah barang, dan total. ⛔ JANGAN mengarang harga/total di luar data ini."),
+        }
+    except accurate.AccurateError as e:
+        return {"found": False, "error": f"Accurate: {e}"}
+    except Exception as e:  # pragma: no cover
+        logger.exception("buat_penawaran gagal")
+        return {"found": False, "error": f"Gagal membuat penawaran: {e}"}
 
 
 def _t_sheet_ringkasan(args: dict, user: dict) -> dict:
@@ -5026,6 +5158,7 @@ _DISPATCH = {
     "gambar_exploded_mesin": _t_gambar_exploded_mesin,
     "sheet_ringkasan": _t_sheet_ringkasan,
     "sheet_isi_kolom": _t_sheet_isi_kolom,
+    "buat_penawaran": _t_buat_penawaran,
 }
 
 
@@ -6449,7 +6582,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     def _capture_meta(name: str, args: dict, result: dict) -> None:
         """Kumpulkan metadata untuk tombol/kartu/gambar di frontend."""
         if name in ("buat_excel", "katalog_kategori", "katalog_mesin", "banding_rangka_massal",
-                    "sheet_isi_kolom") and result.get("found"):
+                    "sheet_isi_kolom", "buat_penawaran") and result.get("found"):
             item = {"id": result.get("export_id"), "filename": result.get("filename"),
                     "judul": result.get("judul"), "jumlah_baris": result.get("jumlah_baris")}
             if item["id"] and item not in excel_exports:

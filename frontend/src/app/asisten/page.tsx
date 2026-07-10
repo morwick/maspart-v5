@@ -80,6 +80,7 @@ const TOOL_LABELS: Record<string, string> = {
   katalog_kategori: "EPC · katalog bergambar",
   sheet_ringkasan: "Excel lampiran",
   sheet_isi_kolom: "Excel lampiran · isi kolom",
+  buat_penawaran: "Accurate · Penawaran",
 };
 
 // Peran kolom hasil deteksi server → label ramah.
