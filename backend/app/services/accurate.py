@@ -747,6 +747,124 @@ def enrich_warehouses() -> int:
             _gudang_enrich_running = False
 
 
+# ── Enrichment per-gudang CEPAT via Report (Kuantitas Barang per Gudang) ──────
+# Gantikan enrich_warehouses() yang 3.700 panggilan per-PN (~8–15 mnt) dengan
+# SATU laporan server-side yang di-export XLS (crosstab item×gudang) — ~4
+# panggilan, hitungan detik. Semua di host iris-report. Lihat memory
+# accurate-stok-report-cepat.
+_STOCK_REPORT_ID = 503
+_STOCK_REPORT_PLAN = "QuantityItemByWarehouseReport"
+
+
+def _stock_report_xls(session: dict[str, str]) -> bytes:
+    """Jalankan Report Kuantitas Barang per Gudang → XLSX. Best-effort raise."""
+    rep, dsi, jsid = _report_base(), session["dsi"], session["jsessionid"]
+    hdr = _sq_headers(dsi, jsid)
+    usi = _harvest_usi(session)
+
+    # 1) input default laporan (berisi 31 gudang + role + [Semua Cabang])
+    r1 = requests.post(f"{rep}/accurate/report/init-report-input.do",
+                       data={"id": _STOCK_REPORT_ID, "planId": _STOCK_REPORT_PLAN, "_dsi": dsi},
+                       headers=hdr, timeout=_HTTP_TIMEOUT, allow_redirects=False)
+    if _looks_expired(r1):
+        raise AccurateSessionExpired("Sesi kadaluarsa saat init report stok.")
+    ri_str = ((r1.json().get("d") or {}) or {}).get("reportInput")
+    if not ri_str:
+        raise AccurateError("init-report-input tak mengembalikan reportInput.")
+    ri = json.loads(ri_str)
+    ri.setdefault("param", {})["asOfDate"] = time.strftime("%d/%m/%Y")
+
+    # 2) jalankan (background) → bgPid
+    r2 = requests.post(f"{rep}/accurate/report/bg-execute-report.do",
+                       data={"id": _STOCK_REPORT_ID, "planId": _STOCK_REPORT_PLAN,
+                             "reportInput": json.dumps(ri, ensure_ascii=False),
+                             "pageIndex": 0, "_usi": usi, "_dsi": dsi},
+                       headers=hdr, timeout=_HTTP_TIMEOUT, allow_redirects=False)
+    bgpid = r2.json().get("b")
+    if not bgpid:
+        raise AccurateError(f"bg-execute-report gagal: {r2.text[:150]}")
+
+    # 3) poll sampai FINISHED → cacheId
+    cache_id = None
+    for _ in range(120):                      # maks ~2 mnt
+        rp = requests.post(f"{rep}/accurate/company/bg-proc-response.do",
+                           data={"bgPid": bgpid, "keepCache": "true", "_usi": usi, "_dsi": dsi},
+                           headers=hdr, timeout=_HTTP_TIMEOUT, allow_redirects=False)
+        d = rp.json().get("d") or {}
+        if d.get("status") == "FINISHED":
+            cache_id = ((d.get("response") or {}) or {}).get("cacheId")
+            break
+        time.sleep(1)
+    if not cache_id:
+        raise AccurateError("Report stok tak selesai (timeout poll).")
+
+    # 4) export XLSX (crosstab item×gudang)
+    r4 = requests.post(f"{rep}/accurate/report/export-report.do",
+                       data={"cacheId": cache_id, "exportType": "xls", "_usi": usi, "_dsi": dsi},
+                       headers=hdr, timeout=_HTTP_TIMEOUT + 45, allow_redirects=False)
+    if r4.content[:2] != b"PK":               # xlsx = arsip ZIP (magic PK)
+        raise AccurateError("Export report bukan XLSX.")
+    return r4.content
+
+
+def _parse_stock_report(data: bytes) -> dict[str, dict[str, float]]:
+    """Parse XLSX crosstab → {norm_pn: {gudang: qty>0}}. Kolom TOTAL diabaikan.
+    Kode barang ('NNNNNN.PN') → PN via parse_pn (SAMA dgn by_pn → kunci cocok)."""
+    import io
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(data), data_only=True)   # read_only gagal utk file ini
+    ws = wb.active
+    mr, mc = ws.max_row, ws.max_column
+    hi = next((i for i in range(1, 20)
+               if str(ws.cell(i, 1).value or "").strip().lower() == "kode barang"), None)
+    if not hi:
+        raise AccurateError("Header 'Kode Barang' tak ditemukan di report XLS.")
+    # kolom gudang = kolom 6+ ber-header, KECUALI kolom Total.
+    wh_cols = []
+    for j in range(6, mc + 1):
+        name = str(ws.cell(hi, j).value or "").strip()
+        if name and "total" not in name.lower():
+            wh_cols.append((j, name))
+    out: dict[str, dict[str, float]] = {}
+    for i in range(hi + 1, mr + 1):
+        code = ws.cell(i, 1).value
+        if not code:
+            continue
+        pn = _norm_pn(parse_pn(str(code)))
+        if not pn:
+            continue
+        g = {}
+        for j, name in wh_cols:
+            q = _num(ws.cell(i, j).value)
+            if q > 0:
+                g[name] = q
+        if g:
+            out[pn] = g
+    return out
+
+
+def enrich_warehouses_via_report() -> int:
+    """Isi indeks per-gudang via Report (CEPAT). Fallback ke enrich_warehouses
+    (per-PN lambat) bila report gagal. Return jumlah PN ter-enrich."""
+    def _do(sess):
+        return _parse_stock_report(_stock_report_xls(sess))
+
+    sess = _ensure_session()
+    try:
+        by_g = _do(sess)
+    except AccurateSessionExpired:
+        if not credentials_configured():
+            raise
+        by_g = _do(_refresh_session())
+    except AccurateError as e:
+        logger.warning("[accurate] enrichment via report gagal (%s) — fallback per-PN", e)
+        return enrich_warehouses()
+    _index_cache["by_gudang"] = by_g
+    _index_cache["gudang_ts"] = time.time()
+    logger.info("[accurate] enrichment per-gudang via REPORT OK (%d PN, ~detik)", len(by_g))
+    return len(by_g)
+
+
 def stock_for(part_number: str, force: bool = False) -> dict[str, Any] | None:
     """Stok Accurate untuk 1 PN (atau None bila tak ada di Accurate)."""
     key = _norm_pn(part_number)
@@ -845,7 +963,7 @@ def _do_scheduled_refresh() -> None:
         logger.info("[accurate] refresh terjadwal OK (%d barang); enrichment per-gudang…",
                     len(_index_cache["items"]))
         try:
-            n = enrich_warehouses()
+            n = enrich_warehouses_via_report()   # CEPAT: 1 laporan XLS, ~detik
             logger.info("[accurate] enrichment per-gudang OK (%d PN)", n)
         except Exception as e:
             logger.warning("[accurate] enrichment per-gudang gagal (%s) — agregat tetap dipakai", e)
