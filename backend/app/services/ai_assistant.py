@@ -2241,6 +2241,7 @@ def _t_buat_penawaran(args: dict, user: dict) -> dict:
     if not isinstance(barang, list) or not barang:
         return {"error": "Daftar barang kosong."}
 
+    qid = None
     try:
         # 1) pelanggan — Accurate mencocokkan sebagian ('cio'→ARGCIO). Banyak cocok
         #    ('jaya') → minta klarifikasi, JANGAN menebak.
@@ -2324,6 +2325,14 @@ def _t_buat_penawaran(args: dict, user: dict) -> dict:
     except Exception as e:  # pragma: no cover
         logger.exception("buat_penawaran gagal")
         return {"found": False, "error": f"Gagal membuat penawaran: {e}"}
+    finally:
+        # Penawaran sudah dibuat → LEPAS sesi Accurate agar orang lain bisa login
+        # (akun hanya 1 sesi). Best-effort; tak memengaruhi hasil di atas.
+        if qid:
+            try:
+                accurate.logout()
+            except Exception:  # pragma: no cover
+                pass
 
 
 def _t_sheet_ringkasan(args: dict, user: dict) -> dict:

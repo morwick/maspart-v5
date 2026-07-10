@@ -277,6 +277,73 @@ def _login_guarded() -> dict[str, str]:
         raise
 
 
+# ── Logout & idle-logout ────────────────────────────────────────────────────
+# Aturan keras pemilik: akun Accurate hanya boleh 1 SESI/perangkat. Selama MASPART
+# memegang sesi, orang lain TAK BISA login untuk membuat penawaran. Maka MASPART
+# harus melepas sesi secepatnya: logout SETELAH membuat penawaran, dan otomatis
+# logout saat IDLE. Aman: _ensure_session auto-login lagi saat file sesi hilang,
+# jadi stok/harga tetap jalan (login on-demand). Cache data indeks TAK terpengaruh.
+# Ambang idle 2 mnt = kompromi: cukup singkat agar orang lain cepat bisa masuk,
+# tapi tak thrashing login (tiap login SSO menendang sesi orang lain).
+_IDLE_LOGOUT_SEC = 120              # 2 menit tanpa aktivitas → logout
+_last_activity = time.monotonic()
+_idle_started = False
+_idle_lock = threading.Lock()
+
+
+def _mark_activity() -> None:
+    global _last_activity
+    _last_activity = time.monotonic()
+
+
+def logout() -> bool:
+    """Tutup sesi Accurate (best-effort): close-database.do lalu hapus file sesi
+    → panggilan berikutnya auto-login segar. TAK PERNAH melempar."""
+    try:
+        s = load_session()
+    except AccurateSessionMissing:
+        return True                 # sudah tak ada sesi
+    try:
+        requests.post(f"{_base()}/accurate/close-database.do",
+                      data={"_dsi": s["dsi"]},
+                      headers={"User-Agent": _UA, "X-Requested-With": "XMLHttpRequest",
+                               "Origin": _base(), "Referer": f"{_base()}/accurate/?_dsi={s['dsi']}",
+                               "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                               "Cookie": f"JSESSIONID={s['jsessionid']}"},
+                      timeout=_HTTP_TIMEOUT, allow_redirects=False)
+    except Exception:
+        pass                        # server mungkin sudah menutup; tetap hapus file
+    try:
+        _session_file().unlink(missing_ok=True)
+    except OSError:
+        pass
+    logger.info("Accurate: sesi ditutup (logout).")
+    return True
+
+
+def _idle_logout_loop() -> None:
+    while True:
+        time.sleep(60)
+        try:
+            idle = time.monotonic() - _last_activity
+            if idle > _IDLE_LOGOUT_SEC and _session_file().exists():
+                logout()
+        except Exception:           # daemon tak boleh mati
+            pass
+
+
+def start_idle_logout() -> bool:
+    """Mulai daemon auto-logout saat idle. Idempoten (aman dipanggil berulang)."""
+    global _idle_started
+    with _idle_lock:
+        if _idle_started:
+            return False
+        _idle_started = True
+    threading.Thread(target=_idle_logout_loop, daemon=True,
+                     name="accurate-idle-logout").start()
+    return True
+
+
 def _ensure_session() -> dict[str, str]:
     """Sesi siap-pakai: dari file, atau auto-login bila file kosong & kredensial ada."""
     try:
@@ -326,6 +393,7 @@ def _call(session: dict[str, str], path: str, data: dict[str, Any]) -> dict[str,
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         "Cookie": f"JSESSIONID={session['jsessionid']}",
     }
+    _mark_activity()   # jaga sesi hidup selama masih dipakai (idle-logout menunda)
     try:
         resp = requests.post(f"{_base()}/accurate/{path}", data={"_dsi": dsi, **data},
                              headers=headers, timeout=_HTTP_TIMEOUT, allow_redirects=False)

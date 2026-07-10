@@ -53,6 +53,12 @@ def _warmup():
     except Exception as e:  # pragma: no cover
         print(f"[startup] scheduler refresh Accurate gagal: {e}")
     try:
+        # Auto-logout Accurate saat idle: akun hanya 1 sesi, jadi sesi tak boleh
+        # dibiarkan menyala agar orang lain bisa login membuat penawaran.
+        accurate.start_idle_logout()
+    except Exception as e:  # pragma: no cover
+        print(f"[startup] scheduler idle-logout Accurate gagal: {e}")
+    try:
         # Usulan sinonim otomatis harian (loop belajar): miss baru cukup banyak →
         # LLM menyusun usulan di latar; admin tinggal Setujui di halaman
         # Pencarian Nihil.

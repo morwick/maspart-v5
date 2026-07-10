@@ -34,6 +34,13 @@ def acc(monkeypatch):
     monkeypatch.setattr(ai.accurate, "next_quotation_number", lambda: "MASPART-01")
     monkeypatch.setattr(ai.accurate, "sales_quotation_pdf", lambda qid, layout_id=50: b"%PDF-1.4 fake")
     monkeypatch.setattr(ai.accurate, "AccurateError", Exception, raising=False)
+    dibuat["logout_calls"] = 0
+
+    def _logout():
+        dibuat["logout_calls"] += 1
+        return True
+
+    monkeypatch.setattr(ai.accurate, "logout", _logout)
     return dibuat
 
 
@@ -132,6 +139,33 @@ def test_harga_selalu_dari_accurate_abaikan_override(acc):
     ai._t_buat_penawaran({"pelanggan": "CV ANUGERAH",
                           "barang": [{"part_number": "AZ9925520271", "qty": 1, "harga": 5}]}, ADMIN)
     assert acc["lines"][0]["unit_price"] == 90000      # harga Accurate, bukan 5
+
+
+# ── Logout sesi setelah penawaran (akun Accurate 1 sesi) ─────────────────────
+
+def test_logout_setelah_penawaran_dibuat(acc):
+    ai._t_buat_penawaran({"pelanggan": "CV ANUGERAH",
+                          "barang": [{"part_number": "WG9925520270", "qty": 1}]}, ADMIN)
+    assert acc["logout_calls"] == 1      # sesi dilepas setelah buat
+
+
+def test_tak_logout_bila_penawaran_tak_jadi(acc):
+    # Pelanggan tak ada → penawaran tak dibuat → TIDAK perlu logout (tak ada sesi
+    # write yang dipegang; logout hanya setelah benar-benar membuat penawaran).
+    ai._t_buat_penawaran({"pelanggan": "TIDAK ADA",
+                          "barang": [{"part_number": "WG9925520270", "qty": 1}]}, ADMIN)
+    assert acc["logout_calls"] == 0
+
+
+def test_logout_walau_pdf_gagal(monkeypatch, acc):
+    """PDF gagal setelah penawaran dibuat → sesi TETAP dilepas (finally)."""
+    def _boom(qid, layout_id=50):
+        raise ai.accurate.AccurateError("pdf gagal")
+    monkeypatch.setattr(ai.accurate, "sales_quotation_pdf", _boom)
+    r = ai._t_buat_penawaran({"pelanggan": "CV ANUGERAH",
+                              "barang": [{"part_number": "WG9925520270", "qty": 1}]}, ADMIN)
+    assert r["found"] is False
+    assert acc["logout_calls"] == 1      # tetap logout walau PDF gagal
 
 
 def test_capture_meta_munculkan_kartu_di_frontend():
