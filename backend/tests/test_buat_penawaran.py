@@ -31,6 +31,7 @@ def acc(monkeypatch):
         return {"id": 22964, "number": number, "total": sum(l["qty"] * l["unit_price"] for l in lines)}
 
     monkeypatch.setattr(ai.accurate, "create_sales_quotation", _create)
+    monkeypatch.setattr(ai.accurate, "next_quotation_number", lambda: "MASPART-01")
     monkeypatch.setattr(ai.accurate, "sales_quotation_pdf", lambda qid, layout_id=50: b"%PDF-1.4 fake")
     monkeypatch.setattr(ai.accurate, "AccurateError", Exception, raising=False)
     return dibuat
@@ -45,32 +46,26 @@ def test_tool_hanya_ditawarkan_ke_admin():
 
 
 def test_handler_tolak_non_admin(acc):
-    r = ai._t_buat_penawaran({"nomor": "PN-1", "pelanggan": "CV ANUGERAH",
+    r = ai._t_buat_penawaran({"pelanggan": "CV ANUGERAH",
                               "barang": [{"part_number": "WG9925520270", "qty": 1}]}, USER)
     assert r["denied"] is True
 
 
 def test_run_tool_tolak_non_admin_terpusat(acc):
-    r = ai._run_tool("buat_penawaran", {"nomor": "PN-1", "pelanggan": "x", "barang": []}, USER)
+    r = ai._run_tool("buat_penawaran", {"pelanggan": "x", "barang": []}, USER)
     assert r["denied"] is True
 
 
 # ── Validasi input ───────────────────────────────────────────────────────────
 
-def test_nomor_wajib(acc):
-    r = ai._t_buat_penawaran({"nomor": "  ", "pelanggan": "CV ANUGERAH",
-                              "barang": [{"part_number": "WG9925520270", "qty": 1}]}, ADMIN)
-    assert "error" in r and "omor" in r["error"]
-
-
 def test_pelanggan_tak_ditemukan(acc):
-    r = ai._t_buat_penawaran({"nomor": "PN-1", "pelanggan": "TIDAK ADA",
+    r = ai._t_buat_penawaran({"pelanggan": "TIDAK ADA",
                               "barang": [{"part_number": "WG9925520270", "qty": 1}]}, ADMIN)
     assert r["found"] is False and "tidak ditemukan" in r["error"].lower()
 
 
 def test_part_tak_ada_batalkan_semua(acc):
-    r = ai._t_buat_penawaran({"nomor": "PN-1", "pelanggan": "CV ANUGERAH",
+    r = ai._t_buat_penawaran({"pelanggan": "CV ANUGERAH",
                               "barang": [{"part_number": "WG9925520270", "qty": 1},
                                          {"part_number": "ZZZ000", "qty": 2}]}, ADMIN)
     # Satu PN tak ada → TIDAK buat penawaran sebagian.
@@ -78,30 +73,65 @@ def test_part_tak_ada_batalkan_semua(acc):
     assert "number" not in acc      # create_sales_quotation TIDAK dipanggil
 
 
+def test_barang_tanpa_harga_dibatalkan(monkeypatch, acc):
+    """Harga jual Accurate 0 → batal (tak menawar/mengarang harga)."""
+    monkeypatch.setattr(ai.accurate, "item_for_quotation",
+                        lambda pn: {"id": 9, "no": "z", "pn": pn.upper(), "name": "X",
+                                    "unit_id": 100, "unit": "Pc", "price": 0, "available": 1})
+    r = ai._t_buat_penawaran({"pelanggan": "CV ANUGERAH",
+                              "barang": [{"part_number": "WG9925520270", "qty": 1}]}, ADMIN)
+    assert r["found"] is False and r["part_tanpa_harga"] == ["WG9925520270"]
+    assert "number" not in acc
+
+
+# ── Nomor otomatis MASPART-NN (bukan penomoran otomatis Accurate) ────────────
+
+def test_nomor_dibuat_maspart_bukan_dari_user(acc):
+    r = ai._t_buat_penawaran({
+        "pelanggan": "CV ANUGERAH", "tanggal": "10/07/2026",
+        "barang": [{"part_number": "WG9925520270", "qty": 2}],
+    }, ADMIN)
+    assert r["found"] is True
+    assert r["nomor"] == "MASPART-01"        # dari next_quotation_number, bukan user
+    assert acc["number"] == "MASPART-01"     # nomor yg dikirim ke Accurate
+
+
+def test_next_quotation_number_format():
+    """MASPART-NN dari nomor tertinggi + 1, zero-pad 2 digit."""
+    from app.services import accurate as a
+    import re
+    rx = a._MASPART_NUM_RE
+    assert rx.match("MASPART-01").group(1) == "01" or int(rx.match("MASPART-01").group(1)) == 1
+    assert int(rx.match("MASPART-07").group(1)) == 7
+    assert int(rx.match("MASPART-123").group(1)) == 123
+    assert rx.match("PQ2607000171") is None          # nomor Accurate diabaikan
+    assert rx.match("TEST-CLD-002") is None
+
+
 # ── Alur sukses ──────────────────────────────────────────────────────────────
 
 def test_buat_sukses_hasilkan_kartu_pdf(acc):
     r = ai._t_buat_penawaran({
-        "nomor": "PN-2026-001", "pelanggan": "CV ANUGERAH", "tanggal": "10/07/2026",
+        "pelanggan": "CV ANUGERAH", "tanggal": "10/07/2026",
         "barang": [{"part_number": "WG9925520270", "qty": 2},
-                   {"part_number": "AZ9925520271", "qty": 3, "harga": 100000}],
+                   {"part_number": "AZ9925520271", "qty": 3}],
     }, ADMIN)
     assert r["found"] is True
-    assert r["nomor"] == "PN-2026-001" and r["pelanggan"] == "CV ANUGERAH"
+    assert r["nomor"] == "MASPART-01" and r["pelanggan"] == "CV ANUGERAH"
     assert r["jumlah_barang"] == 2
-    # harga baris 1 = default Accurate; baris 2 = harga user (100000)
+    # HARGA selalu dari Accurate (tak ada override) — aturan pemilik.
     assert acc["lines"][0]["unit_price"] == 1500000
-    assert acc["lines"][1]["unit_price"] == 100000
-    assert acc["number"] == "PN-2026-001"      # nomor MANUAL diteruskan apa adanya
+    assert acc["lines"][1]["unit_price"] == 90000
     # kartu unduh PDF benar-benar tersimpan & bisa diambil
     data, fname = ai_export.generic_excel(r["export_id"])
     assert data == b"%PDF-1.4 fake" and fname.endswith(".pdf")
 
 
-def test_harga_default_dari_accurate_bila_tak_disebut(acc):
-    ai._t_buat_penawaran({"nomor": "PN-9", "pelanggan": "CV ANUGERAH",
-                          "barang": [{"part_number": "AZ9925520271", "qty": 1}]}, ADMIN)
-    assert acc["lines"][0]["unit_price"] == 90000      # harga Accurate
+def test_harga_selalu_dari_accurate_abaikan_override(acc):
+    """Walau user menyisipkan 'harga', DIABAIKAN — pakai harga Accurate."""
+    ai._t_buat_penawaran({"pelanggan": "CV ANUGERAH",
+                          "barang": [{"part_number": "AZ9925520271", "qty": 1, "harga": 5}]}, ADMIN)
+    assert acc["lines"][0]["unit_price"] == 90000      # harga Accurate, bukan 5
 
 
 def test_capture_meta_munculkan_kartu_di_frontend():

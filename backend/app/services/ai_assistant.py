@@ -1416,28 +1416,31 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "description": (
                     "Buat Penawaran Penjualan (Sales Quotation) di Accurate untuk seorang "
                     "pelanggan berisi daftar barang, lalu hasilkan PDF resmi Accurate yang "
-                    "bisa diunduh/dikirim. HANYA admin. WAJIB minta NOMOR penawaran dari "
-                    "user (diisi manual — penomoran otomatis TIDAK dipakai). Pelanggan "
-                    "dicocokkan dari nama; tiap barang dari Part Number (harus ada di "
-                    "Accurate). Harga per barang boleh ditentukan user; bila tidak, pakai "
-                    "harga jual Accurate. Konfirmasikan ringkasan sebelum membuat bila ragu."
+                    "bisa diunduh/dikirim. HANYA admin.\n"
+                    "⛔ NOMOR dibuat OTOMATIS oleh sistem = 'MASPART-01', 'MASPART-02', dst. "
+                    "JANGAN minta/menetapkan nomor ke user; penomoran otomatis Accurate TIDAK "
+                    "PERNAH dipakai.\n"
+                    "⛔ Sistem HANYA mengatur KUANTITAS tiap part & membuat penawaran — tidak "
+                    "mengubah apa pun yang lain. HARGA memakai harga jual Accurate apa adanya "
+                    "(JANGAN menetapkan/menawar harga).\n"
+                    "Pelanggan dicocokkan dari nama (Accurate mencocokkan sebagian, mis. 'cio' "
+                    "→ PT ARGCIO JAYA ABADI). Bila BANYAK pelanggan cocok (mis. 'jaya'), tool "
+                    "mengembalikan daftar kandidat — TANYAKAN ke user mana yang dimaksud, "
+                    "jangan menebak. Tiap barang dari Part Number (harus ada di Accurate)."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "nomor": {"type": "string",
-                                  "description": "Nomor penawaran MANUAL dari user (mis. 'PN-2026-001'). WAJIB."},
                         "pelanggan": {"type": "string",
-                                      "description": "Nama pelanggan (dicari di Accurate)."},
+                                      "description": "Nama pelanggan (dicari di Accurate; pencocokan sebagian)."},
                         "barang": {
                             "type": "array",
-                            "description": "Daftar barang penawaran.",
+                            "description": "Daftar barang penawaran (hanya Part Number & kuantitas).",
                             "items": {
                                 "type": "object",
                                 "properties": {
                                     "part_number": {"type": "string", "description": "Part Number barang (harus ada di Accurate)."},
                                     "qty": {"type": "number", "description": "Kuantitas."},
-                                    "harga": {"type": "number", "description": "Harga jual satuan (opsional; default harga Accurate)."},
                                 },
                                 "required": ["part_number", "qty"],
                             },
@@ -1446,7 +1449,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                                     "description": "Tanggal dd/mm/yyyy (opsional; default hari ini)."},
                         "catatan": {"type": "string", "description": "Keterangan (opsional)."},
                     },
-                    "required": ["nomor", "pelanggan", "barang"],
+                    "required": ["pelanggan", "barang"],
                 },
             },
         })
@@ -2220,15 +2223,17 @@ def _t_harga_sims(args: dict, user: dict) -> dict:
 
 def _t_buat_penawaran(args: dict, user: dict) -> dict:
     """Buat Penawaran Penjualan Accurate + PDF resmi. Admin-only (dijaga 2 lapis:
-    tool spec + guard di sini + allow-list terpusat)."""
+    tool spec + guard di sini + allow-list terpusat).
+
+    ⛔ RUANG LINGKUP TERKUNCI (aturan keras pemilik): tool ini HANYA MEMBUAT
+    penawaran & mengatur KUANTITAS part. TIDAK mengubah/menghapus apa pun di
+    Accurate (tak ada delete/update). NOMOR = MASPART-NN otomatis (penomoran
+    otomatis Accurate tak dipakai). HARGA = harga jual Accurate apa adanya."""
     if not _is_admin(user):
         return {"denied": True, "error": "Buat penawaran hanya untuk admin."}
     if not accurate.available():
         return {"error": "Accurate belum terkonfigurasi/aktif."}
 
-    nomor = (args.get("nomor") or "").strip()
-    if not nomor:
-        return {"error": "Nomor penawaran wajib (manual) — minta ke user."}
     nama_pel = (args.get("pelanggan") or "").strip()
     barang = args.get("barang") or []
     if not nama_pel:
@@ -2237,19 +2242,26 @@ def _t_buat_penawaran(args: dict, user: dict) -> dict:
         return {"error": "Daftar barang kosong."}
 
     try:
-        # 1) pelanggan — cocokkan dari nama
-        cust = accurate.search_customers(nama_pel, limit=15)
+        # 1) pelanggan — Accurate mencocokkan sebagian ('cio'→ARGCIO). Banyak cocok
+        #    ('jaya') → minta klarifikasi, JANGAN menebak.
+        cust = accurate.search_customers(nama_pel, limit=20)
         if not cust:
             return {"found": False, "error": f"Pelanggan '{nama_pel}' tidak ditemukan di Accurate."}
         exact = [c for c in cust if (c["name"] or "").strip().lower() == nama_pel.lower()]
         if len(cust) > 1 and not exact:
-            return {"found": False, "perlu_klarifikasi": True,
-                    "pesan": f"Ada {len(cust)} pelanggan cocok '{nama_pel}'. Sebutkan yang tepat.",
-                    "kandidat": [{"nama": c["name"], "no": c["no"]} for c in cust[:8]]}
+            return {
+                "found": False, "perlu_klarifikasi": True,
+                "pesan": (f"Ada {len(cust)} pelanggan cocok '{nama_pel}'. Tampilkan daftar ini "
+                          "ke user (nama + kode) dan minta ia memilih satu — jangan menebak. "
+                          "Setelah user memilih, panggil buat_penawaran lagi dgn nama pelanggan "
+                          "yang lebih lengkap/tepat."),
+                "kandidat": [{"nama": c["name"], "kode": c["no"]} for c in cust[:12]],
+            }
         pel = exact[0] if exact else cust[0]
 
-        # 2) barang — resolve tiap PN; kumpulkan yang tak ketemu
-        lines, tak_ada = [], []
+        # 2) barang — resolve tiap PN. HARGA = harga jual Accurate apa adanya
+        #    (aturan pemilik: hanya kuantitas yang boleh diatur, tak menawar harga).
+        lines, tak_ada, tanpa_harga = [], [], []
         for b in barang:
             pn = str(b.get("part_number") or "").strip()
             qty = float(b.get("qty") or 0)
@@ -2259,18 +2271,27 @@ def _t_buat_penawaran(args: dict, user: dict) -> dict:
             if not it:
                 tak_ada.append(pn)
                 continue
-            harga = b.get("harga")
-            unit_price = float(harga) if harga not in (None, "") else float(it["price"] or 0)
+            unit_price = float(it["price"] or 0)
+            if unit_price <= 0:
+                tanpa_harga.append(it["pn"])
+                continue
             lines.append({"item_id": it["id"], "name": it["name"], "qty": qty,
                           "unit_price": unit_price, "unit_id": it["unit_id"], "pn": it["pn"]})
         if tak_ada:
             return {"found": False, "error": "Sebagian Part Number tak ada di Accurate — "
                     "batalkan & sampaikan ke user, jangan buat penawaran sebagian.",
                     "part_tidak_ditemukan": tak_ada}
+        if tanpa_harga:
+            return {"found": False, "error": "Sebagian barang belum punya harga jual di "
+                    "Accurate (Rp 0). Penawaran dibatalkan — minta admin set harga jualnya "
+                    "di Accurate dulu. ⛔ JANGAN mengarang/menawar harga.",
+                    "part_tanpa_harga": tanpa_harga}
         if not lines:
             return {"found": False, "error": "Tak ada baris barang valid."}
 
-        # 3) buat penawaran
+        # 3) buat penawaran. NOMOR dibuat sistem = MASPART-NN. Penomoran otomatis
+        #    Accurate TIDAK PERNAH dipakai (aturan keras pemilik).
+        nomor = accurate.next_quotation_number()
         tanggal = (args.get("tanggal") or "").strip() or time.strftime("%d/%m/%Y")
         res = accurate.create_sales_quotation(
             number=nomor, customer_id=pel["id"], lines=lines, transdate=tanggal,

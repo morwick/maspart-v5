@@ -1056,6 +1056,36 @@ def _save_quotation(session, usi, defaults, *, number, customer_id, lines,
     return j.get("r") or {}
 
 
+_MASPART_NUM_RE = re.compile(r"MASPART-0*(\d+)\s*$", re.I)
+
+
+def next_quotation_number() -> str:
+    """Nomor penawaran MASPART BERIKUTNYA: 'MASPART-NN' (NN = nomor MASPART
+    tertinggi yang sudah ada + 1, mulai 01). Dihitung dari dokumen Accurate →
+    tahan restart & tak pernah bentrok.
+
+    ⛔⛔ PENOMORAN OTOMATIS ACCURATE TIDAK PERNAH DIPAKAI. MASPART selalu memasok
+    nomornya sendiri (dikirim sbg param.number manual di _save_quotation). Aturan
+    keras dari pemilik: toggle 'Penomoran Otomatis' harus SELALU MATI."""
+    def _do(sess):
+        rows = _call(sess, "customer/search-sales-quotation.do",
+                     {"start": 0, "limit": 200, "keywords": "MASPART"}).get("d") or []
+        mx = 0
+        for r in rows:
+            m = _MASPART_NUM_RE.match(str(r.get("number") or "").strip())
+            if m:
+                mx = max(mx, int(m.group(1)))
+        return f"MASPART-{mx + 1:02d}"
+
+    sess = _ensure_session()
+    try:
+        return _do(sess)
+    except AccurateSessionExpired:
+        if not credentials_configured():
+            raise
+        return _do(_refresh_session())
+
+
 def create_sales_quotation(*, number: str, customer_id: int, lines: list[dict],
                            transdate: str, taxable: bool = True, inclusive: bool = True,
                            description: str = "") -> dict[str, Any]:
@@ -1118,18 +1148,10 @@ def sales_quotation_pdf(quotation_id: int, *, layout_id: int = 50) -> bytes:
         return _flow(_refresh_session())
 
 
-def delete_sales_quotation(quotation_id: int) -> bool:
-    """Hapus penawaran (untuk pembatalan/uji). True bila sukses."""
-    def _do(sess):
-        j = _call(sess, "customer/delete-sales-quotation.do", {"id": quotation_id})
-        return bool(j.get("s"))
-    sess = _ensure_session()
-    try:
-        return _do(sess)
-    except AccurateSessionExpired:
-        if not credentials_configured():
-            raise
-        return _do(_refresh_session())
+# ⛔⛔ SENGAJA TIDAK ADA fungsi hapus/ubah penawaran (delete/update/void). Aturan
+# keras pemilik: aplikasi HANYA boleh MEMBUAT penawaran (kuantitas part) — tak
+# boleh mengubah atau menghapus apa pun di Accurate. Jangan menambah endpoint
+# tulis Accurate lain tanpa persetujuan pemilik.
 
 
 # ── CLI selftest (tanpa server) ────────────────────────────────────────────
