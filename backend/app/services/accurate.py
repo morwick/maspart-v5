@@ -527,67 +527,34 @@ def _warehouse_retry(item_id: Any) -> dict[str, Any]:
         return _warehouse_raw(_refresh_session(), item_id)
 
 
-# Cache stok per-PN (TTL pendek): tekan latensi detail_part & lalu-lintas Accurate
-# saat PN sama dilihat berulang / dipanggil beberapa tool. Stok tak berubah tiap detik.
-_STOCK_CACHE_TTL = 90
-_stock_cache: dict[str, tuple[float, Any]] = {}
-_stock_cache_lock = threading.Lock()
-
-
 def stock_full(part_number: str) -> dict[str, Any] | None:
-    """Stok Accurate 1 PN: agregat + harga dari **INDEKS BERSAMA** (tarikan
-    terjadwal tiap ``_INDEX_TTL`` — TIDAK menembak pencarian Accurate per-PN),
-    plus rincian **per gudang** yang tetap ditarik live per-PN (data per-gudang
-    tidak ikut tarikan massal; 1 panggilan kecil, cache ~90 dtk, non-fatal).
+    """Stok Accurate 1 PN: agregat + harga + rincian per-gudang, SEMUA dari
+    **INDEKS BERSAMA** (tarikan terjadwal tiap ``_INDEX_TTL``).
 
-    Non-blocking: indeks belum siap (cold start) / PN tak ada di Accurate →
-    None → pemanggil fallback Excel. ``per_gudang`` = daftar {gudang, deskripsi,
-    qty, gudang_id} untuk gudang berstok > 0 (urut qty menurun).
+    ⛔ ATURAN KERAS PEMILIK: BACA HANYA DARI CACHE — TIDAK PERNAH login/menembak
+    Accurate live per-PN. Semua login untuk baca terjadi SEKALI per 5 jam
+    (refresh + enrichment). Bila rincian per-gudang belum ada di indeks (mis.
+    ~8 mnt setelah boot sebelum enrichment tuntas), `per_gudang` KOSONG dulu —
+    terisi otomatis di siklus enrichment berikutnya. Login live HANYA untuk
+    membuat penawaran.
+
+    Non-blocking: indeks belum siap / PN tak ada → None → pemanggil fallback Excel.
     """
     want = _norm_pn(part_number)
     if not want:
         return None
-    now = time.time()
-    with _stock_cache_lock:
-        c = _stock_cache.get(want)
-        if c and now - c[0] < _STOCK_CACHE_TTL:
-            return c[1]
-
-    def _cache(v: Any) -> Any:
-        with _stock_cache_lock:
-            _stock_cache[want] = (time.time(), v)
-        return v
-
     entry = (_index_cache.get("by_pn") or {}).get(want)
     if not entry:
-        return _cache(None)
+        return None
     base = dict(entry)
-    # Rincian per-gudang: UTAMA dari INDEKS (enrichment 5-jam, dibagi ke semua fitur —
-    # tanpa panggilan live). Fallback SATU panggilan live per-PN hanya bila PN belum
-    # ter-enrich (mis. window ~8 mnt setelah boot / barang baru berstok).
+    # Rincian per-gudang HANYA dari indeks (enrichment 5-jam). Belum ter-enrich →
+    # kosong (TANPA panggilan live — dulu di sini ada _warehouse_retry yang login).
     gmap = (_index_cache.get("by_gudang") or {}).get(want)
-    if gmap is not None:
-        per = [{"gudang": g, "qty": q} for g, q in
-               sorted(gmap.items(), key=lambda kv: kv[1], reverse=True)]
-    else:
-        per = []
-        try:
-            wd = _warehouse_retry(base.get("accurate_id")).get("d") or {}
-            for w in wd.get("detailWarehouseData") or []:
-                qty = _num(w.get("balance"))
-                if qty <= 0:
-                    continue
-                per.append({
-                    "gudang": w.get("warehouseName") or w.get("name") or "",
-                    "deskripsi": w.get("description") or "",
-                    "qty": qty,
-                    "gudang_id": w.get("id"),
-                })
-            per.sort(key=lambda x: x["qty"], reverse=True)
-        except AccurateError:
-            per = []  # non-fatal: agregat tetap tampil
-    base["per_gudang"] = per
-    return _cache(base)
+    base["per_gudang"] = (
+        [{"gudang": g, "qty": q} for g, q in sorted(gmap.items(), key=lambda kv: kv[1], reverse=True)]
+        if gmap else []
+    )
+    return base
 
 
 def fetch_all_items() -> list[dict[str, Any]]:

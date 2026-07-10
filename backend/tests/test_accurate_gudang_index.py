@@ -81,7 +81,6 @@ def test_items_matching(monkeypatch):
 # ── stock_full: per-gudang dari INDEKS (tanpa live) + fallback live ──────────
 def test_stock_full_pakai_indeks(monkeypatch):
     # PN ter-enrich → per_gudang dari by_gudang; _warehouse_retry TAK dipanggil.
-    monkeypatch.setattr(ac, "_stock_cache", {})
     monkeypatch.setitem(ac._index_cache, "by_pn",
                         {"PN1": {"pn": "PN1", "name": "X", "available_to_sell": 11.0, "accurate_id": 1}})
     monkeypatch.setitem(ac._index_cache, "by_gudang",
@@ -97,13 +96,14 @@ def test_stock_full_pakai_indeks(monkeypatch):
     assert sf["per_gudang"][0]["qty"] == 9.0                   # urut qty menurun
 
 
-def test_stock_full_fallback_live(monkeypatch):
-    # PN belum ter-enrich (tak di by_gudang) → 1 panggilan live per-PN.
-    monkeypatch.setattr(ac, "_stock_cache", {})
+def test_stock_full_belum_enrich_tanpa_live(monkeypatch):
+    # ⛔ ATURAN KERAS: PN belum ter-enrich → per_gudang KOSONG, TANPA panggilan
+    # live (dulu ada fallback live per-PN — kini dihapus, login hanya utk penawaran).
     monkeypatch.setitem(ac._index_cache, "by_pn",
                         {"PN2": {"pn": "PN2", "name": "Y", "available_to_sell": 4.0, "accurate_id": 2}})
-    monkeypatch.setitem(ac._index_cache, "by_gudang", {})      # kosong → fallback
+    monkeypatch.setitem(ac._index_cache, "by_gudang", {})      # kosong
     monkeypatch.setattr(ac, "_warehouse_retry",
-                        lambda i: _wh([{"warehouseName": "05.Makasar", "balance": 4.0}]))
+                        lambda i: (_ for _ in ()).throw(AssertionError("dilarang login live")))
     sf = ac.stock_full("PN2")
-    assert [g["gudang"] for g in sf["per_gudang"]] == ["05.Makasar"]
+    assert sf["available_to_sell"] == 4.0     # agregat tetap dari indeks
+    assert sf["per_gudang"] == []             # kosong sampai enrichment 5-jam berikutnya

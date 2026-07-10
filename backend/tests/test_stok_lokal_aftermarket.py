@@ -37,12 +37,13 @@ NOISE = {"no": "004004.XYZ", "pn": "XYZ", "name": "Oli Mesin 10L",
          "item_type": "Persediaan", "price": 500000.0, "accurate_id": 14}
 
 
-def _seed_index(monkeypatch, items):
+def _seed_index(monkeypatch, items, by_gudang=None):
     monkeypatch.setattr(accurate, "_index_cache", {
         "ts": 123.0, "items": list(items),
-        "by_pn": {accurate.norm_pn(i["pn"]): i for i in items}, "snap": {},
+        "by_pn": {accurate.norm_pn(i["pn"]): i for i in items},
+        # per-gudang HANYA dari indeks (enrichment 5-jam) — tak ada panggilan live.
+        "by_gudang": by_gudang or {}, "snap": {},
     })
-    monkeypatch.setattr(accurate, "_stock_cache", {})
 
 
 # ── accurate.search_index ────────────────────────────────────────────────────
@@ -124,32 +125,45 @@ def test_cari_part_miss_tetap_dicatat_bila_stok_lokal_nihil(mock_catalog_kosong,
 
 # ── detail_part: fallback PN Accurate-only ───────────────────────────────────
 
+# Rincian per-gudang datang dari INDEKS (enrichment 5-jam), BUKAN panggilan live.
+_REG_GUDANG = {accurate.norm_pn(REGULATOR["pn"]): {"01.Jakarta": 4}}
+
+
 def test_detail_part_fallback_stok_lokal(monkeypatch):
     monkeypatch.setattr(part_index, "search_part_number", lambda t: [])
-    _seed_index(monkeypatch, [REGULATOR])
+    _seed_index(monkeypatch, [REGULATOR], by_gudang=_REG_GUDANG)
     monkeypatch.setattr(accurate, "available", lambda: True)
-    monkeypatch.setattr(accurate, "_warehouse_retry", lambda item_id: {"d": {
-        "detailWarehouseData": [{"warehouseName": "01.Jakarta", "balance": 4, "id": 1}]}})
+    # ⛔ stock_full TAK BOLEH login live: bila _warehouse_retry terpanggil → gagal test.
+    monkeypatch.setattr(accurate, "_warehouse_retry",
+                        lambda item_id: (_ for _ in ()).throw(AssertionError("dilarang login live")))
 
     r = ai._t_detail_part({"part_number": "2915YNZ-3000-W"}, U)
     assert r["found"] and r["part_name"] == "Alternator Regulator"
     assert r["stok_total"] == "4 Pc"
-    assert r["stok_per_gudang"] == {"01.Jakarta": 4}
+    assert r["stok_per_gudang"] == {"01.Jakarta": 4}   # dari indeks
     assert r["harga_lokal"] == "Rp 350.000"
     assert "TIDAK ada di katalog Sinotruk" in r["sumber"]
 
 
 def test_detail_part_fallback_pembeli_tanpa_rincian_gudang(monkeypatch):
     monkeypatch.setattr(part_index, "search_part_number", lambda t: [])
-    _seed_index(monkeypatch, [REGULATOR])
+    _seed_index(monkeypatch, [REGULATOR], by_gudang=_REG_GUDANG)
     monkeypatch.setattr(accurate, "available", lambda: True)
-    monkeypatch.setattr(accurate, "_warehouse_retry", lambda item_id: {"d": {
-        "detailWarehouseData": [{"warehouseName": "01.Jakarta", "balance": 4, "id": 1}]}})
 
     r = ai._t_detail_part({"part_number": "2915YNZ-3000-W"},
                           {"username": "b", "role": "pembeli"})
     assert r["found"]
     assert not r.get("stok_per_gudang")  # pembeli: tanpa breakdown antar-cabang
+
+
+def test_stock_full_tak_pernah_login_live(monkeypatch):
+    """Aturan keras: baca stok = HANYA cache indeks, tak pernah panggilan live."""
+    _seed_index(monkeypatch, [REGULATOR], by_gudang={})   # per-gudang belum ter-enrich
+    monkeypatch.setattr(accurate, "_warehouse_retry",
+                        lambda item_id: (_ for _ in ()).throw(AssertionError("dilarang login live")))
+    hit = accurate.stock_full("2915YNZ-3000-W")
+    assert hit is not None
+    assert hit["per_gudang"] == []        # belum ter-enrich → kosong, TANPA login
 
 
 def test_detail_part_tetap_not_found_tanpa_accurate(monkeypatch):
