@@ -99,6 +99,32 @@ def test_ensure_session_force_login_bila_file_hilang(monkeypatch, tmp_path):
     assert s["dsi"] == "FRESH"
 
 
+def test_suppress_autologin_tahan_login_latar(monkeypatch):
+    """Pasca-penawaran: _login_guarded (login LATAR) ditahan sementara."""
+    monkeypatch.setattr(a, "_login_fail_until", 0.0)
+    monkeypatch.setattr(a, "login", lambda: {"jsessionid": "J", "dsi": "D"})
+    a.suppress_autologin(9999)
+    try:
+        a._login_guarded()
+        assert False, "harus ditahan"
+    except a.AccurateSessionExpired as e:
+        assert "manual" in str(e).lower()
+    finally:
+        a._login_suppress_until = 0.0     # reset
+
+
+def test_login_now_lewati_penahanan_pasca_penawaran(monkeypatch):
+    """Penawaran BERIKUTNYA (user-triggered) tetap bisa walau auto-login ditahan."""
+    monkeypatch.setattr(a, "_login_fail_until", 0.0)
+    monkeypatch.setattr(a, "login", lambda: {"jsessionid": "J", "dsi": "D2"})
+    a.suppress_autologin(9999)
+    try:
+        s = a.login_now()                 # bypass penahanan
+        assert s["dsi"] == "D2"
+    finally:
+        a._login_suppress_until = 0.0
+
+
 def test_start_idle_logout_idempoten(monkeypatch):
     # Reset flag agar deterministik.
     monkeypatch.setattr(a, "_idle_started", False)

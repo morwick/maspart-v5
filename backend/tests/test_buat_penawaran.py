@@ -43,6 +43,9 @@ def acc(monkeypatch):
         return True
 
     monkeypatch.setattr(ai.accurate, "logout", _logout)
+    dibuat["suppress_calls"] = 0
+    monkeypatch.setattr(ai.accurate, "suppress_autologin",
+                        lambda *a, **k: dibuat.__setitem__("suppress_calls", dibuat["suppress_calls"] + 1))
     return dibuat
 
 
@@ -149,6 +152,7 @@ def test_logout_setelah_penawaran_dibuat(acc):
     ai._t_buat_penawaran({"pelanggan": "CV ANUGERAH",
                           "barang": [{"part_number": "WG9925520270", "qty": 1}]}, ADMIN)
     assert acc["logout_calls"] == 1      # sesi dilepas setelah buat
+    assert acc["suppress_calls"] == 1    # + auto-login latar ditahan (admin buka manual)
 
 
 def test_tak_logout_bila_penawaran_tak_jadi(acc):

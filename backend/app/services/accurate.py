@@ -264,10 +264,29 @@ _LOGIN_COOLDOWN_SEC = 300        # backoff login latar (refresh stok). Aksi user
                                  # cooldown ini → penawaran tak terblokir backoff latar.
 _login_fail_until = 0.0
 
+# Setelah membuat penawaran, admin ingin membuka Accurate MANUAL (akun 1-sesi).
+# Selama jendela ini MASPART MENAHAN diri auto-login latar (stok/harga pakai cache
+# indeks — tak butuh sesi) agar sesi tetap kosong utk admin. login_now() (penawaran
+# berikutnya) TETAP bisa (mengabaikan penahanan ini).
+_POST_QUOTATION_HOLD_SEC = 10 * 60      # 10 menit
+_login_suppress_until = 0.0             # monotonic
+
+
+def suppress_autologin(seconds: float = _POST_QUOTATION_HOLD_SEC) -> None:
+    """Tahan auto-login LATAR selama `seconds` (dipanggil setelah buat penawaran)."""
+    global _login_suppress_until
+    _login_suppress_until = time.monotonic() + seconds
+
 
 def _login_guarded() -> dict[str, str]:
-    """login() dengan gerbang cooldown (dipanggil di dalam _login_lock)."""
+    """login() LATAR dgn gerbang cooldown + penahanan pasca-penawaran (di dalam
+    _login_lock). Aksi user memakai login_now() yang melewati gerbang ini."""
     global _login_fail_until
+    if time.monotonic() < _login_suppress_until:
+        raise AccurateSessionExpired(
+            "Login MASPART ditahan sementara agar admin bisa memakai Accurate manual "
+            "setelah membuat penawaran — pakai fallback cache."
+        )
     if time.time() < _login_fail_until:
         raise AccurateSessionExpired(
             "Login Accurate sedang cooldown setelah gagal berturut — pakai fallback."

@@ -2337,11 +2337,13 @@ def _t_buat_penawaran(args: dict, user: dict) -> dict:
         logger.exception("buat_penawaran gagal")
         return {"found": False, "error": f"Gagal membuat penawaran: {e}"}
     finally:
-        # Penawaran sudah dibuat → LEPAS sesi Accurate agar orang lain bisa login
-        # (akun hanya 1 sesi). Best-effort; tak memengaruhi hasil di atas.
+        # Penawaran sudah dibuat → LEPAS sesi Accurate & TAHAN auto-login latar
+        # sejenak, agar admin bisa langsung buka Accurate manual (akun 1-sesi) tanpa
+        # direbut kembali oleh lookup stok. Best-effort; tak memengaruhi hasil di atas.
         if qid:
             try:
                 accurate.logout()
+                accurate.suppress_autologin()
             except Exception:  # pragma: no cover
                 pass
 
