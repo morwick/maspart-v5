@@ -2243,6 +2243,17 @@ def _t_buat_penawaran(args: dict, user: dict) -> dict:
 
     qid = None
     try:
+        # 0) Aksi user-triggered → pastikan sesi Accurate SEGERA (abaikan cooldown
+        #    backoff refresh latar). Bila login benar-benar gagal (mis. akun sedang
+        #    dipakai login di tempat lain — akun 1-sesi), sampaikan apa adanya.
+        try:
+            accurate.ensure_session_force()
+        except accurate.AccurateError:
+            return {"found": False, "error":
+                    "Accurate sedang tak bisa diakses (login gagal). Kemungkinan akun "
+                    "Accurate sedang dipakai login di perangkat lain (akun hanya 1 sesi) "
+                    "atau server sedang sibuk. Logout dari Accurate lalu coba lagi sebentar."}
+
         # 1) pelanggan — Accurate mencocokkan sebagian ('cio'→ARGCIO). Banyak cocok
         #    ('jaya') → minta klarifikasi, JANGAN menebak.
         cust = accurate.search_customers(nama_pel, limit=20)

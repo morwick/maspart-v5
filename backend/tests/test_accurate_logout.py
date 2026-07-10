@@ -59,6 +59,46 @@ def test_mark_activity_menunda_logout(monkeypatch, tmp_path):
     assert idle < a._IDLE_LOGOUT_SEC              # belum idle → tak logout
 
 
+def test_login_now_abaikan_cooldown(monkeypatch):
+    """Aksi user-triggered: login_now login walau cooldown backoff aktif."""
+    monkeypatch.setattr(a, "_login_fail_until", time.time() + 9999)  # cooldown aktif
+    monkeypatch.setattr(a, "login", lambda: {"jsessionid": "J", "dsi": "D"})
+    s = a.login_now()
+    assert s["dsi"] == "D"     # tetap login (bukan raise cooldown)
+
+
+def test_login_now_arm_cooldown_saat_gagal(monkeypatch):
+    monkeypatch.setattr(a, "_login_fail_until", 0.0)
+
+    def _boom():
+        raise a.AccurateError("gagal")
+    monkeypatch.setattr(a, "login", _boom)
+    try:
+        a.login_now()
+        assert False, "harus raise"
+    except a.AccurateError:
+        pass
+    assert a._login_fail_until > time.time()   # cooldown di-arm agar latar tak hajar
+
+
+def test_ensure_session_force_pakai_file_bila_ada(monkeypatch, tmp_path):
+    fp = tmp_path / "accurate_session.json"
+    fp.write_text('{"jsessionid":"J","dsi":"D"}', encoding="utf-8")
+    monkeypatch.setattr(a, "_session_file", lambda: fp)
+    dipanggil = {"login": 0}
+    monkeypatch.setattr(a, "login_now", lambda: dipanggil.update(login=1))
+    s = a.ensure_session_force()
+    assert s["dsi"] == "D" and dipanggil["login"] == 0   # pakai file, tak login
+
+
+def test_ensure_session_force_login_bila_file_hilang(monkeypatch, tmp_path):
+    monkeypatch.setattr(a, "_session_file", lambda: tmp_path / "nihil.json")
+    monkeypatch.setattr(a, "credentials_configured", lambda: True)
+    monkeypatch.setattr(a, "login_now", lambda: {"jsessionid": "J", "dsi": "FRESH"})
+    s = a.ensure_session_force()
+    assert s["dsi"] == "FRESH"
+
+
 def test_start_idle_logout_idempoten(monkeypatch):
     # Reset flag agar deterministik.
     monkeypatch.setattr(a, "_idle_started", False)

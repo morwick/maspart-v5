@@ -259,7 +259,9 @@ def login() -> dict[str, str]:
 # Cooldown login: setelah login GAGAL (mis. Accurate throttle → errorTimeout),
 # JANGAN coba login lagi selama _LOGIN_COOLDOWN_SEC — pakai fallback lokal dulu.
 # Mencegah hantaman login berulang yang bisa memperpanjang throttle / terlihat abnormal.
-_LOGIN_COOLDOWN_SEC = 300
+_LOGIN_COOLDOWN_SEC = 300        # backoff login latar (refresh stok). Aksi user
+                                 # (buat penawaran) memakai login_now() yg MENGABAIKAN
+                                 # cooldown ini → penawaran tak terblokir backoff latar.
 _login_fail_until = 0.0
 
 
@@ -362,6 +364,30 @@ def _refresh_session() -> dict[str, str]:
     """Paksa login ulang (dipanggil saat sesi kadaluarsa). Thread-safe + cooldown."""
     with _login_lock:
         return _login_guarded()
+
+
+def login_now() -> dict[str, str]:
+    """Login SEGERA, MENGABAIKAN cooldown backoff — untuk aksi yang DIPICU USER
+    (mis. buat penawaran) yang tak boleh terblokir backoff refresh-stok latar.
+    Tetap thread-safe & tetap MENGARM cooldown bila gagal (agar latar tak hajar)."""
+    global _login_fail_until
+    with _login_lock:
+        try:
+            return login()
+        except AccurateError:
+            _login_fail_until = time.time() + _LOGIN_COOLDOWN_SEC
+            raise
+
+
+def ensure_session_force() -> dict[str, str]:
+    """Sesi siap-pakai untuk aksi user-triggered: pakai file bila ada, kalau tidak
+    login SEGERA (abaikan cooldown). Raise bila kredensial tak ada / login gagal."""
+    try:
+        return load_session()
+    except AccurateSessionMissing:
+        if not credentials_configured():
+            raise
+        return login_now()
 
 
 # ── HTTP ───────────────────────────────────────────────────────────────────

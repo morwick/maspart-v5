@@ -30,6 +30,8 @@ def acc(monkeypatch):
         dibuat.update(number=number, customer_id=customer_id, lines=lines, transdate=transdate)
         return {"id": 22964, "number": number, "total": sum(l["qty"] * l["unit_price"] for l in lines)}
 
+    monkeypatch.setattr(ai.accurate, "ensure_session_force",
+                        lambda: {"jsessionid": "J", "dsi": "D"})   # aksi user: sesi siap
     monkeypatch.setattr(ai.accurate, "create_sales_quotation", _create)
     monkeypatch.setattr(ai.accurate, "next_quotation_number", lambda: "MASPART-01")
     monkeypatch.setattr(ai.accurate, "sales_quotation_pdf", lambda qid, layout_id=50: b"%PDF-1.4 fake")
@@ -155,6 +157,19 @@ def test_tak_logout_bila_penawaran_tak_jadi(acc):
     ai._t_buat_penawaran({"pelanggan": "TIDAK ADA",
                           "barang": [{"part_number": "WG9925520270", "qty": 1}]}, ADMIN)
     assert acc["logout_calls"] == 0
+
+
+def test_login_gagal_pesan_jelas_bukan_cooldown(monkeypatch, acc):
+    """Login Accurate gagal (mis. akun dipakai di tempat lain) → pesan jelas,
+    penawaran tak dibuat, tak logout (tak ada sesi yg dipegang)."""
+    def _fail():
+        raise ai.accurate.AccurateError("login gagal")
+    monkeypatch.setattr(ai.accurate, "ensure_session_force", _fail)
+    r = ai._t_buat_penawaran({"pelanggan": "CV ANUGERAH",
+                              "barang": [{"part_number": "WG9925520270", "qty": 1}]}, ADMIN)
+    assert r["found"] is False
+    assert "1 sesi" in r["error"] or "login gagal" in r["error"].lower()
+    assert acc["logout_calls"] == 0 and "number" not in acc
 
 
 def test_logout_walau_pdf_gagal(monkeypatch, acc):
