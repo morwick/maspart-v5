@@ -517,6 +517,73 @@ body {
   display: inline-block;
 }
 
+/* Layout chat: di desktop jawaban asisten tampil sebagai kartu ber-avatar;
+   di HP (≤640px) kartu dihilangkan — jawaban full-bleed selebar layar agar
+   ruang sempit termanfaatkan maksimal (permintaan pemilik 2026-07-10). */
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ink-150);
+  background: var(--paper);
+}
+.chat-scroll {
+  padding: 16px 16px 12px;
+  gap: 14px;
+}
+.chat-row-ai {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  max-width: 96%;
+}
+.chat-row-user {
+  align-self: flex-end;
+  max-width: 85%;
+}
+.chat-bubble-ai {
+  padding: 10px 14px;
+  border-radius: 14px;
+  border-top-left-radius: 4px;
+  background: var(--paper);
+  color: var(--ink-800);
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+  border: 1px solid var(--ink-150);
+  box-shadow: var(--shadow-1);
+}
+@media (max-width: 640px) {
+  .chat-head {
+    padding: 8px 12px;
+  }
+  .chat-scroll {
+    padding: 10px 12px 8px;
+    gap: 12px;
+  }
+  .chat-row-ai {
+    max-width: 100%;
+    gap: 0;
+  }
+  .chat-row-ai .chat-avatar {
+    display: none;
+  }
+  .chat-bubble-ai {
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .chat-row-user {
+    max-width: 92%;
+  }
+  .chat-kbd-hint {
+    display: none;
+  }
+}
+
 /* Konten halaman memenuhi lebar area kerja (bukan dibatasi & ditengahkan).
    Menimpa utility `max-w-*` pada container utama tiap halaman (anak <main>). */
 main > div.mx-auto[class*="max-w-"] {

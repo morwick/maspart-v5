@@ -117,9 +117,10 @@ const IC = {
   sheet: "M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M4 9h16 M4 15h16 M10 3v18",
 };
 
-function Avatar({ size = 30 }: { size?: number }) {
+function Avatar({ size = 30, className }: { size?: number; className?: string }) {
   return (
     <div
+      className={className}
       style={{
         width: size,
         height: size,
@@ -377,16 +378,7 @@ export default function AsistenPage() {
           style={{ minHeight: 0, overflow: "hidden" }}
         >
           {/* Header */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "10px 14px",
-              borderBottom: "1px solid var(--ink-150)",
-              background: "var(--paper)",
-            }}
-          >
+          <div className="chat-head">
             <Avatar size={32} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 650, fontSize: 13.5, color: "var(--ink-900)" }}>
@@ -421,13 +413,12 @@ export default function AsistenPage() {
           {/* Area pesan */}
           <div
             ref={scrollRef}
+            className="chat-scroll"
             style={{
               flex: 1,
               overflow: "auto",
-              padding: "16px 16px 12px",
               display: "flex",
               flexDirection: "column",
-              gap: 14,
               background: "var(--canvas)",
             }}
           >
@@ -491,18 +482,9 @@ export default function AsistenPage() {
             )}
 
             {busy && (
-              <div className="chat-bubble-in" style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                <Avatar />
-                <div
-                  style={{
-                    background: "var(--paper)",
-                    border: "1px solid var(--ink-150)",
-                    borderRadius: 14,
-                    borderTopLeftRadius: 4,
-                    padding: "12px 16px",
-                    boxShadow: "var(--shadow-1)",
-                  }}
-                >
+              <div className="chat-bubble-in chat-row-ai">
+                <Avatar className="chat-avatar" />
+                <div className="chat-bubble-ai">
                   <span className="typing-dots">
                     <span />
                     <span />
@@ -584,7 +566,7 @@ export default function AsistenPage() {
                 flexWrap: "wrap",
               }}
             >
-              <span>
+              <span className="chat-kbd-hint">
                 <span className="kbd">Enter</span> kirim · <span className="kbd">Shift+Enter</span> baris baru
               </span>
               <span>Jawaban part paling akurat bila menyertakan nomor rangka (VIN).</span>
@@ -1022,7 +1004,7 @@ function Bubble({
 
   if (isUser) {
     return (
-      <div className="chat-bubble-in" style={{ alignSelf: "flex-end", maxWidth: "85%" }}>
+      <div className="chat-bubble-in chat-row-user">
         <div
           style={{
             padding: "9px 13px",
@@ -1063,23 +1045,10 @@ function Bubble({
 
   const tools = Array.from(new Set(m.tools || []));
   return (
-    <div className="chat-bubble-in" style={{ display: "flex", gap: 10, alignItems: "flex-start", maxWidth: "96%" }}>
-      <Avatar />
+    <div className="chat-bubble-in chat-row-ai">
+      <Avatar className="chat-avatar" />
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div
-          style={{
-            padding: "10px 14px",
-            borderRadius: 14,
-            borderTopLeftRadius: 4,
-            background: "var(--paper)",
-            color: "var(--ink-800)",
-            fontSize: 14,
-            lineHeight: 1.5,
-            wordBreak: "break-word",
-            border: "1px solid var(--ink-150)",
-            boxShadow: "var(--shadow-1)",
-          }}
-        >
+        <div className="chat-bubble-ai">
           <Markdown content={m.content} />
         </div>
         {m.repairkitModels && m.repairkitModels.length > 0 && (
