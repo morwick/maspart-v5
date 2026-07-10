@@ -47,22 +47,22 @@ def test_xff_ambil_entri_kanan_bukan_kiri(monkeypatch):
     monkeypatch.setattr(ratelimit, "get_settings",
                         lambda: SimpleNamespace(trusted_proxies=1))
     # klien memalsukan hop kiri; proxy menambahkan IP asli di kanan → pakai kanan
-    assert ratelimit._client_ip(_req("1.1.1.1, 203.0.113.9")) == "203.0.113.9"
+    assert ratelimit.client_ip(_req("1.1.1.1, 203.0.113.9")) == "203.0.113.9"
 
 
 def test_xff_spoof_tak_ganti_bucket(monkeypatch):
     monkeypatch.setattr(ratelimit, "get_settings",
                         lambda: SimpleNamespace(trusted_proxies=1))
     # dua request, hop kiri (spoof) beda tapi IP asli (kanan) sama → IP sama
-    a = ratelimit._client_ip(_req("9.9.9.9, 203.0.113.9"))
-    b = ratelimit._client_ip(_req("8.8.8.8, 203.0.113.9"))
+    a = ratelimit.client_ip(_req("9.9.9.9, 203.0.113.9"))
+    b = ratelimit.client_ip(_req("8.8.8.8, 203.0.113.9"))
     assert a == b == "203.0.113.9"
 
 
 def test_tanpa_xff_pakai_peer(monkeypatch):
     monkeypatch.setattr(ratelimit, "get_settings",
                         lambda: SimpleNamespace(trusted_proxies=1))
-    assert ratelimit._client_ip(_req(None, peer="10.0.0.5")) == "10.0.0.5"
+    assert ratelimit.client_ip(_req(None, peer="10.0.0.5")) == "10.0.0.5"
 
 
 # ── deps: DB down tak menaikkan privilege ────────────────────────────────────

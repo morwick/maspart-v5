@@ -21,14 +21,16 @@ _lock = threading.Lock()
 _hits: dict[str, deque] = {}
 
 
-def _client_ip(request: Request) -> str:
-    """IP klien untuk kunci rate-limit.
+def client_ip(request: Request) -> str:
+    """IP klien asli di belakang reverse-proxy (Traefik). Dipakai rate-limiter
+    DAN pencatatan riwayat login — satu implementasi, satu perilaku.
 
     ⚠️ `X-Forwarded-For` dapat dipalsukan klien: format `client, proxy1, proxy2`,
     dan proxy tepercaya MENAMBAHKAN alamat peer di UJUNG KANAN. Maka entri yang
     bisa dipercaya = entri ke-(TRUSTED_PROXIES) dari KANAN — BUKAN yang kiri
     (kiri = nilai yang disuntik penyerang). Mengambil yang kiri membuat limiter
-    trivial dilewati dengan XFF acak per request (brute-force login/webhook).
+    trivial dilewati dengan XFF acak per request (brute-force login/webhook),
+    dan membuat riwayat login bisa diisi IP karangan.
     """
     fwd = request.headers.get("x-forwarded-for", "")
     if fwd:
@@ -63,7 +65,7 @@ def limit(prefix: str, limit_count: int, window_seconds: float):
         @router.post("/login", dependencies=[Depends(limit("login", 5, 60))])
     """
     def _dep(request: Request) -> None:
-        key = f"{prefix}:{_client_ip(request)}"
+        key = f"{prefix}:{client_ip(request)}"
         if not hit(key, limit_count, window_seconds):
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,

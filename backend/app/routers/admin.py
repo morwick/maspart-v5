@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import ai_chat_log, ai_sinonim_learn, catalog_bom, gudang, gudang_config, harga, image_search, orders, part_index, permissions, populasi, presence, reservations, search_log, sinonim
+from ..services import ai_chat_log, ai_sinonim_learn, catalog_bom, gudang, gudang_config, harga, image_search, login_history, orders, part_index, permissions, populasi, presence, reservations, search_log, sinonim
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -244,15 +244,28 @@ def list_users(_admin: dict = Depends(require_admin)):
     return {"users": sb.list_users_full()}
 
 
+# Ambang "kemungkinan dipakai ramai" dalam 30 hari terakhir. Sengaja longgar:
+# IP berubah sendiri saat pindah WiFi/kuota, jadi 2-3 IP itu normal untuk 1 orang.
+_SHARE_IP_MIN = 4
+_SHARE_DEVICE_MIN = 3
+_SHARE_DAYS = 30
+
+
 @router.get("/monitoring")
 def monitoring(_admin: dict = Depends(require_admin)):
-    """Panel Monitoring: status ONLINE/OFFLINE + aktivitas terakhir tiap user.
+    """Panel Monitoring: status ONLINE/OFFLINE, IP & perangkat terakhir, plus
+    indikasi akun dipakai ramai-ramai.
 
     Online = ada request terautentikasi dalam `presence.ONLINE_WINDOW_SEC` (5 mnt)
     terakhir (dilacak in-memory di `services/presence`, di-update tiap request &
     saat login). Roster user diambil dari Supabase; kolom DB last_login/last_active
-    dipakai sebagai fallback bila presence belum punya data (mis. setelah restart)."""
+    dipakai sebagai fallback bila presence belum punya data (mis. setelah restart).
+
+    IP/perangkat: presence (in-memory, hilang saat restart) → fallback riwayat
+    permanen `login_history`. Bila tabel login_history belum dibuat, ringkasannya
+    kosong dan panel tetap jalan (hanya tanpa kolom sharing)."""
     users = sb.list_users_full()
+    share = login_history.sharing_summary(_SHARE_DAYS)   # {} bila tabel belum ada
     out_users: list[dict] = []
     online_count = 0
     for u in users:
@@ -260,8 +273,11 @@ def monitoring(_admin: dict = Depends(require_admin)):
         if not uname:
             continue
         p = presence.get(uname)
+        s = share.get(uname.lower(), {})
         if p["online"]:
             online_count += 1
+        ip_n = s.get("ip_count", 0)
+        dev_n = s.get("device_count", 0)
         out_users.append({
             "username": uname,
             "role": u.get("role") or "user",
@@ -269,18 +285,51 @@ def monitoring(_admin: dict = Depends(require_admin)):
             "is_active": bool(u.get("is_active", True)),
             "last_login_at": p["last_login_at"] or u.get("last_login_at"),
             "last_active_at": p["last_active_at"] or u.get("last_active_at"),
+            # Presence hilang saat restart → jatuh ke riwayat permanen.
+            "last_ip": p["last_ip"] or s.get("last_ip"),
+            "last_device": p["last_device"] or s.get("last_device"),
+            "ip_count": ip_n,
+            "device_count": dev_n,
+            "login_count": s.get("login_count", 0),
+            "ips": s.get("ips", [])[:8],
+            "devices": s.get("devices", [])[:8],
+            # SINYAL, bukan vonis: IP bisa berubah sendiri, kantor berbagi 1 IP.
+            "kemungkinan_dipakai_ramai": ip_n >= _SHARE_IP_MIN or dev_n >= _SHARE_DEVICE_MIN,
         })
-    # Online dulu, lalu alfabet — yang penting di atas.
-    out_users.sort(key=lambda x: (not x["online"], x["username"]))
+    # Yang mencurigakan dulu, lalu online, lalu alfabet.
+    out_users.sort(key=lambda x: (not x["kemungkinan_dipakai_ramai"], not x["online"], x["username"]))
     # Aktivitas terbaru dari presence (login); fallback ke DB user_activity.
     activity = presence.recent(50) or sb.fetch_recent_activity(50)
     return {
         "online_count": online_count,
         "total_users": len(out_users),
         "online_window_minutes": presence.ONLINE_WINDOW_SEC // 60,
+        "share_days": _SHARE_DAYS,
+        "share_ip_min": _SHARE_IP_MIN,
+        "share_device_min": _SHARE_DEVICE_MIN,
+        "riwayat_tersedia": bool(share),
         "users": out_users,
         "recent_activity": activity,
     }
+
+
+@router.get("/monitoring/login-history")
+def monitoring_login_history(
+    username: str = "",
+    limit: int = 200,
+    _admin: dict = Depends(require_admin),
+):
+    """Riwayat login mentah (kapan, siapa, IP, perangkat) — untuk menelusuri akun
+    yang ditandai 'kemungkinan dipakai ramai'. Kosong bila tabel belum dibuat."""
+    rows = login_history.list_logins(username=username, limit=limit)
+    return {"jumlah": len(rows), "riwayat": rows,
+            "tabel_siap": bool(rows) or bool(login_history.list_logins(limit=1))}
+
+
+@router.get("/monitoring/sql")
+def monitoring_sql(_admin: dict = Depends(require_admin)):
+    """DDL tabel login_history — ditampilkan admin bila tabel belum dibuat."""
+    return {"sql": login_history.create_table_sql()}
 
 
 @router.post("/users")

@@ -46,8 +46,10 @@ def touch(username: str) -> None:
             st["last_active"] = now
 
 
-def mark_login(username: str) -> None:
-    """Catat waktu login + baris aktivitas 'login' untuk panel monitoring."""
+def mark_login(username: str, ip: str = "", device: str = "") -> None:
+    """Catat waktu login + baris aktivitas 'login' untuk panel monitoring.
+    `ip`/`device` = dari mana login terakhir datang (hilang saat restart; riwayat
+    permanennya ada di services/login_history)."""
     u = (username or "").strip().lower()
     if not u:
         return
@@ -55,27 +57,33 @@ def mark_login(username: str) -> None:
     with _lock:
         st = _state.get(u)
         if st is None:
-            _state[u] = {"last_active": now, "last_login": now}
+            st = _state[u] = {"last_active": now, "last_login": now}
         else:
             st["last_active"] = now
             st["last_login"] = now
+        st["last_ip"] = ip or None
+        st["last_device"] = device or None
         _recent.appendleft({"created_at": _iso(now), "username": u,
-                            "action": "login", "target": None})
+                            "action": "login", "target": None,
+                            "ip": ip or None, "device": device or None})
 
 
 def get(username: str) -> dict:
-    """Presence 1 user: {online, last_active_at, last_login_at}."""
+    """Presence 1 user: {online, last_active_at, last_login_at, last_ip, last_device}."""
     u = (username or "").strip().lower()
     now = time.time()
     with _lock:
         st = _state.get(u)
         if not st:
-            return {"online": False, "last_active_at": None, "last_login_at": None}
+            return {"online": False, "last_active_at": None, "last_login_at": None,
+                    "last_ip": None, "last_device": None}
         la = st.get("last_active")
         return {
             "online": bool(la and (now - la) <= ONLINE_WINDOW_SEC),
             "last_active_at": _iso(la),
             "last_login_at": _iso(st.get("last_login")),
+            "last_ip": st.get("last_ip"),
+            "last_device": st.get("last_device"),
         }
 
 

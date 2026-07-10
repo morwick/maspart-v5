@@ -1103,23 +1103,74 @@ export type MonitoringUser = {
   is_active: boolean;
   last_login_at?: string | null;
   last_active_at?: string | null;
+  /** IP & perangkat login terakhir. */
+  last_ip?: string | null;
+  last_device?: string | null;
+  /** Berapa IP / perangkat / login berbeda dalam `share_days` hari terakhir. */
+  ip_count?: number;
+  device_count?: number;
+  login_count?: number;
+  ips?: string[];
+  devices?: string[];
+  /** SINYAL (bukan vonis) akun dipakai beramai-ramai. */
+  kemungkinan_dipakai_ramai?: boolean;
 };
 export type MonitoringActivity = {
   created_at?: string | null;
   username: string;
   action: string;
   target?: string | null;
+  ip?: string | null;
+  device?: string | null;
 };
 export type MonitoringData = {
   online_count: number;
   total_users: number;
   online_window_minutes?: number;
+  share_days?: number;
+  share_ip_min?: number;
+  share_device_min?: number;
+  /** false = tabel login_history belum dibuat di Supabase. */
+  riwayat_tersedia?: boolean;
   users: MonitoringUser[];
   recent_activity: MonitoringActivity[];
 };
 
 export async function getMonitoring(token: string): Promise<MonitoringData> {
   const res = await fetch(`${API_BASE}/api/admin/monitoring`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export type LoginHistoryRow = {
+  id: number;
+  created_at: string;
+  username: string;
+  role?: string | null;
+  ip?: string | null;
+  device?: string | null;
+};
+
+/** Riwayat login mentah 1 user (atau semua bila username kosong). */
+export async function getLoginHistory(
+  token: string,
+  username = "",
+  limit = 200,
+): Promise<{ jumlah: number; riwayat: LoginHistoryRow[] }> {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (username) q.set("username", username);
+  const res = await fetch(`${API_BASE}/api/admin/monitoring/login-history?${q}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+/** DDL tabel login_history — ditampilkan bila tabel belum dibuat. */
+export async function getMonitoringSql(token: string): Promise<{ sql: string }> {
+  const res = await fetch(`${API_BASE}/api/admin/monitoring/sql`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
