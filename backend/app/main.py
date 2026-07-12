@@ -21,8 +21,8 @@ from fastapi.responses import JSONResponse
 
 from .core.config import get_settings
 from .routers import admin, ai, auth, branch, buyer, chat, geo, harga, orders, parts, populasi, repairkit, stok
-from .services import (accurate, ai_chat_log, ai_sinonim_learn, image_search, part_index,
-                       sims, sims_weights)
+from .services import (accurate, ai_chat_log, ai_sinonim_learn, geocode, image_search,
+                       part_index, sims, sims_weights)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,6 +84,13 @@ def _warmup():
         sims_weights.start()
     except Exception as e:  # pragma: no cover
         print(f"[startup] warmer berat SIMS gagal: {e}")
+    try:
+        # Kode pos ASAL ongkir tiap gudang: isi otomatis dari koordinat yang sudah
+        # diatur admin. Gudang pemenuh tanpa kode pos = ongkir DITOLAK, jadi ini
+        # yang membuat gudang non-pilihan (fallback terdekat) tetap bisa mengirim.
+        geocode.start_postal_warmer()
+    except Exception as e:  # pragma: no cover
+        print(f"[startup] auto-isi kode pos gudang gagal: {e}")
 
 
 @asynccontextmanager

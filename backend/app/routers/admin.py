@@ -403,6 +403,7 @@ def get_gudang(_admin: dict = Depends(require_admin)):
     coords = gudang_config.coords_map()
     buyer = gudang_config.buyer_locations()
     pic = gudang_config.pic_map()
+    postals = gudang_config.postal_map()
     # label → (key, origin_postal) untuk lokasi yang bisa dipilih pembeli
     by_label = {v["label"]: (k, v.get("origin_postal", "")) for k, v in buyer.items()}
 
@@ -410,7 +411,9 @@ def get_gudang(_admin: dict = Depends(require_admin)):
     items = []
     for lb in labels:
         c = coords.get(lb)
-        key, postal = by_label.get(lb, (None, ""))
+        key, legacy_postal = by_label.get(lb, (None, ""))
+        # Kode pos SEMUA gudang (map postal); config lama → nilai di entri pembeli.
+        postal = postals.get(lb) or legacy_postal
         items.append({
             "label": lb,
             "display": gudang.gudang_label(lb),
@@ -427,13 +430,15 @@ def get_gudang(_admin: dict = Depends(require_admin)):
 
 @router.put("/gudang")
 def save_gudang(body: SaveGudangRequest, _admin: dict = Depends(require_admin)):
-    prev_buyer = gudang_config.buyer_locations()
-    # label → origin_postal lama (fallback bila UI tidak mengirim nilainya)
-    postal_by_label = {v["label"]: v.get("origin_postal", "") for v in prev_buyer.values()}
+    # Kode pos lama per label (fallback bila UI tidak mengirim nilainya).
+    prev_postal = dict(gudang_config.postal_map())
+    for v in gudang_config.buyer_locations().values():
+        prev_postal.setdefault(v["label"], v.get("origin_postal", ""))
 
     coords: dict = {}
     buyer: dict = {}
     pic: dict = {}
+    postal: dict = {}
     seen_keys: set[str] = set()
     for it in body.items:
         label = (it.label or "").strip()
@@ -443,6 +448,15 @@ def save_gudang(body: SaveGudangRequest, _admin: dict = Depends(require_admin)):
             coords[label] = [float(it.lat), float(it.lon)]
         if (it.pic or "").strip():
             pic[label] = it.pic.strip()
+        # Kode pos ASAL ongkir disimpan untuk SETIAP gudang — bukan hanya lokasi
+        # pilihan pembeli — karena gudang PEMENUH (fallback terdekat) sering gudang
+        # lain. None (UI lama) → pertahankan nilai lama; selain itu digit saja.
+        if it.origin_postal is None:
+            code = prev_postal.get(label, "")
+        else:
+            code = "".join(ch for ch in it.origin_postal if ch.isdigit())[:10]
+        if code:
+            postal[label] = code
         if it.selectable:
             key = (it.key or "").strip().lower()
             if not key:
@@ -450,15 +464,9 @@ def save_gudang(body: SaveGudangRequest, _admin: dict = Depends(require_admin)):
             if key in seen_keys:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Key '{key}' dipakai lebih dari satu gudang.")
             seen_keys.add(key)
-            # Kode pos asal ongkir: dari UI (auto-isi dari koordinat, boleh dikoreksi
-            # manual); hanya digit, maks 10. None (UI lama) → pertahankan nilai lama.
-            if it.origin_postal is None:
-                postal = postal_by_label.get(label, "")
-            else:
-                postal = "".join(ch for ch in it.origin_postal if ch.isdigit())[:10]
-            buyer[key] = {"label": label, "origin_postal": postal}
+            buyer[key] = {"label": label, "origin_postal": code}
 
-    ok, msg = gudang_config.save(coords, buyer, pic)
+    ok, msg = gudang_config.save(coords, buyer, pic, postal)
     if not ok:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Gagal simpan: {msg}")
     return {"ok": True}

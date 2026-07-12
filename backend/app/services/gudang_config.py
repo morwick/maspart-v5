@@ -3,6 +3,10 @@ Konfigurasi lokasi gudang yang bisa diatur admin (persisten):
   - `coords`: koordinat tiap gudang (label → [lat, lon]) → dipakai untuk
     menghitung gudang TERDEKAT (fallback stok) secara otomatis.
   - `buyer` : lokasi yang bisa DIPILIH pembeli (key → {label, origin_postal}).
+  - `postal`: kode pos ASAL ongkir SETIAP gudang (label → kode pos), termasuk
+    gudang yang TIDAK bisa dipilih pembeli. Wajib ada karena gudang pemenuh
+    (fallback terdekat) sering bukan gudang pilihan pembeli — tanpa ini ongkir
+    akan dihitung dari kota yang salah.
 
 Disimpan sebagai JSON di <DATA_DIR>/gudang_config.json. Default di-seed dari
 nilai bawaan; admin dapat mengubah via /api/admin/gudang.
@@ -59,7 +63,8 @@ def _defaults() -> dict:
     return {
         "coords": {k: [v[0], v[1]] for k, v in _DEFAULT_COORDS.items()},
         "buyer": {k: dict(v) for k, v in _DEFAULT_BUYER.items()},
-        "pic": {},  # label gudang → nomor PIC (kontak), diatur admin
+        "pic": {},     # label gudang → nomor PIC (kontak), diatur admin
+        "postal": {},  # label gudang → kode pos asal ongkir (SEMUA gudang)
     }
 
 
@@ -88,15 +93,33 @@ def load() -> dict:
                     }
                 if isinstance(saved.get("pic"), dict):
                     cfg["pic"] = {str(k): str(v) for k, v in saved["pic"].items() if v}
+                if isinstance(saved.get("postal"), dict):
+                    cfg["postal"] = {str(k): str(v) for k, v in saved["postal"].items() if v}
         except Exception:
             pass
+        # Config lama (sebelum ada map `postal`) hanya menyimpan kode pos di dalam
+        # entri pembeli → angkat ke map postal agar tak hilang saat upgrade.
+        for b in cfg["buyer"].values():
+            lb, p = b.get("label", ""), b.get("origin_postal", "")
+            if lb and p and lb not in cfg["postal"]:
+                cfg["postal"][lb] = p
         _cache = cfg
         return cfg
 
 
-def save(coords: dict, buyer: dict, pic: dict | None = None) -> tuple[bool, str]:
-    """Tulis config ke disk & invalidasi cache."""
+def save(coords: dict, buyer: dict, pic: dict | None = None,
+         postal: dict | None = None) -> tuple[bool, str]:
+    """Tulis config ke disk & invalidasi cache.
+
+    `postal` (label → kode pos) berlaku untuk SEMUA gudang. Kode pos gudang yang
+    juga lokasi pembeli ikut ditulis ke entri `buyer` agar pembaca lama tetap jalan.
+    """
     global _cache
+    postal_clean = {
+        str(k): "".join(ch for ch in str(v) if ch.isdigit())[:10]
+        for k, v in (postal or {}).items()
+        if str(k).strip() and str(v).strip()
+    }
     data = {
         "coords": {
             str(k): [float(v[0]), float(v[1])]
@@ -106,12 +129,14 @@ def save(coords: dict, buyer: dict, pic: dict | None = None) -> tuple[bool, str]
         "buyer": {
             str(k): {
                 "label": str(b.get("label", "")),
-                "origin_postal": str(b.get("origin_postal", "")),
+                "origin_postal": postal_clean.get(str(b.get("label", "")),
+                                                  str(b.get("origin_postal", ""))),
             }
             for k, b in (buyer or {}).items()
             if str(k).strip()
         },
         "pic": {str(k): str(v).strip() for k, v in (pic or {}).items() if str(v).strip()},
+        "postal": postal_clean,
     }
     try:
         p = _path()
@@ -134,3 +159,22 @@ def buyer_locations() -> dict[str, dict]:
 
 def pic_map() -> dict[str, str]:
     return load().get("pic", {})
+
+
+def postal_map() -> dict[str, str]:
+    """label gudang → kode pos ASAL ongkir (semua gudang, bukan hanya pilihan pembeli)."""
+    return load().get("postal", {})
+
+
+def set_postal(label: str, code: str) -> bool:
+    """Isi kode pos SATU gudang (dipakai auto-isi dari koordinat). Tulis ke disk."""
+    code = "".join(ch for ch in str(code or "") if ch.isdigit())[:10]
+    if not label or not code:
+        return False
+    cfg = load()
+    if cfg.get("postal", {}).get(label) == code:
+        return False
+    postal = dict(cfg.get("postal", {}))
+    postal[label] = code
+    ok, _msg = save(cfg["coords"], cfg["buyer"], cfg.get("pic"), postal)
+    return ok

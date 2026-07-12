@@ -51,13 +51,26 @@ def buyer_label(key: str | None) -> str | None:
 
 def origin_postal_for_label(label: str | None) -> str:
     """Kode pos ASAL kirim untuk gudang berlabel `label` (mis. '08.TJP Jambi').
+
     Dipakai agar ongkir dihitung dari gudang PEMENUH, bukan gudang pilihan pembeli.
-    '' bila label tak punya lokasi terkonfigurasi."""
+    Gudang pemenuh sering BUKAN lokasi pilihan pembeli (fallback terdekat), jadi
+    urutan sumbernya: kode pos gudang itu sendiri → (bila kosong) kode pos CABANG
+    yang mengelolanya, mis. sub-gudang '06.B80 H1' ikut '01.Jakarta'.
+    '' bila tak satu pun punya kode pos — pemanggil WAJIB menolak menghitung ongkir,
+    JANGAN diam-diam memakai kode pos gudang pembeli (ongkir jadi kota yang salah)."""
     if not label:
         return ""
+    postal = gudang_config.postal_map()
+    p = postal.get(label) or ""
+    if p:
+        return p
+    # Config lama: kode pos hanya tersimpan di entri lokasi pembeli.
     for loc in gudang_config.buyer_locations().values():
-        if loc.get("label") == label:
-            return loc.get("origin_postal") or ""
+        if loc.get("label") == label and loc.get("origin_postal"):
+            return loc["origin_postal"]
+    branch = owning_branch_label(label)
+    if branch and branch != label:
+        return origin_postal_for_label(branch)
     return ""
 
 

@@ -75,17 +75,33 @@ class RatesRequest(BaseModel):
     items: list[OrderItemIn] = []             # isi keranjang → tentukan gudang pemenuh (asal ongkir)
 
 
+def _origin_postal(username: str, items: list[dict]) -> tuple[str, str]:
+    """(kode_pos_asal, pesan_error). Asal kirim = gudang PEMENUH item — gudang yang
+    benar-benar mengirim barang, bukan gudang pilihan pembeli (fallback terdekat
+    kerap memilih gudang lain). Gudang pemenuh tanpa kode pos → ERROR, JANGAN
+    jatuh ke kode pos gudang pembeli: ongkir akan dihitung dari kota yang salah.
+    Tanpa items (preview kosong) → pakai gudang pembeli seperti biasa."""
+    if items:
+        fl = orders.fulfillment_gudang(username, items)
+        if fl:
+            postal = gudang.origin_postal_for_label(fl)
+            if not postal:
+                return "", (
+                    f"Ongkir dari gudang {gudang.gudang_label(fl)} belum bisa dihitung — "
+                    "kode pos gudang itu belum diisi admin. Hubungi admin."
+                )
+            return postal, ""
+    loc = gudang.location(sb.get_user_gudang(username))
+    return (loc or {}).get("origin_postal", ""), ""
+
+
 @router.post("/shipping/rates")
 def shipping_rates(body: RatesRequest, user: dict = Depends(require_buyer_ready)):
-    # Asal kirim = gudang PEMENUH item (bukan sekadar gudang pilihan pembeli) agar
-    # ongkir preview = ongkir saat order. Tanpa items → fallback ke gudang pembeli.
-    origin_postal = ""
-    if body.items:
-        fl = orders.fulfillment_gudang(user["username"], [i.model_dump() for i in body.items])
-        origin_postal = gudang.origin_postal_for_label(fl)
-    if not origin_postal:
-        loc = gudang.location(sb.get_user_gudang(user["username"]))
-        origin_postal = (loc or {}).get("origin_postal", "")
+    origin_postal, oerr = _origin_postal(
+        user["username"], [i.model_dump() for i in body.items],
+    )
+    if oerr:
+        return {"rates": [], "error": oerr, "available": shipping.available()}
     rates, err = shipping.get_rates(
         user["username"], max(body.weight_grams, 100), body.value,
         dest_postal=body.dest_postal, origin_postal=origin_postal,
@@ -181,10 +197,15 @@ def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_re
     if shipping.available():
         # Asal kirim = gudang PEMENUH (fulfill_label), bukan gudang pilihan pembeli —
         # agar ongkir sesuai lokasi barang sebenarnya & konsisten dgn preview keranjang.
+        # Kode pos gudang pemenuh belum diisi admin → TOLAK; menghitung dari kode pos
+        # gudang pembeli akan menagih ongkir kota yang salah.
         origin_postal = gudang.origin_postal_for_label(fulfill_label)
         if not origin_postal:
-            loc = gudang.location(sb.get_user_gudang(user["username"]))
-            origin_postal = (loc or {}).get("origin_postal", "")
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Ongkir dari gudang {gudang.gudang_label(fulfill_label)} belum bisa dihitung — "
+                "kode pos gudang itu belum diisi admin. Hubungi admin.",
+            )
         rates, _rerr = shipping.get_rates(
             user["username"], weight_grams, 0,
             dest_postal=body.recipient_postal or "", origin_postal=origin_postal,

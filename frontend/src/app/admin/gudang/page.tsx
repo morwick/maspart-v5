@@ -41,9 +41,11 @@ export default function AdminGudangPage() {
     try {
       const d = await getAdminGudang(token);
       setItems(d.gudang.map((it) => ({ ...it, coordText: coordTextOf(it) })));
-      // Isi otomatis kode pos yang masih KOSONG untuk lokasi pembeli (berurutan,
-      // beri jeda — Nominatim membatasi laju permintaan).
-      const kosong = d.gudang.filter((it) => it.selectable && !it.origin_postal && it.lat != null && it.lon != null);
+      // Isi otomatis kode pos yang masih KOSONG untuk SEMUA gudang berkoordinat —
+      // bukan hanya lokasi pilihan pembeli: gudang pemenuh (fallback terdekat) juga
+      // mengirim barang, dan tanpa kode pos ongkir dari gudang itu ditolak server.
+      // Berurutan dengan jeda — Nominatim membatasi laju permintaan.
+      const kosong = d.gudang.filter((it) => !it.origin_postal && it.lat != null && it.lon != null);
       for (let i = 0; i < kosong.length; i++) {
         const it = kosong[i];
         setTimeout(() => lookupPostal(it.label, it.lat as number, it.lon as number), i * 1200);
@@ -145,9 +147,11 @@ export default function AdminGudangPage() {
 
         <div className="mb-3" style={{ fontSize: 12.5, color: "var(--ink-500)" }}>
           Koordinat (lat/lon) dipakai untuk menghitung <b>gudang terdekat</b> otomatis saat stok di
-          gudang terpilih kosong. <b>Kode Pos</b> = titik ASAL hitung ongkir — <b>terisi otomatis dari
-          koordinat</b> (boleh dikoreksi manual). Centang <b>Pembeli</b> agar gudang muncul di pilihan
-          lokasi pembeli, lalu isi <b>Key/Akun</b> (username akun cabang untuk routing pesanan).
+          gudang terpilih kosong. <b>Kode Pos</b> = titik ASAL hitung ongkir, <b>wajib untuk SEMUA
+          gudang</b> (bukan cuma yang bisa dipilih pembeli) — gudang terdekat juga ikut mengirim
+          barang, dan tanpa kode pos ongkir dari gudang itu ditolak. Terisi otomatis dari koordinat,
+          boleh dikoreksi manual. Centang <b>Pembeli</b> agar gudang muncul di pilihan lokasi pembeli,
+          lalu isi <b>Key/Akun</b> (username akun cabang untuk routing pesanan).
         </div>
 
         {loaded && items.length === 0 && !error ? (
