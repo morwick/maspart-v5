@@ -1,8 +1,11 @@
 {
- "generated_at": "2026-07-09T14:40:07+00:00",
+ "generated_at": "2026-07-10T17:59:15+00:00",
  "sumber": [
   "catalog_bom.json (EPC Sinotruk per-model)",
-  "gudang_config.json"
+  "gudang_config.json",
+  "fault_codes.json (DTC resmi)",
+  "filter Shantui (data/manuals)",
+  "transmisi.json (repair kit gearbox)"
  ],
  "cakupan": {
   "unit_katalog_bom": 40,
@@ -603,5 +606,83 @@
   "25. PT BJM",
   "26. BELOPA",
   "28.Ruko Stadion"
+ ],
+ "fault_codes": {
+  "jumlah": 2276
+ },
+ "filter_shantui_units": [
+  "SE60W1 DAN SE75W1",
+  "SE135F",
+  "SE215W（WP6H)",
+  "SE215W（WP7H)",
+  "SE60W1",
+  "SE75W1",
+  "DH08",
+  "SD22",
+  "SD16",
+  "SR10",
+  "SG15-B6"
+ ],
+ "gearbox_repairkit": [
+  {
+   "model": "8JS85TE",
+   "tipe": "8-speed (Fast)",
+   "jumlah_unit": 2
+  },
+  {
+   "model": "HW13709XST",
+   "tipe": "9-speed",
+   "jumlah_unit": 4
+  },
+  {
+   "model": "HW13709XSTC",
+   "tipe": "9-speed",
+   "jumlah_unit": 2
+  },
+  {
+   "model": "HW15710AC",
+   "tipe": "10-speed",
+   "jumlah_unit": 1
+  },
+  {
+   "model": "HW19709XST",
+   "tipe": "9-speed",
+   "jumlah_unit": 14
+  },
+  {
+   "model": "HW19709XSTL",
+   "tipe": "9-speed",
+   "jumlah_unit": 2
+  },
+  {
+   "model": "HW19710",
+   "tipe": "9-speed (14.28)",
+   "jumlah_unit": 2
+  },
+  {
+   "model": "HW25712XACJ",
+   "tipe": "12-speed",
+   "jumlah_unit": 1
+  },
+  {
+   "model": "HW25712XST",
+   "tipe": "12-speed",
+   "jumlah_unit": 5
+  },
+  {
+   "model": "HW25712XSTC",
+   "tipe": "12-speed",
+   "jumlah_unit": 3
+  },
+  {
+   "model": "HW95508STC",
+   "tipe": "Fast 8-speed",
+   "jumlah_unit": 1
+  },
+  {
+   "model": "ZF16S2531TO",
+   "tipe": "16-speed (ZF)",
+   "jumlah_unit": 3
+  }
  ]
 }

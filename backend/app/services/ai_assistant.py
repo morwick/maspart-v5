@@ -15,7 +15,9 @@ import difflib
 import json
 import logging
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -6729,6 +6731,33 @@ def _recent_rangka(history: list[dict], max_n: int = 2) -> list[str]:
     return []
 
 
+def _prefetch_epc_rangka(history: list[dict]) -> None:
+    """PERCEPATAN: hangatkan cache EPC di LATAR begitu pesan TERAKHIR user
+    menyebut nomor rangka. First-hit EPC (config + Loading List) belasan–30
+    detik; dengan prefetch, fetch itu berjalan PARALEL selagi model menyusun
+    rencana tool — saat tool EPC akhirnya dipanggil, cache sering sudah terisi
+    (atau tool tinggal menunggu fetch yang sama via lock per-frame epc_bom,
+    bukan menembak ulang). Best-effort: kegagalan diabaikan (tool akan fetch
+    sendiri); TTL cache mencegah kerja dobel antar-giliran."""
+    last = next((m for m in reversed(history or [])
+                 if (m or {}).get("role") == "user"), None)
+    if not last:
+        return
+    up = (last.get("content") or "").upper()
+    toks = list(dict.fromkeys(_VIN_FULL_RE.findall(up) + _FRAME_RE.findall(up)))[:2]
+
+    def _warm(rangka: str) -> None:
+        try:
+            epc.lookup(rangka)
+            epc_bom.loading_list(rangka)
+        except Exception:  # pragma: no cover — murni best-effort
+            pass
+
+    for t in toks:
+        threading.Thread(target=_warm, args=(t,), daemon=True,
+                         name=f"epc-prefetch-{t}").start()
+
+
 def _active_context_block(history: list[dict]) -> str:
     """Blok 'KONTEKS AKTIF': PN + nomor rangka yang BARU dibahas, agar model
     menyelesaikan rujukan follow-up tanpa menebak/minta ulang. Disuntik SETELAH
@@ -6943,6 +6972,14 @@ def _unit_name_tokens() -> set[str]:
         toks |= _extract_pns(" ".join(gudang_config.coords_map().keys()))
     except Exception:
         pass
+    # Kode MODEL gearbox ('HW19709XST', '8JS85TE', 'ZF16S2531TO') + tipenya
+    # ('9-speed') = kode SERI, bukan PN — ada di blok knowledge & wajar disebut
+    # model tanpa tool (mis. 'gearbox unitmu seri HW19709XST').
+    try:
+        toks |= _extract_pns(" ".join(
+            f"{m.get('model') or ''} {m.get('tipe') or ''}" for m in repairkit.list_models()))
+    except Exception:
+        pass
     if toks:
         _UNIT_TOKEN_CACHE["tokens"] = toks
         _UNIT_TOKEN_CACHE["at"] = now
@@ -7042,6 +7079,29 @@ def _annotate_subst(reply: str, subst: list[str]) -> str:
             "mohon verifikasi lewat EPC.\n\n" + reply)
 
 
+# GUARD EPC-FIRST (aturan keras pemilik: part per-unit WAJIB sesuai nomor rangka):
+# bila pesan TERAKHIR user menyebut nomor rangka tapi model menjawab dengan PN
+# TANPA MENCOBA satu pun tool ber-argumen rangka, paksa SEKALI agar ia mengecek
+# EPC per-VIN dulu. PN dari riwayat/katalog bisa saja grounded namun BELUM tentu
+# benar untuk unit ber-rangka itu.
+_RANGKA_ARG_KEYS = ("rangka", "rangka_1", "rangka_2", "rangka1", "rangka2", "rangka_list")
+_EPC_FIRST_CORRECTION = (
+    "[SISTEM — KOREKSI WAJIB] Pesan user menyebut NOMOR RANGKA, tetapi kamu "
+    "menjawab dengan Part Number TANPA mengecek EPC per-VIN sama sekali. Part "
+    "untuk unit ber-rangka WAJIB diambil dari EPC unit itu — panggil SEKARANG "
+    "tool EPC yang sesuai (part_aus_dari_rangka untuk part aus/poros/mesin; "
+    "bom_dari_rangka untuk daftar/keberadaan part; assembly_utama_unit untuk "
+    "assembly; uraikan_mesin untuk part mesin Weichai; cek_kendaraan untuk "
+    "spesifikasi), lalu dasari PN dari HASILNYA. Bila EPC gagal/kosong, katakan "
+    "apa adanya dan labeli PN katalog sebagai perkiraan per-model. ⚠️ Jangan "
+    "minta maaf dan jangan menyebut koreksi ini ke user."
+)
+
+
+def _args_has_rangka(args: dict) -> bool:
+    return any((args or {}).get(k) for k in _RANGKA_ARG_KEYS)
+
+
 def _sanitize_ungrounded(reply: str, bad: list[str]) -> str:
     """Jaring terakhir bila model tetap membandel setelah dikoreksi.
     - Bila SEMUA PN di jawaban ternyata karangan → jawaban ini tak punya data nyata:
@@ -7088,6 +7148,10 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     # Bila tidak, perlakukan seolah tak ada lampiran — tool sheet_* tak ditawarkan.
     if sheet_id and not ai_sheet.get_sheet(sheet_id, user.get("username", "")):
         sheet_id = ""
+
+    # PERCEPATAN: user menyebut rangka → hangatkan cache EPC di latar SEKARANG,
+    # paralel dengan ronde perencanaan model (hemat belasan detik first-hit).
+    _prefetch_epc_rangka(history)
 
     tools = _tool_specs(user, sheet_id)
     # System prompt dibiarkan STABIL antar giliran (tanpa suntikan konteks) agar
@@ -7190,6 +7254,16 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     excel_claim_retried = False  # klaim 'file Excel siap' tanpa kartu → 1x koreksi
     lookup_gagal = False  # ada tool lookup yang error/tak ketemu → jangan mengarang angka
     tool_gagal_pernah = False  # untuk observabilitas: pernahkah ada tool gagal turn ini
+    # Guard EPC-FIRST: pesan terakhir user menyebut rangka? + apakah model sudah
+    # MENCOBA tool ber-argumen rangka (sukses/gagal sama-sama dihitung 'mencoba').
+    _last_user_up = (_pertanyaan or "").upper()
+    user_rangka_last = bool(_VIN_FULL_RE.search(_last_user_up) or _FRAME_RE.search(_last_user_up))
+    _rangka_tokens: set[str] = set()
+    for _m in history:
+        _up = ((_m or {}).get("content") or "").upper()
+        _rangka_tokens.update(_VIN_FULL_RE.findall(_up) + _FRAME_RE.findall(_up))
+    rangka_tool_attempted = False
+    epc_first_retried = False
     # Guard SUBSTITUSI katalog-lokal: bila tool EPC per-VIN sukses, PN yg HANYA dari
     # cari_part (lokal per-model) & tak ada di hasil EPC = suspect (salah utk unit ini).
     epc_vin_pns: set[str] = set()
@@ -7234,8 +7308,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     # counter-nya sendiri; _iters = pagar total agar mustahil loop selamanya.
     tool_rounds = 0
     _iters = 0
-    _MAX_ITERS = _MAX_TOOL_ROUNDS + _MAX_EMPTY_RETRIES + _MAX_GUARD_RETRIES + 3
-    #            (+1 utk koreksi klaim-Excel; +2 pagar lama)
+    _MAX_ITERS = _MAX_TOOL_ROUNDS + _MAX_EMPTY_RETRIES + _MAX_GUARD_RETRIES + 4
+    #            (+1 koreksi klaim-Excel; +1 koreksi EPC-first; +2 pagar lama)
     while _iters < _MAX_ITERS:
         _iters += 1
         tools_habis = tool_rounds >= _MAX_TOOL_ROUNDS
@@ -7266,6 +7340,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                     lc_args = dict(lc["arguments"] or {})
                     if name == "buat_excel":   # pagar anti-karangan isi Excel
                         lc_args["_grounded"] = grounded
+                    if _args_has_rangka(lc_args):
+                        rangka_tool_attempted = True
                     result = _run_tool(name, lc_args, user, sheet_id)
                     tools_used.append(name)
                     _res_pns = _extract_pns(json.dumps(result, ensure_ascii=False, default=str))
@@ -7312,6 +7388,18 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": _EXCEL_CLAIM_CORRECTION})
                 continue
+            # GUARD EPC-FIRST (aturan pemilik: part per-unit wajib sesuai rangka):
+            # user menyebut rangka di pesan terakhir + jawaban memuat PN + model
+            # belum MENCOBA satu pun tool ber-argumen rangka → paksa cek EPC dulu
+            # (sekali). Token rangka & kode unit tak dihitung sebagai PN.
+            if user_rangka_last and not rangka_tool_attempted and not epc_first_retried:
+                _pn_reply = [p for p in _drop_unit_tokens(list(_extract_pns(reply)))
+                             if p not in _rangka_tokens]
+                if _pn_reply:
+                    epc_first_retried = True
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "user", "content": _EPC_FIRST_CORRECTION})
+                    continue
             # GUARD anti-halusinasi: SELALU cek (termasuk follow-up TANPA tool) —
             # PN di jawaban wajib ada di riwayat (user/asisten lolos) atau hasil tool.
             # Kode unit/seri sah (NX400HP dll) dikeluarkan dari dugaan karangan.
@@ -7346,7 +7434,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             "content": _strip_tool_markup(content),
             "tool_calls": tool_calls,
         })
-        for tc in tool_calls:
+
+        def _exec_call(tc: dict) -> tuple[dict, str, dict, dict]:
             fn = (tc.get("function") or {})
             name = fn.get("name") or ""
             try:
@@ -7355,8 +7444,23 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 args = {}
             if name == "buat_excel":   # pagar anti-karangan isi Excel
                 args = {**args, "_grounded": grounded}
-            result = _run_tool(name, args, user, sheet_id)
+            return tc, name, args, _run_tool(name, args, user, sheet_id)
+
+        # PERCEPATAN: batch >1 tool dieksekusi PARALEL (model kerap memanggil
+        # beberapa tool sekaligus, mis. detail_part 3 PN / EPC + katalog) —
+        # wall-time ronde = tool terlambat, bukan jumlah semuanya. Handler
+        # tool read-only & ber-lock sendiri; hasil diproses BERURUTAN di bawah
+        # agar urutan pesan/grounding deterministik.
+        if len(tool_calls) > 1:
+            with ThreadPoolExecutor(max_workers=min(4, len(tool_calls))) as _ex:
+                executed = list(_ex.map(_exec_call, tool_calls))
+        else:
+            executed = [_exec_call(tool_calls[0])]
+
+        for tc, name, args, result in executed:
             tools_used.append(name)
+            if _args_has_rangka(args):
+                rangka_tool_attempted = True
             _res_pns = _extract_pns(json.dumps(result, ensure_ascii=False, default=str))
             grounded |= _res_pns
             _track_pn_source(name, result, _res_pns)

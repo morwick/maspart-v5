@@ -151,9 +151,40 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
     except Exception:
         pass
 
+    # ── Fakta tambahan dari sumber RESMI lain di disk (best-effort per sumber;
+    #    file absen → bagian itu dilewati, sisanya tetap dibangun) ──
+    # Kode kesalahan ECU (fault_codes.json — dokumen resmi Bosch/Sinotruk).
+    fault_n = 0
+    try:
+        from . import fault_codes as _fcd
+        fault_n = int(_fcd.count() or 0)
+    except Exception:
+        pass
+    # Unit Shantui yang PUNYA data cross-reference filter (data/manuals).
+    filter_units: list[str] = []
+    try:
+        from . import filter_ref as _fr
+        if _fr.available():
+            filter_units = list(_fr.units())
+    except Exception:
+        pass
+    # Model gearbox yang PUNYA data repair kit (transmisi.json — kurasi resmi).
+    gearbox_models: list[dict] = []
+    try:
+        from . import repairkit as _rk
+        if _rk.available():
+            for m in _rk.list_models():
+                gearbox_models.append({"model": m.get("model"),
+                                       "tipe": m.get("tipe") or "",
+                                       "jumlah_unit": len(m.get("unit") or [])})
+    except Exception:
+        pass
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "sumber": ["catalog_bom.json (EPC Sinotruk per-model)", "gudang_config.json"],
+        "sumber": ["catalog_bom.json (EPC Sinotruk per-model)", "gudang_config.json",
+                   "fault_codes.json (DTC resmi)", "filter Shantui (data/manuals)",
+                   "transmisi.json (repair kit gearbox)"],
         "cakupan": {
             "unit_katalog_bom": len(bom.get("units") or {}),
             "pn_unik_bom": len(pn_kat),
@@ -161,6 +192,9 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         "prefix_pn": prefixes,
         "sub_prefix_pn": sub_rows,
         "gudang": gudang,
+        "fault_codes": {"jumlah": fault_n},
+        "filter_shantui_units": filter_units,
+        "gearbox_repairkit": gearbox_models,
     }
 
 
@@ -220,6 +254,29 @@ def _render(d: dict, with_gudang: bool) -> str:
             "• GUDANG/CABANG RESMI (untuk memahami sebutan user spt 'jkt', "
             "'plg', 'mks' — cocokkan longgar ke nama ini): "
             + ", ".join(d["gudang"]))
+    fc = (d.get("fault_codes") or {}).get("jumlah") or 0
+    if fc:
+        lines.append(
+            f"• KODE KESALAHAN (DTC): database resmi memuat {fc} entri SPN/FMI/kode P — "
+            "pertanyaan kode error/fault code WAJIB via cari_kode_kesalahan, jangan dari ingatan.")
+    fu = d.get("filter_shantui_units") or []
+    if fu:
+        lines.append(
+            "• FILTER SHANTUI: data cross-reference filter (Fleetguard/Donaldson/Sakura/dll) "
+            "TERSEDIA untuk unit: " + ", ".join(fu) +
+            " — pertanyaan filter unit-unit ini WAJIB via cari_filter_shantui.")
+    gm = d.get("gearbox_repairkit") or []
+    if gm:
+        daftar = ", ".join(
+            f"{r.get('model')}" + (f" ({r['tipe']})" if r.get("tipe") else "")
+            for r in gm)
+        lines.append(
+            "• MODEL GEARBOX ber-DATA REPAIR KIT — daftar ini HANYA untuk MENGENALI "
+            "kode seri transmisi: " + daftar +
+            ". ⛔ JANGAN menjawab pertanyaan repair kit / 'model X ada tidak' langsung "
+            "dari daftar ini — WAJIB tetap panggil repair_kit_transmisi (verifikasi + "
+            "isi kit). Unit di luar daftar tetap bisa punya gearbox — cek cari_part/EPC, "
+            "jangan simpulkan 'tidak punya'.")
     cak = d.get("cakupan") or {}
     if cak:
         lines.append(

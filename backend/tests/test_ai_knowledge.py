@@ -47,6 +47,12 @@ def fake_data(tmp_path, monkeypatch):
     from app.services import gudang_config
     monkeypatch.setattr(gudang_config, "coords_map",
                         lambda: {"01.Jakarta": (0, 0), "04.Palembang": (0, 0)})
+    # Sumber fakta tambahan dibuat DETERMINISTIK (tanpa file data nyata):
+    # fault_codes angka pasti; filter/gearbox dimatikan (dirender-test terpisah).
+    from app.services import fault_codes, filter_ref, repairkit
+    monkeypatch.setattr(fault_codes, "count", lambda: 7)
+    monkeypatch.setattr(filter_ref, "available", lambda: False)
+    monkeypatch.setattr(repairkit, "available", lambda: False)
     return tmp_path
 
 
@@ -61,6 +67,8 @@ def test_build_menghitung_prefix_dari_data(fake_data):
     sub = {r["prefix"]: r for r in d["sub_prefix_pn"]}
     assert sub["WG2229"]["kategori_dominan"] == "Transmisi"
     assert d["gudang"] == ["01.Jakarta", "04.Palembang"]
+    assert d["fault_codes"]["jumlah"] == 7
+    assert d["filter_shantui_units"] == [] and d["gearbox_repairkit"] == []
 
 
 def test_blok_prompt_tanpa_pn_utuh(fake_data):

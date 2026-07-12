@@ -77,6 +77,15 @@ _TOKEN_ERR_RE = re.compile(
 _CACHE_TTL = 3600.0  # detik — BOM per-VIN statis; cache ringan agar hemat panggilan.
 _cache: dict[str, dict] = {}  # frame -> {"at": monotonic, "val": dict}
 _lock = threading.Lock()
+# Dedup fetch KONKUREN per-frame: prefetch latar (ai_assistant) + panggilan tool
+# untuk frame yang sama tak boleh menembak server EPC dua kali berbarengan —
+# yang datang belakangan menunggu, lalu terlayani dari cache.
+_fetch_locks: dict[str, threading.Lock] = {}
+
+
+def _frame_fetch_lock(frame: str) -> threading.Lock:
+    with _lock:
+        return _fetch_locks.setdefault(frame, threading.Lock())
 
 
 def _frame(rangka: str) -> str:
@@ -245,6 +254,17 @@ def loading_list(rangka: str) -> dict:
         if c and (time.monotonic() - c["at"] < _CACHE_TTL):
             return c["val"]
 
+    # Serialisasi fetch per-frame (prefetch latar vs tool): yang kedua menunggu
+    # lalu re-cek cache — bukan menembak server EPC dua kali untuk data sama.
+    with _frame_fetch_lock(frame):
+        with _lock:
+            c = _cache.get(frame)
+            if c and (time.monotonic() - c["at"] < _CACHE_TTL):
+                return c["val"]
+        return _loading_list_fetch(frame)
+
+
+def _loading_list_fetch(frame: str) -> dict:
     res = _get_auto(_LOADING_URL, {"vin": frame, "part": ""})
     if "_err" in res:
         # Jangan cache kegagalan (token bisa segera di-refresh).
