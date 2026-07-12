@@ -1707,7 +1707,9 @@ export async function exportAiExcel(token: string, id: string): Promise<Blob> {
   return res.blob();
 }
 
-export async function getAiStatus(token: string): Promise<{ available: boolean }> {
+// `allowed` false = menu "Asisten AI" dimatikan admin untuk akun ini (Menu Control),
+// beda dari asisten yang memang belum dikonfigurasi di server.
+export async function getAiStatus(token: string): Promise<{ available: boolean; allowed?: boolean }> {
   const res = await fetch(`${API_BASE}/api/ai/status`, {
     headers: { Authorization: `Bearer ${token}` },
   });

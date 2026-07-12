@@ -173,6 +173,7 @@ export default function AsistenPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [available, setAvailable] = useState<boolean | null>(null);
+  const [allowed, setAllowed] = useState(true);   // menu 'ai' dimatikan admin? (Menu Control)
   // File yang sudah DIPILIH tapi BELUM dikirim — user mengetik dulu maunya apa
   // ("isikan stok"), baru tekan Kirim. Gaya Claude.
   const [pendingSheet, setPendingSheet] = useState<File | null>(null);
@@ -190,7 +191,10 @@ export default function AsistenPage() {
     const token = getToken();
     if (!token) return router.replace("/login");
     getAiStatus(token)
-      .then((s) => setAvailable(s.available))
+      .then((s) => {
+        setAvailable(s.available);
+        setAllowed(s.allowed !== false);
+      })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) {
           clearSession();
@@ -458,7 +462,11 @@ export default function AsistenPage() {
       <div className="flex h-full w-full flex-col">
         {available === false && (
           <div className="alert alert-error" style={{ margin: 12 }}>
-            Asisten AI belum aktif. Set <code>DEEPSEEK_API_KEY</code> di <code>backend/.env</code> lalu restart backend.
+            {allowed ? (
+              <>Asisten AI belum aktif. Set <code>DEEPSEEK_API_KEY</code> di <code>backend/.env</code> lalu restart backend.</>
+            ) : (
+              <>Asisten AI dimatikan untuk akun ini oleh admin (Menu Control).</>
+            )}
           </div>
         )}
 

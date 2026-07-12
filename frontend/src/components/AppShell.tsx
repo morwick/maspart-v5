@@ -78,11 +78,13 @@ const NAV_ADMIN: NavItem[] = [
   { href: "/admin/index", label: "Image Index", icon: I.grid },
 ];
 
-// Akun pembeli hanya melihat alur belanja.
+// Akun pembeli hanya melihat alur belanja. Item ber-`key` tunduk pada Menu Control
+// (mis. admin mematikan centang "Asisten AI" → menunya hilang untuk pembeli juga);
+// item tanpa key selalu tampil karena bukan bagian dari izin menu.
 const NAV_BUYER: NavItem[] = [
   { href: "/toko", label: "Belanja", icon: I.cart },
-  { href: "/search", label: "Cari Part", icon: I.search },
-  { href: "/asisten", label: "Asisten AI", icon: I.ai },
+  { key: "search", href: "/search", label: "Cari Part", icon: I.search },
+  { key: "ai", href: "/asisten", label: "Asisten AI", icon: I.ai },
   { href: "/chat", label: "Chat", icon: I.chat },
   { href: "/pesanan", label: "Pesanan Saya", icon: I.receipt },
   { href: "/pilih-lokasi", label: "Ganti Lokasi", icon: I.truck },
@@ -136,14 +138,22 @@ export default function AppShell({
       router.replace("/toko");
       return;
     }
-    if (u?.role !== "pembeli") {
-      ensurePerms()
-        .then((p) => {
-          setAllowed(p ? p.menus : NAV_PRIMARY.filter((i) => i.key).map((i) => i.key!));
-          setBranchLabel(p?.branch ?? null);
-        })
-        .catch(() => setAllowed(NAV_PRIMARY.filter((i) => i.key).map((i) => i.key!)));
-    }
+    // Izin menu berlaku untuk SEMUA peran, termasuk pembeli — dulu pembeli tak
+    // pernah mengambil izin sama sekali sehingga mematikan centang "Asisten AI"
+    // tak berpengaruh pada menunya. Halaman yang menunya dimatikan juga ditutup
+    // (backend sudah menolak, ini supaya user tak terdampar di halaman error).
+    const fallback = NAV_PRIMARY.filter((i) => i.key).map((i) => i.key!);
+    ensurePerms()
+      .then((p) => {
+        const menus = p ? p.menus : fallback;
+        setAllowed(menus);
+        setBranchLabel(p?.branch ?? null);
+        const halaman = [...NAV_PRIMARY, ...NAV_BUYER].find((i) => i.key && i.href === active);
+        if (halaman && !menus.includes(halaman.key!)) {
+          router.replace(u?.role === "pembeli" ? "/toko" : "/beranda");
+        }
+      })
+      .catch(() => setAllowed(fallback));
     const sync = () => setCartN(cartCount());
     sync();
     return onCartChange(sync);
@@ -203,7 +213,7 @@ export default function AppShell({
 
   // Bangun daftar section sesuai peran & izin.
   const sections: NavSection[] = useMemo(() => {
-    if (isBuyer) return [{ label: "Belanja", items: NAV_BUYER }];
+    if (isBuyer) return [{ label: "Belanja", items: NAV_BUYER.filter(show) }];
     const out: NavSection[] = [];
     // Ringkasan: admin → Command Center; staf internal → Beranda ringkas.
     out.push({ label: "Ringkasan", items: [isAdmin ? NAV_DASHBOARD : NAV_BERANDA] });

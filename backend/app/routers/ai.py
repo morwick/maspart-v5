@@ -9,10 +9,15 @@ from pydantic import BaseModel, Field
 
 from ..core.config import get_settings
 from ..core.ratelimit import limit
-from ..deps import get_current_user, require_admin
+from ..deps import get_current_user, require_admin, require_menu
 from ..services import ai_assistant, ai_export, ai_feedback, ai_sheet, image_search
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
+
+# Menu Control → centang "Asisten AI" (key 'ai'). Dulu centang itu HANYA
+# menyembunyikan menu di sidebar; endpoint tetap terbuka sehingga fiturnya masih
+# bisa dipakai lewat URL langsung. Semua jalur PEMAKAIAN asisten kini dijaga.
+require_ai = require_menu("ai")
 
 _MAX_PHOTO_BYTES = 12 * 1024 * 1024  # 12 MB
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -41,11 +46,15 @@ class FeedbackRequest(BaseModel):
 
 @router.get("/status")
 def ai_status(user: dict = Depends(get_current_user)):
-    return {"available": get_settings().ai_configured}
+    """Asisten siap dipakai user ini? `available` False juga bila menu 'ai'
+    dimatikan admin untuk akun ini (halaman /asisten memakai ini untuk menutup diri)."""
+    from ..services import permissions
+    allowed = "ai" in permissions.effective("menu", user["username"], user.get("role", "user"))
+    return {"available": get_settings().ai_configured and allowed, "allowed": allowed}
 
 
 @router.post("/chat", dependencies=[Depends(limit("ai_chat", 15, 60))])
-def ai_chat(body: AIChatRequest, user: dict = Depends(get_current_user)):
+def ai_chat(body: AIChatRequest, user: dict = Depends(require_ai)):
     history = [{"role": m.role, "content": m.content} for m in body.messages]
     if not any(m["role"] == "user" and m["content"].strip() for m in history):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pesan kosong.")
@@ -109,7 +118,7 @@ def export_banding_rangka(
     rangka_1: str = Query(..., description="Nomor rangka/VIN unit pertama"),
     rangka_2: str = Query(..., description="Nomor rangka/VIN unit kedua"),
     kategori: str = Query("", description="Kategori (kabin/rem/…); kosong = semua part"),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_ai),
 ):
     """Excel perbandingan LENGKAP (tanpa cap) dua unit — dipicu tombol 'Unduh Excel'
     di bawah jawaban perbandingan asisten."""
@@ -124,7 +133,7 @@ def export_banding_rangka(
 
 
 @router.get("/excel/{export_id}", dependencies=[Depends(limit("ai_export", 20, 60))])
-def export_ai_excel(export_id: str, _user: dict = Depends(get_current_user)):
+def export_ai_excel(export_id: str, _user: dict = Depends(require_ai)):
     """File hasil export asisten (Excel `buat_excel` / katalog bergambar Excel|PDF)
     — dipicu kartu 'Unduh' di bawah jawaban. Payload disimpan sementara (TTL) saat
     tool dijalankan; media type mengikuti ekstensi file (xlsx/pdf)."""
@@ -149,7 +158,7 @@ def export_ai_excel(export_id: str, _user: dict = Depends(get_current_user)):
 async def ai_chat_image(
     messages: str = Form("[]", description="Riwayat chat (JSON list {role, content})."),
     file: UploadFile = File(..., description="Foto part untuk dikenali."),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_ai),
 ):
     """Chat dengan FOTO: foto dikenali via Cari-by-Foto (DINOv2) → kandidat Part Number
     disuntikkan ke Asisten AI, lalu AI cek stok/harga/unit dan menjelaskan."""
@@ -200,7 +209,7 @@ async def ai_chat_image(
 async def ai_chat_sheet(
     messages: str = Form("[]", description="Riwayat chat (JSON list {role, content})."),
     file: UploadFile = File(..., description="File Excel (.xlsx/.xlsm) yang diunggah user."),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_ai),
 ):
     """Chat dengan LAMPIRAN EXCEL. File dibaca di server (kolom dikenali otomatis),
     disimpan sementara (TTL 2 jam, discoped per-user), lalu asisten menjawab dengan

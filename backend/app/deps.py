@@ -100,6 +100,27 @@ def require_buyer(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+def require_menu(key: str):
+    """Dependency: menu `key` (permissions.MENU_TABS) harus aktif untuk user ini.
+
+    Menu Control dulu hanya menyembunyikan menu di sidebar — endpoint-nya tetap
+    terbuka, jadi mematikan centang tidak benar-benar mematikan fiturnya (cukup
+    buka URL-nya langsung). Dependency ini yang membuat izin itu nyata.
+    Admin selalu lolos (permissions.effective mengembalikan semua key untuk admin).
+    """
+    def _dep(user: dict = Depends(get_current_user)) -> dict:
+        from .services import permissions
+        allowed = permissions.effective("menu", user["username"], user.get("role", "user"))
+        if key not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Menu '{permissions.MENU_TABS.get(key, key)}' dimatikan untuk akun ini.",
+            )
+        return user
+
+    return _dep
+
+
 def require_branch(user: dict = Depends(get_current_user)) -> dict:
     """Akun cabang (user yang terpetakan ke 1 gudang). Sisipkan `branch_label`."""
     label = gudang.gudang_for_user(user["username"], user.get("role", "user"))
