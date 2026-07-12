@@ -7,6 +7,11 @@ Konfigurasi lokasi gudang yang bisa diatur admin (persisten):
     gudang yang TIDAK bisa dipilih pembeli. Wajib ada karena gudang pemenuh
     (fallback terdekat) sering bukan gudang pilihan pembeli — tanpa ini ongkir
     akan dihitung dari kota yang salah.
+  - `no_ship`: gudang yang TIDAK boleh mengirim pesanan online (daftar label).
+    Kandidat gudang pemenuh berasal dari INDEKS STOK (semua gudang ber-stok di
+    Accurate), bukan dari config ini — jadi tanpa daftar ini gudang internal
+    (mis. B80) ikut menawarkan barangnya ke pembeli. Tidak terdaftar = BOLEH
+    mengirim (default aman: perilaku lama tak berubah).
 
 Disimpan sebagai JSON di <DATA_DIR>/gudang_config.json. Default di-seed dari
 nilai bawaan; admin dapat mengubah via /api/admin/gudang.
@@ -63,8 +68,9 @@ def _defaults() -> dict:
     return {
         "coords": {k: [v[0], v[1]] for k, v in _DEFAULT_COORDS.items()},
         "buyer": {k: dict(v) for k, v in _DEFAULT_BUYER.items()},
-        "pic": {},     # label gudang → nomor PIC (kontak), diatur admin
-        "postal": {},  # label gudang → kode pos asal ongkir (SEMUA gudang)
+        "pic": {},      # label gudang → nomor PIC (kontak), diatur admin
+        "postal": {},   # label gudang → kode pos asal ongkir (SEMUA gudang)
+        "no_ship": [],  # label gudang yang TIDAK boleh mengirim pesanan online
     }
 
 
@@ -95,6 +101,8 @@ def load() -> dict:
                     cfg["pic"] = {str(k): str(v) for k, v in saved["pic"].items() if v}
                 if isinstance(saved.get("postal"), dict):
                     cfg["postal"] = {str(k): str(v) for k, v in saved["postal"].items() if v}
+                if isinstance(saved.get("no_ship"), list):
+                    cfg["no_ship"] = [str(v) for v in saved["no_ship"] if str(v).strip()]
         except Exception:
             pass
         # Config lama (sebelum ada map `postal`) hanya menyimpan kode pos di dalam
@@ -108,13 +116,22 @@ def load() -> dict:
 
 
 def save(coords: dict, buyer: dict, pic: dict | None = None,
-         postal: dict | None = None) -> tuple[bool, str]:
+         postal: dict | None = None, no_ship: list | None = None) -> tuple[bool, str]:
     """Tulis config ke disk & invalidasi cache.
 
     `postal` (label → kode pos) berlaku untuk SEMUA gudang. Kode pos gudang yang
     juga lokasi pembeli ikut ditulis ke entri `buyer` agar pembaca lama tetap jalan.
+    `no_ship` = daftar gudang yang tak boleh mengirim.
+
+    postal/no_ship = None → nilai lama DIPERTAHANKAN (penting: penulis parsial
+    seperti auto-isi kode pos tak boleh menghapus daftar no_ship, dan sebaliknya).
     """
     global _cache
+    lama = load()
+    if postal is None:
+        postal = dict(lama.get("postal", {}))
+    if no_ship is None:
+        no_ship = list(lama.get("no_ship", []))
     postal_clean = {
         str(k): "".join(ch for ch in str(v) if ch.isdigit())[:10]
         for k, v in (postal or {}).items()
@@ -137,6 +154,7 @@ def save(coords: dict, buyer: dict, pic: dict | None = None,
         },
         "pic": {str(k): str(v).strip() for k, v in (pic or {}).items() if str(v).strip()},
         "postal": postal_clean,
+        "no_ship": sorted({str(v) for v in (no_ship or []) if str(v).strip()}),
     }
     try:
         p = _path()
@@ -164,6 +182,11 @@ def pic_map() -> dict[str, str]:
 def postal_map() -> dict[str, str]:
     """label gudang → kode pos ASAL ongkir (semua gudang, bukan hanya pilihan pembeli)."""
     return load().get("postal", {})
+
+
+def no_ship_labels() -> set[str]:
+    """Gudang yang TIDAK boleh mengirim pesanan online (dimatikan admin)."""
+    return set(load().get("no_ship", []))
 
 
 def set_postal(label: str, code: str) -> bool:

@@ -198,7 +198,7 @@ def _scoped_stock(p: dict, username: str, own: Optional[str],
     menunjukkan gudang pengirim — 'READY · <gudang>'; ongkir dihitung dari
     gudang pemenuh itu). Reservasi dikurangkan SEBELUM scoping supaya fallback
     tetap bekerja saat gudang sendiri habis direservasi pembeli lain."""
-    bd = p["gudang"]
+    bd = gudang.shippable(p["gudang"])      # gudang non-kirim (mis. B80) tak menawarkan barang
     if resv:
         pn = p["part_number"]
         bd = {g: q - resv.get((pn, g), 0) for g, q in bd.items()}

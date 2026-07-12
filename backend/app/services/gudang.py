@@ -74,6 +74,26 @@ def origin_postal_for_label(label: str | None) -> str:
     return ""
 
 
+def can_ship(label: str | None) -> bool:
+    """Gudang ini boleh mengirim pesanan online? (centang 'Bisa Kirim' di admin).
+    Default BOLEH — hanya gudang yang sengaja dimatikan admin yang tak boleh."""
+    return bool(label) and label not in gudang_config.no_ship_labels()
+
+
+def shippable(breakdown: dict) -> dict:
+    """Buang gudang yang tak boleh mengirim dari {gudang: qty}.
+
+    ⚠️ HANYA untuk jalur PEMBELI (etalase, detail part, order). Kandidat gudang
+    pemenuh datang dari INDEKS STOK — semua gudang ber-stok di Accurate, termasuk
+    gudang internal seperti B80 yang tak pernah diatur admin — jadi tanpa saringan
+    ini barang di gudang non-jual ikut ditawarkan. Staf/admin TETAP melihat stok
+    apa adanya (jangan pakai ini di jalur internal)."""
+    mati = gudang_config.no_ship_labels()
+    if not mati:
+        return breakdown
+    return {g: q for g, q in breakdown.items() if g not in mati}
+
+
 def _haversine(a: tuple, b: tuple) -> float:
     lat1, lon1 = a
     lat2, lon2 = b

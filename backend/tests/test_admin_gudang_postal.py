@@ -16,8 +16,9 @@ def captured(monkeypatch):
     monkeypatch.setattr(admin_router.gudang_config, "postal_map",
                         lambda: {"01.Jakarta": "14250"})
 
-    def _save(coords, buyer, pic=None, postal=None):
-        out.update({"coords": coords, "buyer": buyer, "pic": pic, "postal": postal})
+    def _save(coords, buyer, pic=None, postal=None, no_ship=None):
+        out.update({"coords": coords, "buyer": buyer, "pic": pic, "postal": postal,
+                    "no_ship": no_ship})
         return True, ""
 
     monkeypatch.setattr(admin_router.gudang_config, "save", _save)

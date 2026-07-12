@@ -1473,6 +1473,7 @@ export type AdminGudang = {
   key: string | null;
   origin_postal: string;
   pic: string;
+  can_ship: boolean;   // boleh jadi gudang PENGIRIM pesanan online
   nearest: string[];
 };
 
@@ -1486,7 +1487,7 @@ export async function getAdminGudang(token: string): Promise<{ gudang: AdminGuda
 
 export async function saveAdminGudang(
   token: string,
-  items: { label: string; lat: number | null; lon: number | null; selectable: boolean; key: string | null; pic: string; origin_postal: string }[],
+  items: { label: string; lat: number | null; lon: number | null; selectable: boolean; key: string | null; pic: string; origin_postal: string; can_ship: boolean }[],
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/admin/gudang`, {
     method: "PUT",

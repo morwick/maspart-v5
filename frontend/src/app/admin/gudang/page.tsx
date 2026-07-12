@@ -104,6 +104,7 @@ export default function AdminGudangPage() {
           key: it.key,
           pic: it.pic ?? "",
           origin_postal: it.origin_postal ?? "",
+          can_ship: it.can_ship !== false,
         })),
       );
       setMsg("Konfigurasi lokasi gudang tersimpan.");
@@ -150,7 +151,9 @@ export default function AdminGudangPage() {
           gudang terpilih kosong. <b>Kode Pos</b> = titik ASAL hitung ongkir, <b>wajib untuk SEMUA
           gudang</b> (bukan cuma yang bisa dipilih pembeli) — gudang terdekat juga ikut mengirim
           barang, dan tanpa kode pos ongkir dari gudang itu ditolak. Terisi otomatis dari koordinat,
-          boleh dikoreksi manual. Centang <b>Pembeli</b> agar gudang muncul di pilihan lokasi pembeli,
+          boleh dikoreksi manual. <b>Bisa Kirim</b> = gudang ini boleh memenuhi pesanan online;
+          matikan untuk gudang internal (mis. B80) agar stoknya tak pernah ditawarkan ke pembeli.
+          Centang <b>Pembeli</b> agar gudang muncul di pilihan lokasi pembeli,
           lalu isi <b>Key/Akun</b> (username akun cabang untuk routing pesanan).
         </div>
 
@@ -166,6 +169,7 @@ export default function AdminGudangPage() {
                   <th>Gudang</th>
                   <th style={{ width: 230 }}>Koordinat (lat, lon)</th>
                   <th style={{ width: 110 }}>Kode Pos</th>
+                  <th style={{ width: 80 }}>Bisa Kirim</th>
                   <th style={{ width: 70 }}>Pembeli</th>
                   <th style={{ width: 140 }}>Key / Akun</th>
                   <th style={{ width: 150 }}>No. PIC</th>
@@ -196,6 +200,14 @@ export default function AdminGudangPage() {
                         placeholder="otomatis"
                         title="Kode pos ASAL ongkir — terisi otomatis dari koordinat; boleh dikoreksi manual"
                         onChange={(e) => patch(it.label, { origin_postal: e.target.value.replace(/\D/g, "").slice(0, 10) })}
+                      />
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={it.can_ship !== false}
+                        title="Gudang ini boleh mengirim pesanan online. Kalau dimatikan, stoknya tak pernah ditawarkan ke pembeli (mis. gudang internal)."
+                        onChange={(e) => patch(it.label, { can_ship: e.target.checked })}
                       />
                     </td>
                     <td style={{ textAlign: "center" }}>

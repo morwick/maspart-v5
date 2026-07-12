@@ -390,6 +390,7 @@ class GudangItem(BaseModel):
     key: str | None = None       # key/akun cabang bila bisa dipilih pembeli
     pic: str | None = None       # nomor PIC/kontak gudang
     origin_postal: str | None = None  # kode pos ASAL ongkir (auto-isi dari koordinat di UI)
+    can_ship: bool = True        # boleh jadi gudang PENGIRIM pesanan online?
 
 
 class SaveGudangRequest(BaseModel):
@@ -404,6 +405,7 @@ def get_gudang(_admin: dict = Depends(require_admin)):
     buyer = gudang_config.buyer_locations()
     pic = gudang_config.pic_map()
     postals = gudang_config.postal_map()
+    no_ship = gudang_config.no_ship_labels()
     # label → (key, origin_postal) untuk lokasi yang bisa dipilih pembeli
     by_label = {v["label"]: (k, v.get("origin_postal", "")) for k, v in buyer.items()}
 
@@ -422,6 +424,7 @@ def get_gudang(_admin: dict = Depends(require_admin)):
             "selectable": lb in by_label,
             "key": key,
             "origin_postal": postal,
+            "can_ship": lb not in no_ship,
             "pic": pic.get(lb, ""),
             "nearest": [gudang.gudang_label(g) for g in gudang.fallback_order(lb, labels)[:5]],
         })
@@ -439,6 +442,7 @@ def save_gudang(body: SaveGudangRequest, _admin: dict = Depends(require_admin)):
     buyer: dict = {}
     pic: dict = {}
     postal: dict = {}
+    no_ship: list[str] = []
     seen_keys: set[str] = set()
     for it in body.items:
         label = (it.label or "").strip()
@@ -448,6 +452,10 @@ def save_gudang(body: SaveGudangRequest, _admin: dict = Depends(require_admin)):
             coords[label] = [float(it.lat), float(it.lon)]
         if (it.pic or "").strip():
             pic[label] = it.pic.strip()
+        # Gudang yang TIDAK boleh mengirim pesanan online (mis. gudang internal B80).
+        # Yang disimpan hanya yang dimatikan → gudang baru otomatis boleh mengirim.
+        if not it.can_ship:
+            no_ship.append(label)
         # Kode pos ASAL ongkir disimpan untuk SETIAP gudang — bukan hanya lokasi
         # pilihan pembeli — karena gudang PEMENUH (fallback terdekat) sering gudang
         # lain. None (UI lama) → pertahankan nilai lama; selain itu digit saja.
@@ -466,7 +474,7 @@ def save_gudang(body: SaveGudangRequest, _admin: dict = Depends(require_admin)):
             seen_keys.add(key)
             buyer[key] = {"label": label, "origin_postal": code}
 
-    ok, msg = gudang_config.save(coords, buyer, pic, postal)
+    ok, msg = gudang_config.save(coords, buyer, pic, postal, no_ship)
     if not ok:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Gagal simpan: {msg}")
     return {"ok": True}

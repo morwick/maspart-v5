@@ -160,7 +160,8 @@ def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_re
         # Reservasi dikurangkan SEBELUM scoping agar gudang pemenuh dipilih dengan
         # fallback gudang terdekat saat gudang sendiri habis — konsisten dgn
         # etalase (buyer_catalog) & halaman detail (parts._scope_gudang).
-        raw_bd = part_index.gudang_breakdown(pn)
+        # `shippable`: gudang yang dimatikan admin ('Bisa Kirim') tak boleh memenuhi.
+        raw_bd = gudang.shippable(part_index.gudang_breakdown(pn))
         net_bd = {g: raw_bd.get(g, 0) - resv.get((pn, g), 0) for g in raw_bd}
         net_bd = {g: q for g, q in net_bd.items() if q > 0}
         scoped = gudang.scope_breakdown(net_bd, user["username"], "pembeli", names, own=blabel)

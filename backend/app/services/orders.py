@@ -86,7 +86,7 @@ def fulfillment_gudang(username: str, items: list[dict]) -> str:
         pn = str(it.get("part_number") or "").strip().upper()
         if not pn:
             continue
-        raw = part_index.gudang_breakdown(pn)
+        raw = gudang.shippable(part_index.gudang_breakdown(pn))
         net = {g: raw.get(g, 0) - resv.get((pn, g), 0) for g in raw}
         net = {g: q for g, q in net.items() if q > 0}
         scoped = gudang.scope_breakdown(net, username, "pembeli", names, own=blabel)

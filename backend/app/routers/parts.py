@@ -93,6 +93,8 @@ def _scope_gudang(results: list[dict], user: dict) -> list[dict]:
     resv = reservations.reserved_map() if role == "pembeli" else {}
     for r in results:
         bd = dict(r.get("gudang") or {})
+        if role == "pembeli":
+            bd = gudang.shippable(bd)   # gudang non-kirim tak dijual ke pembeli
         if role == "pembeli" and resv:
             pn = str(r.get("part_number", "")).upper()
             bd = {g: q - resv.get((pn, g), 0) for g, q in bd.items()}
