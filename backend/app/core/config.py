@@ -65,12 +65,17 @@ class Settings(BaseSettings):
     ship_origin_id: str = ""                 # opsional: ID lokasi RajaOngkir asal (kalau diisi, tdk perlu cari via kode pos)
     ship_default_item_grams: int = 1000      # estimasi berat per item (gram)
 
-    # ── Pembayaran (Payment API Komerce) ──
-    payment_api_key: str = ""                # key "Payment API" dari dashboard Komerce
-    payment_sandbox: bool = True             # True = mode sandbox (uji), False = produksi
-    payment_callback_secret: str = ""        # secret untuk verifikasi signature webhook
-    payment_base_url: str = ""               # override base URL (kalau kosong, dipilih dari payment_sandbox)
-    public_base_url: str = "http://127.0.0.1:8001"  # URL publik backend (untuk callback_url webhook)
+    # ── Pembayaran (Midtrans Snap) ──
+    midtrans_server_key: str = ""            # Server Key dashboard Midtrans (Basic auth + signature webhook)
+    midtrans_client_key: str = ""            # Client Key (opsional; untuk Snap.js embed di frontend)
+    midtrans_sandbox: bool = True            # True = sandbox (uji), False = production
+    public_base_url: str = "http://127.0.0.1:8001"  # URL publik situs (finish redirect /pesanan/<code> & webhook /api/payments/webhook)
+
+    # ── (Deprecated) Payment API Komerce — digantikan Midtrans, dibiarkan agar env lama tak error ──
+    payment_api_key: str = ""
+    payment_sandbox: bool = True
+    payment_callback_secret: str = ""
+    payment_base_url: str = ""
 
     # ── Accurate Online (ERP — stok live) ──
     # Auto-login SSO ke account.accurate.id → iris.accurate.id (lihat services/accurate.py).
@@ -97,18 +102,18 @@ class Settings(BaseSettings):
         return bool(self.deepseek_api_key)
 
     @property
-    def payment_api_base(self) -> str:
-        if self.payment_base_url:
-            return self.payment_base_url.rstrip("/")
-        return (
-            "https://api-sandbox.collaborator.komerce.id"
-            if self.payment_sandbox
-            else "https://api.collaborator.komerce.id"
-        )
+    def midtrans_app_base(self) -> str:
+        """Base URL Snap (buat transaksi) — app.* host."""
+        return "https://app.sandbox.midtrans.com" if self.midtrans_sandbox else "https://app.midtrans.com"
+
+    @property
+    def midtrans_api_base(self) -> str:
+        """Base URL Core API (cek status transaksi) — api.* host."""
+        return "https://api.sandbox.midtrans.com" if self.midtrans_sandbox else "https://api.midtrans.com"
 
     @property
     def payment_configured(self) -> bool:
-        return bool(self.payment_api_key)
+        return bool(self.midtrans_server_key)
 
     @property
     def data_path(self) -> Path:
@@ -178,10 +183,8 @@ class Settings(BaseSettings):
             )
         if len(self.jwt_secret or "") < 32 and self.jwt_secret != self._DEFAULT_JWT_SECRET:
             issues.append("JWT_SECRET terlalu pendek (<32 karakter); gunakan minimal 32 karakter acak.")
-        if self.payment_configured and not self.payment_callback_secret:
-            issues.append(
-                "PAYMENT_CALLBACK_SECRET kosong — webhook pembayaran tidak bisa diverifikasi keasliannya."
-            )
+        # Midtrans: webhook diverifikasi via signature SHA512 memakai Server Key —
+        # tak perlu secret callback terpisah. (Server Key sudah wajib agar aktif.)
         return issues
 
     def validate_security(self) -> list[str]:

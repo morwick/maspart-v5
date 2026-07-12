@@ -310,7 +310,9 @@ export default function OrderDetailPage() {
                 <>
                   <div style={{ fontSize: 13, color: "var(--ink-700)", lineHeight: 1.6 }}>
                     Bayar <b className="mono">{rp(order.total)}</b>
-                    {order.payment_channel ? ` via ${order.payment_channel.toUpperCase()}` : ""}:
+                    {order.payment_channel === "snap"
+                      ? " — pilih metode (VA / QRIS / e-wallet / kartu) di halaman pembayaran Midtrans:"
+                      : order.payment_channel ? ` via ${order.payment_channel.toUpperCase()}:` : ":"}
                   </div>
 
                   {order.payment_va && (
@@ -372,28 +374,33 @@ export default function OrderDetailPage() {
                 </button>
               )}
 
-              {/* Upload bukti transfer + batalkan (saat belum lunas) */}
+              {/* Batalkan (saat belum lunas). Upload bukti manual HANYA untuk order
+                  non-gateway — pembayaran Midtrans terverifikasi otomatis. */}
               {["menunggu_pembayaran", "menunggu_verifikasi"].includes(order.status) && (
                 <>
-                  {order.payment_proof_url && (
-                    <a className="link" style={{ fontSize: 12 }} href={order.payment_proof_url} target="_blank" rel="noopener noreferrer">
-                      Lihat bukti yang sudah dikirim →
-                    </a>
+                  {order.payment_method !== "gateway" && (
+                    <>
+                      {order.payment_proof_url && (
+                        <a className="link" style={{ fontSize: 12 }} href={order.payment_proof_url} target="_blank" rel="noopener noreferrer">
+                          Lihat bukti yang sudah dikirim →
+                        </a>
+                      )}
+                      <label className="btn btn-secondary btn-sm" style={{ cursor: busy ? "default" : "pointer" }}>
+                        {busy === "proof" ? "Mengunggah…" : "📎 Upload Bukti Transfer"}
+                        <input
+                          type="file"
+                          accept="image/*,.pdf"
+                          hidden
+                          disabled={busy !== null}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) doUploadProof(f);
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                    </>
                   )}
-                  <label className="btn btn-secondary btn-sm" style={{ cursor: busy ? "default" : "pointer" }}>
-                    {busy === "proof" ? "Mengunggah…" : "📎 Upload Bukti Transfer"}
-                    <input
-                      type="file"
-                      accept="image/*,.pdf"
-                      hidden
-                      disabled={busy !== null}
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) doUploadProof(f);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
                   <button
                     className="btn btn-ghost btn-sm"
                     style={{ color: "var(--danger-600)" }}

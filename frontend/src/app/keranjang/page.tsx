@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import MapPicker from "@/components/MapPicker";
-import { ApiError, createOrder, getCartWeight, getShippingRates, getPaymentMethods, type ShippingRate, type PaymentChannel, type GeoPlace } from "@/lib/api";
+import { ApiError, createOrder, getCartWeight, getShippingRates, getPaymentMethods, type ShippingRate, type GeoPlace } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { clearCart, getCart, hasPrice, hasWeight, removeFromCart, setQty, type CartItem } from "@/lib/cart";
 
@@ -35,8 +35,7 @@ export default function KeranjangPage() {
 
   // Pembayaran (hanya online: VA/QRIS)
   const [gatewayOn, setGatewayOn] = useState(false);
-  const [channels, setChannels] = useState<PaymentChannel[]>([]);
-  const [channel, setChannel] = useState("qris");
+  const channel = "snap";   // Midtrans Snap: semua metode dipilih di halaman bayar
 
   useEffect(() => {
     const token = getToken();
@@ -52,10 +51,7 @@ export default function KeranjangPage() {
     const c = getCart();
     setItems(c);
     getPaymentMethods(token)
-      .then((m) => {
-        setGatewayOn(m.gateway_available);
-        setChannels(m.channels);
-      })
+      .then((m) => setGatewayOn(m.gateway_available))
       .catch(() => setGatewayOn(false));
   }, [router]);
 
@@ -321,20 +317,14 @@ export default function KeranjangPage() {
               )}
             </div>
 
-            {/* Pembayaran — online (VA / QRIS) */}
+            {/* Pembayaran — online via Midtrans (Snap) */}
             <div className="surface surface-pad mt-4">
-              <div className="mb-3" style={{ fontSize: 14, fontWeight: 600 }}>💳 Pembayaran Online (VA / QRIS)</div>
+              <div className="mb-3" style={{ fontSize: 14, fontWeight: 600 }}>💳 Pembayaran Online</div>
               {gatewayOn ? (
-                <div>
-                  <label className="mb-1.5 block" style={{ fontSize: 12.5, fontWeight: 550, color: "var(--ink-700)" }}>Pilih channel</label>
-                  <select className="select" value={channel} onChange={(e) => setChannel(e.target.value)} style={{ maxWidth: 280 }}>
-                    {channels.map((c) => (
-                      <option key={c.code} value={c.code}>{c.label}</option>
-                    ))}
-                  </select>
-                  <div style={{ fontSize: 11.5, color: "var(--ink-500)", marginTop: 8 }}>
-                    Bayar via Virtual Account atau QRIS — terverifikasi otomatis.
-                  </div>
+                <div style={{ fontSize: 12.5, color: "var(--ink-600)", lineHeight: 1.5 }}>
+                  Setelah pesanan dibuat, Anda diarahkan ke halaman pembayaran aman{" "}
+                  <b>Midtrans</b> untuk memilih metode — <b>Virtual Account, QRIS, e-wallet,
+                  atau kartu</b>. Pembayaran terverifikasi otomatis.
                 </div>
               ) : (
                 <div className="alert alert-error" style={{ marginBottom: 0 }}>
