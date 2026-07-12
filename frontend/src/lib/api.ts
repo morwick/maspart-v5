@@ -262,6 +262,7 @@ export type OrderDetail = OrderSummary & {
   recipient_phone?: string | null;
   recipient_address?: string | null;
   recipient_postal?: string | null;
+  fulfill_gudang?: string | null;     // gudang FISIK pengirim (beda dari `gudang` = cabang pemroses)
   payment_note?: string | null;       // mis. dibayar setelah order batal → perlu refund
   penawaran_status?: string | null;   // created | skip | failed (Penawaran Accurate otomatis)
   penawaran_number?: string | null;   // mis. 'MASPART-07'
@@ -330,6 +331,27 @@ export async function getCartWeight(
   items: { part_number: string; qty: number }[],
 ): Promise<{ weight_grams: number; default_item_grams: number }> {
   const res = await fetch(`${API_BASE}/api/shipping/weight`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export type CartGudang = {
+  items: { part_number: string; gudang: string }[];
+  utama: string;      // gudang pengirim utama (asal ongkir)
+  multi: boolean;     // keranjang terpecah ke >1 gudang → lebih dari satu paket
+};
+
+/** Gudang pengirim tiap item keranjang — pembeli berhak tahu barangnya dari mana
+ *  sebelum membayar, dan gudang inilah titik asal ongkirnya. */
+export async function getCartGudang(
+  token: string,
+  items: { part_number: string; qty: number }[],
+): Promise<CartGudang> {
+  const res = await fetch(`${API_BASE}/api/cart/gudang`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ items }),

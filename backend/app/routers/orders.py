@@ -109,6 +109,28 @@ def shipping_rates(body: RatesRequest, user: dict = Depends(require_buyer_ready)
     return {"rates": rates, "error": err, "available": shipping.available()}
 
 
+class CartGudangRequest(BaseModel):
+    items: list[OrderItemIn] = []
+
+
+@router.post("/cart/gudang")
+def cart_gudang(body: CartGudangRequest, user: dict = Depends(require_buyer_ready)):
+    """Gudang PENGIRIM tiap item keranjang — supaya pembeli tahu barangnya berangkat
+    dari mana SEBELUM membayar (dulu tak ada keterangan apa pun di checkout).
+    `multi` = keranjang terpecah ke >1 gudang → akan jadi >1 paket."""
+    fmap = orders.fulfillment_map(user["username"], [i.model_dump() for i in body.items])
+    items = [{"part_number": pn, "gudang": gudang.gudang_label(g)} for pn, g in fmap.items()]
+    tally: dict[str, int] = {}
+    for g in fmap.values():
+        tally[g] = tally.get(g, 0) + 1
+    utama = max(tally, key=tally.get) if tally else ""
+    return {
+        "items": items,
+        "utama": gudang.gudang_label(utama) if utama else "",
+        "multi": len(tally) > 1,     # keranjang terpecah → lebih dari satu paket
+    }
+
+
 @router.get("/payments/methods")
 def payment_methods(_user: dict = Depends(require_buyer_ready)):
     """Metode pembayaran yang tersedia (channel asli dari gateway kalau aktif)."""
@@ -244,6 +266,9 @@ def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_re
     if err:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, err)
     code = order["order_code"]
+    # Gudang FISIK pengirim (mis. '06.B80 H1') — beda dari kolom `gudang` yang berisi
+    # cabang pemroses. Dipakai agar pembeli & admin tahu barang berangkat dari mana.
+    orders.set_fulfill_gudang(code, fulfill_label)
 
     # Reservasi stok ATOMIK (anti-oversell sejati) lewat RPC. Bila migrasi 014
     # belum dijalankan, fallback ke jalur lama (best-effort) + cek pasca-reservasi.

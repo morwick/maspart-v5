@@ -10,6 +10,12 @@ import { ORDER_STATUS, rp, fmtDate } from "@/lib/order-ui";
 import OrderStepper from "@/components/OrderStepper";
 import OrderChat from "@/components/OrderChat";
 
+/** Gudang FISIK pengirim (tanpa prefiks nomor). Kolom `gudang` order berisi CABANG
+ *  pemroses — untuk sub-gudang seperti '06.B80 H1' keduanya berbeda. */
+function gudangKirim(o: OrderDetail): string {
+  return (o.fulfill_gudang || "").replace(/^\s*\d+\s*\.\s*/, "").trim();
+}
+
 export default function OrderDetailPage() {
   const router = useRouter();
   const params = useParams<{ code: string }>();
@@ -260,7 +266,12 @@ export default function OrderDetailPage() {
               {order.gudang && (
                 <div className="px-4 py-3" style={{ borderTop: "1px solid var(--ink-150)", fontSize: 13, color: "var(--ink-700)" }}>
                   <div style={{ fontWeight: 600, marginBottom: 2 }}>📦 Lokasi Pengirim</div>
-                  <div>Gudang <b>{order.gudang}</b></div>
+                  <div>Gudang <b>{gudangKirim(order) || order.gudang}</b></div>
+                  {gudangKirim(order) && gudangKirim(order) !== order.gudang && (
+                    <div style={{ color: "var(--ink-500)", fontSize: 12 }}>
+                      Diproses cabang {order.gudang}
+                    </div>
+                  )}
                   {order.gudang_lat != null && order.gudang_lon != null && (
                     <div style={{ color: "var(--ink-500)", fontSize: 12, marginTop: 2 }}>
                       Lokasi: {senderPlace || "memuat lokasi…"}{" · "}

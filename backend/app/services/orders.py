@@ -68,20 +68,20 @@ def current_status(order_code: str, gudang: str | None = None) -> str | None:
         return None
 
 
-def fulfillment_gudang(username: str, items: list[dict]) -> str:
-    """Label gudang PEMENUH dominan untuk daftar item pembeli (reserve-sebelum-scope
-    + fallback gudang terdekat) — dipakai menentukan ASAL ongkir. Logika SAMA dengan
-    pemilihan gudang di `create_order` agar preview ongkir & order konsisten.
-    Return label (mis. '08.TJP Jambi') atau '' bila tak ada stok."""
+def fulfillment_map(username: str, items: list[dict]) -> dict[str, str]:
+    """{PART_NUMBER: label gudang PEMENUH} untuk daftar item pembeli (reserve-sebelum-
+    scope + fallback gudang terdekat). Logika SAMA dengan pemilihan gudang di
+    `create_order` agar yang ditampilkan ke pembeli = yang benar-benar dipakai saat
+    order. PN tanpa stok yang bisa dikirim tak masuk hasil."""
     try:
         from . import part_index
         from .supabase_client import get_user_gudang
     except Exception:
-        return ""
+        return {}
     names = part_index.gudang_names()
     resv = reservations.reserved_map()
     blabel = gudang.buyer_label(get_user_gudang(username))
-    tally: dict[str, int] = {}
+    out: dict[str, str] = {}
     for it in items or []:
         pn = str(it.get("part_number") or "").strip().upper()
         if not pn:
@@ -91,8 +91,16 @@ def fulfillment_gudang(username: str, items: list[dict]) -> str:
         net = {g: q for g, q in net.items() if q > 0}
         scoped = gudang.scope_breakdown(net, username, "pembeli", names, own=blabel)
         if scoped:
-            g = next(iter(scoped))
-            tally[g] = tally.get(g, 0) + 1
+            out[pn] = next(iter(scoped))
+    return out
+
+
+def fulfillment_gudang(username: str, items: list[dict]) -> str:
+    """Label gudang PEMENUH dominan (dipakai menentukan ASAL ongkir).
+    Return label (mis. '08.TJP Jambi') atau '' bila tak ada stok."""
+    tally: dict[str, int] = {}
+    for g in fulfillment_map(username, items).values():
+        tally[g] = tally.get(g, 0) + 1
     return max(tally, key=tally.get) if tally else ""
 
 
@@ -571,6 +579,20 @@ def mark_paid(order_code: str, raw: dict | None = None) -> bool:
         # Order lunas: jadikan reservasi stok permanen agar tidak ikut kedaluwarsa.
         reservations.commit(order_code)
     return ok
+
+
+def set_fulfill_gudang(order_code: str, label: str) -> bool:
+    """Catat gudang FISIK pengirim di order (mis. '06.B80 H1'), berbeda dari kolom
+    `gudang` yang berisi CABANG pemroses (B80 → cabang Jakarta). Best-effort: kolom
+    `fulfill_gudang` mungkin belum ada (migrasi 020 belum jalan) → kegagalan ditelan,
+    order tetap sah, hanya keterangannya yang belum tampil."""
+    if not label:
+        return False
+    try:
+        return _patch(order_code, {"fulfill_gudang": label})
+    except Exception:
+        logger.exception("set_fulfill_gudang gagal (order %s)", order_code)
+        return False
 
 
 def flag_late_payment(order_code: str, amount: int = 0) -> bool:

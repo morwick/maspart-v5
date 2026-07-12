@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import MapPicker from "@/components/MapPicker";
-import { ApiError, createOrder, getCartWeight, getShippingRates, getPaymentMethods, type ShippingRate, type GeoPlace } from "@/lib/api";
+import { ApiError, createOrder, getCartGudang, getCartWeight, getShippingRates, getPaymentMethods, type CartGudang, type ShippingRate, type GeoPlace } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { clearCart, getCart, hasPrice, hasWeight, removeFromCart, setQty, type CartItem } from "@/lib/cart";
 
@@ -67,6 +67,8 @@ export default function KeranjangPage() {
   const noWeightItems = items.filter((i) => !hasWeight(i.berat));
   // Berat dihitung otomatis oleh backend dari data berat part (fallback estimasi/item).
   const totalQty = items.reduce((n, i) => n + i.qty, 0);
+  const [asal, setAsal] = useState<CartGudang | null>(null);   // gudang pengirim per item
+  const gudangOf = (pn: string) => asal?.items.find((i) => i.part_number === pn)?.gudang || "";
   const [weightGrams, setWeightGrams] = useState(0);
   const weightKg = weightGrams / 1000;
   // Tanda-tangan isi keranjang (PN:qty) → ambil ulang berat hanya saat isi berubah.
@@ -85,6 +87,10 @@ export default function KeranjangPage() {
     getCartWeight(token, items.map((i) => ({ part_number: i.part_number, qty: i.qty })))
       .then((r) => { if (alive) setWeightGrams(r.weight_grams); })
       .catch(() => {});
+    // Gudang pengirim tiap item (= titik asal ongkir) — pembeli berhak tahu sebelum bayar.
+    getCartGudang(token, items.map((i) => ({ part_number: i.part_number, qty: i.qty })))
+      .then((r) => { if (alive) setAsal(r); })
+      .catch(() => { if (alive) setAsal(null); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cartSig]);
@@ -214,6 +220,11 @@ export default function KeranjangPage() {
                         {!hasWeight(i.berat) && (
                           <span className="pill pill-warn" style={{ marginLeft: 8 }} title="Berat belum ditetapkan admin">Tanpa berat</span>
                         )}
+                        {gudangOf(i.part_number) && (
+                          <div style={{ fontSize: 11.5, color: "var(--ink-500)", marginTop: 2 }}>
+                            🚚 Dikirim dari gudang <b>{gudangOf(i.part_number)}</b>
+                          </div>
+                        )}
                       </td>
                       <td className="num mono">
                         {hasPrice(i.harga) ? (
@@ -287,6 +298,19 @@ export default function KeranjangPage() {
               </div>
 
               {rateErr && <div className="alert alert-error" style={{ marginBottom: 10 }}>{rateErr}</div>}
+
+              {/* Asal kirim: pembeli tahu barangnya berangkat dari mana sebelum bayar. */}
+              {asal?.utama && (
+                <div style={{ fontSize: 12.5, color: "var(--ink-600)", marginBottom: 10 }}>
+                  🚚 Ongkir dihitung dari <b>Gudang {asal.utama}</b>.
+                  {asal.multi && (
+                    <span style={{ color: "var(--warn-700, var(--ink-700))" }}>
+                      {" "}Keranjang ini berisi part dari <b>lebih dari satu gudang</b>, jadi barang
+                      akan tiba dalam <b>beberapa paket terpisah</b> (lihat keterangan tiap part di atas).
+                    </span>
+                  )}
+                </div>
+              )}
 
               {rates.length > 0 ? (
                 <div className="grid gap-2 sm:grid-cols-2">
