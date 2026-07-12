@@ -4,7 +4,7 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-07-09** (oleh inspeksi langsung repo lokal + SSH ke server).
+> Terakhir diverifikasi: **2026-07-12** (oleh inspeksi langsung repo lokal + SSH ke server).
 > Ditambah **§3.5 — Cara Kerja Aplikasi (deep-dive fungsional)** pada 2026-06-25 agar AI/dev
 > langsung paham domain, alur data, logika pencarian + sinonim, AI tools, API & frontend.
 > Update **2026-06-27**: tambah fitur **Repair Kit Transmisi** (data + tool AI + endpoint +
@@ -205,6 +205,35 @@
 > jatah habis lalu dibuang, jawaban mengklaim 'file Excel siap 👇' tanpa kartu → kini buat_excel bocor
 > TETAP dieksekusi saat ronde habis + koreksi 1× bila jawaban mengklaim file tanpa kartu unduh
 > (test_excel_claim_guard.py). 289 unit test lolos.
+> Update **2026-07-11/12 — Excel asisten lanjutan, MIDTRANS, penawaran otomatis, stok & ongkir**:
+> (a) **Excel asisten**: `sheet_isi_kolom` kini MULTI-KOLOM ke SATU file (param `kolom`=array
+> {isi,gudang,nama_kolom} — stok per-gudang Jakarta+Pekanbaru+harga sekali panggil, `ai_sheet.
+> fill_columns`); tool BARU `sheet_isi_part_number` (KEBALIKAN: isi PN dari kolom NAMA part,
+> per-VIN via BOM EPC — terverifikasi live VIN LZZ5DMSD5RT108966 1.553 part, 8/10 nama cocok;
+> matcher: persis→token+sinonim→sinonim FRASA 'filter solar'→fuel filter; hanya isi sel KOSONG,
+> ambigu dikosongkan; kolom 'Bagian' terdeteksi role `kategori` = pemecah ambigu) + `sheet_cek_qty`
+> (isi/validasi Qty dari qty BOM unit, selisih ditandai 'Cek Qty', qty user TAK ditimpa) +
+> asisten PROAKTIF meringkas & menawarkan aksi saat file dilampirkan. (b) **Payment gateway
+> GANTI ke MIDTRANS Snap** (dari Komerce): `payments.py` ditulis ulang (bentuk fungsi dijaga),
+> webhook diverifikasi signature SHA512, Notification URL diset di dashboard Midtrans; SANDBOX
+> AKTIF teruji e2e (key di .env server; akun ini pakai prefiks `Mid-` utk sandbox juga);
+> `expiry` 24 jam → order auto-batal. (c) **Penawaran Accurate OTOMATIS saat order lunas**
+> (`accurate_quotation.py`, thread latar best-effort, idempoten; customer dicocokkan dari
+> recipient_name, PN bermasalah → skip, order tetap lunas; hasil di kolom `penawaran_*` —
+> ⚠️ migrasi `018_orders_penawaran.sql` dijalankan manual; kartu di detail order admin).
+> (d) **Stok pembeli**: reserve-SEBELUM-scope di 3 jalur (fix 'katalog READY tapi detail
+> habis'); reservasi DILEPAS saat DIKIRIM/selesai/batal (`_RELEASE_ON`) → ikut Accurate
+> setelah admin proses penawaran, tanpa double-potong; KEPUTUSAN FINAL: FALLBACK gudang
+> terdekat DIPERTAHANKAN (model no-fallback sempat dicoba & dibatalkan pemilik di hari sama).
+> (e) **Ongkir dari gudang PEMENUH** (bukan gudang pilihan pembeli): `/api/shipping/rates`
+> GET→POST (terima items), `orders.fulfillment_gudang` + `gudang.origin_postal_for_label`;
+> **Kode Pos Asal per gudang AUTO-ISI dari koordinat** (kolom baru UI admin gudang, reverse-
+> geocode Nominatim; live: Jakarta 14250, Pekanbaru 28291, Palembang 30138, Medan 20149).
+> (f) **Berat part: SIMS = sumber UTAMA** (indeks persisten `data/sims_weights.json` + warmer
+> latar 6 jam utk part berharga; harga.xlsx jadi fallback) — part baru dihargai tak terblokir
+> berat manual. (g) Fix frontend /toko: kartu produk tinggi seragam (aspect-ratio + overflow).
+> 486 unit test. ⚠️ Pekerjaan 2026-07-10→12 LIVE di prod via push.sh (working tree) tapi
+> **BELUM dikomit ke git** — komit per-fitur sebelum kerja lanjutan.
 
 ---
 
@@ -864,6 +893,16 @@ Monitoring User dapat kolom **IP terakhir, Perangkat, Sebaran (30h)**. Tabel Sup
 ### 3.5.5r Perbaikan kecil (2026-07-10)
 
 - **Admin selalu lihat kolom Stok & Harga** (`part/[pn]`, `search`): izin kolom hanya membatasi staf bawahan; cache izin di-bump `maspart_perms_v3`. **Observabilitas AI**: kolom **Akun** (username+peran) + filter per-user (data sudah ada di `ai_chat_log`, hanya UI). **Chat asisten di HP**: jawaban full-bleed (card dihilangkan ≤640px), avatar per-pesan dihapus.
+
+### 3.5.5s Asisten lebih CEPAT + guard EPC-FIRST + knowledge faktual baru — sejak 2026-07-11
+
+Tiga perbaikan asisten (semua di `ai_assistant.py` / `ai_knowledge.py` / `epc_bom.py`):
+
+- **PERCEPATAN**: (1) **Prefetch EPC di latar** (`_prefetch_epc_rangka`) — begitu pesan terakhir user menyebut nomor rangka, config EPC + Loading List di-fetch paralel selagi model menyusun rencana tool; first-hit EPC (belasan–30 dtk) tumpang-tindih dengan ronde perencanaan. `epc_bom.loading_list` kini punya **lock per-frame** (`_fetch_locks`) — prefetch vs tool untuk frame sama tidak menembak server EPC dua kali (yang kedua menunggu lalu terlayani cache). (2) **Batch >1 tool dieksekusi PARALEL** (`ThreadPoolExecutor`, max 4) — model kerap memanggil beberapa tool sekaligus (detail_part 3 PN, EPC+katalog); wall-time ronde = tool terlambat, bukan jumlah semuanya; hasil diproses berurutan agar pesan/grounding deterministik.
+- **GUARD EPC-FIRST** (aturan keras pemilik: part per-unit wajib sesuai rangka): bila pesan terakhir user menyebut nomor rangka + jawaban memuat PN + model **belum MENCOBA satu pun tool ber-argumen rangka** → satu koreksi sistem memaksa cek EPC per-VIN dulu (`_EPC_FIRST_CORRECTION`; token rangka & kode unit/seri tak dihitung PN). Melengkapi guard lama (anti-PN-karangan, guard substitusi katalog-lokal) untuk kasus model menjawab dari riwayat tanpa verifikasi per-VIN.
+- **KNOWLEDGE FAKTUAL BARU** (mining data resmi, bukan karangan — `ai_knowledge.build()` + `tools/build_ai_knowledge.py`): blok prompt kini juga memuat (a) jumlah entri database **kode kesalahan DTC** (2.276 SPN/FMI/kode P), (b) daftar **unit Shantui** yang punya data cross-reference filter (11 unit), (c) daftar **model gearbox ber-data repair kit** (12 model + tipe speed) — model mengenali kode HW19709XST dkk sebagai kode SERI transmisi. Kode model gearbox juga dimasukkan `_unit_name_tokens` agar guard PN tidak salah menyamarkannya. ⚠️ setelah mengubah miner, jalankan `python tools/build_ai_knowledge.py` dan kirim `data/ai_knowledge.json` ke server.
+
+Test: `test_ai_speed_guard.py` (8) + `test_ai_knowledge.py` diperbarui; total suite 420.
 
 ### 3.5.6 Cari by Foto
 
