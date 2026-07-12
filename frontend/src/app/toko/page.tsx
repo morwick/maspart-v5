@@ -58,8 +58,10 @@ function ProductCard({
       onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "var(--shadow-2)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
       onMouseLeave={(e) => { e.currentTarget.style.boxShadow = ""; e.currentTarget.style.transform = ""; }}
     >
-      {/* Foto */}
-      <div style={{ position: "relative", aspectRatio: "1 / 1", background: "var(--ink-075, var(--ink-100))", display: "grid", placeItems: "center", color: "var(--ink-300)" }}>
+      {/* Foto — overflow:hidden + minHeight:0 WAJIB: tanpa ini aspect-ratio kalah
+          oleh ukuran min-content gambar yang intrinsik tinggi (mis. brake plate
+          memanjang) → box melar, tinggi kartu jadi tak seragam. */}
+      <div style={{ position: "relative", aspectRatio: "1 / 1", minHeight: 0, overflow: "hidden", background: "var(--ink-075, var(--ink-100))", display: "grid", placeItems: "center", color: "var(--ink-300)" }}>
         {p.foto && !imgErr ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -127,7 +129,7 @@ function ProductStrip({ title, icon, items, cartQty, open, add, qtyFn, rm }: {
       </div>
       <div style={{ display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(170px, 200px)", gap: 12, overflowX: "auto", paddingBottom: 6, scrollSnapType: "x proximity" }}>
         {items.map((p) => (
-          <div key={p.part_number} style={{ scrollSnapAlign: "start" }}>
+          <div key={p.part_number} style={{ scrollSnapAlign: "start", display: "grid" }}>
             <ProductCard
               p={p}
               qty={cartQty(p.part_number)}
