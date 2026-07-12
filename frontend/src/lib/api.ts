@@ -262,6 +262,9 @@ export type OrderDetail = OrderSummary & {
   recipient_phone?: string | null;
   recipient_address?: string | null;
   recipient_postal?: string | null;
+  penawaran_status?: string | null;   // created | skip | failed (Penawaran Accurate otomatis)
+  penawaran_number?: string | null;   // mis. 'MASPART-07'
+  penawaran_note?: string | null;     // alasan skip / pesan gagal
   items: OrderItemDetail[];
 };
 

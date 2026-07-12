@@ -9,10 +9,23 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.ratelimit import limit
 from ..deps import get_current_user, require_admin, require_buyer_ready
-from ..services import gudang, harga, orders, part_index, payments, reservations, shipping
+from ..services import (accurate_quotation, gudang, harga, orders, part_index, payments,
+                        reservations, shipping)
 from ..services import supabase_client as sb
 
 router = APIRouter(prefix="/api", tags=["orders"])
+
+
+def _after_paid(order_code: str) -> None:
+    """Dipanggil SEKALI saat order transisi ke lunas (webhook/polling). Memicu
+    pembuatan Penawaran Accurate otomatis di THREAD LATAR — best-effort, TAK
+    PERNAH menggagalkan/menunda respons pembayaran."""
+    if not get_settings().accurate_auto_quotation:
+        return
+    try:
+        accurate_quotation.create_for_order_bg(order_code)
+    except Exception:  # pragma: no cover — jaring pengaman, jangan ganggu alur bayar
+        pass
 _IMG_MIME = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "pdf": "application/pdf"}
 _MAX_PROOF_BYTES = 10 * 1024 * 1024  # 10 MB
 
@@ -325,7 +338,8 @@ def payment_status(code: str, user: dict = Depends(get_current_user)):
             "error": f"Nominal pembayaran (Rp{gw_amount:,}) tidak sama dengan total tagihan (Rp{int(o.get('total') or 0):,}). Hubungi admin.",
         }
     if paid and o.get("status") == "menunggu_pembayaran":
-        orders.mark_paid(code, raw=res.get("raw"))
+        if orders.mark_paid(code, raw=res.get("raw")):
+            _after_paid(code)
     return {"status": "diproses" if paid else o.get("status"), "paid": paid, "gateway_status": res["status"]}
 
 
@@ -358,7 +372,8 @@ async def payment_webhook(request: Request):
         return {"ok": True, "ignored": f"nominal tidak cocok ({gw_amount} vs {o.get('total')})"}
     # Idempotent: hanya proses kalau masih menunggu_pembayaran.
     if o.get("status") == "menunggu_pembayaran":
-        orders.mark_paid(o["order_code"], raw=data.get("raw"))
+        if orders.mark_paid(o["order_code"], raw=data.get("raw")):
+            _after_paid(o["order_code"])
     return {"ok": True}
 
 

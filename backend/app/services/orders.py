@@ -5,6 +5,7 @@ service_key. Tabel: orders, order_items.
 """
 from __future__ import annotations
 
+import logging
 import secrets
 import time
 from datetime import datetime, timezone
@@ -14,6 +15,8 @@ import requests
 from .supabase_client import _rest_url, _service_headers
 from . import gudang, harga, reservations
 from .gudang import coords_for_display as _coords_for_display, pic_for_display as _pic_for_display
+
+logger = logging.getLogger("maspart.orders")
 
 STATUSES = ["menunggu_pembayaran", "menunggu_verifikasi", "diproses", "dikirim", "selesai", "batal"]
 
@@ -531,3 +534,19 @@ def mark_paid(order_code: str, raw: dict | None = None) -> bool:
         # Order lunas: jadikan reservasi stok permanen agar tidak ikut kedaluwarsa.
         reservations.commit(order_code)
     return ok
+
+
+def set_penawaran_result(order_code: str, res: dict) -> bool:
+    """Simpan hasil pembuatan Penawaran Accurate otomatis ke order (best-effort).
+    Kolom penawaran_* mungkin belum ada (migrasi belum jalan) → kegagalan patch
+    ditelan; penawaran tetap terbuat di Accurate, hanya pencatatannya tertunda."""
+    data = {
+        "penawaran_status": res.get("status"),
+        "penawaran_number": res.get("number") or None,
+        "penawaran_note": (res.get("note") or "")[:300] or None,
+    }
+    try:
+        return _patch(order_code, data)
+    except Exception:
+        logger.exception("set_penawaran_result gagal (order %s)", order_code)
+        return False

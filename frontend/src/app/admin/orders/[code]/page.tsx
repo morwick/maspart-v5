@@ -146,21 +146,44 @@ export default function AdminOrderDetailPage() {
 
             {/* Verifikasi & status */}
             <div className="flex flex-col gap-4">
-              <div className="surface surface-pad">
-                <div className="mb-2" style={{ fontSize: 14, fontWeight: 600 }}>Bukti Transfer</div>
-                {order.payment_proof_url ? (
-                  isPdf ? (
-                    <a href={order.payment_proof_url} target="_blank" rel="noopener noreferrer" className="link">Buka bukti (PDF) →</a>
+              {/* Penawaran Accurate otomatis (saat order lunas) */}
+              {order.penawaran_status && (
+                <div className="surface surface-pad">
+                  <div className="mb-2" style={{ fontSize: 14, fontWeight: 600 }}>🧾 Penawaran Accurate</div>
+                  {order.penawaran_status === "created" ? (
+                    <div style={{ fontSize: 13 }}>
+                      <span className="pill pill-brand">Dibuat</span>{" "}
+                      <b className="mono" style={{ fontSize: 15 }}>{order.penawaran_number}</b>
+                    </div>
                   ) : (
-                    <a href={order.payment_proof_url} target="_blank" rel="noopener noreferrer">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={order.payment_proof_url} alt="bukti" className="w-full rounded-lg ring-1" style={{ maxHeight: 280, objectFit: "contain", borderColor: "var(--ink-200)" }} />
-                    </a>
-                  )
-                ) : (
-                  <div style={{ fontSize: 13, color: "var(--ink-400)" }}>Belum ada bukti transfer.</div>
-                )}
-              </div>
+                    <div style={{ fontSize: 12.5, color: "var(--ink-600)" }}>
+                      <span className={"pill " + (order.penawaran_status === "failed" ? "pill-danger" : "pill-warn")}>
+                        {order.penawaran_status === "failed" ? "Gagal" : "Dilewati"}
+                      </span>{" "}
+                      {order.penawaran_note || "—"}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Bukti transfer manual — hanya relevan bila BUKAN order gateway atau ada bukti */}
+              {(order.payment_method !== "gateway" || order.payment_proof_url) && (
+                <div className="surface surface-pad">
+                  <div className="mb-2" style={{ fontSize: 14, fontWeight: 600 }}>Bukti Transfer</div>
+                  {order.payment_proof_url ? (
+                    isPdf ? (
+                      <a href={order.payment_proof_url} target="_blank" rel="noopener noreferrer" className="link">Buka bukti (PDF) →</a>
+                    ) : (
+                      <a href={order.payment_proof_url} target="_blank" rel="noopener noreferrer">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={order.payment_proof_url} alt="bukti" className="w-full rounded-lg ring-1" style={{ maxHeight: 280, objectFit: "contain", borderColor: "var(--ink-200)" }} />
+                      </a>
+                    )
+                  ) : (
+                    <div style={{ fontSize: 13, color: "var(--ink-400)" }}>Belum ada bukti transfer.</div>
+                  )}
+                </div>
+              )}
 
               <div className="surface surface-pad flex flex-col gap-2">
                 <div style={{ fontSize: 14, fontWeight: 600 }}>Ubah Status</div>

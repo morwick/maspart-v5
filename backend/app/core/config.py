@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     accurate_device_id: str = ""     # device-id browser (agar dianggap "device dikenal", tak minta OTP email)
     accurate_uid: str = ""           # uniqueId database/perusahaan (open.do?uid=)
     accurate_host: str = "iris.accurate.id"  # host aplikasi perusahaan (zona)
+    accurate_auto_quotation: bool = True      # buat Penawaran Accurate otomatis saat order lunas
 
     @property
     def accurate_login_configured(self) -> bool:
