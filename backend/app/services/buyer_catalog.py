@@ -241,34 +241,61 @@ def _terlaris_map() -> dict[str, int]:
 
 
 # ── Pencarian di dalam katalog etalase ───────────────────────────────────────
-def _match_q(products: list[dict], q: str) -> list[dict]:
+def _match_q(products: list[dict], q: str) -> list[tuple[dict, int]]:
+    """(produk, peringkat) yang cocok dengan `q`. Peringkat kecil = lebih relevan:
+    0 = kata query ada langsung di nama/PN, 1..N = cocok lewat istilah sinonim ke-N
+    (istilah paling spesifik lebih dulu). Peringkat inilah yang dipakai urutan
+    'Paling relevan' — tanpa itu hasil terurut alfabetis dan 'kampas rem' malah
+    dipimpin 'brake chamber'."""
     tokens = [t for t in q.upper().split() if t]
     if not tokens:
-        return products
+        return [(p, 0) for p in products]
     hits = [p for p in products if all(t in p["_hay"] for t in tokens)]
     if not hits and len(tokens) == 1:
         flat = _flat(tokens[0])
         if len(flat) >= 6:   # PN tanpa pemisah ('202V091007926')
             hits = [p for p in products if flat in p["_flat"]]
-    if not hits:
-        # Ekspansi sinonim + payung kategori (kamus yang sama dgn asisten):
-        # 'kampas rem' → friction plate/brake lining, 'spion' → mirror, dst.
-        try:
-            from .ai_assistant import _expand_query, _umbrella_keywords
-            terms, _matched = _expand_query(q)
-            for kw in _umbrella_keywords(q):
-                if kw not in terms:
-                    terms.append(kw)
-            seen: set[str] = set()
-            for t in terms[1:]:
-                tu = t.upper()
-                for p in products:
-                    if tu in p["_hay"] and p["part_number"] not in seen:
-                        seen.add(p["part_number"])
-                        hits.append(p)
-        except Exception:
-            pass
-    return hits
+    if hits:
+        return [(p, 0) for p in hits]
+
+    # Istilah lapangan (kamus yang sama dgn asisten): 'kampas rem' → friction
+    # plate / brake lining / brake pad, 'spion' → mirror, dst.
+    try:
+        from .ai_assistant import _expand_query, _umbrella_keywords
+        terms, _matched = _expand_query(q)
+        sinonim = terms[1:]                     # tanpa query asli (sudah dicoba di atas)
+    except Exception:
+        return []
+
+    # Payung kategori ('rem' → SEMUA part rem) hanya untuk query KATA KATEGORI POLOS.
+    # Untuk 'kampas rem', payung akan menyeret brake chamber/ABS/air compressor —
+    # pembeli minta kampasnya, bukan seisi kategori. Dipakai juga sebagai upaya
+    # terakhir bila sinonim tak menghasilkan apa pun.
+    try:
+        payung = [k for k in _umbrella_keywords(q) if k not in terms]
+    except Exception:
+        payung = []
+    kategori_polos = len(tokens) == 1        # 'rem' → ya; 'kampas rem' → tidak
+    urut = sinonim + (payung if kategori_polos else [])
+
+    out = _cocok_bertingkat(products, urut)
+    if not out and payung:
+        out = _cocok_bertingkat(products, payung)
+    return out
+
+
+def _cocok_bertingkat(products: list[dict], terms: list[str]) -> list[tuple[dict, int]]:
+    """Cocokkan `terms` berurutan; produk mendapat peringkat = posisi istilah yang
+    pertama kali mencocokkannya (istilah lebih awal = lebih spesifik = lebih relevan)."""
+    out: list[tuple[dict, int]] = []
+    seen: set[str] = set()
+    for i, t in enumerate(terms, start=1):
+        tu = t.upper()
+        for p in products:
+            if tu in p["_hay"] and p["part_number"] not in seen:
+                seen.add(p["part_number"])
+                out.append((p, i))
+    return out
 
 
 def _strip_internal(p: dict, stok: int, label: str) -> dict:
@@ -298,17 +325,19 @@ def catalog_page(username: str, buyer_gudang_key: Optional[str], q: str = "",
 
     q = (q or "").strip()
     if q:
-        products = _match_q(products, q)
+        cocok = _match_q(products, q)
+    else:
+        cocok = [(p, 0) for p in products]
     kategori = (kategori or "").strip().lower()
     if kategori:
-        products = [p for p in products if kategori in p["kategori"]]
+        cocok = [(p, r) for p, r in cocok if kategori in p["kategori"]]
 
-    rows: list[tuple[dict, int, str]] = []
-    for p in products:
+    rows: list[tuple[dict, int, str, int]] = []
+    for p, rank in cocok:
         stok, label = _scoped_stock(p, username, own, all_names, resv)
         if ready_only and stok <= 0:
             continue
-        rows.append((p, stok, label))
+        rows.append((p, stok, label, rank))
 
     sort = sort if sort in _SORTS else "relevan"
     if sort == "harga_asc":
@@ -319,15 +348,15 @@ def catalog_page(username: str, buyer_gudang_key: Optional[str], q: str = "",
         rows.sort(key=lambda r: r[0]["name"])
     elif sort == "stok":
         rows.sort(key=lambda r: -r[1])
-    else:  # relevan: READY dulu, lalu yang berfoto, lalu nama
-        rows.sort(key=lambda r: (r[1] <= 0, r[0]["foto"] is None, r[0]["name"]))
+    else:  # relevan: kecocokan query dulu, baru READY, berfoto, nama
+        rows.sort(key=lambda r: (r[3], r[1] <= 0, r[0]["foto"] is None, r[0]["name"]))
 
     total = len(rows)
     page_size = max(1, min(int(page_size or 24), 100))
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(max(1, int(page or 1)), total_pages)
     start = (page - 1) * page_size
-    items = [_strip_internal(p, s, g) for p, s, g in rows[start:start + page_size]]
+    items = [_strip_internal(p, s, g) for p, s, g, _rank in rows[start:start + page_size]]
     return {
         "items": items,
         "count": total,
