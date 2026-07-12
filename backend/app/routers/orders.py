@@ -115,14 +115,46 @@ class CartGudangRequest(BaseModel):
 
 @router.post("/cart/gudang")
 def cart_gudang(body: CartGudangRequest, user: dict = Depends(require_buyer_ready)):
-    """Gudang PENGIRIM tiap item keranjang — supaya pembeli tahu barangnya berangkat
-    dari mana SEBELUM membayar (dulu tak ada keterangan apa pun di checkout).
+    """Keadaan TERKINI tiap item keranjang menurut server: gudang pengirim, harga,
+    berat, dan apakah masih bisa dibeli.
+
+    Keranjang disimpan di browser LENGKAP DENGAN HARGANYA saat part dimasukkan —
+    harga/stok bisa sudah berubah (mis. part hilang dari Accurate) sehingga pembeli
+    melihat harga basi lalu ditolak saat checkout. Halaman keranjang menyegarkan
+    dirinya dari sini, jadi yang dilihat = yang ditagih.
     `multi` = keranjang terpecah ke >1 gudang → akan jadi >1 paket."""
-    fmap = orders.fulfillment_map(user["username"], [i.model_dump() for i in body.items])
-    items = [{"part_number": pn, "gudang": gudang.gudang_label(g)} for pn, g in fmap.items()]
+    raw = [i.model_dump() for i in body.items]
+    fmap = orders.fulfillment_map(user["username"], raw)
+
+    items: list[dict] = []
+    for it in body.items:
+        pn = (it.part_number or "").strip().upper()
+        if not pn:
+            continue
+        price, _nm = harga.price_for_buyer(pn)
+        berat = harga.weight_for(pn, allow_remote=True)
+        g = fmap.get(pn, "")
+        alasan = ""
+        if price <= 0:
+            alasan = "harga belum tersedia"
+        elif berat <= 0:
+            alasan = "berat belum ditetapkan"
+        elif not g:
+            alasan = "stok habis"
+        items.append({
+            "part_number": pn,
+            "gudang": gudang.gudang_label(g) if g else "",
+            "harga": price,
+            "harga_display": f"Rp {price:,}".replace(",", ".") if price > 0 else "",
+            "berat": berat,
+            "bisa_dibeli": not alasan,
+            "alasan": alasan,
+        })
+
     tally: dict[str, int] = {}
-    for g in fmap.values():
-        tally[g] = tally.get(g, 0) + 1
+    for pn, g in fmap.items():
+        if any(i["part_number"] == pn and i["bisa_dibeli"] for i in items):
+            tally[g] = tally.get(g, 0) + 1
     utama = max(tally, key=tally.get) if tally else ""
     return {
         "items": items,

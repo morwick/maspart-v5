@@ -340,13 +340,22 @@ export async function getCartWeight(
 }
 
 export type CartGudang = {
-  items: { part_number: string; gudang: string }[];
+  items: {
+    part_number: string;
+    gudang: string;          // gudang pengirim ('' bila tak ada stok)
+    harga: number;           // harga TERKINI dari server (yang akan ditagih)
+    harga_display: string;
+    berat: number;
+    bisa_dibeli: boolean;
+    alasan: string;          // 'harga belum tersedia' | 'berat belum ditetapkan' | 'stok habis'
+  }[];
   utama: string;      // gudang pengirim utama (asal ongkir)
   multi: boolean;     // keranjang terpecah ke >1 gudang → lebih dari satu paket
 };
 
-/** Gudang pengirim tiap item keranjang — pembeli berhak tahu barangnya dari mana
- *  sebelum membayar, dan gudang inilah titik asal ongkirnya. */
+/** Keadaan terkini tiap item keranjang menurut SERVER (gudang pengirim, harga, berat,
+ *  bisa dibeli atau tidak). Keranjang di browser menyimpan harga saat part dimasukkan —
+ *  bisa basi — jadi halaman keranjang wajib menyegarkan dirinya dari sini. */
 export async function getCartGudang(
   token: string,
   items: { part_number: string; qty: number }[],

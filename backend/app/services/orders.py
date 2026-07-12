@@ -129,7 +129,8 @@ def create_order(
             qty = 1
         if not pn or qty < 1:
             continue
-        price, name = harga.price_for(pn)
+        # Harga yang DITAGIH = harga yang DIPAJANG (Accurate dulu, lalu harga.xlsx).
+        price, name = harga.price_for_buyer(pn)
         # Part tanpa harga (harga 0 / tidak ada di List Harga) tidak boleh dibeli.
         if price <= 0:
             no_price.append(pn)

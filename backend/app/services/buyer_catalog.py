@@ -2,7 +2,10 @@
 Service ETALASE PEMBELI — katalog produk siap-jual gaya e-commerce.
 
 Menyatukan sumber yang sudah ada menjadi satu daftar produk yang bisa dibeli:
-  - HARGA  : indeks Accurate (utama, snapshot 3×/hari) → harga.xlsx (fallback).
+  - HARGA  : indeks Accurate SAJA (snapshot terjadwal). ⛔ harga.xlsx TIDAK PERNAH
+             dipakai sebagai harga jual (aturan keras pemilik) — sama dengan yang
+             ditagih saat checkout (harga.price_for_buyer), jadi yang dipajang = yang
+             dibayar. Tak berharga di Accurate = tidak dijual.
   - NAMA   : katalog Excel lokal (all_parts_min) → nama barang Accurate (fallback,
              menjaring stok lokal aftermarket di luar katalog Sinotruk).
   - BERAT  : harga.weight_for (syarat bisa dibeli — konsisten aturan keranjang).
@@ -95,9 +98,10 @@ def _build_products() -> list[dict]:
     """Gabungkan sumber menjadi daftar produk siap-jual (lihat docstring modul)."""
     names = {pn: (nm or "").strip() for pn, nm in part_index.all_parts_min()}
     photos = image_search.photo_url_map()
-    harga_excel = part_index.harga_map()
 
-    # 1) Barang Accurate = sumber harga utama (termasuk aftermarket di luar katalog).
+    # Barang Accurate = SATU-SATUNYA sumber harga jual (termasuk aftermarket di luar
+    # katalog). ⛔ harga.xlsx tak pernah dipakai — dulu ia jadi fallback, sehingga part
+    # bisa tampil berharga di toko padahal checkout menolaknya.
     picked: dict[str, dict] = {}   # norm_pn -> produk
     try:
         acc_items = accurate.all_items()
@@ -117,23 +121,6 @@ def _build_products() -> list[dict]:
             "harga": price,
             "stok_total": int(it.get("available_to_sell") or 0),
             "sumber_harga": "accurate",
-        }
-
-    # 2) Fallback: PN katalog yang berharga di harga.xlsx tapi tak ada di Accurate.
-    for pn, harga_disp in harga_excel.items():
-        key = accurate.norm_pn(pn)
-        if key in picked:
-            continue
-        digits = re.sub(r"[^\d]", "", str(harga_disp))
-        price = int(digits) if digits else 0
-        if price <= 0:
-            continue
-        picked[key] = {
-            "part_number": pn,
-            "name": names.get(pn) or pn,
-            "harga": price,
-            "stok_total": 0,   # dihitung dari breakdown di bawah
-            "sumber_harga": "excel",
         }
 
     out: list[dict] = []

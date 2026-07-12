@@ -97,6 +97,28 @@ def price_for(pn: str) -> tuple[int, str]:
     return _price_map.get(key, 0), (_state.get("_name_map", {}) or {}).get(key, "")
 
 
+def price_for_buyer(pn: str) -> tuple[int, str]:
+    """Harga JUAL untuk pembeli — **HANYA dari Accurate**, tanpa kecuali.
+
+    ⛔ ATURAN KERAS PEMILIK: harga.xlsx TIDAK PERNAH dipakai sebagai harga jual
+    (dia daftar harga internal yang bisa basi). Accurate = satu-satunya sumber harga
+    yang dipajang di etalase MAUPUN yang ditagih saat checkout — kalau keduanya beda
+    sumber, pembeli bisa melihat satu harga lalu ditagih harga lain.
+    Tak ada harga di Accurate → (0, '') → part TIDAK bisa dibeli (bukan jatuh ke Excel).
+
+    Baca dari INDEKS Accurate (cache, tarikan terjadwal) — tak pernah login live."""
+    try:
+        from . import accurate
+        e = accurate.stock_full(pn)
+        if e:
+            p = int(e.get("price") or 0)
+            if p > 0:
+                return p, (e.get("name") or "")
+    except Exception:
+        pass
+    return 0, ""
+
+
 _weight_map: dict[str, int] | None = None
 
 

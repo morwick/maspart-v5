@@ -20,6 +20,9 @@ STOK = {
 USER = {"username": "roni", "role": "pembeli", "gudang": "pekanbaru"}
 
 
+HARGA = {"P-PKU": 100_000, "P-BPN": 250_000}   # P-TANPA-HARGA sengaja tak ada
+
+
 @pytest.fixture(autouse=True)
 def dunia(monkeypatch):
     monkeypatch.setattr(gudang_config, "buyer_locations", lambda: BUYER)
@@ -30,6 +33,9 @@ def dunia(monkeypatch):
                         lambda pn: dict(STOK.get(pn.upper(), {})))
     monkeypatch.setattr("app.services.supabase_client.get_user_gudang", lambda u: "pekanbaru")
     monkeypatch.setattr(OS.reservations, "reserved_map", lambda force=False: {})
+    monkeypatch.setattr(R.harga, "price_for_buyer",
+                        lambda pn: (HARGA.get(pn.upper(), 0), "Part uji"))
+    monkeypatch.setattr(R.harga, "weight_for", lambda pn, allow_remote=False: 1000)
 
 
 def _minta(*pns):
@@ -40,13 +46,30 @@ def _minta(*pns):
 def test_satu_gudang_tak_ditandai_multi():
     out = _minta("P-PKU")
     assert out["utama"] == "Pekanbaru" and out["multi"] is False
-    assert out["items"] == [{"part_number": "P-PKU", "gudang": "Pekanbaru"}]
+    (it,) = out["items"]
+    assert it["part_number"] == "P-PKU" and it["gudang"] == "Pekanbaru"
+    assert it["harga"] == 100_000 and it["bisa_dibeli"] is True
 
 
 def test_item_dari_gudang_lain_disebut_gudangnya():
     out = _minta("P-BPN")
-    assert out["items"] == [{"part_number": "P-BPN", "gudang": "Balikpapan"}]
+    (it,) = out["items"]
+    assert it["gudang"] == "Balikpapan" and it["harga"] == 250_000
     assert out["utama"] == "Balikpapan"
+
+
+def test_harga_dari_server_bukan_dari_keranjang_browser():
+    """Harga yang dilaporkan = harga yang akan DITAGIH (price_for_buyer), bukan
+    harga yang tersimpan di localStorage pembeli (bisa basi)."""
+    out = _minta("P-PKU")
+    assert out["items"][0]["harga_display"] == "Rp 100.000"
+
+
+def test_part_tanpa_harga_ditandai_tak_bisa_dibeli():
+    out = _minta("P-TANPA-HARGA")
+    (it,) = out["items"]
+    assert it["bisa_dibeli"] is False and it["alasan"] == "harga belum tersedia"
+    assert it["harga"] == 0 and out["utama"] == ""
 
 
 def test_keranjang_terpecah_ditandai_multi():
@@ -56,9 +79,11 @@ def test_keranjang_terpecah_ditandai_multi():
     assert per_pn == {"P-PKU": "Pekanbaru", "P-BPN": "Balikpapan"}
 
 
-def test_part_habis_tak_muncul():
+def test_part_habis_ditandai_stok_habis():
     out = _minta("P-TIDAK-ADA")
-    assert out["items"] == [] and out["utama"] == "" and out["multi"] is False
+    (it,) = out["items"]
+    assert it["gudang"] == "" and it["bisa_dibeli"] is False
+    assert out["utama"] == "" and out["multi"] is False
 
 
 def test_gudang_yang_dilaporkan_sama_dengan_yang_dipakai_order():

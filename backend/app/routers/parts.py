@@ -104,20 +104,23 @@ def _scope_gudang(results: list[dict], user: dict) -> list[dict]:
 
 
 def _overlay_accurate(results: list[dict]) -> list[dict]:
-    """Overlay STOK (total) + HARGA dari indeks Accurate bersama (tarikan terjadwal
-    tiap 5 jam — sumber sama dgn menu Stok & detail part) = sumber UTAMA; Excel =
-    fallback bila PN tak ada / indeks belum siap. Non-blocking: snapshot() cuma view
-    dict di memori, request tak pernah menunggu tarikan Accurate. Rincian per-gudang
-    (`gudang`) tetap Excel (indeks hanya agregat)."""
-    if not accurate.available():
-        return results
+    """Overlay STOK (total) + HARGA dari indeks Accurate bersama (tarikan terjadwal —
+    sumber sama dgn menu Stok, detail part, & etalase).
+
+    ⛔ HARGA: Accurate SATU-SATUNYA sumber (aturan keras pemilik). Baris hasil datang
+    dari part_index dengan harga bawaan dari harga.xlsx — itu DIBUANG di sini, supaya
+    harga yang dilihat = harga yang ditagih saat checkout (harga.price_for_buyer).
+    Tanpa ini, part berharga di harga.xlsx tapi tak ada di Accurate tampil berharga,
+    masuk keranjang, lalu ditolak saat bayar.
+
+    Non-blocking: snapshot() cuma view dict di memori. Rincian per-gudang (`gudang`)
+    tetap dari Excel (indeks Accurate hanya agregat)."""
     try:
-        snap = accurate.snapshot()
+        snap = accurate.snapshot() if accurate.available() else {}
     except Exception:
-        return results
-    if not snap:
-        return results
+        snap = {}
     for r in results:
+        r["harga"] = "—"        # buang harga bawaan harga.xlsx
         e = snap.get(accurate.norm_pn(r.get("part_number") or ""))
         if not e:
             continue
@@ -297,8 +300,8 @@ async def batch_catalog(
 
 def _overlay_stok_harga_image(results: list[dict]) -> None:
     """Isi stok/harga/tersedia tiap hasil Cari-by-Foto — user langsung tahu mana
-    yang READY tanpa membuka detail satu-satu. Sumber sama dgn pencarian teks:
-    indeks Accurate bersama (utama) → Excel katalog (fallback). In-place, non-fatal."""
+    yang READY tanpa membuka detail satu-satu. Stok: indeks Accurate (utama) → Excel.
+    ⛔ HARGA: Accurate SAJA — harga.xlsx tak pernah dipakai sebagai harga jual."""
     snap: dict = {}
     if accurate.available():
         try:
@@ -315,7 +318,6 @@ def _overlay_stok_harga_image(results: list[dict]) -> None:
             row = None
         if row:
             stok = str(row.get("stok") or "")
-            harga = str(row.get("harga") or "")
         e = snap.get(accurate.norm_pn(pn))
         if e:
             if e.get("stok") is not None:

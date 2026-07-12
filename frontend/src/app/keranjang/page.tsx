@@ -59,16 +59,21 @@ export default function KeranjangPage() {
     setItems(getCart());
   }
 
-  const subtotal = items.reduce((n, i) => n + toNum(i.harga) * i.qty, 0);
+  // Keranjang tersimpan di browser LENGKAP dengan harganya saat part dimasukkan —
+  // harga/stok bisa sudah berubah sejak itu. Keadaan dari server (`asal`) selalu
+  // MENANG supaya yang dilihat = yang ditagih; harga lokal cuma dipakai selagi memuat.
+  const [asal, setAsal] = useState<CartGudang | null>(null);
+  const srv = (pn: string) => asal?.items.find((i) => i.part_number === pn);
+  const gudangOf = (pn: string) => srv(pn)?.gudang || "";
+  const hargaOf = (i: CartItem) => srv(i.part_number)?.harga ?? toNum(i.harga);
+  const bisaBeli = (i: CartItem) => srv(i.part_number)?.bisa_dibeli ?? (hasPrice(i.harga) && hasWeight(i.berat));
+
+  const subtotal = items.reduce((n, i) => n + hargaOf(i) * i.qty, 0);
   const ppn = Math.round(subtotal * 0.11);
   const total = subtotal + ppn + (rate?.price || 0);
-  // Part tanpa harga / tanpa berat tidak bisa dibeli → blokir checkout sampai dihapus.
-  const noPriceItems = items.filter((i) => !hasPrice(i.harga));
-  const noWeightItems = items.filter((i) => !hasWeight(i.berat));
-  // Berat dihitung otomatis oleh backend dari data berat part (fallback estimasi/item).
+  // Part yang tak bisa dibeli (harga/berat/stok) → blokir checkout sampai dihapus.
+  const blokir = items.filter((i) => !bisaBeli(i));
   const totalQty = items.reduce((n, i) => n + i.qty, 0);
-  const [asal, setAsal] = useState<CartGudang | null>(null);   // gudang pengirim per item
-  const gudangOf = (pn: string) => asal?.items.find((i) => i.part_number === pn)?.gudang || "";
   const [weightGrams, setWeightGrams] = useState(0);
   const weightKg = weightGrams / 1000;
   // Tanda-tangan isi keranjang (PN:qty) → ambil ulang berat hanya saat isi berubah.
@@ -125,15 +130,11 @@ export default function KeranjangPage() {
     const token = getToken();
     if (!token) return router.replace("/login");
     if (!items.length) return;
-    if (noPriceItems.length) {
+    if (blokir.length) {
       setError(
-        `Part tanpa harga belum bisa dibeli: ${noPriceItems.map((i) => i.part_number).join(", ")}. Hapus dari keranjang dulu.`,
-      );
-      return;
-    }
-    if (noWeightItems.length) {
-      setError(
-        `Part tanpa berat belum bisa dibeli: ${noWeightItems.map((i) => i.part_number).join(", ")}. Hapus dari keranjang dulu.`,
+        `Belum bisa dibeli: ${blokir
+          .map((i) => `${i.part_number} (${srv(i.part_number)?.alasan || "data belum lengkap"})`)
+          .join(", ")}. Hapus dari keranjang dulu.`,
       );
       return;
     }
@@ -187,16 +188,12 @@ export default function KeranjangPage() {
           </div>
         ) : (
           <>
-            {noPriceItems.length > 0 && (
+            {blokir.length > 0 && (
               <div className="alert alert-error" style={{ marginBottom: 16 }}>
-                Part berikut belum punya harga dan <b>tidak bisa dibeli</b>:{" "}
-                {noPriceItems.map((i) => i.part_number).join(", ")}. Hapus dari keranjang untuk melanjutkan.
-              </div>
-            )}
-            {noWeightItems.length > 0 && (
-              <div className="alert alert-error" style={{ marginBottom: 16 }}>
-                Part berikut belum punya data berat dan <b>tidak bisa dibeli</b>:{" "}
-                {noWeightItems.map((i) => i.part_number).join(", ")}. Hapus dari keranjang untuk melanjutkan.
+                Part berikut <b>tidak bisa dibeli</b>:{" "}
+                {blokir
+                  .map((i) => `${i.part_number} — ${srv(i.part_number)?.alasan || "data belum lengkap"}`)
+                  .join("; ")}. Hapus dari keranjang untuk melanjutkan.
               </div>
             )}
             <div className="surface" style={{ overflow: "hidden" }}>
@@ -217,8 +214,10 @@ export default function KeranjangPage() {
                       <td className="pn">{i.part_number}</td>
                       <td>
                         {i.name}
-                        {!hasWeight(i.berat) && (
-                          <span className="pill pill-warn" style={{ marginLeft: 8 }} title="Berat belum ditetapkan admin">Tanpa berat</span>
+                        {!bisaBeli(i) && (
+                          <span className="pill pill-warn" style={{ marginLeft: 8 }}>
+                            {srv(i.part_number)?.alasan || "belum bisa dibeli"}
+                          </span>
                         )}
                         {gudangOf(i.part_number) && (
                           <div style={{ fontSize: 11.5, color: "var(--ink-500)", marginTop: 2 }}>
@@ -227,11 +226,7 @@ export default function KeranjangPage() {
                         )}
                       </td>
                       <td className="num mono">
-                        {hasPrice(i.harga) ? (
-                          i.harga
-                        ) : (
-                          <span className="pill pill-warn" title="Harga belum tersedia">Tanpa harga</span>
-                        )}
+                        {hargaOf(i) > 0 ? rp(hargaOf(i)) : <span className="pill pill-warn">—</span>}
                       </td>
                       <td>
                         <input
@@ -246,7 +241,7 @@ export default function KeranjangPage() {
                           style={{ width: 80, height: 32 }}
                         />
                       </td>
-                      <td className="num mono">{rp(toNum(i.harga) * i.qty)}</td>
+                      <td className="num mono">{rp(hargaOf(i) * i.qty)}</td>
                       <td>
                         <button className="btn btn-danger btn-sm" title="Hapus" onClick={() => { removeFromCart(i.part_number); refresh(); }}>✕</button>
                       </td>
@@ -381,14 +376,8 @@ export default function KeranjangPage() {
                   <span style={{ fontWeight: 600 }}>Total</span>
                   <span className="mono" style={{ fontSize: 18, fontWeight: 700, color: "var(--brand-700)" }}>{rp(total)}</span>
                 </div>
-                <button onClick={process} disabled={busy || noPriceItems.length > 0 || noWeightItems.length > 0} className="btn btn-primary btn-lg mt-1" style={{ width: "100%" }}>
-                  {busy
-                    ? "Memproses…"
-                    : noPriceItems.length > 0
-                      ? "Ada part tanpa harga"
-                      : noWeightItems.length > 0
-                        ? "Ada part tanpa berat"
-                        : "Proses Pembelian"}
+                <button onClick={process} disabled={busy || blokir.length > 0} className="btn btn-primary btn-lg mt-1" style={{ width: "100%" }}>
+                  {busy ? "Memproses…" : blokir.length > 0 ? "Ada part yang belum bisa dibeli" : "Proses Pembelian"}
                 </button>
                 <p style={{ fontSize: 11.5, color: "var(--ink-400)" }}>
                   Harga part dihitung dari sistem saat pesanan dibuat. Ongkir opsional.

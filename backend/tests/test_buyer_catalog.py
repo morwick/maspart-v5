@@ -18,10 +18,15 @@ _ACC_ITEMS = [
     {"pn": "WG9100443050", "name": "BRAKE PAD SINOTRUK", "price": 250_000, "available_to_sell": 12},
     {"pn": "VG1560080012", "name": "FUEL FILTER", "price": 150_000, "available_to_sell": 4},
     {"pn": "KACA-SPION-88", "name": "KACA SPION UNIVERSAL", "price": 90_000, "available_to_sell": 7},  # aftermarket (di luar katalog)
-    {"pn": "202V09100-7926", "name": "OIL FILTER", "price": 0, "available_to_sell": 3},  # harga 0 di Accurate → fallback Excel
+    {"pn": "202V09100-7926", "name": "OIL FILTER", "price": 75_000, "available_to_sell": 3},
+    {"pn": "AZ9725520276", "name": "SPRING", "price": 1_200_000, "available_to_sell": 0},
     {"pn": "NO-WEIGHT-01", "name": "TANPA BERAT", "price": 50_000, "available_to_sell": 9},  # berat 0 → tak dipajang
+    {"pn": "HARGA-NOL-01", "name": "HARGA NOL DI ACCURATE", "price": 0, "available_to_sell": 5},
 ]
-_HARGA_EXCEL = {"202V09100-7926": "Rp 75.000", "AZ9725520276": "Rp 1.200.000"}
+# harga.xlsx sengaja diisi harga BERBEDA + satu PN yang HANYA ada di sini — keduanya
+# harus DIABAIKAN: harga jual = Accurate saja (aturan pemilik).
+_HARGA_EXCEL = {"202V09100-7926": "Rp 999.000", "EXCEL-ONLY-01": "Rp 300.000",
+                "HARGA-NOL-01": "Rp 400.000"}
 _GUDANG_BD = {
     "WG9100443050": {"01.Jakarta": 5, "23.Medan": 2},
     "VG1560080012": {"23.Medan": 3},
@@ -63,22 +68,27 @@ def test_build_hanya_produk_berharga_dan_berberat():
     pns = {i["part_number"] for i in _page(page_size=100)["items"]}
     assert "WG9100443050" in pns            # harga Accurate
     assert "KACA-SPION-88" in pns           # aftermarket di luar katalog Excel
-    assert "202V09100-7926" in pns          # harga 0 di Accurate → fallback Excel 75rb
-    assert "AZ9725520276" in pns            # hanya di harga.xlsx
+    assert "202V09100-7926" in pns          # harga Accurate
     assert "WG1642770001" not in pns        # tanpa harga sama sekali
     assert "NO-WEIGHT-01" not in pns        # tanpa berat → keranjang menolak
+
+
+def test_harga_hanya_dari_accurate_bukan_harga_xlsx():
+    """⛔ Aturan pemilik: harga.xlsx TAK PERNAH jadi harga jual. Part yang berharga
+    hanya di sana (atau berharga 0 di Accurate) TIDAK dijual — kalau dipajang, pembeli
+    akan ditolak saat checkout karena order memakai harga Accurate."""
+    items = {i["part_number"]: i for i in _page(page_size=100)["items"]}
+    assert "EXCEL-ONLY-01" not in items      # hanya ada di harga.xlsx
+    assert "HARGA-NOL-01" not in items       # harga 0 di Accurate; Excel TIDAK menambal
+    # Harga yang dipajang = harga Accurate, bukan angka lain di harga.xlsx.
+    assert items["202V09100-7926"]["harga"] == 75_000
+    assert items["202V09100-7926"]["harga_display"] == "Rp 75.000"
 
 
 def test_nama_utamakan_katalog_lokal_dan_fallback_accurate():
     items = {i["part_number"]: i for i in _page(page_size=100)["items"]}
     assert items["WG9100443050"]["name"] == "BRAKE PAD"          # nama katalog menang
     assert items["KACA-SPION-88"]["name"] == "KACA SPION UNIVERSAL"  # fallback Accurate
-
-
-def test_harga_fallback_excel_diparse():
-    items = {i["part_number"]: i for i in _page(page_size=100)["items"]}
-    assert items["202V09100-7926"]["harga"] == 75_000
-    assert items["202V09100-7926"]["harga_display"] == "Rp 75.000"
 
 
 def test_foto_dan_kategori():
