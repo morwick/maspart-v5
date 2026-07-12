@@ -81,6 +81,22 @@ def test_semua_jalur_pemakaian_asisten_dijaga_izin():
     assert all(ketemu.values()), f"tak dijaga izin menu: {[n for n, ok in ketemu.items() if not ok]}"
 
 
+def test_cari_part_bisa_dimatikan_per_akun(monkeypatch):
+    """Permintaan pemilik 2026-07-12: menu Cari Part bisa disembunyikan lewat Menu
+    Control (dulu 'search' masuk set `always` sehingga centangnya tak berefek)."""
+    monkeypatch.setattr(permissions, "perms_load", lambda perm_type: {"roni": ["ai"]})
+    menus = permissions.effective("menu", "roni", "pembeli")
+    assert "search" not in menus and "ai" in menus
+
+
+def test_tanpa_baris_izin_cari_part_tetap_aktif(monkeypatch):
+    """Melepas 'search' dari `always` TIDAK boleh mengubah default: akun tanpa baris
+    izin tetap mendapat semua menu (kalau tidak, semua akun kehilangan Cari Part)."""
+    monkeypatch.setattr(permissions, "perms_load", lambda perm_type: {})
+    assert "search" in permissions.effective("menu", "roni", "pembeli")
+    assert "search" in permissions.effective("menu", "budi", "user")
+
+
 def test_status_dan_feedback_tetap_terbuka():
     """Kontrol negatif — memastikan pemeriksaan di atas tidak lolos-kosong:
     /status & /feedback sengaja TIDAK dijaga (status dipakai halaman untuk tahu

@@ -45,7 +45,13 @@ SESI_KEYS: dict[str, str] = {
 # begitu fitur ini terpasang. Untuk kind ber-default_off, tanpa baris = KOSONG
 # (pembatasan mati), harus dicentang admin secara sadar.
 KINDS: dict[str, dict] = {
-    "menu": {"perm_type": "nav", "all": MENU_TABS, "always": {"search"}},
+    # 'search' dulu masuk `always` (tak bisa dimatikan siapa pun) — dilepas atas
+    # permintaan pemilik 2026-07-12 agar menu Cari Part bisa disembunyikan per-akun
+    # (khususnya pembeli). Tanpa baris izin, semua menu tetap aktif (default lama).
+    # Catatan batas: yang disembunyikan MENU & halamannya; endpoint /api/search
+    # sengaja TIDAK digembok karena halaman detail part (dibuka dari kartu /toko)
+    # memakai endpoint yang sama — datanya sudah di-scope per peran.
+    "menu": {"perm_type": "nav", "all": MENU_TABS, "always": set()},
     "column": {"perm_type": "column", "all": COLUMN_KEYS, "always": set()},
     "harga": {"perm_type": "harga_subtab", "all": HARGA_SUBTABS, "always": set()},
     "sesi": {"perm_type": "session_policy", "all": SESI_KEYS, "always": set(),
