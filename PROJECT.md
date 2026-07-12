@@ -232,8 +232,9 @@
 > (f) **Berat part: SIMS = sumber UTAMA** (indeks persisten `data/sims_weights.json` + warmer
 > latar 6 jam utk part berharga; harga.xlsx jadi fallback) — part baru dihargai tak terblokir
 > berat manual. (g) Fix frontend /toko: kartu produk tinggi seragam (aspect-ratio + overflow).
-> 486 unit test. ⚠️ Pekerjaan 2026-07-10→12 LIVE di prod via push.sh (working tree) tapi
-> **BELUM dikomit ke git** — komit per-fitur sebelum kerja lanjutan.
+> 486 unit test. Pekerjaan 2026-07-10→12 LIVE di prod via push.sh dan **sudah dikomit
+> per-fitur** ke `snapshot-clean` (2026-07-12: 56ce148 Midtrans, 59580ef penawaran Accurate,
+> e415754 stok+ongkir, c28521a berat SIMS, 84233e6 Excel asisten, ae7e6b0 kecepatan+guard).
 
 ---
 
