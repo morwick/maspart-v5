@@ -1501,6 +1501,8 @@ def exploded_figures(rangka: str, pn: str, kategori: str) -> dict:
         figs.append({
             "svg": f["svg"],
             "balon": hit.get("balon"),
+            "qty": hit.get("qty"),
+            "nama_item": hit.get("nama") or hit.get("nama_cn"),
             "nama": f.get("nama"),
             "kode": f.get("kode"),
             "kategori": f.get("kategori"),

@@ -478,7 +478,8 @@ function CekUnitCard({ pn }: { pn: string }) {
       </div>
       {busy && (
         <div style={{ fontSize: 12, color: "var(--ink-400)", marginTop: 8 }}>
-          Pengecekan pertama untuk sebuah unit bisa memakan ±30 detik (mengambil BOM lengkap dari EPC)…
+          Mengecek menyeluruh ke EPC (Loading List + seluruh kategori Parts Atlas) —
+          pengecekan pertama untuk sebuah unit bisa ±30 detik sampai 2 menit…
         </div>
       )}
       {err && <div className="alert alert-error" style={{ marginTop: 10 }}>{err}</div>}
