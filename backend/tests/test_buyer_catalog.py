@@ -90,10 +90,12 @@ def test_foto_dan_kategori():
     assert items["VG1560080012"]["foto"] is None
 
 
-# ── Scope stok lokasi pembeli ────────────────────────────────────────────────
+# ── Scope stok lokasi pembeli (gudang sendiri dulu → fallback terdekat) ──────
 def test_stok_discope_ke_lokasi_pembeli():
     items = {i["part_number"]: i for i in _page(page_size=100)["items"]}
-    # Pembeli Jakarta: brake pad 5 (bukan 7 total), fuel filter fallback Medan.
+    # Pembeli Jakarta: brake pad 5 (bukan 7 total), fuel filter fallback Medan
+    # (keputusan pemilik 2026-07-12: pembeli TETAP bisa beli dari gudang lain,
+    # badge 'READY · <gudang>' menunjukkan gudang pengirim).
     assert items["WG9100443050"]["stok"] == 5
     assert items["WG9100443050"]["gudang"] == "Jakarta"
     assert items["VG1560080012"]["stok"] == 3

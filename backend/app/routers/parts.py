@@ -80,19 +80,24 @@ def _paginate(term: str, results: list, page: int, page_size: int,
 
 
 def _scope_gudang(results: list[dict], user: dict) -> list[dict]:
-    """Filter breakdown gudang tiap hasil sesuai cabang user (stok total tetap)."""
+    """Filter breakdown gudang tiap hasil sesuai cabang user (stok total tetap).
+
+    Pembeli: reservasi dikurangkan SEBELUM scoping supaya fallback gudang terdekat
+    tetap bekerja saat gudang sendiri habis direservasi. WAJIB konsisten dengan
+    etalase (buyer_catalog._scoped_stock) — kalau tidak, katalog bisa READY tapi
+    detail 'habis' (bug urutan reserve-vs-scope)."""
     names = part_index.gudang_names()
     uname, role = user.get("username", ""), user.get("role", "user")
     # Pembeli: scope ke gudang yang DIPILIH (bukan mapping per-username).
     own = gudang.buyer_label(get_user_gudang(uname)) if role == "pembeli" else None
     resv = reservations.reserved_map() if role == "pembeli" else {}
     for r in results:
-        bd = gudang.scope_breakdown(r.get("gudang") or {}, uname, role, names, own=own)
+        bd = dict(r.get("gudang") or {})
         if role == "pembeli" and resv:
             pn = str(r.get("part_number", "")).upper()
             bd = {g: q - resv.get((pn, g), 0) for g, q in bd.items()}
             bd = {g: q for g, q in bd.items() if q > 0}  # buang yang habis (tersisa ≤ 0)
-        r["gudang"] = bd
+        r["gudang"] = gudang.scope_breakdown(bd, uname, role, names, own=own)
     return results
 
 

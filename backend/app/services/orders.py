@@ -68,6 +68,34 @@ def current_status(order_code: str, gudang: str | None = None) -> str | None:
         return None
 
 
+def fulfillment_gudang(username: str, items: list[dict]) -> str:
+    """Label gudang PEMENUH dominan untuk daftar item pembeli (reserve-sebelum-scope
+    + fallback gudang terdekat) — dipakai menentukan ASAL ongkir. Logika SAMA dengan
+    pemilihan gudang di `create_order` agar preview ongkir & order konsisten.
+    Return label (mis. '08.TJP Jambi') atau '' bila tak ada stok."""
+    try:
+        from . import part_index
+        from .supabase_client import get_user_gudang
+    except Exception:
+        return ""
+    names = part_index.gudang_names()
+    resv = reservations.reserved_map()
+    blabel = gudang.buyer_label(get_user_gudang(username))
+    tally: dict[str, int] = {}
+    for it in items or []:
+        pn = str(it.get("part_number") or "").strip().upper()
+        if not pn:
+            continue
+        raw = part_index.gudang_breakdown(pn)
+        net = {g: raw.get(g, 0) - resv.get((pn, g), 0) for g in raw}
+        net = {g: q for g, q in net.items() if q > 0}
+        scoped = gudang.scope_breakdown(net, username, "pembeli", names, own=blabel)
+        if scoped:
+            g = next(iter(scoped))
+            tally[g] = tally.get(g, 0) + 1
+    return max(tally, key=tally.get) if tally else ""
+
+
 def create_order(
     username: str,
     role: str,
@@ -393,6 +421,15 @@ def set_proof(order_code: str, username: str, url: str) -> bool:
     return _patch(order_code, {"payment_proof_url": url, "status": "menunggu_verifikasi"}, username=username)
 
 
+# Status yang MELEPAS reservasi stok app:
+#  • batal   → barang tak jadi terjual, stok kembali tersedia.
+#  • dikirim  → barang KELUAR gudang; di titik ini admin mengurangi stok di Accurate
+#              (proses penawaran), jadi app berhenti menahan & "ikut Accurate" —
+#              mencegah stok terpotong dua kali (reservasi + potongan Accurate).
+#  • selesai  → jaring pengaman bila order lompat diproses→selesai tanpa 'dikirim'.
+_RELEASE_ON = {"batal", "dikirim", "selesai"}
+
+
 def set_status(order_code: str, status: str) -> bool:
     if status not in STATUSES:
         return False
@@ -400,8 +437,8 @@ def set_status(order_code: str, status: str) -> bool:
     if not can_transition(current_status(order_code), status):
         return False
     ok = _patch(order_code, {"status": status})
-    if ok and status == "batal":
-        reservations.release(order_code)  # lepas stok yang direservasi
+    if ok and status in _RELEASE_ON:
+        reservations.release(order_code)  # lepas tahanan stok (lihat _RELEASE_ON)
     return ok
 
 
@@ -416,8 +453,8 @@ def set_status_branch(order_code: str, gudang_label: str, status: str, tracking_
     if tracking_no is not None:
         data["tracking_no"] = tracking_no
     ok = _patch(order_code, data, gudang=gudang_label)
-    if ok and status == "batal":
-        reservations.release(order_code)
+    if ok and status in _RELEASE_ON:
+        reservations.release(order_code)  # lepas tahanan stok (lihat _RELEASE_ON)
     return ok
 
 

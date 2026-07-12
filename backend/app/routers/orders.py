@@ -68,18 +68,27 @@ def shipping_weight(body: WeightRequest, _user: dict = Depends(require_buyer_rea
     return {"weight_grams": grams, "default_item_grams": default_each}
 
 
-@router.get("/shipping/rates")
-def shipping_rates(
-    weight_grams: int = Query(1000, ge=100),
-    value: int = Query(0, ge=0),
-    dest_postal: str = Query("", description="Kode pos tujuan (penerima)"),
-    user: dict = Depends(require_buyer_ready),
-):
-    # Asal kirim = kode pos gudang yang dipilih pembeli.
-    loc = gudang.location(user.get("gudang"))
-    origin_postal = (loc or {}).get("origin_postal", "")
+class RatesRequest(BaseModel):
+    weight_grams: int = 1000
+    value: int = 0
+    dest_postal: str = ""                     # kode pos tujuan (penerima)
+    items: list[OrderItemIn] = []             # isi keranjang → tentukan gudang pemenuh (asal ongkir)
+
+
+@router.post("/shipping/rates")
+def shipping_rates(body: RatesRequest, user: dict = Depends(require_buyer_ready)):
+    # Asal kirim = gudang PEMENUH item (bukan sekadar gudang pilihan pembeli) agar
+    # ongkir preview = ongkir saat order. Tanpa items → fallback ke gudang pembeli.
+    origin_postal = ""
+    if body.items:
+        fl = orders.fulfillment_gudang(user["username"], [i.model_dump() for i in body.items])
+        origin_postal = gudang.origin_postal_for_label(fl)
+    if not origin_postal:
+        loc = gudang.location(sb.get_user_gudang(user["username"]))
+        origin_postal = (loc or {}).get("origin_postal", "")
     rates, err = shipping.get_rates(
-        user["username"], weight_grams, value, dest_postal=dest_postal, origin_postal=origin_postal,
+        user["username"], max(body.weight_grams, 100), body.value,
+        dest_postal=body.dest_postal, origin_postal=origin_postal,
     )
     return {"rates": rates, "error": err, "available": shipping.available()}
 
@@ -112,8 +121,10 @@ def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_re
         "address": body.recipient_address,
         "postal": body.recipient_postal,
     }
-    # Gudang yang dipilih pembeli (label penuh, mis. '01.Jakarta').
-    blabel = gudang.buyer_label(user.get("gudang"))
+    # Gudang yang dipilih pembeli (label penuh, mis. '01.Jakarta') — dari DB (lokasi
+    # terpilih terkini), SAMA dgn etalase & halaman detail agar pemilihan gudang
+    # konsisten (JWT bisa basi bila pembeli ganti lokasi setelah login).
+    blabel = gudang.buyer_label(sb.get_user_gudang(user["username"]))
 
     # Cek stok (Excel − reservasi aktif) + tentukan gudang pemenuh (termasuk
     # fallback ke lokasi terdekat). Order dirutekan ke cabang gudang pemenuh ini.
@@ -130,24 +141,24 @@ def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_re
             qty = max(1, int(it.qty or 1))
         except Exception:
             qty = 1
-        scoped = gudang.scope_breakdown(
-            part_index.gudang_breakdown(pn), user["username"], "pembeli", names, own=blabel,
-        )
+        # Reservasi dikurangkan SEBELUM scoping agar gudang pemenuh dipilih dengan
+        # fallback gudang terdekat saat gudang sendiri habis — konsisten dgn
+        # etalase (buyer_catalog) & halaman detail (parts._scope_gudang).
+        raw_bd = part_index.gudang_breakdown(pn)
+        net_bd = {g: raw_bd.get(g, 0) - resv.get((pn, g), 0) for g in raw_bd}
+        net_bd = {g: q for g, q in net_bd.items() if q > 0}
+        scoped = gudang.scope_breakdown(net_bd, user["username"], "pembeli", names, own=blabel)
         if not scoped:
             habis.append(it.part_number)
             continue
-        g = next(iter(scoped))  # gudang pemenuh
-        stock = int(scoped[g])
-        avail = stock - resv.get((pn, g), 0)
-        if avail <= 0:
-            habis.append(it.part_number)
-            continue
+        g = next(iter(scoped))       # gudang pemenuh (stok NET > 0)
+        avail = int(scoped[g])       # sudah net (stok Excel − reservasi aktif)
         if avail < qty:
             kurang.append(f"{it.part_number} (sisa {avail})")
             continue
         fulfill_tally[g] = fulfill_tally.get(g, 0) + 1
         res_entries.append((pn, g, qty))
-        stock_map[(pn, g)] = stock
+        stock_map[(pn, g)] = int(raw_bd.get(g, 0))   # RAW (Excel) utk cek oversell pasca-reservasi
     if habis:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -168,8 +179,12 @@ def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_re
     # dari klien tidak dipercaya untuk mencegah manipulasi ongkir.
     server_ship = max(int(body.shipping_cost or 0), 0)
     if shipping.available():
-        loc = gudang.location(user.get("gudang"))
-        origin_postal = (loc or {}).get("origin_postal", "")
+        # Asal kirim = gudang PEMENUH (fulfill_label), bukan gudang pilihan pembeli —
+        # agar ongkir sesuai lokasi barang sebenarnya & konsisten dgn preview keranjang.
+        origin_postal = gudang.origin_postal_for_label(fulfill_label)
+        if not origin_postal:
+            loc = gudang.location(sb.get_user_gudang(user["username"]))
+            origin_postal = (loc or {}).get("origin_postal", "")
         rates, _rerr = shipping.get_rates(
             user["username"], weight_grams, 0,
             dest_postal=body.recipient_postal or "", origin_postal=origin_postal,

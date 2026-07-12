@@ -389,6 +389,7 @@ class GudangItem(BaseModel):
     selectable: bool = False
     key: str | None = None       # key/akun cabang bila bisa dipilih pembeli
     pic: str | None = None       # nomor PIC/kontak gudang
+    origin_postal: str | None = None  # kode pos ASAL ongkir (auto-isi dari koordinat di UI)
 
 
 class SaveGudangRequest(BaseModel):
@@ -427,7 +428,7 @@ def get_gudang(_admin: dict = Depends(require_admin)):
 @router.put("/gudang")
 def save_gudang(body: SaveGudangRequest, _admin: dict = Depends(require_admin)):
     prev_buyer = gudang_config.buyer_locations()
-    # label → origin_postal lama (dipertahankan; tidak diatur di UI ini)
+    # label → origin_postal lama (fallback bila UI tidak mengirim nilainya)
     postal_by_label = {v["label"]: v.get("origin_postal", "") for v in prev_buyer.values()}
 
     coords: dict = {}
@@ -449,7 +450,13 @@ def save_gudang(body: SaveGudangRequest, _admin: dict = Depends(require_admin)):
             if key in seen_keys:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Key '{key}' dipakai lebih dari satu gudang.")
             seen_keys.add(key)
-            buyer[key] = {"label": label, "origin_postal": postal_by_label.get(label, "")}
+            # Kode pos asal ongkir: dari UI (auto-isi dari koordinat, boleh dikoreksi
+            # manual); hanya digit, maks 10. None (UI lama) → pertahankan nilai lama.
+            if it.origin_postal is None:
+                postal = postal_by_label.get(label, "")
+            else:
+                postal = "".join(ch for ch in it.origin_postal if ch.isdigit())[:10]
+            buyer[key] = {"label": label, "origin_postal": postal}
 
     ok, msg = gudang_config.save(coords, buyer, pic)
     if not ok:

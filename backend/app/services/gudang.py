@@ -49,6 +49,18 @@ def buyer_label(key: str | None) -> str | None:
     return loc["label"] if loc else None
 
 
+def origin_postal_for_label(label: str | None) -> str:
+    """Kode pos ASAL kirim untuk gudang berlabel `label` (mis. '08.TJP Jambi').
+    Dipakai agar ongkir dihitung dari gudang PEMENUH, bukan gudang pilihan pembeli.
+    '' bila label tak punya lokasi terkonfigurasi."""
+    if not label:
+        return ""
+    for loc in gudang_config.buyer_locations().values():
+        if loc.get("label") == label:
+            return loc.get("origin_postal") or ""
+    return ""
+
+
 def _haversine(a: tuple, b: tuple) -> float:
     lat1, lon1 = a
     lat2, lon2 = b
@@ -161,7 +173,7 @@ def gudang_label(gudang_name: str) -> str:
 
 def scope_breakdown(
     breakdown: dict, username: str, role: str, all_names: list[str],
-    own: str | None = None,
+    own: str | None = None, fallback: bool = True,
 ) -> dict:
     """
     Filter breakdown {gudang: qty} sesuai cakupan user.
@@ -169,6 +181,11 @@ def scope_breakdown(
     - akun cabang: hanya gudang sendiri; bila kosong → gudang terdekat yang ada stok.
     - `own` boleh diberikan eksplisit (mis. gudang terpilih pembeli); bila None,
       dihitung dari `gudang_for_user`.
+    - `fallback=False`: TANPA jatuh ke gudang terdekat — gudang `own` kosong = {}.
+      (Saat ini TIDAK dipakai jalur mana pun: pemilik memutuskan 2026-07-12
+      pembeli TETAP memakai fallback — part habis di gudangnya tampil
+      'READY · <gudang lain>' dan tetap bisa dibeli; ongkir dihitung dari
+      gudang pemenuh. Param dibiarkan untuk fleksibilitas.)
     `breakdown` hanya berisi gudang ber-qty != 0.
     """
     if own is None:
@@ -177,6 +194,8 @@ def scope_breakdown(
         return breakdown
     if own in breakdown and breakdown[own]:
         return {own: breakdown[own]}
+    if not fallback:
+        return {}
     for g in fallback_order(own, all_names):
         if g in breakdown and breakdown[g]:
             return {g: breakdown[g]}

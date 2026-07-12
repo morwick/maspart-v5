@@ -104,7 +104,8 @@ export default function KeranjangPage() {
     setRates([]);
     setRate(null);
     try {
-      const r = await getShippingRates(token, weightGrams, subtotal, rcpPostal.trim());
+      const r = await getShippingRates(token, weightGrams, subtotal, rcpPostal.trim(),
+        items.map((i) => ({ part_number: i.part_number, qty: i.qty })));
       if (r.error) setRateErr(r.error);
       setRates(r.rates);
     } catch (err) {

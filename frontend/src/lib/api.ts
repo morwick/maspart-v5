@@ -342,11 +342,14 @@ export async function getShippingRates(
   weightGrams: number,
   value = 0,
   destPostal = "",
+  items: { part_number: string; qty: number }[] = [],
 ): Promise<{ rates: ShippingRate[]; error: string | null; available: boolean }> {
-  const qs = new URLSearchParams({ weight_grams: String(weightGrams), value: String(value) });
-  if (destPostal) qs.set("dest_postal", destPostal);
-  const res = await fetch(`${API_BASE}/api/shipping/rates?${qs}`, {
-    headers: { Authorization: `Bearer ${token}` },
+  // POST: item keranjang dikirim agar server menghitung ongkir dari gudang PEMENUH
+  // (bukan sekadar gudang pilihan pembeli) → ongkir preview = ongkir saat order.
+  const res = await fetch(`${API_BASE}/api/shipping/rates`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ weight_grams: weightGrams, value, dest_postal: destPostal, items }),
   });
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
@@ -1482,7 +1485,7 @@ export async function getAdminGudang(token: string): Promise<{ gudang: AdminGuda
 
 export async function saveAdminGudang(
   token: string,
-  items: { label: string; lat: number | null; lon: number | null; selectable: boolean; key: string | null; pic: string }[],
+  items: { label: string; lat: number | null; lon: number | null; selectable: boolean; key: string | null; pic: string; origin_postal: string }[],
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/admin/gudang`, {
     method: "PUT",

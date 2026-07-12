@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { ApiError, getAdminGudang, saveAdminGudang, type AdminGudang } from "@/lib/api";
+import { ApiError, geoReverse, getAdminGudang, saveAdminGudang, type AdminGudang } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 
 type Row = AdminGudang & { coordText: string };
@@ -19,12 +19,35 @@ export default function AdminGudangPage() {
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  // Auto-isi kode pos dari koordinat (reverse-geocoding OSM via backend).
+  const postalTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const lookupPostal = useCallback(async (label: string, lat: number, lon: number) => {
+    const token = getToken();
+    if (!token) return;
+    try {
+      const r = await geoReverse(token, lat, lon);
+      if (r.postal) {
+        setItems((arr) => arr.map((it) => (it.label === label ? { ...it, origin_postal: r.postal } : it)));
+      }
+    } catch {
+      /* biarkan — kode pos bisa diisi manual */
+    }
+  }, []);
+
   const load = useCallback(async () => {
     const token = getToken();
     if (!token) return router.replace("/login");
     try {
       const d = await getAdminGudang(token);
       setItems(d.gudang.map((it) => ({ ...it, coordText: coordTextOf(it) })));
+      // Isi otomatis kode pos yang masih KOSONG untuk lokasi pembeli (berurutan,
+      // beri jeda — Nominatim membatasi laju permintaan).
+      const kosong = d.gudang.filter((it) => it.selectable && !it.origin_postal && it.lat != null && it.lon != null);
+      for (let i = 0; i < kosong.length; i++) {
+        const it = kosong[i];
+        setTimeout(() => lookupPostal(it.label, it.lat as number, it.lon as number), i * 1200);
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearSession();
@@ -50,11 +73,16 @@ export default function AdminGudangPage() {
   }
 
   // Parse "lat, lon" (atau "lat lon") → angka; biarkan teks apa adanya saat mengetik.
+  // Koordinat valid → kode pos diisi OTOMATIS dari koordinat itu (debounce 800 ms).
   function setCoord(label: string, text: string) {
     const parts = text.split(/[,\s]+/).filter(Boolean);
     const lat = numOrNull(parts[0] ?? "");
     const lon = numOrNull(parts[1] ?? "");
     patch(label, { coordText: text, lat, lon });
+    if (postalTimers.current[label]) clearTimeout(postalTimers.current[label]);
+    if (lat != null && lon != null) {
+      postalTimers.current[label] = setTimeout(() => lookupPostal(label, lat, lon), 800);
+    }
   }
 
   async function save() {
@@ -73,6 +101,7 @@ export default function AdminGudangPage() {
           selectable: it.selectable,
           key: it.key,
           pic: it.pic ?? "",
+          origin_postal: it.origin_postal ?? "",
         })),
       );
       setMsg("Konfigurasi lokasi gudang tersimpan.");
@@ -116,8 +145,9 @@ export default function AdminGudangPage() {
 
         <div className="mb-3" style={{ fontSize: 12.5, color: "var(--ink-500)" }}>
           Koordinat (lat/lon) dipakai untuk menghitung <b>gudang terdekat</b> otomatis saat stok di
-          gudang terpilih kosong. Centang <b>Pembeli</b> agar gudang muncul di pilihan lokasi pembeli,
-          lalu isi <b>Key/Akun</b> (username akun cabang untuk routing pesanan).
+          gudang terpilih kosong. <b>Kode Pos</b> = titik ASAL hitung ongkir — <b>terisi otomatis dari
+          koordinat</b> (boleh dikoreksi manual). Centang <b>Pembeli</b> agar gudang muncul di pilihan
+          lokasi pembeli, lalu isi <b>Key/Akun</b> (username akun cabang untuk routing pesanan).
         </div>
 
         {loaded && items.length === 0 && !error ? (
@@ -131,6 +161,7 @@ export default function AdminGudangPage() {
                 <tr>
                   <th>Gudang</th>
                   <th style={{ width: 230 }}>Koordinat (lat, lon)</th>
+                  <th style={{ width: 110 }}>Kode Pos</th>
                   <th style={{ width: 70 }}>Pembeli</th>
                   <th style={{ width: 140 }}>Key / Akun</th>
                   <th style={{ width: 150 }}>No. PIC</th>
@@ -151,6 +182,16 @@ export default function AdminGudangPage() {
                         value={it.coordText}
                         placeholder="-6.21, 106.85"
                         onChange={(e) => setCoord(it.label, e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="input mono"
+                        style={{ width: 96, height: 32 }}
+                        value={it.origin_postal ?? ""}
+                        placeholder="otomatis"
+                        title="Kode pos ASAL ongkir — terisi otomatis dari koordinat; boleh dikoreksi manual"
+                        onChange={(e) => patch(it.label, { origin_postal: e.target.value.replace(/\D/g, "").slice(0, 10) })}
                       />
                     </td>
                     <td style={{ textAlign: "center" }}>

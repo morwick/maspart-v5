@@ -193,8 +193,11 @@ def _products() -> list[dict]:
 def _scoped_stock(p: dict, username: str, own: Optional[str],
                   all_names: list[str], resv: dict) -> tuple[int, str]:
     """(qty, label gudang) stok yang boleh dilihat/dibeli pembeli ini.
-    Reservasi dikurangkan SEBELUM scoping supaya fallback gudang terdekat tetap
-    bekerja saat gudang sendiri habis direservasi pembeli lain."""
+    Gudang pembeli dulu; bila kosong → FALLBACK gudang terdekat yang masih ada
+    stok (keputusan pemilik 2026-07-12: pembeli tetap bisa membeli, badge
+    menunjukkan gudang pengirim — 'READY · <gudang>'; ongkir dihitung dari
+    gudang pemenuh itu). Reservasi dikurangkan SEBELUM scoping supaya fallback
+    tetap bekerja saat gudang sendiri habis direservasi pembeli lain."""
     bd = p["gudang"]
     if resv:
         pn = p["part_number"]
