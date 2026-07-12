@@ -364,11 +364,12 @@ export default function PartDetailPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Cek kecocokan part di unit pembeli — tepat di bawah daftar unit,
+                    supaya alurnya alami: "dipakai di unit-unit ini → cek unit SAYA". */}
+                {isBuyer && <CekUnitCard pn={main.part_number} />}
               </section>
             </div>
-
-            {/* Cek kecocokan part di unit pembeli (per nomor rangka, sumber EPC) */}
-            {isBuyer && <CekUnitCard pn={main.part_number} />}
           </>
         )}
       </div>
@@ -454,7 +455,7 @@ function CekUnitCard({ pn }: { pn: string }) {
   }
 
   return (
-    <section className="surface surface-pad" style={{ marginTop: 20 }}>
+    <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--ink-150)" }}>
       <div className="mb-2 flex items-center gap-2">
         <h2 style={{ fontSize: 13, fontWeight: 600 }}>🔍 Cocok di unit saya?</h2>
         <span className="pill">sumber: EPC resmi per-VIN</span>
@@ -516,6 +517,6 @@ function CekUnitCard({ pn }: { pn: string }) {
           ❌ {res.pesan}
         </div>
       )}
-    </section>
+    </div>
   );
 }
