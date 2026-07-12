@@ -548,23 +548,39 @@ def cek_part_di_unit(body: CekUnitRequest, _user: dict = Depends(get_current_use
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Isi Part Number dan nomor rangka/VIN unit (min. 6 karakter).")
 
-    ll = epc_bom.loading_list(rangka)
-    if not ll.get("found"):
-        err = ll.get("_err")
-        if err in ("token_expired", "no_token"):
-            return {"checked": False,
-                    "error": "Koneksi ke EPC sedang bermasalah (token). Coba lagi nanti atau tanya asisten."}
-        if err == "network":
-            return {"checked": False, "error": "Gagal menghubungi server EPC. Coba lagi."}
+    # SATU panggilan pencarian terbalik EPC (home/reverse/part) memvonis cocok/tidak —
+    # menemukan part yang tersembunyi DI DALAM assembly maupun part Loading List
+    # (terverifikasi live di SJ346500). Menggantikan alur lama yang berat: fetch
+    # Loading List + sisir 10 kategori Atlas satu-satu (bisa 1-2 menit).
+    rev = epc_bom.reverse_find_in_unit(rangka, pn)
+    err = rev.get("_err")
+    if err in ("token_expired", "no_token"):
+        return {"checked": False,
+                "error": "Koneksi ke EPC sedang bermasalah (token). Coba lagi nanti atau tanya asisten."}
+    if err == "network":
+        return {"checked": False, "error": "Gagal menghubungi server EPC. Coba lagi."}
+    if err in ("not_found", "input"):
         return {"checked": False,
                 "error": "Nomor rangka tidak ditemukan di EPC — pastikan benar (hanya unit "
                          "Sinotruk/HOWO/SITRAK)."}
-    frame = ll.get("frame_number") or rangka
+    frame = rev.get("frame_number") or rangka
 
+    if not rev.get("found"):
+        return {
+            "checked": True, "cocok": False, "frame_number": frame, "part_number": pn,
+            "pesan": (f"Part {pn} tidak ditemukan di unit {frame} menurut pencarian "
+                      "menyeluruh EPC (seluruh katalog unit ini). Bisa jadi bukan untuk "
+                      "unit ini (posisi depan/belakang pun bisa beda part) — tanyakan ke "
+                      "Asisten AI atau chat gudang sebelum membeli."),
+        }
+
+    instances = rev.get("instances") or []
+    induk = instances[0]
     norm = catalog_bom._norm
-    hit = next((p for p in (ll.get("parts") or []) if norm(p.get("pn") or "") == norm(pn)), None)
+    nama_en = (part_index.name_for(pn) or "").strip()
+    istilah = _istilah_lapangan(nama_en)
 
-    # Kategori part (peta katalog) → nama Indonesia + urutan kategori Parts Atlas.
+    # Kategori part (peta katalog) → nama Indonesia + istilah walk utk GAMBAR.
     kode = ""
     try:
         kode = (catalog_bom.pn_category_map().get(norm(pn)) or {}).get("kategori") or ""
@@ -572,75 +588,52 @@ def cek_part_di_unit(body: CekUnitRequest, _user: dict = Depends(get_current_use
         pass
     kategori_nama = catalog_bom.KATEGORI_NAMA.get(kode, "") if kode else ""
 
-    # Urutan kategori Atlas yang disisir: kategori terpetakan DULU, lalu sisanya.
-    # Loading List ≠ katalog lengkap — part servis (kampas rem dkk) kerap tersembunyi
-    # DI DALAM assembly dan hanya muncul di figure Parts Atlas. Bukti: brake friction
-    # plate AZ450045000042 ada di unit SJ346500 (figure 'brake shoe assembly') tapi
-    # TIDAK ada di Loading List 1.078 barisnya. Maka: tak ketemu di Loading List ≠
-    # tidak cocok — WAJIB menyisir SELURUH kategori Atlas dulu (perintah pemilik).
-    _SEMUA_TERM = ["rem", "gardan depan", "gardan belakang", "transmisi", "kopling",
-                   "kabin", "kelistrikan", "sasis", "mesin", "bak"]
-    urutan = list(dict.fromkeys(([_KODE2ATLAS[kode]] if kode in _KODE2ATLAS else []) + _SEMUA_TERM))
-
-    fig = None
-    kategori_fig = None
-    # Loading-list HIT: figure hanya pelengkap gambar → cukup beberapa kategori awal.
-    # Loading-list MISS: figure = PENENTU kecocokan → sisir SEMUA kategori.
-    batas = 3 if hit else len(urutan)
-    for term in urutan[:batas]:
-        try:
-            d = epc_bom.exploded_figures(rangka, pn, term)
-        except Exception:
-            continue
-        if d.get("found") and d.get("figures"):
-            fig = d["figures"][0]
-            kategori_fig = term
-            break
-        if d.get("_err") in ("token_expired", "no_token"):
-            if not hit:   # tanpa Atlas kita TAK BISA memvonis 'tidak cocok'
-                return {"checked": False,
-                        "error": "Koneksi ke EPC sedang bermasalah (token). Coba lagi nanti."}
-            break
-        if d.get("_err") == "network" and not hit:
-            return {"checked": False, "error": "Gagal menghubungi server EPC. Coba lagi."}
-
-    if not hit and not fig:
-        return {
-            "checked": True, "cocok": False, "frame_number": frame, "part_number": pn,
-            "pesan": (f"Part {pn} tidak ditemukan di unit {frame} menurut EPC — sudah dicek "
-                      "menyeluruh: Loading List DAN seluruh kategori Parts Atlas unit ini. "
-                      "Bisa jadi bukan untuk unit ini (posisi depan/belakang pun bisa beda "
-                      "part) — tanyakan ke Asisten AI atau chat gudang sebelum membeli."),
-        }
-
-    sumber = "loading_list" if hit else "parts_atlas"
-    nama_en = (part_index.name_for(pn)
-               or (hit or {}).get("nama_cn")
-               or (fig or {}).get("nama_item") or "").strip()
-    istilah = _istilah_lapangan(nama_en)
-    qty = (hit or {}).get("qty") or (fig or {}).get("qty") or ""
-
+    # Gambar exploded view + qty + balon — BEST-EFFORT (satu kategori terpetakan
+    # saja; kecocokan sudah divonis reverse, gambar hanya pelengkap).
     image_id = lokasi = None
     balon = None
-    if fig:
-        balon = fig.get("balon")
-        lokasi = fig.get("nama")
+    qty = ""
+    term = _KODE2ATLAS.get(kode)
+    if term:
         try:
-            image_id, _fn = ai_export.stash_builder(
-                f"Exploded {pn}", {"kind": "exploded", "svg": fig["svg"], "balon": balon},
-                ext="png")
+            d = epc_bom.exploded_figures(rangka, pn, term)
+            if d.get("found") and d.get("figures"):
+                fig = d["figures"][0]
+                balon, lokasi, qty = fig.get("balon"), fig.get("nama"), fig.get("qty") or ""
+                if not nama_en:
+                    nama_en = (fig.get("nama_item") or "").strip()
+                    istilah = _istilah_lapangan(nama_en)
+                image_id, _fn = ai_export.stash_builder(
+                    f"Exploded {pn}", {"kind": "exploded", "svg": fig["svg"], "balon": balon},
+                    ext="png")
         except Exception:
             image_id = None
 
-    bag = f" — {kategori_nama}" if kategori_nama else (f" — kategori {kategori_fig}" if kategori_fig else "")
-    lok = f", pada bagian '{lokasi}'" + (f" (nomor balon {balon})" if balon else "") if lokasi else ""
+    # Lokasi: figure bila ada; kalau tidak, assembly induk dari reverse
+    # ("bagian dari 'Brake shoe assembly' (AZ450045001161)").
+    if not lokasi and induk.get("parent_nama"):
+        lokasi = induk["parent_nama"]
+    n_lok = len({i.get("parent_pn") for i in instances if i.get("parent_pn")})
+    induk_txt = ""
+    if induk.get("parent_nama"):
+        induk_txt = (f", bagian dari assembly '{induk['parent_nama']}'"
+                     + (f" (PN {induk['parent_pn']})" if induk.get("parent_pn") else "")
+                     + (f" — ditemukan di {n_lok} posisi" if n_lok > 1 else ""))
+
+    bag = f" — {kategori_nama}" if kategori_nama else ""
+    fig_txt = (f", pada figure '{lokasi}'" + (f" (nomor balon {balon})" if balon else "")
+               ) if lokasi and balon is not None else ""
     ist = f" atau {istilah}" if istilah else ""
     penjelasan = (f"✅ Cocok — part ini terpasang di unit {frame}. "
-                  f"Ini adalah {nama_en or pn}{ist}{bag}{lok}. Qty di unit: {qty or '—'}.")
+                  f"Ini adalah {nama_en or pn}{ist}{bag}{induk_txt}{fig_txt}."
+                  + (f" Qty di unit: {qty}." if qty else ""))
     return {
         "checked": True, "cocok": True, "frame_number": frame, "part_number": pn,
-        "sumber": sumber, "nama": nama_en, "istilah_lapangan": istilah or None, "qty": qty,
-        "kategori": kategori_nama or None, "lokasi": lokasi, "balon": balon,
+        "sumber": "epc_reverse", "nama": nama_en, "istilah_lapangan": istilah or None,
+        "qty": qty, "kategori": kategori_nama or None, "lokasi": lokasi, "balon": balon,
+        "assembly_induk": induk.get("parent_nama") or None,
+        "assembly_induk_pn": induk.get("parent_pn") or None,
+        "jumlah_posisi": n_lok,
         "image_id": image_id, "penjelasan": penjelasan,
     }
 

@@ -1,46 +1,60 @@
-"""Fitur pembeli 'Cocok di unit saya?': verifikasi part ke BOM per-VIN EPC.
+"""Fitur pembeli 'Cocok di unit saya?' — kini lewat PENCARIAN TERBALIK EPC.
 
-Aturan keras pemilik: part per-unit SELALU dicek EPC — fitur ini membawanya ke
-halaman detail part pembeli. Cocok → penjelasan ramah (nama EN + istilah lapangan
-+ kategori + figure/balon) + gambar exploded view; tidak cocok → jawaban JUJUR,
-bukan tebakan. Gambar dilayani endpoint sendiri (bukan /api/ai/excel yang digembok
-izin menu Asisten AI).
+Satu panggilan home/reverse/part memvonis cocok/tidak untuk SELURUH katalog unit
+(termasuk part yang tersembunyi di dalam assembly — kampas rem AZ450045000042 di
+SJ346500 terbukti ketemu sebagai bagian 'Brake shoe assembly'), menggantikan alur
+lama: fetch Loading List + sisir 10 kategori Atlas (1-2 menit). Gambar exploded
+view tinggal pelengkap best-effort. Vonis 'tidak cocok' tetap jujur; EPC bermasalah
+= 'gagal mengecek', bukan vonis palsu.
 """
 import pytest
 
 from app.routers import parts as R
 
 USER = {"username": "roni", "role": "pembeli"}
-_LL = {"found": True, "frame_number": "LZZTEST123", "jumlah_part": 3, "parts": [
-    {"pn": "WG9100443050", "nama_cn": "制动摩擦片", "qty": 4},
-    {"pn": "VG1560080012", "nama_cn": "燃油滤清器", "qty": 1},
-]}
 
-
-# PN yang figure-nya ADA di Parts Atlas (per kategori). AZ450045000042 = kasus
-# regresi nyata: TIDAK ada di Loading List SJ346500 tapi ADA di figure Atlas
-# 'brake shoe assembly' — pengecekan wajib menyisir Atlas sebelum memvonis.
-_ATLAS = {
-    ("WG9100443050", "rem"),
-    ("AZ450045000042", "gardan depan"),
+# Hasil reverse per-PN (unit uji). Kampas = kasus nyata: 2 posisi assembly.
+_REV = {
+    "AZ450045000042": [
+        {"parent_pn": "AZ450045001161", "parent_nama": "Brake shoe assembly",
+         "part_id": 1482857, "part_list_id": 432614, "root_id": 1278889},
+        {"parent_pn": "AZ450045001160", "parent_nama": "Brake shoe assembly",
+         "part_id": 1482856, "part_list_id": 432613, "root_id": 1278889},
+    ],
+    "WG9100443050": [
+        {"parent_pn": "WG9100443001", "parent_nama": "Front brake assembly",
+         "part_id": 1, "part_list_id": 2, "root_id": 3},
+    ],
 }
 
 
 @pytest.fixture
 def dunia(monkeypatch):
     from app.services import ai_export, catalog_bom, epc_bom, part_index
-    monkeypatch.setattr(epc_bom, "loading_list", lambda r: dict(_LL))
+
+    def _reverse(rangka, pn):
+        inst = _REV.get(pn.upper())
+        return {"found": bool(inst), "frame_number": rangka.upper(),
+                "instances": list(inst or [])}
+
+    monkeypatch.setattr(epc_bom, "reverse_find_in_unit", _reverse)
+    # Loading List TIDAK boleh disentuh lagi (alur lama yang lambat).
+    monkeypatch.setattr(epc_bom, "loading_list",
+                        lambda r: (_ for _ in ()).throw(AssertionError("loading_list dipanggil")))
     monkeypatch.setattr(part_index, "name_for",
                         lambda pn: "Brake friction plate" if pn.startswith(("WG9100", "AZ4500")) else "")
     monkeypatch.setattr(catalog_bom, "pn_category_map",
                         lambda: {catalog_bom._norm("WG9100443050"): {"kategori": "09"},
                                  catalog_bom._norm("AZ450045000042"): {"kategori": "06"}})
+    fig_calls: list[str] = []
 
     def _figures(r, pn, k):
-        if (pn.upper(), k) in _ATLAS:
+        fig_calls.append(k)
+        if pn.upper() in _REV:
             return {"found": True, "figures": [
-                {"svg": "fig.svg", "balon": 7, "qty": 4, "nama_item": "Brake friction plate",
-                 "nama": "FRONT AXLE BRAKE", "kategori": k, "jumlah_item": 12, "items_ringkas": []}]}
+                {"svg": "fig.svg", "balon": 2, "qty": 2, "nama_item": "Brake friction plate",
+                 "nama": "brake shoe assembly", "kategori": k, "jumlah_item": 9,
+                 "items_ringkas": []}]}
         return {"found": False, "_err": "not_in_category"}
 
     monkeypatch.setattr(epc_bom, "exploded_figures", _figures)
@@ -48,78 +62,56 @@ def dunia(monkeypatch):
     monkeypatch.setattr(ai_export, "stash_builder",
                         lambda judul, builder, ext="png": (stashed.update(builder=builder) or ("IMG1", "x.png")))
     monkeypatch.setattr(R, "_istilah_lapangan", lambda nama: "kampas rem" if "friction" in nama.lower() else "")
+    stashed["fig_calls"] = fig_calls
     return stashed
 
 
-def test_cocok_lengkap_dengan_gambar(dunia):
-    r = R.cek_part_di_unit(R.CekUnitRequest(part_number="WG9100443050", rangka="LZZTEST123"), USER)
-    assert r["checked"] and r["cocok"] is True
-    assert r["nama"] == "Brake friction plate" and r["istilah_lapangan"] == "kampas rem"
-    assert r["qty"] == 4 and r["balon"] == 7 and r["image_id"] == "IMG1"
-    assert "kampas rem" in r["penjelasan"] and "FRONT AXLE BRAKE" in r["penjelasan"]
-    assert dunia["builder"]["balon"] == 7          # balon part DISOROT di PNG
+def test_kampas_tersembunyi_di_assembly_ketemu_satu_panggilan(dunia):
+    """Kasus nyata SJ346500: kampas tak ada di Loading List — reverse menemukannya
+    sebagai bagian 'Brake shoe assembly' TANPA sisir kategori."""
+    r = R.cek_part_di_unit(R.CekUnitRequest(part_number="AZ450045000042", rangka="sj346500"), USER)
+    assert r["checked"] and r["cocok"] is True and r["sumber"] == "epc_reverse"
+    assert r["assembly_induk"] == "Brake shoe assembly" and r["jumlah_posisi"] == 2
+    assert r["qty"] == 2 and r["balon"] == 2 and r["image_id"] == "IMG1"
+    assert "kampas rem" in r["penjelasan"] and "Brake shoe assembly" in r["penjelasan"]
+    assert dunia["fig_calls"] == ["gardan depan"]     # gambar: 1 kategori terpetakan saja
 
 
-def test_cocok_tanpa_kategori_tetap_dikirim(dunia, monkeypatch):
-    """Part tanpa peta kategori → tak ada gambar, tapi hasil cocok TETAP tampil."""
-    from app.services import catalog_bom
-    monkeypatch.setattr(catalog_bom, "pn_category_map", lambda: {})
-    r = R.cek_part_di_unit(R.CekUnitRequest(part_number="VG1560080012", rangka="LZZTEST123"), USER)
-    assert r["cocok"] is True and r["image_id"] is None and r["lokasi"] is None
-
-
-def test_ATLAS_menyelamatkan_part_yang_tak_ada_di_loading_list(dunia):
-    """Regresi nyata (SJ346500): kampas rem AZ450045000042 TIDAK ada di Loading List
-    (part servis tersembunyi di dalam assembly) tapi ADA di figure Parts Atlas —
-    dulu divonis 'tidak cocok', padahal terpasang di unit. Kini Atlas disisir dulu."""
-    r = R.cek_part_di_unit(R.CekUnitRequest(part_number="AZ450045000042", rangka="SJ346500"), USER)
-    assert r["checked"] and r["cocok"] is True
-    assert r["sumber"] == "parts_atlas"
-    assert r["qty"] == 4                                 # qty dari item figure Atlas
-    assert r["image_id"] == "IMG1" and r["balon"] == 7
-    assert "kampas rem" in r["penjelasan"]
-
-
-def test_tidak_cocok_hanya_setelah_atlas_disisir_semua(dunia, monkeypatch):
-    from app.services import epc_bom
-    disisir: list[str] = []
-
-    def _figures(r, pn, k):
-        disisir.append(k)
-        return {"found": False, "_err": "not_in_category"}
-
-    monkeypatch.setattr(epc_bom, "exploded_figures", _figures)
-    r = R.cek_part_di_unit(R.CekUnitRequest(part_number="AZ9999999999", rangka="LZZTEST123"), USER)
+def test_tidak_cocok_cepat_tanpa_sisir_kategori(dunia):
+    r = R.cek_part_di_unit(R.CekUnitRequest(part_number="ZZ0000000001", rangka="LZZTEST123"), USER)
     assert r["checked"] and r["cocok"] is False
-    assert "Parts Atlas" in r["pesan"]              # pesan menyebut cek menyeluruh
-    assert len(disisir) == 10                       # SEMUA kategori Atlas disisir
+    assert "menyeluruh" in r["pesan"]
+    assert dunia["fig_calls"] == []                   # nol walk kategori — vonis dari reverse
 
 
-def test_atlas_error_token_tidak_memvonis_tidak_cocok(dunia, monkeypatch):
-    """Tanpa Atlas kita TAK BISA bilang 'tidak cocok' — token EPC bermasalah harus
-    jadi 'gagal mengecek', bukan vonis palsu yang membuat pembeli batal membeli."""
+def test_epc_error_bukan_vonis_palsu(dunia, monkeypatch):
     from app.services import epc_bom
-    monkeypatch.setattr(epc_bom, "exploded_figures",
-                        lambda r, pn, k: {"found": False, "_err": "token_expired"})
-    r = R.cek_part_di_unit(R.CekUnitRequest(part_number="AZ9999999999", rangka="LZZTEST123"), USER)
+    monkeypatch.setattr(epc_bom, "reverse_find_in_unit",
+                        lambda r, pn: {"found": False, "_err": "token_expired"})
+    r = R.cek_part_di_unit(R.CekUnitRequest(part_number="AZ450045000042", rangka="SJ346500"), USER)
     assert r["checked"] is False and "token" in r["error"].lower()
 
 
 def test_rangka_tak_dikenal(dunia, monkeypatch):
     from app.services import epc_bom
-    monkeypatch.setattr(epc_bom, "loading_list", lambda r: {"found": False, "_err": "empty"})
-    r = R.cek_part_di_unit(R.CekUnitRequest(part_number="WG9100443050", rangka="LZZSALAH1"), USER)
+    monkeypatch.setattr(epc_bom, "reverse_find_in_unit",
+                        lambda r, pn: {"found": False, "_err": "not_found"})
+    r = R.cek_part_di_unit(R.CekUnitRequest(part_number="AZ450045000042", rangka="LZZSALAH1"), USER)
     assert r["checked"] is False and "tidak ditemukan" in r["error"]
 
 
 def test_gambar_gagal_tak_menggagalkan_hasil(dunia, monkeypatch):
-    """exploded_figures error → hasil cocok tetap dikirim tanpa gambar (best-effort)."""
+    """Reverse sudah memvonis cocok; figure error → hasil tetap dikirim, lokasi
+    jatuh ke assembly induk dari reverse."""
     from app.services import epc_bom
+
     def _boom(r, pn, k):
         raise RuntimeError("EPC figure error")
+
     monkeypatch.setattr(epc_bom, "exploded_figures", _boom)
-    r = R.cek_part_di_unit(R.CekUnitRequest(part_number="WG9100443050", rangka="LZZTEST123"), USER)
+    r = R.cek_part_di_unit(R.CekUnitRequest(part_number="AZ450045000042", rangka="SJ346500"), USER)
     assert r["cocok"] is True and r["image_id"] is None
+    assert r["lokasi"] == "Brake shoe assembly"
 
 
 def test_endpoint_gambar_terpisah_dari_gembok_ai(monkeypatch):

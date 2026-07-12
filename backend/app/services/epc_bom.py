@@ -824,6 +824,51 @@ def _tree_node(frame: str, root_id, part_id) -> dict:
     })
 
 
+_root_cache: dict[str, dict] = {}   # frame -> {"at", "val"} (rootId+orderNo, ringan)
+
+
+def _atlas_root_cached(frame: str) -> dict:
+    """_atlas_root dengan cache kecil — dipakai jalur yang sering dipanggil
+    (reverse_find_in_unit) agar cek berulang unit yang sama tak menembak EPC."""
+    c = _root_cache.get(frame)
+    if c and (time.monotonic() - c["at"] < _CAT_TTL):
+        return c["val"]
+    r = _atlas_root(frame)
+    if "_err" not in r:
+        _root_cache[frame] = {"at": time.monotonic(), "val": r}
+    return r
+
+
+def reverse_find_in_unit(rangka: str, pn: str) -> dict:
+    """Cari SEBUAH PN di SATU unit lewat pencarian terbalik EPC — SATU panggilan
+    (home/reverse/part?t=car&v=<orderNo>&k=<pn>&cjh=<frame>), pengganti sisiran
+    kategori Atlas satu-satu.
+
+    Terverifikasi live (SJ346500): menemukan part yang TERSEMBUNYI di dalam assembly
+    (kampas rem AZ450045000042 → 2× 'Brake shoe assembly') MAUPUN part Loading List
+    (AZ9003963022 → 'Front leaf spring suspension'); PN yang bukan milik unit → [].
+    Return {found, frame_number, instances:[{parent_pn, parent_nama, part_id,
+    part_list_id, root_id}]} atau {found:False, _err} bila EPC bermasalah."""
+    frame = _frame(rangka)
+    pnu = (pn or "").strip().upper()
+    if not frame or not pnu:
+        return {"found": False, "_err": "input"}
+    r = _atlas_root_cached(frame)
+    if "_err" in r:
+        return {"found": False, "frame_number": frame, "_err": r["_err"]}
+    res = _get_auto(_REVERSE_URL, {"t": "car", "v": r.get("orderNo") or frame,
+                                   "k": pnu, "cjh": frame})
+    if "_err" in res:
+        return {"found": False, "frame_number": frame, "_err": res["_err"]}
+    instances = [{
+        "parent_pn": (d.get("partCode") or "").strip(),
+        "parent_nama": (d.get("partName") or "").strip(),
+        "part_id": d.get("partId"), "part_list_id": d.get("partListId"),
+        "root_id": d.get("rootId"),
+    } for d in (res.get("data") or []) if isinstance(d, dict)]
+    return {"found": bool(instances), "frame_number": frame, "instances": instances}
+
+
 def category_top(rangka: str) -> dict:
     """Daftar kategori/assembly TINGKAT-ATAS untuk 1 unit (1 panggilan + cache).
     Sukses → {found, frame_number, order_no, root_id, jumlah, kategori:[norm_cat...]}.
