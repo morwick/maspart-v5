@@ -73,6 +73,25 @@ def test_skip_nama_kosong(acc):
     assert r["status"] == "skip" and "kosong" in r["note"]
 
 
+def test_harga_baris_ikut_yang_DIBAYAR_bukan_live_accurate(acc):
+    """Dokumen = transaksi. Pembeli membayar harga indeks saat order; kalau admin
+    keburu mengubah harga di Accurate sebelum pelunasan, penawaran TETAP memakai
+    harga yang dibayar — kalau tidak, invoice hasil penawaran menagih angka lain
+    dari uang yang sudah masuk."""
+    r = aq.create_for_order(_order(items=[
+        {"part_number": "WG9925520270", "qty": 2, "price": 1_400_000},  # dibayar
+    ]))                                                                  # live: 1.5jt
+    assert r["status"] == "created"
+    assert acc["lines"][0]["unit_price"] == 1_400_000       # bukan 1_500_000
+
+
+def test_tanpa_harga_order_jatuh_ke_live_accurate(acc):
+    """Order lama (belum menyimpan price per item) tetap terbuat memakai harga live."""
+    r = aq.create_for_order(_order())          # item tanpa field 'price'
+    assert r["status"] == "created"
+    assert acc["lines"][0]["unit_price"] == 1_500_000
+
+
 def test_skip_accurate_tak_aktif(monkeypatch):
     monkeypatch.setattr(aq.accurate, "available", lambda: False)
     r = aq.create_for_order(_order())

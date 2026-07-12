@@ -81,10 +81,23 @@ def create_for_order(order: dict) -> dict:
             if not acc_it:
                 missing.append(pn)
                 continue
-            price = float(acc_it.get("price") or 0)
+            # Harga baris = harga yang BENAR-BENAR DIBAYAR pembeli (order_items.price,
+            # dari indeks saat order dibuat) — BUKAN harga live Accurate saat pelunasan.
+            # Kalau admin sempat mengubah harga di Accurate di antara order dan bayar,
+            # dokumen penawaran wajib tetap sama dengan uang yang masuk; kalau tidak,
+            # invoice hasil proses penawaran akan menagih angka yang berbeda.
+            try:
+                paid = float(it.get("price") or 0)
+            except (TypeError, ValueError):
+                paid = 0
+            live = float(acc_it.get("price") or 0)
+            price = paid if paid > 0 else live
             if price <= 0:
                 noprice.append(acc_it.get("pn") or pn)
                 continue
+            if paid > 0 and live > 0 and abs(paid - live) >= 1:
+                logger.warning("harga %s berubah sejak order %s: dibayar %s, Accurate kini %s "
+                               "— penawaran memakai harga DIBAYAR", pn, code, paid, live)
             lines.append({"item_id": acc_it["id"], "name": acc_it["name"], "qty": qty,
                           "unit_price": price, "unit_id": acc_it["unit_id"]})
 
