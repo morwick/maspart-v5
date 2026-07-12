@@ -122,9 +122,11 @@ async def upload_data(
         if kind in ("stok", "harga"):
             part_index.refresh_index()
             harga.refresh()
-            if kind == "stok":
-                # Stok baru = snapshot terbaru → reset reservasi lama agar tak dobel-kurang.
-                reservations.clear_all()
+            # ⛔ JANGAN reservations.clear_all() di sini lagi. Dulu stok.xlsx = sumber
+            # stok, jadi upload = snapshot baru & reservasi lama di-reset. Sejak stok
+            # HANYA dari indeks Accurate (aturan pemilik 2026-07-12), upload stok.xlsx
+            # tak mengubah stok apa pun — clear_all hanya akan MENGHAPUS tahanan stok
+            # order aktif (termasuk yang sudah DIBAYAR) dan membuka pintu oversell.
         elif kind == "populasi":
             populasi.refresh()
     except Exception as e:
