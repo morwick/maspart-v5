@@ -146,6 +146,13 @@ export default function AdminOrderDetailPage() {
 
             {/* Verifikasi & status */}
             <div className="flex flex-col gap-4">
+              {/* Pembayaran bermasalah (mis. dibayar setelah order batal → perlu refund) */}
+              {order.payment_note && (
+                <div className="alert alert-error" style={{ marginBottom: 0 }}>
+                  <b>⚠️ Pembayaran perlu ditindaklanjuti.</b> {order.payment_note}
+                </div>
+              )}
+
               {/* Penawaran Accurate otomatis (saat order lunas) */}
               {order.penawaran_status && (
                 <div className="surface surface-pad">

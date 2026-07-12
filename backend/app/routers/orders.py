@@ -283,7 +283,16 @@ def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_re
             customer={"name": body.recipient_name or user["username"], "email": user.get("email", ""), "phone": body.recipient_phone or ""},
         )
         if perr:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Order dibuat tapi gagal buat pembayaran: {perr}")
+            # Order tanpa transaksi gateway TAK BISA dibayar (tak ada payment_url) DAN
+            # tak pernah kedaluwarsa (is_expired butuh payment_expiry yang tak pernah
+            # terisi) → akan nyangkut selamanya sambil menahan stok. Batalkan saja;
+            # pembeli tinggal checkout ulang.
+            reservations.release(code)
+            orders.set_status(code, "batal")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                f"Gagal membuat pembayaran ({perr}). Pesanan dibatalkan, silakan ulangi checkout.",
+            )
         orders.attach_payment(order["order_code"], pay)
         order["payment"] = pay
     return order
@@ -329,6 +338,15 @@ async def upload_proof(code: str, file: UploadFile = File(...), user: dict = Dep
     o = orders.get_order(code, username=None if is_admin else user["username"])
     if not o:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pesanan tidak ditemukan.")
+    # Order gateway TAK BOLEH terima bukti manual: set_proof memindahkan status ke
+    # 'menunggu_verifikasi', dan pembayaran yang lunas setelah itu akan terabaikan
+    # (webhook & polling hanya melunasi order yang belum diverifikasi manual).
+    if (o.get("payment_method") or "") == "gateway":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Pesanan ini dibayar lewat pembayaran online — bukti transfer tidak diperlukan, "
+            "pembayaran terverifikasi otomatis.",
+        )
     # Ekstensi dari nama asli HANYA untuk menentukan tipe; nama file di-generate
     # server (cegah path traversal / overwrite). order_code diambil dari DB.
     raw_name = (file.filename or "bukti").strip()
@@ -353,6 +371,13 @@ async def upload_proof(code: str, file: UploadFile = File(...), user: dict = Dep
 
 
 # ── Pembayaran gateway ──
+# Status yang masih boleh DILUNASI oleh konfirmasi gateway. 'menunggu_verifikasi'
+# ikut (jaring pengaman): order gateway seharusnya tak pernah punya bukti manual,
+# tapi kalau toh statusnya sempat berpindah ke sana, pembayaran yang benar-benar
+# lunas jangan sampai terabaikan & ordernya nyangkut.
+_PAYABLE = {"menunggu_pembayaran", "menunggu_verifikasi"}
+
+
 @router.get("/orders/{code}/payment/status")
 def payment_status(code: str, user: dict = Depends(get_current_user)):
     """Cek status pembayaran ke gateway; kalau lunas, tandai order diproses."""
@@ -373,9 +398,11 @@ def payment_status(code: str, user: dict = Depends(get_current_user)):
             "status": o.get("status"), "paid": False,
             "error": f"Nominal pembayaran (Rp{gw_amount:,}) tidak sama dengan total tagihan (Rp{int(o.get('total') or 0):,}). Hubungi admin.",
         }
-    if paid and o.get("status") == "menunggu_pembayaran":
+    if paid and o.get("status") in _PAYABLE:
         if orders.mark_paid(code, raw=res.get("raw")):
             _after_paid(code)
+    elif paid and o.get("status") == "batal":
+        orders.flag_late_payment(code, int(gw_amount or o.get("total") or 0))
     return {"status": "diproses" if paid else o.get("status"), "paid": paid, "gateway_status": res["status"]}
 
 
@@ -406,11 +433,19 @@ async def payment_webhook(request: Request):
     gw_amount = int(chk.get("amount") or 0)
     if gw_amount and gw_amount != int(o.get("total") or 0):
         return {"ok": True, "ignored": f"nominal tidak cocok ({gw_amount} vs {o.get('total')})"}
-    # Idempotent: hanya proses kalau masih menunggu_pembayaran.
-    if o.get("status") == "menunggu_pembayaran":
+    # Idempotent: hanya proses kalau order belum lunas.
+    if o.get("status") in _PAYABLE:
         if orders.mark_paid(o["order_code"], raw=data.get("raw")):
             _after_paid(o["order_code"])
-    return {"ok": True}
+        return {"ok": True}
+    if o.get("status") == "batal":
+        # Pembayaran MASUK untuk order yang sudah dibatalkan (mis. bayar tepat sebelum
+        # batas 24 jam, order keburu auto-batal). Uang ada di gateway tapi tak ada yang
+        # tahu → tandai order & log keras agar admin bisa refund. Jangan menghidupkan
+        # order (stoknya sudah dilepas, bisa saja sudah terjual ke pembeli lain).
+        orders.flag_late_payment(o["order_code"], gw_amount or int(o.get("total") or 0))
+        return {"ok": True, "flagged": "dibayar setelah order batal — perlu refund"}
+    return {"ok": True, "ignored": f"order sudah berstatus {o.get('status')}"}
 
 
 # ── Admin ──

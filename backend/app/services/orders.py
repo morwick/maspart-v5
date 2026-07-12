@@ -573,6 +573,24 @@ def mark_paid(order_code: str, raw: dict | None = None) -> bool:
     return ok
 
 
+def flag_late_payment(order_code: str, amount: int = 0) -> bool:
+    """Tandai order BATAL yang ternyata tetap dibayar di gateway (perlu refund).
+
+    Order tidak dihidupkan kembali — stoknya sudah dilepas & bisa saja sudah terjual
+    ke pembeli lain. Yang penting uangnya tidak hilang dari radar admin: dicatat di
+    kolom `payment_note` (migrasi 019) + log peringatan, sehingga tetap terlihat
+    meski kolomnya belum ada.
+    """
+    note = (f"Dibayar di gateway setelah pesanan BATAL (Rp{int(amount or 0):,}) — "
+            "perlu refund / konfirmasi ke pembeli.")
+    logger.warning("PEMBAYARAN TELAT order %s: %s", order_code, note)
+    try:
+        return _patch(order_code, {"payment_note": note})
+    except Exception:
+        logger.exception("flag_late_payment gagal (order %s)", order_code)
+        return False
+
+
 def set_penawaran_result(order_code: str, res: dict) -> bool:
     """Simpan hasil pembuatan Penawaran Accurate otomatis ke order (best-effort).
     Kolom penawaran_* mungkin belum ada (migrasi belum jalan) → kegagalan patch
