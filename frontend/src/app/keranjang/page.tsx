@@ -284,8 +284,11 @@ export default function KeranjangPage() {
               <div className="mb-3 flex flex-wrap items-center gap-3">
                 <div style={{ fontSize: 14, fontWeight: 600 }}>🚚 Ekspedisi & Ongkir</div>
                 <div className="grow" />
-                <span style={{ fontSize: 12.5, color: "var(--ink-600)" }}>
-                  Berat: <b>{weightKg} kg</b>
+                <span
+                  style={{ fontSize: 12.5, color: "var(--ink-600)" }}
+                  title="Berat yang ditagih kurir: yang lebih besar antara berat asli dan berat volumetrik (p×l×t ÷ 6000). Barang besar tapi ringan ditagih dari ukurannya."
+                >
+                  Berat kirim: <b>{weightKg} kg</b>
                 </span>
                 <button onClick={cekOngkir} disabled={loadingRates} className="btn btn-secondary btn-sm">
                   {loadingRates ? "Mengecek…" : "Cek Ongkir"}

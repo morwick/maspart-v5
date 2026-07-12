@@ -16,11 +16,14 @@ def tmp_index(tmp_path, monkeypatch):
 
 
 def test_put_get_dan_persist(tmp_index):
-    sims_weights.put("wg123", 8800)
+    sims_weights.put("wg123", 8800, 12_000)
     assert sims_weights.get("WG123") == 8800                 # case-insensitif
-    assert json.loads(tmp_index.read_text())["WG123"] == 8800  # tersimpan ke disk
+    assert sims_weights.get_volumetric("WG123") == 12_000    # dimensi ikut tersimpan
+    disk = json.loads(tmp_index.read_text())["WG123"]
+    assert disk == {"g": 8800, "vol": 12_000}
     sims_weights._map = None                                  # reload dari file
     assert sims_weights.get("wg123") == 8800
+    assert sims_weights.get_volumetric("wg123") == 12_000
 
 
 def test_put_abaikan_nol_dan_kosong(tmp_index):
@@ -38,16 +41,29 @@ def test_fetch_and_store(monkeypatch, tmp_index):
     assert sims_weights.get("NOPE") == 0                      # 0 tak disimpan
 
 
-def test_warm_once_lewati_yang_sudah_ada(monkeypatch, tmp_index):
+def test_warm_once_lewati_yang_sudah_lengkap(monkeypatch, tmp_index):
     monkeypatch.setattr(sims_weights.sims, "_SIMS_OK", True)
     monkeypatch.setattr(sims_weights, "_priced_pns", lambda: {"A", "B", "C"})
-    sims_weights.put("A", 1000)                               # sudah ada → skip
+    sims_weights.put("A", 1000, 0)    # berat ADA & dimensi sudah dicek (SIMS tak punya) → skip
     fetched = []
     monkeypatch.setattr(sims_weights, "fetch_and_store",
                         lambda pn: fetched.append(pn) or 500)
     r = sims_weights.warm_once()
-    assert set(fetched) == {"B", "C"}                         # A dilewati (cached)
+    assert set(fetched) == {"B", "C"}                         # A dilewati (lengkap)
     assert r["fetched"] == 2 and r["with_weight"] == 2
+
+
+def test_warm_once_melengkapi_entri_lama_yang_belum_punya_dimensi(monkeypatch, tmp_index):
+    """Entri format lama (berat saja) HARUS di-fetch ulang sekali untuk mengambil
+    dimensinya — kalau tidak, ongkir barang besar-ringan tetap salah selamanya."""
+    monkeypatch.setattr(sims_weights.sims, "_SIMS_OK", True)
+    monkeypatch.setattr(sims_weights, "_priced_pns", lambda: {"LAMA"})
+    sims_weights._map = {"LAMA": sims_weights._norm(2500)}    # format lama: angka polos
+    fetched = []
+    monkeypatch.setattr(sims_weights, "fetch_and_store",
+                        lambda pn: fetched.append(pn) or 2500)
+    sims_weights.warm_once()
+    assert fetched == ["LAMA"]
 
 
 def test_warm_once_sims_mati(monkeypatch, tmp_index):

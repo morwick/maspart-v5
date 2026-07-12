@@ -159,18 +159,39 @@ def weight_for(pn: str, allow_remote: bool = False) -> int:
     return _weight_map.get((pn or "").strip().upper(), 0)
 
 
+def shipping_weight_for(pn: str, allow_remote: bool = False) -> int:
+    """Berat TERTAGIH kurir (gram) = **max(berat asli, berat volumetrik)**.
+
+    Kurir domestik (JNE/J&T/SiCepat/POS) menagih berdasarkan yang lebih besar antara
+    berat asli dan volumetrik (p×l×t/6000). Barang besar-ringan jauh lebih mahal dari
+    beratnya — mis. filter WG9725190102: berat 3,7 kg tapi 46,5×30,5×30,2 cm = 7,1 kg
+    volumetrik. Kalau ongkir dihitung dari berat asli saja, selisihnya ditanggung
+    penjual di konter. Dimensi resmi dari SIMS (indeks persisten sims_weights)."""
+    asli = weight_for(pn, allow_remote=allow_remote)
+    try:
+        from . import sims_weights
+        vol = sims_weights.get_volumetric(pn)
+        if vol <= 0 and allow_remote and not sims_weights.dim_known(pn):
+            sims_weights.fetch_and_store(pn)      # ikut menyimpan dimensi
+            vol = sims_weights.get_volumetric(pn)
+    except Exception:
+        vol = 0
+    return max(asli, vol)
+
+
 def total_weight_grams(items: list[tuple[str, int]], default_each: int,
                        allow_remote: bool = True) -> int:
-    """Total berat (gram) dari daftar (part_number, qty). Part tanpa berat → pakai
-    estimasi `default_each` gram per item. Minimal `default_each`. `allow_remote`
-    boleh fetch berat SIMS (dipakai utk ongkir; item sedikit)."""
+    """Total berat TERTAGIH (gram) dari daftar (part_number, qty) — dasar hitung
+    ongkir, jadi memakai max(berat asli, volumetrik) per item. Part tanpa berat →
+    estimasi `default_each` gram. Minimal `default_each`. `allow_remote` boleh fetch
+    SIMS (item sedikit di alur ongkir/order)."""
     total = 0
     for pn, qty in items:
         try:
             q = max(1, int(qty or 1))
         except Exception:
             q = 1
-        w = weight_for(pn, allow_remote=allow_remote)
+        w = shipping_weight_for(pn, allow_remote=allow_remote)
         total += (w if w > 0 else default_each) * q
     return max(default_each, total) if items else default_each
 

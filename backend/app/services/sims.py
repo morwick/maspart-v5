@@ -124,6 +124,40 @@ def get_part_weight_grams_cached(part_number: str) -> int:
     return g if g > 0 else 0
 
 
+# Pembagi berat volumetrik kurir domestik Indonesia (JNE/J&T/SiCepat/POS):
+# (p × l × t dalam cm) / 6000 = kg. Kurir menagih yang LEBIH BESAR antara berat
+# asli dan berat volumetrik — barang besar-ringan (filter, kaca spion) jauh lebih
+# mahal dari beratnya.
+VOLUMETRIC_DIVISOR = 6000
+
+
+def _vol_grams(info: dict) -> int:
+    """Berat volumetrik (gram) dari dimensi SIMS. 0 bila dimensi tak lengkap."""
+    try:
+        l = float(info.get("lengthCm") or 0)
+        w = float(info.get("widthCm") or 0)
+        h = float(info.get("heightCm") or 0)
+    except (TypeError, ValueError):
+        return 0
+    if l <= 0 or w <= 0 or h <= 0:
+        return 0
+    return int(round(l * w * h / VOLUMETRIC_DIVISOR * 1000))
+
+
+def get_part_volumetric_grams(part_number: str) -> int:
+    """Berat VOLUMETRIK (gram) dari dimensi resmi SIMS — boleh login/fetch. 0 bila
+    dimensi tak ada. Dipakai untuk ongkir: kurir menagih max(berat asli, volumetrik)."""
+    info = get_part_info(part_number)
+    if info and "lengthCm" not in info:
+        info = get_part_info(part_number, force_refresh=True)
+    return _vol_grams(info or {})
+
+
+def get_part_volumetric_grams_cached(part_number: str) -> int:
+    """Seperti di atas tapi HANYA dari cache (tanpa jaringan). 0 bila belum ter-cache."""
+    return _vol_grams(_part_info_cached(part_number))
+
+
 def get_part_spec(part_number: str) -> dict:
     """Spesifikasi fisik resmi SIMS untuk ditampilkan: berat (kg), dimensi (cm),
     satuan, kemasan minimum, merek. {} bila tak ada data."""
