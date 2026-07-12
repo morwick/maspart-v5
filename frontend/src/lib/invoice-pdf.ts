@@ -3,7 +3,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { OrderDetail } from "@/lib/api";
-import { fmtDate } from "@/lib/order-ui";
+import { fmtDate, ppnOf } from "@/lib/order-ui";
 
 const rupiah = (n: number) => "Rp " + (n || 0).toLocaleString("id-ID");
 
@@ -30,7 +30,8 @@ export function downloadInvoicePdf(o: OrderDetail): void {
   const right = W - M;
   let y = 18;
 
-  const ppn = Math.max(0, o.total - (o.subtotal || 0) - (o.shipping_cost || 0));
+  // PPN 12% INKLUSIF (ikut Accurate): terkandung DI DALAM subtotal, bukan tambahan.
+  const ppn = o.tax ?? ppnOf(o.subtotal || 0);
   const courierLabel = o.courier
     ? o.courier.toUpperCase() + (o.courier_service ? " " + o.courier_service : "")
     : "—";
@@ -156,8 +157,8 @@ export function downloadInvoicePdf(o: OrderDetail): void {
     doc.text(val, right, y, { align: "right" });
     y += grand ? 7 : 5.5;
   };
-  trow("Subtotal Produk", rupiah(o.subtotal));
-  if (ppn > 0) trow("PPN (11%)", rupiah(ppn));
+  trow("Subtotal Produk (termasuk PPN)", rupiah(o.subtotal));
+  if (ppn > 0) trow("— di dalamnya PPN 12%", rupiah(ppn));
   trow(`Ongkos Kirim${o.courier ? ` (${courierLabel})` : ""}`, o.shipping_cost ? rupiah(o.shipping_cost) : "—");
   doc.setDrawColor(...LINE);
   doc.line(xK, y - 2, right, y - 2);

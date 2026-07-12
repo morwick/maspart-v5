@@ -32,7 +32,18 @@ _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "batal": set(),
 }
 
-PPN_RATE = 0.11  # PPN 11% (ditambahkan di atas subtotal)
+# PPN 12% **INKLUSIF** — harga jual Accurate SUDAH mengandung PPN, jadi pajak TIDAK
+# ditambahkan di atas subtotal. Ikut persis Penawaran Penjualan Accurate: Sub Total
+# Rp 80.000 → PPN 12% Rp 8.571 (= 80.000 × 12/112) → Total tetap Rp 80.000.
+# Kalau app menambahkan PPN di atasnya (perilaku lama, 11% eksklusif), tagihan ke
+# pembeli tak akan pernah cocok dengan dokumen Accurate.
+PPN_RATE = 0.12
+
+
+def ppn_included(amount: int) -> int:
+    """Komponen PPN 12% yang SUDAH TERKANDUNG dalam `amount` (harga inklusif pajak).
+    Pembulatan integer ke bawah, sama dengan yang ditampilkan Accurate."""
+    return (max(int(amount), 0) * 12) // 112
 _TIMEOUT = 15
 
 
@@ -168,8 +179,10 @@ def create_order(
         g = gudang.gudang_for_user(username, role)
         gud_label = gudang.gudang_label(g) if g else ("Semua cabang" if role == "admin" else "")
     ship = max(int(shipping_cost or 0), 0)
-    tax = (subtotal * 11 + 50) // 100  # PPN 11% exclusive, pembulatan integer (bukan float)
-    total = subtotal + tax + ship
+    # PPN 12% INKLUSIF (ikut Accurate): pajak sudah ada DI DALAM subtotal → hanya
+    # dicatat sebagai komponen, TIDAK ditambahkan ke total. Total = barang + ongkir.
+    tax = ppn_included(subtotal)
+    total = subtotal + ship
     rcp = recipient or {}
     try:
         # Insert order — retry beberapa kali bila order_code bentrok (unique violation).

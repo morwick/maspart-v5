@@ -23,9 +23,14 @@ export function orderProgress(status: string): { label: string; done: boolean }[
 
 export const rp = (n: number) => "Rp " + (n || 0).toLocaleString("id-ID");
 
-// PPN 11% (ditambahkan di atas subtotal). Harus sama dengan backend (orders.PPN_RATE).
-export const PPN_RATE = 0.11;
-export const ppnOf = (subtotal: number) => Math.round((subtotal || 0) * PPN_RATE);
+// PPN 12% **INKLUSIF** — harga jual Accurate sudah mengandung PPN, jadi pajak TIDAK
+// ditambahkan di atas subtotal (Accurate: Sub Total 80.000 → PPN 12% 8.571 → Total
+// tetap 80.000). Harus sama dengan backend (orders.ppn_included), kalau tidak,
+// tagihan ke pembeli takkan cocok dengan dokumen Accurate.
+export const PPN_RATE = 0.12;
+export const ppnOf = (subtotal: number) => Math.floor(((subtotal || 0) * 12) / 112);
+/** Total tagihan = barang (sudah termasuk PPN) + ongkir. PPN bukan tambahan. */
+export const totalOf = (subtotal: number, ongkir = 0) => (subtotal || 0) + (ongkir || 0);
 
 export const fmtDate = (s?: string | null) => {
   if (!s) return "—";

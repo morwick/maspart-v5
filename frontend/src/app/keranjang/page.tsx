@@ -8,6 +8,7 @@ import MapPicker from "@/components/MapPicker";
 import { ApiError, createOrder, getCartGudang, getCartWeight, getShippingRates, getPaymentMethods, type CartGudang, type ShippingRate, type GeoPlace } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { clearCart, getCart, hasPrice, hasWeight, removeFromCart, setQty, type CartItem } from "@/lib/cart";
+import { ppnOf, totalOf } from "@/lib/order-ui";
 
 const toNum = (s: string) => parseInt((s || "").replace(/[^\d]/g, ""), 10) || 0;
 const rp = (n: number) => "Rp " + n.toLocaleString("id-ID");
@@ -81,9 +82,11 @@ export default function KeranjangPage() {
   // Item yang IKUT checkout kali ini (item gudang lain ditahan, bukan dihapus).
   const itemsBeli = items.filter((i) => !gudangAktif || gudangOf(i.part_number) === gudangAktif);
 
+  // Harga Accurate SUDAH termasuk PPN 12% → pajak bukan tambahan, hanya komponen.
+  // Total = barang (harga Accurate) + ongkir (satu-satunya angka dari aplikasi).
   const subtotal = itemsBeli.reduce((n, i) => n + hargaOf(i) * i.qty, 0);
-  const ppn = Math.round(subtotal * 0.11);
-  const total = subtotal + ppn + (rate?.price || 0);
+  const ppn = ppnOf(subtotal);
+  const total = totalOf(subtotal, rate?.price || 0);
   // Part yang tak bisa dibeli (harga/berat/stok) → blokir checkout sampai dihapus.
   const blokir = items.filter((i) => !bisaBeli(i));
   const totalQty = itemsBeli.reduce((n, i) => n + i.qty, 0);
@@ -427,12 +430,14 @@ export default function KeranjangPage() {
               </div>
               <div className="surface surface-pad flex flex-col gap-2">
                 <div className="flex items-center justify-between" style={{ fontSize: 13 }}>
-                  <span style={{ color: "var(--ink-500)" }}>Subtotal</span>
+                  <span style={{ color: "var(--ink-500)" }}>Subtotal barang</span>
                   <span className="mono">{rp(subtotal)}</span>
                 </div>
-                <div className="flex items-center justify-between" style={{ fontSize: 13 }}>
-                  <span style={{ color: "var(--ink-500)" }}>PPN (11%)</span>
-                  <span className="mono">{rp(ppn)}</span>
+                <div className="flex items-center justify-between" style={{ fontSize: 12.5 }}>
+                  <span style={{ color: "var(--ink-400)" }} title="Harga sudah termasuk PPN — sama dengan dokumen Accurate">
+                    Termasuk PPN 12%
+                  </span>
+                  <span className="mono" style={{ color: "var(--ink-400)" }}>{rp(ppn)}</span>
                 </div>
                 <div className="flex items-center justify-between" style={{ fontSize: 13 }}>
                   <span style={{ color: "var(--ink-500)" }}>Ongkir{rate ? ` (${rate.courier_name})` : ""}</span>

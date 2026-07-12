@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ApiError, getOrder, type OrderDetail } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
-import { rp, fmtDate } from "@/lib/order-ui";
+import { ppnOf, rp, fmtDate } from "@/lib/order-ui";
 import { downloadInvoicePdf } from "@/lib/invoice-pdf";
 
 // Invoice hanya sah setelah pesanan LUNAS (sudah dibayar & terverifikasi).
@@ -51,7 +51,9 @@ export default function InvoicePage() {
     load();
   }, [load]);
 
-  const ppn = order ? Math.max(0, order.total - (order.subtotal || 0) - (order.shipping_cost || 0)) : 0;
+  // PPN 12% INKLUSIF (ikut Accurate): sudah terkandung di subtotal, bukan tambahan.
+  // Jangan turunkan dari (total − subtotal − ongkir) — dengan harga inklusif itu nol.
+  const ppn = order ? (order.tax ?? ppnOf(order.subtotal || 0)) : 0;
   const paid = order ? PAID.includes(order.status) : false;
   const courierLabel = order?.courier
     ? order.courier.toUpperCase() + (order.courier_service ? " " + order.courier_service : "")
@@ -205,12 +207,12 @@ export default function InvoicePage() {
             {/* Ringkasan */}
             <div className="inv-totals">
               <div className="inv-trow">
-                <span>Subtotal Produk</span>
+                <span>Subtotal Produk (termasuk PPN)</span>
                 <span className="mono">{rp(order.subtotal)}</span>
               </div>
               {ppn > 0 && (
                 <div className="inv-trow">
-                  <span>PPN (11%)</span>
+                  <span>— di dalamnya PPN 12%</span>
                   <span className="mono">{rp(ppn)}</span>
                 </div>
               )}

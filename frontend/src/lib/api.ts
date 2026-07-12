@@ -245,6 +245,7 @@ export type OrderDetail = OrderSummary & {
   gudang_lon?: number | null;
   gudang_pic?: string | null;
   subtotal: number;
+  tax?: number | null;        // komponen PPN 12% yang SUDAH termasuk dalam subtotal
   shipping_cost?: number;
   courier?: string | null;
   courier_service?: string | null;

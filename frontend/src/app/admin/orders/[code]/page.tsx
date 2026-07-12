@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import { ApiError, getAdminOrder, setOrderStatus, type OrderDetail } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
-import { ORDER_STATUS, rp, fmtDate } from "@/lib/order-ui";
+import { ORDER_STATUS, ppnOf, rp, fmtDate } from "@/lib/order-ui";
 
 export default function AdminOrderDetailPage() {
   const router = useRouter();
@@ -112,12 +112,13 @@ export default function AdminOrderDetailPage() {
                   <span style={{ color: "var(--ink-500)" }}>Subtotal</span>
                   <span className="mono">{rp(order.subtotal)}</span>
                 </div>
-                {order.total - (order.subtotal || 0) - (order.shipping_cost || 0) > 0 && (
-                  <div className="flex justify-between" style={{ fontSize: 13, marginTop: 4 }}>
-                    <span style={{ color: "var(--ink-500)" }}>PPN (11%)</span>
-                    <span className="mono">{rp(order.total - (order.subtotal || 0) - (order.shipping_cost || 0))}</span>
-                  </div>
-                )}
+                {/* Harga sudah termasuk PPN (ikut Accurate) — pajak komponen, bukan tambahan. */}
+                <div className="flex justify-between" style={{ fontSize: 12.5, marginTop: 4 }}>
+                  <span style={{ color: "var(--ink-400)" }}>Termasuk PPN 12%</span>
+                  <span className="mono" style={{ color: "var(--ink-400)" }}>
+                    {rp(order.tax ?? ppnOf(order.subtotal || 0))}
+                  </span>
+                </div>
                 <div className="flex justify-between" style={{ fontSize: 13, marginTop: 4 }}>
                   <span style={{ color: "var(--ink-500)" }}>
                     Ongkir{order.courier ? ` (${order.courier.toUpperCase()}${order.courier_service ? " " + order.courier_service : ""})` : ""}
