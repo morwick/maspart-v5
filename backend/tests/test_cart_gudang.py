@@ -6,6 +6,7 @@ Gudang yang dilaporkan WAJIB sama dengan yang dipakai create_order (fulfillment_
 adalah sumber tunggalnya), supaya keterangan di checkout tidak berbohong.
 """
 import pytest
+from fastapi import HTTPException
 
 from app.routers import orders as R
 from app.services import gudang_config, orders as OS
@@ -91,3 +92,42 @@ def test_gudang_yang_dilaporkan_sama_dengan_yang_dipakai_order():
     items = [{"part_number": "P-BPN", "qty": 1}]
     assert OS.fulfillment_map("roni", items) == {"P-BPN": "03.Balikpapan"}
     assert OS.fulfillment_gudang("roni", items) == "03.Balikpapan"
+
+
+# ── SATU pesanan = SATU gudang (aturan pemilik) ─────────────────────────────
+def test_ongkir_ditolak_untuk_keranjang_lintas_gudang():
+    """Kurir tak bisa mengirim satu paket dari dua kota. Menghitung ongkir dari satu
+    gudang dominan (perilaku lama) membuat paket gudang kedua TAK tertagih."""
+    body = R.RatesRequest(weight_grams=2000, dest_postal="40111", items=[
+        R.OrderItemIn(part_number="P-PKU", qty=1),
+        R.OrderItemIn(part_number="P-BPN", qty=1),
+    ])
+    out = R.shipping_rates(body, USER)
+    assert out["rates"] == []
+    assert "2 gudang" in out["error"] and "Pekanbaru" in out["error"] and "Balikpapan" in out["error"]
+
+
+def test_create_order_menolak_keranjang_lintas_gudang(monkeypatch):
+    dibuat = []
+    monkeypatch.setattr(R.payments, "available", lambda: True)
+    monkeypatch.setattr(R.orders, "create_order", lambda *a, **kw: dibuat.append(a) or (None, "x"))
+    body = R.CreateOrderRequest(
+        items=[R.OrderItemIn(part_number="P-PKU", qty=1), R.OrderItemIn(part_number="P-BPN", qty=1)],
+        payment_method="gateway", recipient_name="Roni", recipient_phone="0811",
+        recipient_address="Jl. X", recipient_postal="40111")
+    with pytest.raises(HTTPException) as e:
+        R.create_order(body, USER)
+    assert e.value.status_code == 400
+    assert "SATU gudang" in str(e.value.detail)
+    assert dibuat == []          # order tak pernah dibuat / stok tak direservasi
+
+
+def test_keranjang_satu_gudang_tetap_lolos(monkeypatch):
+    """Aturan ini tak boleh mengganggu keranjang normal (satu gudang)."""
+    body = R.RatesRequest(weight_grams=2000, dest_postal="40111",
+                          items=[R.OrderItemIn(part_number="P-PKU", qty=2)])
+    monkeypatch.setattr(R.shipping, "available", lambda: True)
+    monkeypatch.setattr(R.shipping, "get_rates",
+                        lambda *a, **kw: ([{"courier": "jnt", "service": "EZ", "price": 12_000}], None))
+    out = R.shipping_rates(body, USER)
+    assert out["error"] is None and out["rates"][0]["price"] == 12_000

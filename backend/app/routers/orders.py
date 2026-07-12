@@ -75,6 +75,24 @@ class RatesRequest(BaseModel):
     items: list[OrderItemIn] = []             # isi keranjang → tentukan gudang pemenuh (asal ongkir)
 
 
+def _satu_gudang(username: str, items: list[dict]) -> tuple[str, str]:
+    """(label gudang pemenuh TUNGGAL, pesan_error).
+
+    ATURAN PEMILIK: satu pesanan hanya boleh dari SATU gudang. Barang dari dua gudang
+    = dua paket, dua resi, dua ongkir — dan kurir tak bisa mengirim satu paket dari
+    dua kota. Keranjang lintas gudang karena itu DITOLAK; pembeli memesan bergantian
+    per gudang (dua transaksi)."""
+    fmap = orders.fulfillment_map(username, items)
+    gudangs = sorted(set(fmap.values()))
+    if len(gudangs) > 1:
+        nama = ", ".join(gudang.gudang_label(g) for g in gudangs)
+        return "", (
+            f"Keranjang berisi part dari {len(gudangs)} gudang ({nama}). Satu pesanan "
+            "hanya bisa dari SATU gudang — pesan bergantian per gudang."
+        )
+    return (gudangs[0] if gudangs else ""), ""
+
+
 def _origin_postal(username: str, items: list[dict]) -> tuple[str, str]:
     """(kode_pos_asal, pesan_error). Asal kirim = gudang PEMENUH item — gudang yang
     benar-benar mengirim barang, bukan gudang pilihan pembeli (fallback terdekat
@@ -82,7 +100,9 @@ def _origin_postal(username: str, items: list[dict]) -> tuple[str, str]:
     jatuh ke kode pos gudang pembeli: ongkir akan dihitung dari kota yang salah.
     Tanpa items (preview kosong) → pakai gudang pembeli seperti biasa."""
     if items:
-        fl = orders.fulfillment_gudang(username, items)
+        fl, err = _satu_gudang(username, items)
+        if err:
+            return "", err
         if fl:
             postal = gudang.origin_postal_for_label(fl)
             if not postal:
@@ -175,6 +195,11 @@ def payment_methods(_user: dict = Depends(require_buyer_ready)):
 @router.post("/orders")
 def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_ready)):
     items = [i.model_dump() for i in body.items]
+    # SATU pesanan = SATU gudang (aturan pemilik). Dicek di awal, sebelum order/reservasi
+    # dibuat — bukan cuma di UI, karena ongkirnya hanya bisa dihitung dari satu asal.
+    _fl_cek, gerr = _satu_gudang(user["username"], items)
+    if gerr:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, gerr)
     # Berat dihitung server (otoritatif) dari data berat part — bukan dari klien.
     weight_grams = harga.total_weight_grams(
         [(i.part_number, i.qty) for i in body.items],

@@ -68,16 +68,31 @@ export default function KeranjangPage() {
   const hargaOf = (i: CartItem) => srv(i.part_number)?.harga ?? toNum(i.harga);
   const bisaBeli = (i: CartItem) => srv(i.part_number)?.bisa_dibeli ?? (hasPrice(i.harga) && hasWeight(i.berat));
 
-  const subtotal = items.reduce((n, i) => n + hargaOf(i) * i.qty, 0);
+  // SATU pesanan = SATU gudang (aturan pemilik): kurir tak bisa mengirim satu paket
+  // dari dua kota, jadi part dari gudang berbeda harus jadi transaksi terpisah.
+  // Keranjang boleh berisi banyak gudang, tapi checkout hanya untuk gudang TERPILIH;
+  // sisanya tetap di keranjang untuk pesanan berikutnya.
+  const gudangList = [...new Set(items.map((i) => gudangOf(i.part_number)).filter(Boolean))];
+  const [gudangPilih, setGudangPilih] = useState("");
+  const gudangAktif = gudangPilih && gudangList.includes(gudangPilih)
+    ? gudangPilih
+    : (asal?.utama || gudangList[0] || "");
+  const lintasGudang = gudangList.length > 1;
+  // Item yang IKUT checkout kali ini (item gudang lain ditahan, bukan dihapus).
+  const itemsBeli = items.filter((i) => !gudangAktif || gudangOf(i.part_number) === gudangAktif);
+
+  const subtotal = itemsBeli.reduce((n, i) => n + hargaOf(i) * i.qty, 0);
   const ppn = Math.round(subtotal * 0.11);
   const total = subtotal + ppn + (rate?.price || 0);
   // Part yang tak bisa dibeli (harga/berat/stok) → blokir checkout sampai dihapus.
   const blokir = items.filter((i) => !bisaBeli(i));
-  const totalQty = items.reduce((n, i) => n + i.qty, 0);
+  const totalQty = itemsBeli.reduce((n, i) => n + i.qty, 0);
   const [weightGrams, setWeightGrams] = useState(0);
   const weightKg = weightGrams / 1000;
   // Tanda-tangan isi keranjang (PN:qty) → ambil ulang berat hanya saat isi berubah.
   const cartSig = items.map((i) => `${i.part_number}:${i.qty}`).join(",");
+  // Ongkir & berat dihitung HANYA untuk gudang terpilih.
+  const beliSig = itemsBeli.map((i) => `${i.part_number}:${i.qty}`).join(",");
 
   useEffect(() => {
     const token = getToken();
@@ -85,13 +100,7 @@ export default function KeranjangPage() {
       setWeightGrams(0);
       return;
     }
-    // Estimasi sementara dulu (1 kg/item) supaya UI langsung punya angka,
-    // lalu pertajam dengan berat sesungguhnya dari backend.
-    setWeightGrams(Math.max(1000, totalQty * 1000));
     let alive = true;
-    getCartWeight(token, items.map((i) => ({ part_number: i.part_number, qty: i.qty })))
-      .then((r) => { if (alive) setWeightGrams(r.weight_grams); })
-      .catch(() => {});
     // Gudang pengirim tiap item (= titik asal ongkir) — pembeli berhak tahu sebelum bayar.
     getCartGudang(token, items.map((i) => ({ part_number: i.part_number, qty: i.qty })))
       .then((r) => { if (alive) setAsal(r); })
@@ -99,6 +108,24 @@ export default function KeranjangPage() {
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cartSig]);
+
+  // Berat KIRIM hanya untuk item gudang terpilih (yang benar-benar akan dipesan).
+  useEffect(() => {
+    const token = getToken();
+    if (!token || itemsBeli.length === 0) {
+      setWeightGrams(0);
+      return;
+    }
+    // Estimasi sementara dulu (1 kg/item) supaya UI langsung punya angka,
+    // lalu pertajam dengan berat sesungguhnya dari backend.
+    setWeightGrams(Math.max(1000, totalQty * 1000));
+    let alive = true;
+    getCartWeight(token, itemsBeli.map((i) => ({ part_number: i.part_number, qty: i.qty })))
+      .then((r) => { if (alive) setWeightGrams(r.weight_grams); })
+      .catch(() => {});
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beliSig]);
 
   // Berat berubah → ongkir lama tidak berlaku lagi, reset pilihan.
   useEffect(() => {
@@ -116,7 +143,7 @@ export default function KeranjangPage() {
     setRate(null);
     try {
       const r = await getShippingRates(token, weightGrams, subtotal, rcpPostal.trim(),
-        items.map((i) => ({ part_number: i.part_number, qty: i.qty })));
+        itemsBeli.map((i) => ({ part_number: i.part_number, qty: i.qty })));
       if (r.error) setRateErr(r.error);
       setRates(r.rates);
     } catch (err) {
@@ -129,7 +156,7 @@ export default function KeranjangPage() {
   async function process() {
     const token = getToken();
     if (!token) return router.replace("/login");
-    if (!items.length) return;
+    if (!itemsBeli.length) return;
     if (blokir.length) {
       setError(
         `Belum bisa dibeli: ${blokir
@@ -151,7 +178,7 @@ export default function KeranjangPage() {
     try {
       const res = await createOrder(token, {
         note,
-        items: items.map((i) => ({ part_number: i.part_number, qty: i.qty, name: i.name })),
+        items: itemsBeli.map((i) => ({ part_number: i.part_number, qty: i.qty, name: i.name })),
         courier: rate?.courier,
         courier_service: rate?.service,
         shipping_cost: rate?.price || 0,
@@ -163,7 +190,10 @@ export default function KeranjangPage() {
         recipient_address: rcpAddress.trim() || undefined,
         recipient_postal: rcpPostal.trim() || undefined,
       });
-      clearCart();
+      // Hanya item yang JADI dipesan yang keluar dari keranjang — part dari gudang
+      // lain tetap tersimpan untuk transaksi berikutnya.
+      if (lintasGudang) itemsBeli.forEach((i) => removeFromCart(i.part_number));
+      else clearCart();
       router.push(`/pesanan/${encodeURIComponent(res.order_code)}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -196,6 +226,41 @@ export default function KeranjangPage() {
                   .join("; ")}. Hapus dari keranjang untuk melanjutkan.
               </div>
             )}
+
+            {/* Keranjang lintas gudang: satu pesanan hanya bisa dari satu gudang
+                (kurir tak bisa mengirim satu paket dari dua kota). Pembeli memesan
+                bergantian — part gudang lain tetap tersimpan di keranjang. */}
+            {lintasGudang && (
+              <div className="surface surface-pad" style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, marginBottom: 8 }}>
+                  📦 Keranjang berisi part dari <b>{gudangList.length} gudang</b>. Satu pesanan hanya
+                  bisa dari <b>satu gudang</b>, jadi part dari gudang lain <b>tetap tersimpan</b> dan
+                  bisa dipesan setelah ini.
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {gudangList.map((g) => {
+                    const n = items.filter((i) => gudangOf(i.part_number) === g).length;
+                    const aktif = g === gudangAktif;
+                    return (
+                      <button
+                        key={g}
+                        onClick={() => setGudangPilih(g)}
+                        className="rounded-lg px-3 py-1.5"
+                        style={{
+                          fontSize: 12.5,
+                          border: "1px solid " + (aktif ? "var(--brand-600)" : "var(--ink-200)"),
+                          background: aktif ? "var(--brand-50)" : "var(--paper)",
+                          fontWeight: aktif ? 600 : 500,
+                        }}
+                      >
+                        Gudang {g} · {n} part{aktif ? " — dipesan sekarang" : ""}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="surface" style={{ overflow: "hidden" }}>
               <table className="tbl">
                 <thead>
@@ -210,7 +275,11 @@ export default function KeranjangPage() {
                 </thead>
                 <tbody>
                   {items.map((i) => (
-                    <tr key={i.part_number}>
+                    <tr
+                      key={i.part_number}
+                      style={itemsBeli.includes(i) ? undefined : { opacity: 0.45 }}
+                      title={itemsBeli.includes(i) ? undefined : "Gudang lain — dipesan di transaksi berikutnya"}
+                    >
                       <td className="pn">{i.part_number}</td>
                       <td>
                         {i.name}
@@ -298,15 +367,10 @@ export default function KeranjangPage() {
               {rateErr && <div className="alert alert-error" style={{ marginBottom: 10 }}>{rateErr}</div>}
 
               {/* Asal kirim: pembeli tahu barangnya berangkat dari mana sebelum bayar. */}
-              {asal?.utama && (
+              {gudangAktif && (
                 <div style={{ fontSize: 12.5, color: "var(--ink-600)", marginBottom: 10 }}>
-                  🚚 Ongkir dihitung dari <b>Gudang {asal.utama}</b>.
-                  {asal.multi && (
-                    <span style={{ color: "var(--warn-700, var(--ink-700))" }}>
-                      {" "}Keranjang ini berisi part dari <b>lebih dari satu gudang</b>, jadi barang
-                      akan tiba dalam <b>beberapa paket terpisah</b> (lihat keterangan tiap part di atas).
-                    </span>
-                  )}
+                  🚚 Ongkir dihitung dari <b>Gudang {gudangAktif}</b>
+                  {lintasGudang ? ` — untuk ${itemsBeli.length} part dari gudang ini saja.` : "."}
                 </div>
               )}
 
@@ -379,8 +443,14 @@ export default function KeranjangPage() {
                   <span style={{ fontWeight: 600 }}>Total</span>
                   <span className="mono" style={{ fontSize: 18, fontWeight: 700, color: "var(--brand-700)" }}>{rp(total)}</span>
                 </div>
-                <button onClick={process} disabled={busy || blokir.length > 0} className="btn btn-primary btn-lg mt-1" style={{ width: "100%" }}>
-                  {busy ? "Memproses…" : blokir.length > 0 ? "Ada part yang belum bisa dibeli" : "Proses Pembelian"}
+                <button onClick={process} disabled={busy || blokir.length > 0 || itemsBeli.length === 0} className="btn btn-primary btn-lg mt-1" style={{ width: "100%" }}>
+                  {busy
+                    ? "Memproses…"
+                    : blokir.length > 0
+                      ? "Ada part yang belum bisa dibeli"
+                      : lintasGudang
+                        ? `Proses Pembelian — Gudang ${gudangAktif} (${itemsBeli.length} part)`
+                        : "Proses Pembelian"}
                 </button>
                 <p style={{ fontSize: 11.5, color: "var(--ink-400)" }}>
                   Harga part dihitung dari sistem saat pesanan dibuat. Ongkir opsional.
