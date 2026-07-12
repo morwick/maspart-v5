@@ -1225,14 +1225,18 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "buat_excel",
                 "description": (
-                    "BUAT FILE EXCEL (kartu unduh) dari data yang SUDAH dibahas — panggil saat user "
-                    "minta 'buatkan excelnya', 'export ke excel/xlsx/spreadsheet', 'unduh sebagai "
-                    "excel', 'bikin filenya'. Isi 'baris' WAJIB disalin PERSIS dari hasil tool di "
-                    "percakapan ini (PN/nama/qty/stok/harga apa adanya) — ⛔ JANGAN mengarang/"
-                    "menambah data; PN yang tak pernah muncul dari tool akan DITOLAK. Bila datanya "
-                    "belum pernah diambil tool, panggil tool datanya DULU, baru buat_excel. Setelah "
-                    "sukses, kartu unduh muncul OTOMATIS di bawah jawaban — jawab singkat saja "
-                    "(konfirmasi isi file), JANGAN tulis ulang tabelnya & JANGAN membuat link."
+                    "BUAT FILE EXCEL (kartu unduh) untuk TABEL KECIL AD-HOC dari data yang SUDAH "
+                    "dibahas — mis. rangkuman beberapa part, hasil perbandingan singkat, daftar "
+                    "pilihan. Isi 'baris' WAJIB disalin PERSIS dari hasil tool di percakapan ini "
+                    "(PN/nama/qty/stok/harga apa adanya) — ⛔ JANGAN mengarang/menambah data; PN "
+                    "yang tak pernah muncul dari tool akan DITOLAK. Bila datanya belum pernah "
+                    "diambil tool, panggil tool datanya DULU, baru buat_excel. "
+                    "⛔ PILIH TOOL YANG TEPAT — JANGAN pakai buat_excel untuk data BESAR yang bisa "
+                    "dibangun server LENGKAP: BOM/part per-rangka → excel_bom_rangka; daftar stok "
+                    "kategori per gudang → excel_stok_gudang; katalog BERGAMBAR → katalog_kategori/"
+                    "katalog_mesin; perbandingan armada → banding_rangka_massal; mengisi file Excel "
+                    "UNGGAHAN user → sheet_isi_kolom/sheet_isi_part_number. Setelah sukses, kartu "
+                    "unduh muncul OTOMATIS — jawab singkat, JANGAN tulis ulang tabel/membuat link."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1242,6 +1246,60 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "baris": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "description": "Baris data; tiap baris = array string seurut 'kolom'. Salin PERSIS dari hasil tool."},
                     },
                     "required": ["judul", "kolom", "baris"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "excel_bom_rangka",
+                "description": (
+                    "EXCEL BOM/DAFTAR PART per-NOMOR RANGKA yang dibangun SERVER secara LENGKAP "
+                    "(ribuan baris pun utuh, data langsung dari EPC — bukan salinan model). Panggil "
+                    "saat user minta 'excel BOM unit X', 'export daftar part rangka X ke excel', "
+                    "'excel part rem unit X lengkap dengan stok dan harganya'. Bisa difilter satu "
+                    "kategori (kabin/rem/transmisi/…) ATAU kata kunci part; kosongkan keduanya "
+                    "untuk BOM lengkap. Set dengan_stok/dengan_harga=true bila user menyebut ingin "
+                    "stok/harga ikut (kolom otomatis disembunyikan bila peran user tak berhak). "
+                    "⛔ BUKAN untuk katalog BERGAMBAR (itu katalog_kategori) & BUKAN pengganti "
+                    "bom_dari_rangka untuk MENJAWAB pertanyaan — ini khusus MEMBUAT FILE. Setelah "
+                    "sukses kartu unduh muncul otomatis; jawab singkat tanpa menulis ulang tabel."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Nomor rangka/VIN unit."},
+                        "kategori": {"type": "string", "description": "Opsional: SATU kategori (kabin, rem, transmisi, kelistrikan, mesin, …)."},
+                        "kata_kunci": {"type": "string", "description": "Opsional: filter kata kunci part (mis. 'filter', 'kampas rem')."},
+                        "dengan_stok": {"type": "boolean", "description": "Sertakan kolom stok total + rincian per-gudang (indeks Accurate)."},
+                        "dengan_harga": {"type": "boolean", "description": "Sertakan kolom harga (hanya tampil untuk peran yang berhak)."},
+                    },
+                    "required": ["rangka"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "excel_stok_gudang",
+                "description": (
+                    "EXCEL DAFTAR STOK per KATEGORI part yang dibangun SERVER secara LENGKAP dari "
+                    "indeks Accurate (jawaban chat stok_gudang dipangkas 40 baris — file ini TIDAK). "
+                    "Panggil saat user minta 'excel semua filter yang ready di Jakarta', 'export "
+                    "stok kampas rem semua gudang ke excel', 'daftar stok kopling + harga dalam "
+                    "excel'. `gudang` kosong = SEMUA gudang (ada kolom rincian per-gudang). "
+                    "dengan_harga=true bila user ingin harga (hanya untuk peran yang berhak). "
+                    "⛔ Bukan untuk pembeli. ⛔ Untuk MENJAWAB pertanyaan stok di chat tetap pakai "
+                    "stok_gudang — tool ini khusus MEMBUAT FILE. Kartu unduh muncul otomatis."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "kata_kunci": {"type": "string", "description": "Kategori/nama part (mis. 'kampas rem', 'filter oli', 'kopling')."},
+                        "gudang": {"type": "string", "description": "Opsional: satu gudang (mis. 'Jakarta'); kosong = semua gudang."},
+                        "dengan_harga": {"type": "boolean", "description": "Sertakan kolom harga (hanya tampil untuk peran yang berhak)."},
+                    },
+                    "required": ["kata_kunci"],
                 },
             },
         },
@@ -5283,6 +5341,188 @@ def _t_buat_excel(args: dict, user: dict) -> dict:
                         "tabelnya, JANGAN membuat link/URL unduhan sendiri.")}
 
 
+_EXCEL_SERVER_MAX = 4000   # plafon baris export server-side (BOM terbesar ~2rb)
+
+
+def _excel_stok_harga_cols(user: dict, dengan_stok: bool, dengan_harga: bool) -> tuple[bool, bool]:
+    """Gerbang peran kolom Excel: pembeli tak boleh melihat rincian stok gudang
+    (aturan audit hardening) & harga di asisten HANYA admin/akun 'mas'."""
+    if _is_pembeli(user):
+        return False, False
+    if dengan_harga and not gudang.can_see_price(user.get("username", ""), user.get("role", "")):
+        dengan_harga = False
+    return dengan_stok, dengan_harga
+
+
+def _rincian_gudang_str(pn: str) -> tuple[int, str]:
+    """(stok_total, 'NN.Gudang: q · …') dari indeks Accurate — untuk kolom Excel."""
+    br = accurate.gudang_breakdown(pn)
+    pairs = sorted(((g, _acc_qty(v)) for g, v in br.items() if _acc_qty(v) > 0),
+                   key=lambda kv: kv[1], reverse=True)
+    return sum(q for _, q in pairs), " · ".join(f"{g}: {q}" for g, q in pairs)
+
+
+def _t_excel_bom_rangka(args: dict, user: dict) -> dict:
+    """EXPORT EXCEL BOM per-VIN yang dibangun DI SERVER — data ditarik langsung dari
+    EPC + indeks Accurate, TIDAK lewat model. Ini yang membuat 'Excel BOM lengkap
+    dengan stok & harga' bisa benar: buat_excel menuntut model menyalin ulang baris
+    (terpangkas & rawan salin), sedangkan BOM bisa 1.500+ part."""
+    rangka = (args.get("rangka") or "").strip()
+    if not rangka:
+        return {"error": "Sebutkan nomor rangka/VIN unit."}
+    kategori = (args.get("kategori") or "").strip()
+    kata = (args.get("kata_kunci") or "").strip()
+    dengan_stok, dengan_harga = _excel_stok_harga_cols(
+        user, bool(args.get("dengan_stok")), bool(args.get("dengan_harga")))
+
+    res = epc_bom.loading_list(rangka)
+    if not res.get("found"):
+        err = res.get("_err")
+        if err in ("token_expired", "no_token"):
+            return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
+        if err == "network":
+            return {"found": False, "error": "Gagal menghubungi server EPC (jaringan). Coba lagi."}
+        return {"found": False, "error": "BOM unit ini tidak ditemukan di EPC (cek nomor rangka)."}
+    frame = res.get("frame_number") or rangka
+    parts = [p for p in (res.get("parts") or []) if p.get("pn")]
+
+    label_filter = ""
+    if kategori and not kata:
+        code = catalog_bom.resolve_kategori(kategori) if catalog_bom.available() else None
+        if not code:
+            return {"error": f"Kategori '{kategori}' tak dikenal — pakai mis. kabin, rem, "
+                             "transmisi, kelistrikan, mesin; atau kosongkan untuk BOM lengkap."}
+        _pncat = catalog_bom.pn_category_map()
+        parts = [p for p in parts
+                 if (_pncat.get(catalog_bom._norm(p["pn"])) or {}).get("kategori") == code]
+        label_filter = catalog_bom.KATEGORI_NAMA.get(code, kategori)
+    elif kata:
+        terms, _m = _expand_query(kata)
+        up_terms = [t.upper() for t in terms if t]
+        local_pre = {(r.get("part_number") or "").upper(): r
+                     for r in part_index.search_exact_pns([p["pn"] for p in parts])}
+
+        def _hit(p: dict) -> bool:
+            hay = " ".join([p["pn"], local_pre.get(p["pn"].upper(), {}).get("part_name") or "",
+                            p.get("nama_cn") or ""]).upper()
+            return any(t in hay for t in up_terms)
+
+        parts = [p for p in parts if _hit(p)]
+        label_filter = kata
+    if not parts:
+        return {"found": False, "error": f"Tidak ada part '{label_filter}' di BOM unit ini — "
+                                         "coba kategori/kata lain atau BOM lengkap."}
+    parts = parts[:_EXCEL_SERVER_MAX]
+
+    local = {(r.get("part_number") or "").upper(): r
+             for r in part_index.search_exact_pns([p["pn"] for p in parts])}
+    snap = accurate.snapshot() if dengan_harga else {}
+
+    kolom = ["No", "Part Number", "Nama Part", "Qty"]
+    if dengan_stok:
+        kolom += ["Stok Total", "Stok per Gudang"]
+    if dengan_harga:
+        kolom += ["Harga"]
+    baris: list[list[str]] = []
+    for i, p in enumerate(parts, start=1):
+        pn = p["pn"]
+        nama = (local.get(pn.upper(), {}).get("part_name") or p.get("nama_cn") or "").strip()
+        row = [str(i), pn, nama, str(p.get("qty") or "")]
+        if dengan_stok:
+            total, rinci = _rincian_gudang_str(pn)
+            row += [str(total), rinci]
+        if dengan_harga:
+            e = snap.get(accurate.norm_pn(pn))
+            hg = (e or {}).get("harga")
+            row += ["Rp " + f"{int(hg):,}".replace(",", ".") if hg else "—"]
+        baris.append(row)
+
+    judul = f"BOM {frame}" + (f" — {label_filter}" if label_filter else " (lengkap)")
+    export_id, filename = ai_export.stash_export(judul, kolom, baris)
+    return {"found": True, "export_id": export_id, "filename": filename, "judul": judul,
+            "jumlah_baris": len(baris), "frame_number": frame,
+            "kolom_stok": dengan_stok, "kolom_harga": dengan_harga,
+            "catatan": ("File Excel BOM siap — kartu unduh muncul OTOMATIS di bawah jawaban. "
+                        "Jawab SINGKAT (judul + jumlah baris + kolom yang disertakan). "
+                        "⛔ JANGAN tulis ulang isi tabel & JANGAN membuat link sendiri.")}
+
+
+def _t_excel_stok_gudang(args: dict, user: dict) -> dict:
+    """EXPORT EXCEL daftar stok kategori dibangun DI SERVER dari indeks Accurate —
+    LENGKAP (tanpa pangkas 40 baris seperti jawaban chat stok_gudang). `gudang`
+    kosong = semua gudang (kolom rincian per-gudang)."""
+    if _is_pembeli(user):
+        return {"error": "Rincian stok antar-gudang tidak tersedia untuk akun pembeli."}
+    kata = (args.get("kata_kunci") or args.get("query") or "").strip()
+    if not kata:
+        return {"error": "Sebutkan part/kategori yang dicari (mis. 'kampas rem', 'filter oli')."}
+    gud = (args.get("gudang") or "").strip()
+    gudang_kanonik = None
+    if gud:
+        gudang_kanonik = _resolve_gudang(gud)
+        if not gudang_kanonik:
+            return {"found": False, "error": f"Gudang '{gud}' tak dikenal.",
+                    "gudang_tersedia": [_norm_gudang(g) for g in _gudang_list()],
+                    "jawaban_wajib": "Sebutkan salah satu gudang dari 'gudang_tersedia'."}
+    _stok_dummy, dengan_harga = _excel_stok_harga_cols(user, True, bool(args.get("dengan_harga")))
+
+    terms, _m = _expand_query(kata)
+    for kw in _umbrella_keywords(kata):
+        if kw not in terms:
+            terms.append(kw)
+    search_terms = list(dict.fromkeys(t for t in terms if t))
+
+    want_g = _norm_gudang(gudang_kanonik) if gudang_kanonik else None
+    hasil: list[dict] = []
+    for it in accurate.items_matching(search_terms, limit=_EXCEL_SERVER_MAX):
+        pn = (it.get("pn") or "").upper()
+        if not pn:
+            continue
+        total, rinci = _rincian_gudang_str(pn)
+        if want_g:
+            br = accurate.gudang_breakdown(pn)
+            qty = next((_acc_qty(v) for g, v in br.items() if _norm_gudang(g) == want_g), 0)
+            if qty <= 0:
+                continue
+        else:
+            qty = total
+            if total <= 0:
+                continue
+        price = it.get("price")
+        hasil.append({"pn": pn, "nama": it.get("name") or part_index.name_for(pn),
+                      "qty": qty, "total": total, "rinci": rinci,
+                      "harga": "Rp " + f"{int(price):,}".replace(",", ".") if price else "—"})
+    if not hasil:
+        if accurate.gudang_enriched_count() == 0:
+            return {"found": False, "error": "Indeks stok per-gudang sedang disiapkan — coba lagi beberapa menit."}
+        tempat = f"di gudang {gudang_kanonik}" if gudang_kanonik else "di gudang mana pun"
+        return {"found": False, "error": f"Tidak ada part '{kata}' yang berstok {tempat}."}
+    hasil.sort(key=lambda x: x["qty"], reverse=True)
+
+    label_g = gudang.gudang_label(gudang_kanonik) if gudang_kanonik else ""
+    if gudang_kanonik:
+        kolom = ["No", "Part Number", "Nama Part", f"Stok {label_g}", "Stok Total"]
+    else:
+        kolom = ["No", "Part Number", "Nama Part", "Stok Total", "Stok per Gudang"]
+    if dengan_harga:
+        kolom += ["Harga"]
+    baris = []
+    for i, h in enumerate(hasil, start=1):
+        row = [str(i), h["pn"], h["nama"]]
+        row += ([str(h["qty"]), str(h["total"])] if gudang_kanonik else [str(h["total"]), h["rinci"]])
+        if dengan_harga:
+            row += [h["harga"]]
+        baris.append(row)
+
+    judul = f"Stok {kata}" + (f" — Gudang {label_g}" if gudang_kanonik else " — Semua Gudang")
+    export_id, filename = ai_export.stash_export(judul, kolom, baris)
+    return {"found": True, "export_id": export_id, "filename": filename, "judul": judul,
+            "jumlah_baris": len(baris), "kolom_harga": dengan_harga,
+            "catatan": ("File Excel stok siap — kartu unduh muncul OTOMATIS di bawah jawaban. "
+                        "Jawab SINGKAT (judul + jumlah part). ⛔ JANGAN tulis ulang isi tabel "
+                        "& JANGAN membuat link sendiri.")}
+
+
 def _t_katalog_mesin(args: dict, user: dict) -> dict:
     """KATALOG BERGAMBAR MESIN Weichai per-VIN — tiap GROUP mesin = satu figure
     (gambar exploded view resmi EPC Weichai + part ber-nomor balon). Reuse penuh
@@ -5689,6 +5929,8 @@ _DISPATCH = {
     "rekap_penjualan": _t_rekap_penjualan,
     "daftar_pesanan": _t_daftar_pesanan,
     "buat_excel": _t_buat_excel,
+    "excel_bom_rangka": _t_excel_bom_rangka,
+    "excel_stok_gudang": _t_excel_stok_gudang,
     "katalog_kategori": _t_katalog_kategori,
     "katalog_mesin": _t_katalog_mesin,
     "gambar_exploded": _t_gambar_exploded,
@@ -7192,7 +7434,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
 
     def _capture_meta(name: str, args: dict, result: dict) -> None:
         """Kumpulkan metadata untuk tombol/kartu/gambar di frontend."""
-        if name in ("buat_excel", "katalog_kategori", "katalog_mesin", "banding_rangka_massal",
+        if name in ("buat_excel", "excel_bom_rangka", "excel_stok_gudang",
+                    "katalog_kategori", "katalog_mesin", "banding_rangka_massal",
                     "sheet_isi_kolom", "sheet_isi_part_number", "sheet_cek_qty",
                     "buat_penawaran") and result.get("found"):
             item = {"id": result.get("export_id"), "filename": result.get("filename"),
