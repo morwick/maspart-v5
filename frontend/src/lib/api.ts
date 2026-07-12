@@ -1742,6 +1742,44 @@ export async function exportAiExcel(token: string, id: string): Promise<Blob> {
 
 // `allowed` false = menu "Asisten AI" dimatikan admin untuk akun ini (Menu Control),
 // beda dari asisten yang memang belum dikonfigurasi di server.
+// ── Cek kecocokan part di unit pembeli (per nomor rangka, sumber EPC) ────────
+export type CekUnitResult = {
+  checked: boolean;
+  error?: string;          // gagal MENGECEK (EPC down / rangka tak dikenal)
+  cocok?: boolean;
+  frame_number?: string;
+  part_number?: string;
+  pesan?: string;          // saat TIDAK cocok — jujur, jangan menebak
+  nama?: string;
+  istilah_lapangan?: string | null;
+  qty?: string | number;
+  kategori?: string | null;
+  lokasi?: string | null;  // nama figure exploded view yang memuat part ini
+  balon?: number | null;
+  image_id?: string | null;
+  penjelasan?: string;     // kalimat siap tampil ("✅ Cocok — ... kampas rem ...")
+};
+
+export async function cekPartDiUnit(token: string, partNumber: string, rangka: string): Promise<CekUnitResult> {
+  const res = await fetch(`${API_BASE}/api/parts/cek-unit`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ part_number: partNumber, rangka }),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+/** PNG exploded view fitur cek-unit — endpoint terpisah dari /api/ai/excel yang
+ *  digembok izin menu Asisten AI. */
+export async function getPartExploded(token: string, id: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/api/parts/exploded/${encodeURIComponent(id)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.blob();
+}
+
 export async function getAiStatus(token: string): Promise<{ available: boolean; allowed?: boolean }> {
   const res = await fetch(`${API_BASE}/api/ai/status`, {
     headers: { Authorization: `Bearer ${token}` },

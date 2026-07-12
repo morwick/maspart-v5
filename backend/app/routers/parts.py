@@ -16,7 +16,9 @@ from fastapi import (
     status,
 )
 from fastapi.responses import Response
+from pydantic import BaseModel
 
+from ..core.ratelimit import limit
 from ..deps import get_current_user, require_admin
 from ..schemas import (
     CompareResponse,
@@ -491,3 +493,137 @@ def index_status(_user: dict = Depends(get_current_user)):
 @router.post("/index/refresh", response_model=IndexStatus)
 def index_refresh(_admin: dict = Depends(require_admin)):
     return part_index.refresh_index()
+
+# ── Cek kecocokan part di UNIT pembeli (per nomor rangka, sumber EPC) ─────────
+# Fitur halaman detail part akun pembeli: pembeli memasukkan no rangka unitnya →
+# aplikasi mengecek ke BOM per-VIN EPC apakah part ini memang terpasang di unit
+# itu (aturan keras pemilik: part per-unit SELALU diverifikasi EPC, jangan tebak).
+# Reuse penuh mesin asisten: epc_bom.loading_list (cache+lock per-frame),
+# exploded_figures (gambar figure + nomor balon), kamus sinonim (istilah lapangan).
+
+# Kode kategori katalog (catalog_bom 01..12) → istilah pencarian Parts Atlas —
+# dipakai menemukan figure exploded view yang memuat PN tanpa bertanya kategori.
+_KODE2ATLAS = {
+    "01": "kabin", "02": "mesin", "03": "mesin", "04": "kopling",
+    "05": "transmisi", "06": "gardan depan", "07": "gardan belakang",
+    "08": "kelistrikan", "09": "rem", "10": "sasis", "12": "bak",
+}
+
+
+def _istilah_lapangan(nama_en: str) -> str:
+    """Istilah bengkel Indonesia untuk sebuah nama part EN — kamus sinonim DIBALIK
+    (keyword katalog → trigger lapangan). '' bila tak ada padanan. Keyword terpanjang
+    menang ('brake friction plate' mengalahkan 'friction plate' generik)."""
+    nu = (nama_en or "").lower()
+    if not nu:
+        return ""
+    best_kw, best_trg = "", ""
+    try:
+        from ..services.ai_assistant import _load_sinonim_entries
+        for e in _load_sinonim_entries():
+            trg = next((t for t in (e.get("triggers") or []) if t), "")
+            if not trg:
+                continue
+            for kw in (e.get("keywords") or []):
+                kl = (kw or "").lower()
+                if kl and kl in nu and len(kl) > len(best_kw):
+                    best_kw, best_trg = kl, trg
+    except Exception:
+        return ""
+    return best_trg
+
+
+class CekUnitRequest(BaseModel):
+    part_number: str
+    rangka: str
+
+
+@router.post("/cek-unit", dependencies=[Depends(limit("cek_unit", 6, 60))])
+def cek_part_di_unit(body: CekUnitRequest, _user: dict = Depends(get_current_user)):
+    from ..services import ai_export, catalog_bom, epc_bom
+
+    pn = (body.part_number or "").strip().upper()
+    rangka = (body.rangka or "").strip().upper()
+    if not pn or len(rangka) < 6:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Isi Part Number dan nomor rangka/VIN unit (min. 6 karakter).")
+
+    ll = epc_bom.loading_list(rangka)
+    if not ll.get("found"):
+        err = ll.get("_err")
+        if err in ("token_expired", "no_token"):
+            return {"checked": False,
+                    "error": "Koneksi ke EPC sedang bermasalah (token). Coba lagi nanti atau tanya asisten."}
+        if err == "network":
+            return {"checked": False, "error": "Gagal menghubungi server EPC. Coba lagi."}
+        return {"checked": False,
+                "error": "Nomor rangka tidak ditemukan di EPC — pastikan benar (hanya unit "
+                         "Sinotruk/HOWO/SITRAK)."}
+    frame = ll.get("frame_number") or rangka
+
+    norm = catalog_bom._norm
+    hit = next((p for p in (ll.get("parts") or []) if norm(p.get("pn") or "") == norm(pn)), None)
+    if not hit:
+        return {
+            "checked": True, "cocok": False, "frame_number": frame, "part_number": pn,
+            "pesan": (f"Part {pn} TIDAK terdaftar di BOM unit {frame} menurut EPC. "
+                      "Bisa jadi bukan untuk unit ini (posisi depan/belakang pun bisa beda part) — "
+                      "tanyakan ke Asisten AI atau chat gudang sebelum membeli."),
+        }
+
+    nama_en = (part_index.name_for(pn) or hit.get("nama_cn") or "").strip()
+    istilah = _istilah_lapangan(nama_en)
+    qty = hit.get("qty") or ""
+
+    # Kategori part (peta katalog) → nama Indonesia + istilah walk Parts Atlas.
+    kode = ""
+    try:
+        kode = (catalog_bom.pn_category_map().get(norm(pn)) or {}).get("kategori") or ""
+    except Exception:
+        pass
+    kategori_nama = catalog_bom.KATEGORI_NAMA.get(kode, "") if kode else ""
+
+    # Gambar exploded view + lokasi (figure yang memuat PN ini) — best-effort:
+    # tanpa kategori terpetakan / figure tak ketemu, hasil cocok tetap dikirim.
+    image_id = lokasi = None
+    balon = None
+    term = _KODE2ATLAS.get(kode)
+    if term:
+        try:
+            d = epc_bom.exploded_figures(rangka, pn, term)
+            if d.get("found") and d.get("figures"):
+                f = d["figures"][0]
+                balon = f.get("balon")
+                lokasi = f.get("nama")
+                image_id, _fn = ai_export.stash_builder(
+                    f"Exploded {pn}", {"kind": "exploded", "svg": f["svg"], "balon": balon},
+                    ext="png")
+        except Exception:
+            pass
+
+    bag = f" — {kategori_nama}" if kategori_nama else ""
+    lok = f", pada bagian '{lokasi}'" + (f" (nomor balon {balon})" if balon else "") if lokasi else ""
+    ist = f" atau {istilah}" if istilah else ""
+    penjelasan = (f"✅ Cocok — part ini terpasang di unit {frame}. "
+                  f"Ini adalah {nama_en or pn}{ist}{bag}{lok}. Qty di unit: {qty or '—'}.")
+    return {
+        "checked": True, "cocok": True, "frame_number": frame, "part_number": pn,
+        "nama": nama_en, "istilah_lapangan": istilah or None, "qty": qty,
+        "kategori": kategori_nama or None, "lokasi": lokasi, "balon": balon,
+        "image_id": image_id, "penjelasan": penjelasan,
+    }
+
+
+@router.get("/exploded/{export_id}")
+def part_exploded_png(export_id: str, _user: dict = Depends(get_current_user)):
+    """PNG exploded view untuk fitur cek-unit — SENGAJA terpisah dari
+    /api/ai/excel/{id} yang digembok izin menu Asisten AI: pembeli yang asistennya
+    dimatikan tetap berhak melihat gambar kecocokan part di unitnya."""
+    from ..services import ai_export
+
+    data, fname = ai_export.generic_excel(export_id)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, fname)
+    return Response(content=data, media_type="image/png",
+                    headers={"Content-Disposition": f'inline; filename="{fname}"',
+                             "Cache-Control": "private, max-age=86400"})

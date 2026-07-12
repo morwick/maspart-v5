@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import ImageLightbox from "@/components/ImageLightbox";
-import { ApiError, getAccurateStock, getPartPhotos, getPartSpec, getBuyerLocations, partImageUrl, searchParts, type AccurateStock, type BuyerLocation, type PartResult, type PartSpec } from "@/lib/api";
+import { ApiError, cekPartDiUnit, getAccurateStock, getPartExploded, getPartPhotos, getPartSpec, getBuyerLocations, partImageUrl, searchParts, type AccurateStock, type BuyerLocation, type CekUnitResult, type PartResult, type PartSpec } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { ensurePerms } from "@/lib/perms";
 import { addToCart, hasPrice, hasWeight } from "@/lib/cart";
@@ -366,6 +366,9 @@ export default function PartDetailPage() {
                 )}
               </section>
             </div>
+
+            {/* Cek kecocokan part di unit pembeli (per nomor rangka, sumber EPC) */}
+            {isBuyer && <CekUnitCard pn={main.part_number} />}
           </>
         )}
       </div>
@@ -378,5 +381,140 @@ export default function PartDetailPage() {
         />
       )}
     </AppShell>
+  );
+}
+
+// ── Cek kecocokan part di unit pembeli ───────────────────────────────────────
+// Pembeli memasukkan nomor rangka unitnya → backend memverifikasi ke BOM per-VIN
+// EPC (aturan: part per-unit SELALU dicek EPC, jangan menebak). Bila cocok:
+// penjelasan ("ini Brake friction plate / kampas rem, di bagian …") + gambar
+// exploded view dengan nomor balon part-nya.
+const RANGKA_KEY = "maspart_rangka_v1";
+
+function CekUnitCard({ pn }: { pn: string }) {
+  const [rangka, setRangka] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<CekUnitResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(false);
+
+  // Nomor rangka diingat antar-kunjungan — pembeli biasanya punya 1-2 unit.
+  useEffect(() => {
+    try {
+      setRangka(localStorage.getItem(RANGKA_KEY) || "");
+    } catch { /* ignore */ }
+  }, []);
+
+  // Ambil PNG exploded view (butuh auth → fetch blob → objectURL).
+  useEffect(() => {
+    const id = res?.image_id;
+    const token = getToken();
+    if (!id || !token) {
+      setImgUrl(null);
+      return;
+    }
+    let alive = true;
+    let made: string | null = null;
+    getPartExploded(token, id)
+      .then((b) => {
+        made = URL.createObjectURL(b);
+        if (alive) setImgUrl(made);
+      })
+      .catch(() => { if (alive) setImgUrl(null); });
+    return () => {
+      alive = false;
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [res?.image_id]);
+
+  async function cek() {
+    const token = getToken();
+    if (!token) return;
+    const r = rangka.trim().toUpperCase();
+    if (r.length < 6) {
+      setErr("Isi nomor rangka/VIN unit Anda (min. 6 karakter).");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    setRes(null);
+    try {
+      const out = await cekPartDiUnit(token, pn, r);
+      setRes(out);
+      if (out.checked) {
+        try { localStorage.setItem(RANGKA_KEY, r); } catch { /* ignore */ }
+      }
+      if (!out.checked && out.error) setErr(out.error);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Gagal mengecek ke EPC. Coba lagi.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="surface surface-pad" style={{ marginTop: 20 }}>
+      <div className="mb-2 flex items-center gap-2">
+        <h2 style={{ fontSize: 13, fontWeight: 600 }}>🔍 Cocok di unit saya?</h2>
+        <span className="pill">sumber: EPC resmi per-VIN</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: "var(--ink-500)", marginBottom: 10 }}>
+        Masukkan <b>nomor rangka (VIN)</b> unit Anda — sistem mengecek langsung ke katalog
+        EPC apakah part ini memang terpasang di unit tersebut.
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          className="input mono"
+          style={{ height: 36, minWidth: 260, flex: "1 1 260px", maxWidth: 420 }}
+          placeholder="mis. LZZ5DMSD5RT108966"
+          value={rangka}
+          onChange={(e) => setRangka(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !busy) void cek(); }}
+        />
+        <button className="btn btn-primary btn-sm" style={{ height: 36 }} disabled={busy} onClick={() => void cek()}>
+          {busy ? "Mengecek ke EPC…" : "Cek di Unit Saya"}
+        </button>
+      </div>
+      {busy && (
+        <div style={{ fontSize: 12, color: "var(--ink-400)", marginTop: 8 }}>
+          Pengecekan pertama untuk sebuah unit bisa memakan ±30 detik (mengambil BOM lengkap dari EPC)…
+        </div>
+      )}
+      {err && <div className="alert alert-error" style={{ marginTop: 10 }}>{err}</div>}
+
+      {res?.checked && res.cocok && (
+        <div style={{ marginTop: 12 }}>
+          <div
+            className="rounded-lg px-3 py-2.5"
+            style={{ background: "var(--brand-50, #eef8f0)", border: "1px solid var(--brand-600)", fontSize: 13, lineHeight: 1.55 }}
+          >
+            {res.penjelasan}
+          </div>
+          {imgUrl && (
+            <button
+              type="button"
+              onClick={() => setZoom(true)}
+              style={{ display: "block", width: "100%", marginTop: 10, border: "1px solid var(--ink-150)", borderRadius: 10, overflow: "hidden", cursor: "zoom-in", background: "#fff" }}
+              title="Klik untuk perbesar"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={imgUrl} alt={`Exploded view ${pn}`} style={{ width: "100%", display: "block" }} />
+              <div style={{ fontSize: 11.5, color: "var(--ink-500)", padding: "6px 10px", textAlign: "left" }}>
+                Exploded view: {res.lokasi}{res.balon ? ` — part ini nomor balon ${res.balon} (disorot)` : ""} · klik untuk perbesar
+              </div>
+            </button>
+          )}
+          {zoom && imgUrl && (
+            <ImageLightbox src={imgUrl} onClose={() => setZoom(false)} alt={`Exploded view ${pn}`} />
+          )}
+        </div>
+      )}
+      {res?.checked && res.cocok === false && (
+        <div className="alert alert-error" style={{ marginTop: 12 }}>
+          ❌ {res.pesan}
+        </div>
+      )}
+    </section>
   );
 }
