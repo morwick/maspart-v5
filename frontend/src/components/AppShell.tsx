@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { clearSession, getUser } from "@/lib/auth";
 import { clearPerms, ensurePerms } from "@/lib/perms";
 import { cartCount, onCartChange } from "@/lib/cart";
@@ -108,6 +108,7 @@ export default function AppShell({
   children: ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [allowed, setAllowed] = useState<string[] | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isBuyer, setIsBuyer] = useState(false);
@@ -134,7 +135,7 @@ export default function AppShell({
     setRole(u?.role ?? "");
     setIsAdmin(u?.role === "admin");
     setIsBuyer(u?.role === "pembeli");
-    if (u?.role === "pembeli" && (active.startsWith("/admin") || BUYER_DENY.includes(active))) {
+    if (u?.role === "pembeli" && (pathname.startsWith("/admin") || BUYER_DENY.includes(pathname))) {
       router.replace("/toko");
       return;
     }
@@ -148,7 +149,11 @@ export default function AppShell({
         const menus = p ? p.menus : fallback;
         setAllowed(menus);
         setBranchLabel(p?.branch ?? null);
-        const halaman = [...NAV_PRIMARY, ...NAV_BUYER].find((i) => i.key && i.href === active);
+        // Cocokkan ke PATH URL SUNGGUHAN, BUKAN prop `active`: sub-halaman
+        // (mis. /part/[pn]) mengeset active="/search" hanya untuk menyorot menu
+        // induknya — kalau `active` yang dipakai, menyembunyikan Cari Part ikut
+        // menendang pembeli dari detail part yang dibuka lewat /toko.
+        const halaman = [...NAV_PRIMARY, ...NAV_BUYER].find((i) => i.key && i.href === pathname);
         if (halaman && !menus.includes(halaman.key!)) {
           router.replace(u?.role === "pembeli" ? "/toko" : "/beranda");
         }
@@ -157,7 +162,7 @@ export default function AppShell({
     const sync = () => setCartN(cartCount());
     sync();
     return onCartChange(sync);
-  }, [active, router]);
+  }, [active, pathname, router]);
 
   // Akun cabang: badge jumlah pesanan masuk.
   useEffect(() => {
