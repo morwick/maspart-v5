@@ -17,6 +17,9 @@ export default function KeranjangPage() {
   const router = useRouter();
   const [items, setItems] = useState<CartItem[]>([]);
   const [note, setNote] = useState("");
+  // Alamat penerima diingat antar-order (localStorage) — pembeli tetap tak perlu
+  // mengetik ulang nama/HP/alamat tiap belanja; boleh dikoreksi kapan saja.
+  const ALAMAT_KEY = "maspart_alamat_v1";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,9 +54,22 @@ export default function KeranjangPage() {
     }
     const c = getCart();
     setItems(c);
+    // Prefill alamat dari order sebelumnya (tersimpan lokal saat checkout sukses).
+    try {
+      const a = JSON.parse(localStorage.getItem(ALAMAT_KEY) || "null");
+      if (a && typeof a === "object") {
+        setRcpName(a.name || "");
+        setRcpPhone(a.phone || "");
+        setRcpAddress(a.address || "");
+        setRcpPostal(a.postal || "");
+      }
+    } catch {
+      /* alamat rusak → biarkan kosong */
+    }
     getPaymentMethods(token)
       .then((m) => setGatewayOn(m.gateway_available))
       .catch(() => setGatewayOn(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   function refresh() {
@@ -149,12 +165,27 @@ export default function KeranjangPage() {
         itemsBeli.map((i) => ({ part_number: i.part_number, qty: i.qty })));
       if (r.error) setRateErr(r.error);
       setRates(r.rates);
+      // Satu-satunya pilihan → langsung terpilih; >1 → yang termurah jadi default
+      // (pembeli tetap bebas mengganti). Menghindari checkout tanpa kurir karena lupa.
+      if (r.rates.length > 0) {
+        setRate([...r.rates].sort((a, b) => a.price - b.price)[0]);
+      }
     } catch (err) {
       setRateErr(err instanceof Error ? err.message : "Gagal cek ongkir");
     } finally {
       setLoadingRates(false);
     }
   }
+
+  // Ongkir dihitung OTOMATIS begitu alamat (kode pos) & berat siap — dulu pembeli
+  // harus ingat menekan 'Cek Ongkir'; yang lupa membuat order tanpa kurir. Debounce
+  // 900 ms agar tak menembak tiap ketikan; tombol manual tetap ada.
+  useEffect(() => {
+    if (!itemsBeli.length || weightGrams <= 0 || rcpPostal.trim().length < 5) return;
+    const t = setTimeout(() => { void cekOngkir(); }, 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beliSig, weightGrams, rcpPostal]);
 
   async function process() {
     const token = getToken();
@@ -176,6 +207,15 @@ export default function KeranjangPage() {
       setError("Pembayaran online (VA/QRIS) belum aktif. Hubungi admin.");
       return;
     }
+    // Tarif kurir TERSEDIA tapi tak ada yang dipilih → pastikan itu disengaja
+    // (mis. ambil sendiri di gudang), jangan diam-diam order tanpa ongkir.
+    if (rates.length > 0 && !rate) {
+      const ok = window.confirm(
+        "Anda belum memilih kurir/ongkir. Lanjut TANPA ongkir?\n" +
+        "(Barang diambil sendiri di gudang atau pengiriman diatur terpisah.)",
+      );
+      if (!ok) return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -193,10 +233,25 @@ export default function KeranjangPage() {
         recipient_address: rcpAddress.trim() || undefined,
         recipient_postal: rcpPostal.trim() || undefined,
       });
+      // Simpan alamat untuk order berikutnya (prefill).
+      try {
+        localStorage.setItem(ALAMAT_KEY, JSON.stringify({
+          name: rcpName.trim(), phone: rcpPhone.trim(),
+          address: rcpAddress.trim(), postal: rcpPostal.trim(),
+        }));
+      } catch { /* penuh/di-blok → abaikan */ }
       // Hanya item yang JADI dipesan yang keluar dari keranjang — part dari gudang
       // lain tetap tersimpan untuk transaksi berikutnya.
       if (lintasGudang) itemsBeli.forEach((i) => removeFromCart(i.part_number));
       else clearCart();
+      // LANGSUNG ke halaman pembayaran Midtrans — jangan biarkan pembeli mencari
+      // tombol Bayar di halaman pesanan. Selesai bayar, Midtrans mengembalikannya
+      // ke /pesanan/<code> (callback finish). Tanpa URL → fallback halaman pesanan.
+      const payUrl = res.payment?.url;
+      if (payUrl) {
+        window.location.href = payUrl;
+        return;
+      }
       router.push(`/pesanan/${encodeURIComponent(res.order_code)}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -217,7 +272,7 @@ export default function KeranjangPage() {
         {items.length === 0 ? (
           <div className="surface grid place-items-center" style={{ height: 220, color: "var(--ink-500)", gap: 10 }}>
             <div>Keranjang kosong.</div>
-            <Link href="/search" className="btn btn-primary btn-sm">Cari Part</Link>
+            <Link href="/toko" className="btn btn-primary btn-sm">🛒 Belanja Part</Link>
           </div>
         ) : (
           <>

@@ -167,6 +167,11 @@ export default function BranchOrderDetailPage() {
                     <div style={{ fontSize: 12.5, color: "var(--ink-500)" }}>
                       Pembayaran lunas. Siapkan & kemas barang, isi nomor resi lalu tandai dikirim.
                     </div>
+                    <div className="alert" style={{ background: "var(--warn-50, #fff8e6)", border: "1px solid #efd9a7", color: "var(--ink-700)", fontSize: 12 }}>
+                      ⚠️ <b>Proses penawaran di Accurate dulu</b> sebelum menandai dikirim —
+                      saat status jadi <i>dikirim</i>, tahanan stok aplikasi dilepas dan stok
+                      mengikuti angka Accurate.
+                    </div>
                     <label className="block" style={{ fontSize: 12, color: "var(--ink-600)" }}>
                       Nomor resi {order.courier ? `(${order.courier.toUpperCase()})` : ""}
                       <input
@@ -177,7 +182,21 @@ export default function BranchOrderDetailPage() {
                         onChange={(e) => setResi(e.target.value)}
                       />
                     </label>
-                    <button onClick={() => changeStatus("dikirim", resi.trim() || undefined)} disabled={busy} className="btn btn-primary" style={{ width: "100%" }}>
+                    <button
+                      onClick={() => {
+                        const r = resi.trim();
+                        // Order berkurir tanpa resi = pembeli tak bisa melacak paketnya —
+                        // pastikan itu disengaja, jangan cuma kelupaan.
+                        if (order.courier && !r && !window.confirm(
+                          `Nomor resi belum diisi padahal pesanan ini memakai kurir ` +
+                          `${order.courier.toUpperCase()}. Tandai dikirim TANPA resi?`,
+                        )) return;
+                        changeStatus("dikirim", r || undefined);
+                      }}
+                      disabled={busy}
+                      className="btn btn-primary"
+                      style={{ width: "100%" }}
+                    >
                       {busy ? "Memproses…" : "🚚 Tandai Dikirim"}
                     </button>
                     <button onClick={() => changeStatus("batal")} disabled={busy} className="btn btn-danger btn-sm">Batalkan pesanan</button>
