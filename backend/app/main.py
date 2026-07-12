@@ -21,7 +21,8 @@ from fastapi.responses import JSONResponse
 
 from .core.config import get_settings
 from .routers import admin, ai, auth, branch, buyer, chat, geo, harga, orders, parts, populasi, repairkit, stok
-from .services import accurate, ai_chat_log, ai_sinonim_learn, image_search, part_index, sims
+from .services import (accurate, ai_chat_log, ai_sinonim_learn, image_search, part_index,
+                       sims, sims_weights)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,6 +78,12 @@ def _warmup():
         ai_chat_log.start_retention()
     except Exception as e:  # pragma: no cover
         print(f"[startup] scheduler retensi chat-log gagal: {e}")
+    try:
+        # Hangatkan indeks BERAT SIMS (persisten /app/data) utk part berharga →
+        # SIMS jadi sumber berat utama etalase tanpa input manual. Latar, throttled.
+        sims_weights.start()
+    except Exception as e:  # pragma: no cover
+        print(f"[startup] warmer berat SIMS gagal: {e}")
 
 
 @asynccontextmanager

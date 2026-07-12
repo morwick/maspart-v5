@@ -101,9 +101,12 @@ _weight_map: dict[str, int] | None = None
 
 
 def weight_for(pn: str, allow_remote: bool = False) -> int:
-    """Berat part (gram). Prioritas: kolom Berat manual di harga.xlsx → lalu berat
-    resmi SIMS. `allow_remote=False` (default) HANYA baca cache SIMS (cepat — untuk
-    daftar pencarian); `True` boleh login/fetch SIMS (alur pesanan/ongkir/detail)."""
+    """Berat part (gram). **SIMS = sumber UTAMA** (berat resmi pabrik); kolom Berat
+    manual di harga.xlsx dipakai sebagai JARING PENGAMAN bila SIMS belum punya.
+    `allow_remote=False` (default) HANYA baca cache SIMS (cepat — daftar/katalog),
+    jadi transisi mulus: sebelum cache SIMS hangat, otomatis jatuh ke berat manual;
+    setelah warmer mengisi cache, SIMS yang menang. `True` boleh login/fetch SIMS
+    (alur ongkir/detail — item sedikit)."""
     global _weight_map
     df = _ensure()
     if _weight_map is None:
@@ -119,17 +122,19 @@ def weight_for(pn: str, allow_remote: bool = False) -> int:
                     g = 0
                 if g > 0:
                     _weight_map[key] = g
-    g = _weight_map.get((pn or "").strip().upper(), 0)
-    if g > 0:
-        return g
-    # Fallback: berat resmi pabrik dari SIMS (kg→gram), bila admin belum mengisi
-    # kolom Berat di harga.xlsx. Membuka blokir pembelian & ongkir akurat tanpa
-    # input manual. Non-fatal bila SIMS down → 0.
+    # 1) SIMS UTAMA — indeks berat SIMS PERSISTEN (diisi warmer latar, di /app/data).
+    #    Jalur ongkir/detail (allow_remote) boleh fetch live lalu simpan ke indeks.
     try:
-        return sims.get_part_weight_grams(pn) if allow_remote \
-            else sims.get_part_weight_grams_cached(pn)
+        from . import sims_weights
+        s = sims_weights.get(pn)
+        if s <= 0 and allow_remote:
+            s = sims_weights.fetch_and_store(pn)
     except Exception:
-        return 0
+        s = 0
+    if s > 0:
+        return s
+    # 2) Jaring pengaman: berat manual harga.xlsx (untuk part yang tak ada di SIMS).
+    return _weight_map.get((pn or "").strip().upper(), 0)
 
 
 def total_weight_grams(items: list[tuple[str, int]], default_each: int,
