@@ -422,6 +422,15 @@ def ensure_index() -> None:
 
 
 def gudang_names() -> list[str]:
+    """Daftar nama gudang dari INDEKS ACCURATE (tarikan terjadwal 3×/hari).
+    ⛔ Aturan pemilik 2026-07-12: stok/harga/rincian gudang HANYA dari indeks
+    Accurate — stok.xlsx tak lagi jadi sumber. Nama dari stok.xlsx hanya dipakai
+    bila indeks Accurate benar-benar kosong (cold start tanpa file persist),
+    supaya fallback-gudang-terdekat tidak kehilangan kandidat."""
+    from . import accurate
+    names = accurate.warehouse_names()
+    if names:
+        return names
     ensure_index()
     return list(_state["gudang_names"])
 
@@ -443,9 +452,35 @@ def unit_models() -> list[dict]:
 
 
 def gudang_breakdown(pn: str) -> dict:
-    """Rincian stok {gudang: qty} untuk satu Part Number (hanya qty != 0)."""
-    ensure_index()
-    return dict(_state["gudang_cache"].get((pn or "").strip().upper(), {}))
+    """Rincian stok {gudang: qty} untuk satu Part Number (hanya qty != 0) —
+    SATU-SATUNYA sumber = INDEKS ACCURATE (tarikan 3×/hari, persist disk, enrichment
+    per-gudang). ⛔ Aturan pemilik 2026-07-12: stok.xlsx TAK PERNAH lagi dipakai
+    untuk stok — indeks Accurate dibagi ke semua fitur (etalase, order, search, AI)."""
+    from . import accurate
+    out: dict[str, int] = {}
+    for g, q in (accurate.gudang_breakdown(pn) or {}).items():
+        try:
+            qi = int(q)
+        except (TypeError, ValueError):
+            continue
+        if qi != 0:
+            out[g] = qi
+    return out
+
+
+def _acc_stok_harga(snap: dict, pn_key: str) -> tuple[str, str]:
+    """(stok_str, harga_str) baris hasil pencarian, dari snapshot indeks Accurate.
+    '—' bila PN tak ada di Accurate (perusahaan tak menstok/menjualnya).
+    ⛔ Dulu diisi dari stok.xlsx & harga.xlsx — dua-duanya kini dilarang pemilik."""
+    from . import accurate
+    e = snap.get(accurate.norm_pn(pn_key)) if snap else None
+    if not e:
+        return "—", "—"
+    stok = e.get("stok")
+    hg = e.get("harga")
+    s = f"{int(stok):,}".replace(",", ".") if stok is not None else "—"
+    h = "Rp " + f"{int(hg):,}".replace(",", ".") if hg else "—"
+    return s, h
 
 
 def harga_map() -> dict[str, str]:
@@ -581,9 +616,10 @@ def search_part_number(term: str) -> list[dict]:
         return []
 
     excel_files = _state["excel_files"]
-    stok_cache = _state["stok_cache"]
-    harga_lookup = _state["harga_lookup"]
-    gudang_cache = _state["gudang_cache"]
+    # Stok & harga baris HANYA dari indeks Accurate (aturan pemilik 2026-07-12) —
+    # snapshot di-hoist sekali per pencarian (dict in-memory, murah).
+    from . import accurate as _acc
+    _snap = _acc.snapshot()
 
     results, seen = [], set()
     for fi in excel_files:
@@ -604,10 +640,10 @@ def search_part_number(term: str) -> list[dict]:
                     "part_name": str(row["part_name"]) if pd.notna(row["part_name"]) else "N/A",
                     "keterangan": str(row["remark"]).strip() if pd.notna(row.get("remark")) else "",
                     "quantity": str(row["quantity"]) if pd.notna(row["quantity"]) else "N/A",
-                    "stok": stok_cache.get(pn_key, "—"),
-                    "harga": harga_lookup.get(pn_key, "—"),
+                    "stok": _acc_stok_harga(_snap, pn_key)[0],
+                    "harga": _acc_stok_harga(_snap, pn_key)[1],
                     "berat": harga.weight_for(pn_key),
-                    "gudang": gudang_cache.get(pn_key, {}),
+                    "gudang": gudang_breakdown(pn_key),
                     "excel_row": int(indices[0]) + 2,
                 })
                 seen.add(sn)
@@ -626,9 +662,10 @@ def search_exact_pns(pns) -> list[dict]:
         return []
 
     excel_files = _state["excel_files"]
-    stok_cache = _state["stok_cache"]
-    harga_lookup = _state["harga_lookup"]
-    gudang_cache = _state["gudang_cache"]
+    # Stok & harga baris HANYA dari indeks Accurate (aturan pemilik 2026-07-12) —
+    # snapshot di-hoist sekali per pencarian (dict in-memory, murah).
+    from . import accurate as _acc
+    _snap = _acc.snapshot()
 
     results, seen = [], set()
     for fi in excel_files:
@@ -656,10 +693,10 @@ def search_exact_pns(pns) -> list[dict]:
                 "part_name": str(row["part_name"]) if pd.notna(row["part_name"]) else "N/A",
                 "keterangan": str(row["remark"]).strip() if pd.notna(row.get("remark")) else "",
                 "quantity": str(row["quantity"]) if pd.notna(row["quantity"]) else "N/A",
-                "stok": stok_cache.get(pn_key, "—"),
-                "harga": harga_lookup.get(pn_key, "—"),
+                "stok": _acc_stok_harga(_snap, pn_key)[0],
+                "harga": _acc_stok_harga(_snap, pn_key)[1],
                 "berat": harga.weight_for(pn_key),
-                "gudang": gudang_cache.get(pn_key, {}),
+                "gudang": gudang_breakdown(pn_key),
                 "excel_row": int(indices[0]) + 2,
             })
     return results
@@ -706,9 +743,10 @@ def search_part_name(term: str) -> list[dict]:
         return []
 
     excel_files = _state["excel_files"]
-    stok_cache = _state["stok_cache"]
-    harga_lookup = _state["harga_lookup"]
-    gudang_cache = _state["gudang_cache"]
+    # Stok & harga baris HANYA dari indeks Accurate (aturan pemilik 2026-07-12) —
+    # snapshot di-hoist sekali per pencarian (dict in-memory, murah).
+    from . import accurate as _acc
+    _snap = _acc.snapshot()
     search_keywords = [term_clean.lower()]
     # Tambah varian dgn singkatan dinormalkan (mis. 'kabin assy' → 'kabin assembly').
     norm = _normalize_abbr(term_clean).lower()
@@ -767,10 +805,10 @@ def search_part_name(term: str) -> list[dict]:
                 "part_name": pname if pname else "N/A",
                 "keterangan": remark,
                 "quantity": str(col_qty[pos]) if pd.notna(col_qty[pos]) else "N/A",
-                "stok": stok_cache.get(pn_key, "—"),
-                "harga": harga_lookup.get(pn_key, "—"),
+                "stok": _acc_stok_harga(_snap, pn_key)[0],
+                "harga": _acc_stok_harga(_snap, pn_key)[1],
                 "berat": harga.weight_for(pn_key),
-                "gudang": gudang_cache.get(pn_key, {}),
+                "gudang": gudang_breakdown(pn_key),
                 "excel_row": int(idx) + 2,
             })
     return results

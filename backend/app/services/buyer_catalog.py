@@ -9,9 +9,9 @@ Menyatukan sumber yang sudah ada menjadi satu daftar produk yang bisa dibeli:
   - NAMA   : katalog Excel lokal (all_parts_min) → nama barang Accurate (fallback,
              menjaring stok lokal aftermarket di luar katalog Sinotruk).
   - BERAT  : harga.weight_for (syarat bisa dibeli — konsisten aturan keranjang).
-  - STOK   : breakdown per-gudang Excel (sumber yang sama dgn halaman /search agar
-             konsisten dgn alur beli) → fallback indeks per-gudang Accurate; di-scope
-             ke lokasi pembeli (gudang.scope_breakdown) minus reservasi aktif.
+  - STOK   : indeks per-gudang ACCURATE SAJA (enrichment 3×/hari; ⛔ stok.xlsx tak
+             lagi dipakai — aturan pemilik 2026-07-12); di-scope ke lokasi pembeli
+             (gudang.scope_breakdown) minus reservasi aktif.
   - FOTO   : galeri lokal Cari-by-Foto (image_search.photo_url_map — in-memory).
   - LARIS  : agregat qty dari tabel order_items (Supabase, cache 15 mnt).
 
@@ -129,14 +129,9 @@ def _build_products() -> list[dict]:
         berat = harga.weight_for(pn)
         if not berat or berat <= 0:
             continue  # keranjang menolak part tanpa berat — jangan dipajang
-        # Breakdown per-gudang: Excel (label = lokasi pembeli) → Accurate.
-        bd = part_index.gudang_breakdown(pn)
-        if not bd:
-            try:
-                bd = accurate.gudang_breakdown(pn)
-            except Exception:
-                bd = {}
-        bd = {g: int(q) for g, q in bd.items() if int(q or 0) > 0}
+        # Breakdown per-gudang: INDEKS ACCURATE (part_index.gudang_breakdown kini
+        # mendelegasikan ke sana — ⛔ stok.xlsx tak lagi dipakai, aturan pemilik).
+        bd = {g: int(q) for g, q in part_index.gudang_breakdown(pn).items() if int(q or 0) > 0}
         name_up = p["name"].upper()
         out.append({
             "part_number": pn,

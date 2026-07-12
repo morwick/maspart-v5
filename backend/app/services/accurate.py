@@ -1011,6 +1011,16 @@ def start_scheduled_refresh() -> bool:
 # non-blocking, request pencarian tak pernah menunggu tarikan / login.
 
 
+def warehouse_names() -> list[str]:
+    """Semua nama gudang yang muncul di rincian per-gudang indeks (mis. '01.Jakarta').
+    Nama-nama ini identik dengan label di gudang_config/no_ship — sumber tunggal
+    daftar gudang untuk scoping & fallback terdekat."""
+    names: set[str] = set()
+    for m in (_index_cache.get("by_gudang") or {}).values():
+        names.update(m)
+    return sorted(names)
+
+
 def snapshot() -> dict[str, dict[str, Any]]:
     """{norm_pn: {stok,harga,unit}} dari indeks 5-jam bersama (tanpa tarikan
     terpisah). Bisa kosong (cold start / Accurate down) — pemanggil fallback Excel."""
