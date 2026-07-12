@@ -158,8 +158,8 @@ def main() -> int:
     orig_run_tool = ai_assistant._run_tool
     tool_pns: set[str] = set()
 
-    def _spy_run_tool(name, args, user):
-        result = orig_run_tool(name, args, user)
+    def _spy_run_tool(name, args, user, sheet_id=""):
+        result = orig_run_tool(name, args, user, sheet_id)
         tool_pns.update(ai_assistant._extract_pns(
             json.dumps(result, ensure_ascii=False, default=str)))
         return result

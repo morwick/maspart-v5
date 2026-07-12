@@ -55,6 +55,11 @@ _HEAD_NAMA = re.compile(r"\b(part\s*name|nama\s*part|nama\s*barang|deskripsi|des
 _HEAD_STOK = re.compile(r"\b(stok|stock|qty\s*ready|ready|sisa|on\s*hand)\b", re.I)
 _HEAD_QTY = re.compile(r"\b(qty|quantity|jumlah|jml|pcs|order)\b", re.I)
 _HEAD_HARGA = re.compile(r"\b(harga|price|rp|idr|cny|amount|nilai)\b", re.I)
+# Kolom yang MENGELOMPOKKAN part (sistem/bagian unit) — konteks untuk memecah
+# nama ambigu saat mengisi Part Number ('Hose clamp' di 'AIR INTAKE' vs 'COOLING').
+_HEAD_KATEGORI = re.compile(
+    r"\b(bagian|kategori|katagori|kelompok|kelas|golongan|grup|group|section|"
+    r"sistem|system|assembly|assy|modul|module|posisi|lokasi)\b", re.I)
 
 # PN Sinotruk/Weichai: huruf besar + angka, boleh . / + -, minimal 5 char.
 _PN_RE = re.compile(r"^[A-Z0-9][A-Z0-9./+\-]{4,}$")
@@ -135,6 +140,8 @@ def _detect_roles(headers: list[str], cols: list[list[str]]) -> list[str]:
             roles[i] = "qty"
         elif _HEAD_HARGA.search(h):
             roles[i] = "harga"
+        elif _HEAD_KATEGORI.search(h):
+            roles[i] = "kategori"
     return roles
 
 
@@ -212,12 +219,36 @@ def parse_upload(data: bytes, filename: str = "") -> dict:
 
 
 def ringkas(parsed: dict) -> dict:
-    """Ringkasan aman untuk model & UI (tanpa `_body` penuh)."""
-    kolom = [
-        {"nama": h, "peran": p}
-        for h, p in zip(parsed["headers"], parsed["roles"])
-    ]
-    return {
+    """Ringkasan aman untuk model & UI (tanpa `_body` penuh). Dilengkapi sinyal
+    KONTEKS agar model paham maksud file: berapa baris yang Part Number-nya masih
+    KOSONG (kandidat diisi) & kolom pengelompokan (sistem/bagian) + nilainya."""
+    headers, roles, body = parsed["headers"], parsed["roles"], parsed["_body"]
+    kolom = [{"nama": h, "peran": p} for h, p in zip(headers, roles)]
+
+    # Baris tanpa Part Number = yang biasanya user minta dilengkapi.
+    baris_tanpa_pn = None
+    if "part_number" in roles:
+        pn_i = roles.index("part_number")
+        baris_tanpa_pn = sum(
+            1 for r in body
+            if not (str(r[pn_i]).strip() if pn_i < len(r) and r[pn_i] is not None else "")
+        )
+
+    # Kolom kategori/bagian: bantu model mengerti STRUKTUR file (part dikelompokkan
+    # per sistem) & jadi konteks pemecah ambigu saat mengisi PN.
+    kategori = None
+    if "kategori" in roles:
+        k_i = roles.index("kategori")
+        nilai: list[str] = []
+        for r in body:
+            v = (str(r[k_i]).strip() if k_i < len(r) and r[k_i] is not None else "")
+            if v and v not in nilai:
+                nilai.append(v)
+            if len(nilai) >= 20:
+                break
+        kategori = {"kolom": headers[k_i], "contoh_nilai": nilai}
+
+    out = {
         "filename": parsed["filename"],
         "sheet": parsed["sheet"],
         "sheet_lain": parsed["sheet_lain"],
@@ -229,6 +260,11 @@ def ringkas(parsed: dict) -> dict:
         "contoh_baris": parsed["contoh"],
         "terpotong": parsed["terpotong"],
     }
+    if baris_tanpa_pn is not None:
+        out["baris_tanpa_part_number"] = baris_tanpa_pn
+    if kategori is not None:
+        out["kolom_pengelompokan"] = kategori
+    return out
 
 
 # ── Stash per-user ──
@@ -288,6 +324,25 @@ def _fmt_rp(v) -> str:
         return "Rp " + f"{int(v):,}".replace(",", ".")
     except (TypeError, ValueError):
         return ""
+
+
+def _cocok_gudang(minta: str, tersedia: list[str]) -> str | None:
+    """Cocokkan nama gudang yang diminta user ke nama gudang KANONIK di indeks
+    (case/spasi-insensitif; sama persis dulu, lalu substring)."""
+    m = re.sub(r"\s+", " ", (minta or "").strip().lower())
+    if not m:
+        return None
+    for g in tersedia:
+        if m == g.strip().lower():
+            return g
+    for g in tersedia:
+        gl = g.strip().lower()
+        if m in gl or gl in m:
+            return g
+    return None
+
+
+_MAX_GUDANG = 12   # plafon kolom gudang per permintaan (jaga lebar file)
 
 
 def fill_column(
@@ -391,5 +446,174 @@ def fill_column(
             "📎 Kartu unduh Excel muncul otomatis di bawah jawaban — beri tahu user singkat. "
             f"{terisi} dari {len(body)} baris terisi; sisanya PN tak ditemukan di sumber — "
             "sampaikan apa adanya, ⛔ JANGAN mengarang nilai untuk baris kosong."
+        ),
+    }
+
+
+_ISI_LABEL = {
+    ISI_STOK: "Stok",
+    ISI_NAMA: "Nama Part",
+    ISI_HARGA_LOKAL: "Harga",
+    ISI_HARGA_SIMS: "Harga SIMS (IDR)",
+}
+_ISI_KEY = {ISI_STOK: "stok", ISI_NAMA: "part_name", ISI_HARGA_LOKAL: "harga"}
+
+
+def fill_columns(
+    sheet_id: str,
+    user: dict,
+    permintaan: list[dict],
+    can_sims: bool = False,
+    kolom_pn: str = "",
+) -> dict:
+    """Isi BEBERAPA kolom sekaligus ke SATU file (satu kartu unduh). `permintaan` =
+    daftar spesifikasi kolom, tiap elemen menghasilkan SATU kolom:
+      {"isi": "stok"|"nama_part"|"harga_lokal"|"harga_sims",
+       "gudang": <opsional, khusus stok → kolom stok gudang itu>,
+       "kolom_tujuan": <opsional nama/huruf kolom, default nama otomatis>}
+    Semua kolom ditaruh dalam file yang sama sehingga user tak menerima banyak file.
+    Data di-lookup sekali (indeks lokal + SIMS batch) lalu dipakai semua kolom."""
+    parsed = get_sheet(sheet_id, user.get("username", ""))
+    if not parsed:
+        return {"found": False, "error": "Belum ada file Excel yang diunggah di percakapan ini "
+                                         "(atau sudah kedaluwarsa). Minta user unggah ulang."}
+
+    # Normalkan & validasi spesifikasi.
+    specs: list[dict] = []
+    for s in (permintaan or []):
+        if not isinstance(s, dict):
+            continue
+        isi = (s.get("isi") or "").strip()
+        if not isi:
+            continue
+        specs.append({"isi": isi,
+                      "gudang": (s.get("gudang") or "").strip(),
+                      "kolom_tujuan": (s.get("kolom_tujuan") or "").strip()})
+    if not specs:
+        return {"found": False, "error": "Tidak ada kolom yang diminta untuk diisi."}
+    for s in specs:
+        if s["isi"] not in ISI_PILIHAN:
+            return {"error": f"isi '{s['isi']}' tak dikenal; pilih dari {list(ISI_PILIHAN)}"}
+        if s["isi"] == ISI_HARGA_SIMS and not can_sims:
+            return {"denied": True,
+                    "error": "Harga SIMS (harga modal) hanya untuk admin. Jangan menampilkan, "
+                             "memperkirakan, atau menghitung harga SIMS untuk user ini."}
+
+    headers = list(parsed["headers"])
+    body = [list(r) for r in parsed["_body"]]
+
+    pn_i = _cari_kolom(headers, kolom_pn) if kolom_pn else None
+    if pn_i is None:
+        pn_i = parsed["roles"].index("part_number") if "part_number" in parsed["roles"] else None
+    if pn_i is None:
+        return {"found": False,
+                "error": "Kolom Part Number tidak terdeteksi. Minta user menyebut kolom mana "
+                         "yang berisi Part Number."}
+
+    pns = [(r[pn_i] or "").strip().upper() for r in body]
+    unik = [p for p in dict.fromkeys(pns) if p]
+
+    # Lookup SEKALI, dipakai semua kolom.
+    peta_lokal: dict[str, dict] = {}
+    if any(s["isi"] in (ISI_STOK, ISI_NAMA, ISI_HARGA_LOKAL) for s in specs):
+        try:
+            for row in part_index.search_exact_pns(set(unik)):
+                peta_lokal.setdefault((row.get("part_number") or "").upper(), row)
+        except Exception as e:
+            return {"found": False, "error": f"gagal membaca indeks part: {e}"}
+    peta_sims: dict[str, dict] = {}
+    sumber_sims = ""
+    if any(s["isi"] == ISI_HARGA_SIMS for s in specs):
+        if len(unik) > _MAX_SIMS:
+            return {"found": False,
+                    "error": f"Terlalu banyak Part Number ({len(unik)}) untuk harga SIMS live. "
+                             f"Maksimum {_MAX_SIMS} per permintaan — minta user memecah filenya."}
+        res = harga.batch_harga(unik)
+        peta_sims = {r["pn"]: r for r in res["results"]}
+        sumber_sims = f"SIMS live (kurs CNY→IDR {res['rate']:.0f})"
+    tersedia_gudang = part_index.gudang_names()
+
+    def _nilai_fn(isi: str, gud_canon: str | None):
+        """Fungsi nilai per-PN untuk satu kolom (menutup peta lookup)."""
+        if isi == ISI_STOK and gud_canon:
+            def f(p):
+                d = peta_lokal.get(p)
+                return "" if not d else str((d.get("gudang") or {}).get(gud_canon, 0))
+            return f
+        if isi == ISI_HARGA_SIMS:
+            def f(p):
+                d = peta_sims.get(p)
+                return _fmt_rp(d["idr"]) if d and d.get("idr") is not None else ""
+            return f
+        key = _ISI_KEY[isi]
+
+        def f(p):
+            d = peta_lokal.get(p)
+            if not d:
+                return ""
+            v = _txt(d.get(key))
+            return "" if v in ("N/A", "—") else v
+        return f
+
+    hasil: list[dict] = []
+    gudang_tak_dikenal: list[str] = []
+    gudang_dipakai = 0
+    for s in specs:
+        isi, gud = s["isi"], s["gudang"]
+        gud_canon = None
+        if isi == ISI_STOK and gud:
+            if gudang_dipakai >= _MAX_GUDANG:
+                continue
+            gud_canon = _cocok_gudang(gud, tersedia_gudang)
+            if not gud_canon:
+                if gud not in gudang_tak_dikenal:
+                    gudang_tak_dikenal.append(gud)
+                continue
+            gudang_dipakai += 1
+            label = s["kolom_tujuan"] or f"Stok {gud_canon}"
+        else:
+            label = s["kolom_tujuan"] or _ISI_LABEL[isi]
+
+        tgt = _cari_kolom(headers, label)
+        if tgt is None:
+            headers.append(label)
+            tgt = len(headers) - 1
+            for r in body:
+                r.append("")
+
+        fn = _nilai_fn(isi, gud_canon)
+        terisi = 0
+        for r, p in zip(body, pns):
+            r[tgt] = fn(p)
+            if r[tgt] != "":
+                terisi += 1
+        hasil.append({"kolom": headers[tgt], "isi": isi,
+                      "gudang": gud_canon, "baris_terisi": terisi})
+
+    if not hasil:
+        return {"found": False,
+                "error": (f"Tak ada kolom yang bisa diisi. Gudang tak dikenal: {gudang_tak_dikenal}. "
+                          f"Pilihan gudang: {tersedia_gudang}.")}
+
+    judul = f"{parsed['filename'].rsplit('.', 1)[0]} + Data"
+    export_id, filename = ai_export.stash_export(judul, headers, body)
+    return {
+        "found": True,
+        "export_id": export_id,
+        "filename": filename,
+        "judul": judul,
+        "jumlah_baris": len(body),
+        "kolom_part_number": headers[pn_i],
+        "kolom": hasil,
+        "gudang_tak_dikenal": gudang_tak_dikenal,
+        "sumber": ("indeks part lokal (stok.xlsx/harga.xlsx/katalog)"
+                   + (f" + {sumber_sims}" if sumber_sims else "")),
+        "catatan": (
+            "📎 SATU kartu unduh Excel muncul otomatis di bawah — SEMUA kolom yang diminta ada "
+            "di file yang SAMA (jangan pernah membuat banyak file kecuali user eksplisit "
+            "memintanya). Untuk stok per-gudang, '0' = terlacak tapi kosong di gudang itu, sel "
+            "KOSONG = PN tak ada di sumber. "
+            + (f"⚠️ Gudang tak dikenal: {gudang_tak_dikenal}. " if gudang_tak_dikenal else "")
+            + "⛔ JANGAN mengarang nilai untuk baris kosong."
         ),
     }
