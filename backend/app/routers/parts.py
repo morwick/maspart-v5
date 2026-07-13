@@ -501,15 +501,6 @@ def index_refresh(_admin: dict = Depends(require_admin)):
 # Reuse penuh mesin asisten: epc_bom.loading_list (cache+lock per-frame),
 # exploded_figures (gambar figure + nomor balon), kamus sinonim (istilah lapangan).
 
-# Kode kategori katalog (catalog_bom 01..12) → istilah pencarian Parts Atlas —
-# dipakai menemukan figure exploded view yang memuat PN tanpa bertanya kategori.
-_KODE2ATLAS = {
-    "01": "kabin", "02": "mesin", "03": "mesin", "04": "kopling",
-    "05": "transmisi", "06": "gardan depan", "07": "gardan belakang",
-    "08": "kelistrikan", "09": "rem", "10": "sasis", "12": "bak",
-}
-
-
 def _istilah_lapangan(nama_en: str) -> str:
     """Istilah bengkel Indonesia untuk sebuah nama part EN — kamus sinonim DIBALIK
     (keyword katalog → trigger lapangan). '' bila tak ada padanan. Keyword terpanjang
@@ -588,26 +579,30 @@ def cek_part_di_unit(body: CekUnitRequest, _user: dict = Depends(get_current_use
         pass
     kategori_nama = catalog_bom.KATEGORI_NAMA.get(kode, "") if kode else ""
 
-    # Gambar exploded view + qty + balon — BEST-EFFORT (satu kategori terpetakan
-    # saja; kecocokan sudah divonis reverse, gambar hanya pelengkap).
+    # Gambar exploded view + qty + balon — LANGSUNG dari alamat node hasil reverse
+    # (satu panggilan tree/item per posisi, pola HAR pemilik). Tanpa tebakan
+    # kategori: dulu poros transmisi gagal bergambar karena walk 'sasis' tak
+    # menyaringnya. Best-effort: gagal semua → hasil cocok tetap dikirim.
     image_id = lokasi = None
     balon = None
     qty = ""
-    term = _KODE2ATLAS.get(kode)
-    if term:
+    for inst in instances[:3]:
         try:
-            d = epc_bom.exploded_figures(rangka, pn, term)
-            if d.get("found") and d.get("figures"):
-                fig = d["figures"][0]
-                balon, lokasi, qty = fig.get("balon"), fig.get("nama"), fig.get("qty") or ""
-                if not nama_en:
-                    nama_en = (fig.get("nama_item") or "").strip()
-                    istilah = _istilah_lapangan(nama_en)
-                image_id, _fn = ai_export.stash_builder(
-                    f"Exploded {pn}", {"kind": "exploded", "svg": fig["svg"], "balon": balon},
-                    ext="png")
+            f = epc_bom.figure_for_instance(rangka, inst, pn)
         except Exception:
-            image_id = None
+            continue
+        if f.get("found"):
+            balon, lokasi, qty = f.get("balon"), f.get("nama"), f.get("qty") or ""
+            if not nama_en:
+                nama_en = (f.get("nama_item") or "").strip()
+                istilah = _istilah_lapangan(nama_en)
+            try:
+                image_id, _fn = ai_export.stash_builder(
+                    f"Exploded {pn}", {"kind": "exploded", "svg": f["svg"], "balon": balon},
+                    ext="png")
+            except Exception:
+                image_id = None
+            break
 
     # Lokasi: figure bila ada; kalau tidak, assembly induk dari reverse
     # ("bagian dari 'Brake shoe assembly' (AZ450045001161)").

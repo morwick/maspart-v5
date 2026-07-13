@@ -869,6 +869,40 @@ def reverse_find_in_unit(rangka: str, pn: str) -> dict:
     return {"found": bool(instances), "frame_number": frame, "instances": instances}
 
 
+def figure_for_instance(rangka: str, instance: dict, pn: str) -> dict:
+    """FIGURE exploded view LANGSUNG dari alamat node hasil reverse_find_in_unit —
+    SATU panggilan part/tree/item (pola HAR pemilik), tanpa tebakan/walk kategori.
+    Respons membawa d2s (nama file SVG), partListName (nama figure), dan items
+    ber-ballNum + amount → balon & qty part kita.
+    {found, svg, balon, qty, nama, nama_item} atau {found:False, _err}."""
+    frame = _frame(rangka)
+    pnu = (pn or "").strip().upper()
+    rid, pid = instance.get("root_id"), instance.get("part_id")
+    if not (frame and pnu and rid and pid):
+        return {"found": False, "_err": "input"}
+    res = _get_auto(_ATLAS_ITEM_URL, {
+        "id": instance.get("part_list_id") or 0, "partId": pid, "parentId": rid,
+        "rootId": rid, "partCode": instance.get("parent_pn") or "", "type": "frameNo",
+        "isSearch": "false", "vin": frame,
+    })
+    if "_err" in res:
+        return {"found": False, "_err": res["_err"]}
+    d = res.get("data") if isinstance(res.get("data"), dict) else {}
+    hit = next((p for p in (d.get("items") or [])
+                if str(p.get("code") or "").strip().upper() == pnu), None)
+    svgs = [s for s in (d.get("d2s") or []) if isinstance(s, str)]
+    if not hit or not svgs:
+        return {"found": False, "_err": "no_figure"}
+    return {
+        "found": True,
+        "svg": svgs[0],
+        "balon": hit.get("ballNum"),
+        "qty": hit.get("amount"),
+        "nama_item": " ".join(str(hit.get("name") or "").split()),
+        "nama": " ".join(str(d.get("partListName") or instance.get("parent_nama") or "").split()),
+    }
+
+
 def category_top(rangka: str) -> dict:
     """Daftar kategori/assembly TINGKAT-ATAS untuk 1 unit (1 panggilan + cache).
     Sukses → {found, frame_number, order_no, root_id, jumlah, kategori:[norm_cat...]}.

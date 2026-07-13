@@ -46,18 +46,17 @@ def dunia(monkeypatch):
     monkeypatch.setattr(catalog_bom, "pn_category_map",
                         lambda: {catalog_bom._norm("WG9100443050"): {"kategori": "09"},
                                  catalog_bom._norm("AZ450045000042"): {"kategori": "06"}})
-    fig_calls: list[str] = []
+    fig_calls: list[dict] = []
 
-    def _figures(r, pn, k):
-        fig_calls.append(k)
-        if pn.upper() in _REV:
-            return {"found": True, "figures": [
-                {"svg": "fig.svg", "balon": 2, "qty": 2, "nama_item": "Brake friction plate",
-                 "nama": "brake shoe assembly", "kategori": k, "jumlah_item": 9,
-                 "items_ringkas": []}]}
-        return {"found": False, "_err": "not_in_category"}
+    def _figure(r, inst, pn):
+        fig_calls.append(inst)
+        return {"found": True, "svg": "fig.svg", "balon": 2, "qty": 2,
+                "nama_item": "Brake friction plate", "nama": "brake shoe assembly"}
 
-    monkeypatch.setattr(epc_bom, "exploded_figures", _figures)
+    monkeypatch.setattr(epc_bom, "figure_for_instance", _figure)
+    # Walk kategori TIDAK boleh disentuh lagi (jalur lambat yang digantikan).
+    monkeypatch.setattr(epc_bom, "exploded_figures",
+                        lambda r, pn, k: (_ for _ in ()).throw(AssertionError("walk kategori dipanggil")))
     stashed = {}
     monkeypatch.setattr(ai_export, "stash_builder",
                         lambda judul, builder, ext="png": (stashed.update(builder=builder) or ("IMG1", "x.png")))
@@ -74,7 +73,8 @@ def test_kampas_tersembunyi_di_assembly_ketemu_satu_panggilan(dunia):
     assert r["assembly_induk"] == "Brake shoe assembly" and r["jumlah_posisi"] == 2
     assert r["qty"] == 2 and r["balon"] == 2 and r["image_id"] == "IMG1"
     assert "kampas rem" in r["penjelasan"] and "Brake shoe assembly" in r["penjelasan"]
-    assert dunia["fig_calls"] == ["gardan depan"]     # gambar: 1 kategori terpetakan saja
+    # Gambar diambil LANGSUNG dari node posisi pertama hasil reverse — 1 panggilan.
+    assert dunia["fig_calls"] == [_REV["AZ450045000042"][0]]
 
 
 def test_tidak_cocok_cepat_tanpa_sisir_kategori(dunia):
@@ -105,10 +105,10 @@ def test_gambar_gagal_tak_menggagalkan_hasil(dunia, monkeypatch):
     jatuh ke assembly induk dari reverse."""
     from app.services import epc_bom
 
-    def _boom(r, pn, k):
+    def _boom(r, inst, pn):
         raise RuntimeError("EPC figure error")
 
-    monkeypatch.setattr(epc_bom, "exploded_figures", _boom)
+    monkeypatch.setattr(epc_bom, "figure_for_instance", _boom)
     r = R.cek_part_di_unit(R.CekUnitRequest(part_number="AZ450045000042", rangka="SJ346500"), USER)
     assert r["cocok"] is True and r["image_id"] is None
     assert r["lokasi"] == "Brake shoe assembly"
