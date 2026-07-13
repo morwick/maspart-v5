@@ -7,7 +7,37 @@ PERSIS meleset dan part yang tersedia dilaporkan tak berstok.
 """
 import pytest
 
-from app.services import ai_assistant as ai, part_index
+from app.services import accurate, ai_assistant as ai, part_index
+
+
+# ── Lookup INDEKS ACCURATE (stok & harga) ────────────────────────────────────
+@pytest.fixture
+def indeks_accurate(monkeypatch):
+    """Accurate menyimpan PN DASAR; katalog/EPC memakai PN ber-suffix varian."""
+    monkeypatch.setitem(accurate._index_cache, "by_pn", {
+        "WG9525160004": {"pn": "WG9525160004", "price": 5_250_000, "available_to_sell": 11},
+    })
+    monkeypatch.setitem(accurate._index_cache, "by_gudang", {
+        "WG9525160004": {"02.Pekanbaru": 3, "03.Balikpapan": 3},
+    })
+
+
+def test_index_key_memaafkan_suffix_varian(indeks_accurate):
+    assert accurate.index_key("WG9525160004/2") == "WG9525160004"   # ⛔ bukan '' (miss)
+    assert accurate.index_key("WG9525160004") == "WG9525160004"
+    assert accurate.index_key("ZZ0000000000/9") == ""               # asing tetap miss
+
+
+def test_stok_dan_gudang_pn_bersuffix_ketemu(indeks_accurate):
+    """Kasus nyata: kampas kopling WG9525160004/2 dilaporkan 'stok —' padahal 11 pc."""
+    e = accurate.stock_full("WG9525160004/2")
+    assert e and e["price"] == 5_250_000
+    assert accurate.gudang_breakdown("WG9525160004/2") == {"02.Pekanbaru": 3, "03.Balikpapan": 3}
+
+
+def test_indeks_belum_dimuat_tak_meledak(monkeypatch):
+    monkeypatch.setitem(accurate._index_cache, "by_pn", {})
+    assert accurate.index_key("WG9525160004/2") == "WG95251600042"   # apa adanya, aman
 
 _INDEKS = {
     "WG9525160004": {"part_number": "WG9525160004", "part_name": "Driven disk assembly",

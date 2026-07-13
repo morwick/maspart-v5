@@ -542,7 +542,8 @@ def stock_full(part_number: str) -> dict[str, Any] | None:
 
     Non-blocking: indeks belum siap / PN tak ada → None → pemanggil fallback Excel.
     """
-    want = _norm_pn(part_number)
+    # PN ber-suffix varian ('WG9525160004/2') dicocokkan ke PN dasar Accurate.
+    want = index_key(part_number)
     if not want:
         return None
     entry = (_index_cache.get("by_pn") or {}).get(want)
@@ -605,6 +606,26 @@ def _norm_pn(pn: str) -> str:
 def norm_pn(pn: str) -> str:
     """Publik: normalisasi PN (dipakai router untuk cocokkan ke snapshot)."""
     return _norm_pn(pn)
+
+
+def index_key(pn: str) -> str:
+    """Kunci indeks Accurate untuk sebuah PN — PEMAAF terhadap SUFFIX VARIAN.
+
+    Katalog & EPC memakai PN ber-suffix varian pemasok/halaman ('WG9525160004/2',
+    'YG9525230005/1'), sementara Accurate menyimpan PN DASAR ('WG9525160004').
+    Normalisasi biasa membuang '/' → 'WG95251600042' ≠ 'WG9525160004', jadi stok &
+    harga part yang ADA dilaporkan '—' (kasus nyata: kampas kopling, 11 pc).
+    Urutan: kunci apa adanya → kunci PN dasar (potong di '/' atau '+').
+    '' bila dua-duanya tak ada di indeks."""
+    by = _index_cache.get("by_pn") or {}
+    k = _norm_pn(pn)
+    if not by:
+        return k          # indeks belum dimuat → tak bisa verifikasi; pakai kunci apa adanya
+    if k and k in by:
+        return k
+    base = re.split(r"[/+]", (pn or "").strip().upper())[0]
+    kb = _norm_pn(base)
+    return kb if kb and kb in by else ""
 
 
 def _num(v: Any) -> float:
@@ -706,8 +727,9 @@ def _warehouse_map(item_id: Any) -> dict[str, float]:
 
 def gudang_breakdown(part_number: str) -> dict[str, float]:
     """Rincian stok {warehouseName: qty} 1 PN dari INDEKS (hasil enrichment 5-jam).
-    {} bila belum ter-enrich / PN tak ada. Non-blocking, tanpa panggilan live."""
-    key = _norm_pn(part_number)
+    {} bila belum ter-enrich / PN tak ada. Non-blocking, tanpa panggilan live.
+    PN ber-suffix varian ('…/2') dicocokkan ke PN dasar lewat index_key."""
+    key = index_key(part_number) or _norm_pn(part_number)
     if not key:
         return {}
     return dict((_index_cache.get("by_gudang") or {}).get(key, {}))

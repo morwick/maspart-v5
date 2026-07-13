@@ -5564,7 +5564,7 @@ def _t_excel_bom_rangka(args: dict, user: dict) -> dict:
             total, rinci = _rincian_gudang_str(pn)
             row += [str(total), rinci]
         if dengan_harga:
-            e = snap.get(accurate.norm_pn(pn))
+            e = snap.get(accurate.index_key(pn))
             hg = (e or {}).get("harga")
             row += ["Rp " + f"{int(hg):,}".replace(",", ".") if hg else "—"]
         baris.append(row)

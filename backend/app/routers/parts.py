@@ -123,7 +123,8 @@ def _overlay_accurate(results: list[dict]) -> list[dict]:
         snap = {}
     for r in results:
         r["harga"] = "—"        # buang harga bawaan harga.xlsx
-        e = snap.get(accurate.norm_pn(r.get("part_number") or ""))
+        # index_key: pemaaf suffix varian ("WG…/2" → PN dasar di Accurate).
+        e = snap.get(accurate.index_key(r.get("part_number") or ""))
         if not e:
             continue
         if e.get("stok") is not None:
@@ -320,7 +321,7 @@ def _overlay_stok_harga_image(results: list[dict]) -> None:
             row = None
         if row:
             stok = str(row.get("stok") or "")
-        e = snap.get(accurate.norm_pn(pn))
+        e = snap.get(accurate.index_key(pn))
         if e:
             if e.get("stok") is not None:
                 stok = f"{int(e['stok']):,}".replace(",", ".")

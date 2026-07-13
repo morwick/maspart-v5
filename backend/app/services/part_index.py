@@ -473,7 +473,10 @@ def _acc_stok_harga(snap: dict, pn_key: str) -> tuple[str, str]:
     '—' bila PN tak ada di Accurate (perusahaan tak menstok/menjualnya).
     ⛔ Dulu diisi dari stok.xlsx & harga.xlsx — dua-duanya kini dilarang pemilik."""
     from . import accurate
-    e = snap.get(accurate.norm_pn(pn_key)) if snap else None
+    # PN katalog/EPC kerap ber-suffix varian ('WG9525160004/2') sementara Accurate
+    # menyimpan PN dasarnya → index_key mencocokkan keduanya (kalau tidak, part yang
+    # ADA dilaporkan stok '—').
+    e = snap.get(accurate.index_key(pn_key) or accurate.norm_pn(pn_key)) if snap else None
     if not e:
         return "—", "—"
     stok = e.get("stok")
