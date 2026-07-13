@@ -836,13 +836,45 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "cari_part_di_unit",
+                "description": (
+                    "⭐ JALUR UTAMA saat user menyebut NOMOR RANGKA + NAMA PART ('kampas rem "
+                    "SJ346500', 'cross joint unit LZZ…', 'filter oli untuk rangka ini'). "
+                    "Mencari langsung DI KATALOG EPC UNIT ITU lewat pencarian nama per-kendaraan: "
+                    "CEPAT (~1-2 detik) dan menjangkau SELURUH katalog unit — termasuk part yang "
+                    "TERSEMBUNYI DI DALAM assembly. ⛔ bom_dari_rangka (Loading List) MELEWATKAN "
+                    "part semacam itu: 'kampas rem' di sana hasilnya 0 padahal kampas depan & "
+                    "belakang unit itu ADA. Istilah lapangan Indonesia otomatis diterjemahkan ke "
+                    "nama katalog EPC (kamus sinonim). Tiap PN dilengkapi assembly INDUK "
+                    "('di_dalam_assembly') + stok/harga lokal. Bila hasil memuat beberapa varian "
+                    "(mis. kampas DEPAN vs BELAKANG), sebutkan SEMUA & bedakan lewat assembly "
+                    "induknya. Untuk memisah posisi poros depan/belakang secara eksplisit, "
+                    "part_aus_dari_rangka masih boleh dipakai sebagai pelengkap (lebih lambat)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Nomor rangka/VIN unit."},
+                        "kata_kunci": {"type": "string", "description": "Nama part yang dicari (istilah lapangan Indonesia / Inggris / PN) — mis. 'kampas rem', 'cross joint', 'filter oli'."},
+                    },
+                    "required": ["rangka", "kata_kunci"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "bom_dari_rangka",
                 "description": (
                     "Daftar PART (BOM PABRIK) untuk SATU unit dari NOMOR RANGKA/VIN — "
                     "diambil LANGSUNG dari EPC Sinotruk resmi, jadi PERSIS untuk unit itu "
                     "(bukan asumsi katalog per-model). Pakai untuk 'part apa saja di unit "
-                    "rangka X', 'apakah unit rangka X pakai part/injector/… tertentu', "
-                    "'PN <komponen> untuk unit rangka ini'. Bisa filter dengan kata_kunci "
+                    "rangka X' dan RINGKASAN/kategori_breakdown unit. "
+                    "⛔ JANGAN pakai untuk MENCARI SATU NAMA PART di unit ('kampas rem rangka X') "
+                    "— Loading List DATAR tak memuat part yang tersembunyi di dalam assembly, "
+                    "jadi hasilnya bisa 0 padahal part-nya ADA di unit itu (kampas rem = kasus "
+                    "nyata). Untuk itu pakai cari_part_di_unit (cepat, seluruh katalog unit). "
+                    "Bisa filter dengan kata_kunci "
                     "(istilah lapangan Indonesia / Inggris / PN — mis. 'injector', 'kampas "
                     "rem', 'WG9'). Tiap part disilangkan ke STOK & HARGA lokal kita bila ada. "
                     "Hasil SELALU memuat 'kategori_breakdown' = JUMLAH part per kategori (kabin, "
@@ -4483,6 +4515,113 @@ def _atlas_modules_for(text: str) -> tuple[tuple, bool]:
     return ("CDQ", "QDQ"), True
 
 
+def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
+    """CARI PART DI SATU UNIT lewat PENCARIAN NAMA EPC per-kendaraan (match/part
+    t=car) — JALUR UTAMA saat user menyebut nomor rangka + nama part.
+
+    Kenapa ini yang utama: satu panggilan per kata kunci (~1 dtk) menjangkau SELURUH
+    katalog unit, termasuk part yang TERSEMBUNYI di dalam assembly. Loading List
+    (bom_dari_rangka) MELEWATKANNYA — kampas rem 'kampas rem SJ346500' hasilnya 0
+    di sana, padahal AZ450045000042 (depan) & AZ450045000024 (belakang) memang
+    terpasang. Walk Atlas (part_aus_dari_rangka) menemukannya tapi 18-22 dtk dan
+    hanya untuk domain yang terpetakan (poros/mesin/kopling/gearbox).
+
+    EPC hanya paham nama INGGRIS/Mandarin → istilah lapangan diterjemahkan lewat
+    kamus sinonim dulu. Tiap PN disilangkan ke inventori lokal (stok/harga) dan
+    diberi assembly INDUK (reverse) agar konteks pemasangannya jelas."""
+    rangka = (args.get("rangka") or "").strip()
+    kata = (args.get("kata_kunci") or args.get("query") or "").strip()
+    if not rangka:
+        return {"error": "Sebutkan nomor rangka (VIN atau frame number)."}
+    if not kata:
+        return {"error": "Sebutkan part yang dicari (mis. 'kampas rem', 'cross joint')."}
+
+    # Istilah lapangan → keyword katalog EN/CN (EPC tak paham 'kampas'). Query asli
+    # tetap disertakan (mungkin sudah bahasa Inggris / PN).
+    terms, matched_syn = _expand_query(kata)
+    kws = [t for t in dict.fromkeys(terms) if t and len(t.strip()) >= 3]
+
+    d = epc_bom.search_in_unit(rangka, kws)
+    err = d.get("_err")
+    if err in ("token_expired", "no_token"):
+        return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
+    if err == "network":
+        return {"found": False, "error": "Gagal menghubungi server EPC (jaringan). Coba lagi."}
+    if err in ("not_found", "input"):
+        return {"found": False, "error": "Nomor rangka tak ditemukan di EPC "
+                                         "(cek VIN; hanya Sinotruk/HOWO/SITRAK)."}
+    frame = d.get("frame_number") or rangka
+    hasil = d.get("hasil") or []
+    if not hasil:
+        return {
+            "found": False, "frame_number": frame, "kata_kunci": kata,
+            "kata_kunci_dicari": kws[:8],
+            "error": f"Tidak ada part '{kata}' di katalog EPC unit {frame}.",
+            "jawaban_wajib": ("Sampaikan JUJUR bahwa EPC unit ini tak punya part itu dengan "
+                              "istilah tsb. ⛔ JANGAN mengarang PN. Boleh tawarkan: coba istilah "
+                              "lain / nama Inggris, atau cek kategori lewat bom_dari_rangka."),
+        }
+
+    # Silang ke inventori lokal (nama katalog + stok + harga) — pola tool per-VIN lain.
+    pns = [h["pn"] for h in hasil]
+    local: dict[str, dict] = {}
+    for r in part_index.search_exact_pns(pns):
+        pn = (r.get("part_number") or "").upper()
+        if pn and pn not in local:
+            local[pn] = r
+    boleh_harga = gudang.can_see_price(user.get("username", ""), user.get("role", ""))
+
+    parts: list[dict] = []
+    for h in hasil[:40]:
+        pn = h["pn"]
+        lr = local.get(pn, {})
+        row = {
+            "part_number": pn,
+            "nama": " ".join((lr.get("part_name") or h.get("nama") or "").split()),
+            "cocok_kata_kunci": h.get("kata_kunci"),
+            "ada_di_inventori": bool(lr),
+        }
+        # Assembly INDUK (reverse) — konteks pemasangan; hanya untuk beberapa PN
+        # teratas agar tetap cepat.
+        if len(parts) < 8:
+            try:
+                rv = epc_bom.reverse_find_in_unit(rangka, pn)
+                inst = (rv.get("instances") or [])
+                if inst:
+                    row["di_dalam_assembly"] = inst[0].get("parent_nama") or None
+                    row["assembly_pn"] = inst[0].get("parent_pn") or None
+                    row["jumlah_posisi"] = len({i.get("parent_pn") for i in inst if i.get("parent_pn")})
+            except Exception:
+                pass
+        if lr:
+            row["stok_total"] = lr.get("stok")
+            row["stok_per_gudang"] = lr.get("gudang") or {}
+            if boleh_harga:
+                row["harga_lokal"] = lr.get("harga")
+        parts.append(row)
+
+    if _is_pembeli(user):
+        for row in parts:
+            row.pop("stok_per_gudang", None)
+
+    note = None
+    if matched_syn:
+        note = (f"Istilah lapangan '{', '.join(dict.fromkeys(matched_syn))}' diterjemahkan ke "
+                f"kata kunci katalog EPC: {', '.join(k for k in kws if k.lower() != kata.lower())}.")
+    return {
+        "found": True, "frame_number": frame, "kata_kunci": kata,
+        "kata_kunci_dicari": kws[:8], "catatan_sinonim": note,
+        "jumlah_part": len(hasil), "parts": parts,
+        "sumber": ("EPC pencarian per-unit (match/part t=car) — menjangkau SELURUH katalog "
+                   "unit ini, termasuk part di DALAM assembly yang tak ada di Loading List."),
+        "catatan": ("PN di 'parts' PERSIS untuk unit ini (dari EPC). Jawab sebagai DAFTAR "
+                    "ringkas (PN + nama + assembly induk bila ada + stok). Bila ada beberapa "
+                    "varian (mis. kampas DEPAN vs BELAKANG), SEBUTKAN semuanya & jelaskan "
+                    "bedanya lewat 'di_dalam_assembly' — JANGAN pilih satu diam-diam. "
+                    "⛔ JANGAN mengarang PN di luar daftar ini."),
+    }
+
+
 def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:
     """PART POROS/AXLE presis per-VIN & per-POSISI dari EPC PARTS ATLAS (tree walk) —
     SUMBER WAJIB untuk SEMUA part di poros: kampas rem, sepatu rem, BAUT/MUR RODA, hub,
@@ -5904,6 +6043,7 @@ _DISPATCH = {
     "cek_kendaraan": _t_cek_kendaraan,
     "assembly_utama_unit": _t_assembly_utama_unit,
     "bom_dari_rangka": _t_bom_dari_rangka,
+    "cari_part_di_unit": _t_cari_part_di_unit,
     "banding_rangka": _t_banding_rangka,
     "banding_rangka_massal": _t_banding_rangka_massal,
     "part_aus_dari_rangka": _t_part_aus_dari_rangka,
@@ -7297,6 +7437,7 @@ _NOT_FOUND_REPLY = (
 # BUKAN dari cari_part (katalog lokal per-model, bisa beda per-VIN). Lihat guard
 # substitusi di bawah (kasus nyata WG9114520140 lokal vs WG9525520641 EPC).
 _EPC_VIN_PART_TOOLS = frozenset({
+    "cari_part_di_unit",
     "part_aus_dari_rangka", "bom_dari_rangka", "uraikan_mesin", "uraikan_assembly",
     "kategori_unit", "assembly_utama_unit", "banding_rangka", "banding_rangka_massal",
 })

@@ -824,6 +824,7 @@ def _tree_node(frame: str, root_id, part_id) -> dict:
     })
 
 
+_SEARCH_MAX_KEYWORDS = 8            # plafon kata kunci per pencarian (1 call EPC/kata)
 _root_cache: dict[str, dict] = {}   # frame -> {"at", "val"} (rootId+orderNo, ringan)
 
 
@@ -837,6 +838,52 @@ def _atlas_root_cached(frame: str) -> dict:
     if "_err" not in r:
         _root_cache[frame] = {"at": time.monotonic(), "val": r}
     return r
+
+
+def search_in_unit(rangka: str, keywords: list[str]) -> dict:
+    """Cari part DI DALAM SATU UNIT berdasarkan NAMA (bukan PN) — pencarian EPC
+    per-kendaraan (home/match/part?t=car&v=<orderNo>&k=<kata>&cjh=<frame>).
+
+    Ini jalur CEPAT & LUAS: satu panggilan per kata kunci (~1 dtk) mencakup SELURUH
+    katalog unit, termasuk part yang tersembunyi di dalam assembly dan yang TIDAK
+    ada di Loading List. Terverifikasi live (SJ346500): 'brake friction plate' →
+    AZ450045000042 + AZ450045000024 (kampas depan & belakang); 'universal joint' →
+    3 PN. ⚠️ EPC hanya paham nama INGGRIS/Mandarin — istilah lapangan Indonesia
+    ('kampas rem') WAJIB diterjemahkan pemanggil lewat kamus sinonim dulu.
+
+    {found, frame_number, order_no, hasil:[{pn, nama, kata_kunci}]} — dedup per PN,
+    urut sesuai urutan keywords. {found:False,_err} bila EPC bermasalah."""
+    frame = _frame(rangka)
+    kws = [k.strip() for k in (keywords or []) if k and len(k.strip()) >= 3]
+    if not frame or not kws:
+        return {"found": False, "_err": "input"}
+    r = _atlas_root_cached(frame)
+    if "_err" in r:
+        return {"found": False, "frame_number": frame, "_err": r["_err"]}
+    order_no = r.get("orderNo") or frame
+
+    hasil: list[dict] = []
+    seen: set[str] = set()
+    err_last = None
+    for kw in kws[:_SEARCH_MAX_KEYWORDS]:
+        res = _get_auto(_MATCH_URL, {"t": "car", "v": order_no, "k": kw, "cjh": frame})
+        if "_err" in res:
+            err_last = res["_err"]
+            continue
+        for d in (res.get("data") or []):
+            if not isinstance(d, dict):
+                continue
+            pn = str(d.get("code") or "").strip().upper()
+            if not pn or pn in seen:
+                continue
+            seen.add(pn)
+            hasil.append({"pn": pn,
+                          "nama": " ".join(str(d.get("name") or "").split()),
+                          "kata_kunci": kw})
+    if not hasil and err_last:
+        return {"found": False, "frame_number": frame, "_err": err_last}
+    return {"found": bool(hasil), "frame_number": frame, "order_no": order_no,
+            "hasil": hasil}
 
 
 def reverse_find_in_unit(rangka: str, pn: str) -> dict:
