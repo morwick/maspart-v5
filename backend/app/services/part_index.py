@@ -947,6 +947,68 @@ def _pn_flat_map() -> dict[str, list[str]]:
     return c["map"]
 
 
+def rows_for_pns(pns) -> dict[str, dict]:
+    """{PN_ASLI: baris inventori} untuk daftar PN — PEMAAF terhadap SUFFIX VARIAN EPC.
+
+    EPC kerap memberi PN berakhiran varian pemasok/halaman ('WG9525160004/2',
+    'WG9525470121+003/1') sementara indeks stok/harga kita menyimpan PN dasarnya
+    ('WG9525160004'). Pencocokan PERSIS meleset → part tampil 'stok —' padahal
+    barangnya ADA (kasus nyata: kampas kopling WG9525160004/2, stok 11 pc).
+    Urutan: cocok PERSIS → varian bersih (suffix dibuang) → tanpa tanda pemisah.
+    Kunci hasil = PN ASLI yang diminta (pemanggil tak perlu tahu bentuk dasarnya)."""
+    want = [str(p or "").strip().upper() for p in (pns or [])]
+    want = [p for p in want if p]
+    if not want:
+        return {}
+
+    # 1) Cocok PERSIS.
+    out: dict[str, dict] = {}
+    exact: dict[str, dict] = {}
+    for r in search_exact_pns(want):
+        pn = (r.get("part_number") or "").upper()
+        if pn and pn not in exact:
+            exact[pn] = r
+    sisa = []
+    for p in want:
+        if p in exact:
+            out[p] = exact[p]
+        else:
+            sisa.append(p)
+    if not sisa:
+        return out
+
+    # 2) Varian bersih: suffix qty/halaman/varian dibuang ('WG…/2' → 'WG…').
+    kandidat: dict[str, list[str]] = {}   # PN asli → varian yang dicoba
+    for p in sisa:
+        kandidat[p] = [v for v in pn_query_variants(p) if v and v != p]
+    lookup = {v for vs in kandidat.values() for v in vs}
+    if lookup:
+        base: dict[str, dict] = {}
+        for r in search_exact_pns(sorted(lookup)):
+            pn = (r.get("part_number") or "").upper()
+            if pn and pn not in base:
+                base[pn] = r
+        for p, vs in list(kandidat.items()):
+            hit = next((base[v] for v in vs if v in base), None)
+            if hit:
+                out[p] = hit
+                sisa.remove(p)
+    if not sisa:
+        return out
+
+    # 3) Tanpa tanda pemisah ('202V091007926' = '202V09100-7926').
+    fmap = _pn_flat_map()
+    for p in sisa:
+        tok = (pn_query_variants(p) or [p])[0]
+        raws = fmap.get(_pn_flat(tok))
+        if not raws:
+            continue
+        rows = search_exact_pns(raws[:1])
+        if rows:
+            out[p] = rows[0]
+    return out
+
+
 def smart_pn_search(term: str) -> tuple[list[dict], Optional[str]]:
     """Fallback pintar saat pencarian PN biasa nihil. Urutan ikhtiar:
       1) varian bersih (suffix qty/halaman dibuang) → substring biasa;

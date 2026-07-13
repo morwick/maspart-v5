@@ -3665,11 +3665,10 @@ def _t_assembly_utama_unit(args: dict, user: dict) -> dict:
 
     asm = al["assemblies"]
     pns = [a["pn"] for a in asm]
-    local: dict[str, dict] = {}
-    for r in part_index.search_exact_pns(pns):
-        pn = (r.get("part_number") or "").upper()
-        if pn and pn not in local:
-            local[pn] = r
+    # PN dari EPC kerap ber-suffix varian ('WG9525160004/2') sementara indeks kita
+    # menyimpan PN dasarnya → rows_for_pns mencocokkan dengan pemaaf (kalau tidak,
+    # part tampil 'stok —' padahal ADA).
+    local = part_index.rows_for_pns(pns)
 
     rows = []
     for a in asm:
@@ -3787,11 +3786,7 @@ def _t_bom_dari_rangka(args: dict, user: dict) -> dict:
     all_pns = [p["pn"] for p in parts]
 
     # Silang tiap PN ke data lokal: nama Inggris katalog + stok + harga (satu baris per PN).
-    local: dict[str, dict] = {}
-    for r in part_index.search_exact_pns(all_pns):
-        pn = (r.get("part_number") or "").upper()
-        if pn and pn not in local:
-            local[pn] = r
+    local = part_index.rows_for_pns(all_pns)   # pemaaf suffix varian EPC ('…/2')
 
     # Kategorisasi PERSIS unit ini: PN dari EPC (BOM exact) × peta kategori katalog
     # lokal (kode 01..12). Memberi "berapa part kabin/rem/dll" untuk unit INI —
@@ -4564,11 +4559,10 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
 
     # Silang ke inventori lokal (nama katalog + stok + harga) — pola tool per-VIN lain.
     pns = [h["pn"] for h in hasil]
-    local: dict[str, dict] = {}
-    for r in part_index.search_exact_pns(pns):
-        pn = (r.get("part_number") or "").upper()
-        if pn and pn not in local:
-            local[pn] = r
+    # PN dari EPC kerap ber-suffix varian ('WG9525160004/2') sementara indeks kita
+    # menyimpan PN dasarnya → rows_for_pns mencocokkan dengan pemaaf (kalau tidak,
+    # part tampil 'stok —' padahal ADA).
+    local = part_index.rows_for_pns(pns)
     boleh_harga = gudang.can_see_price(user.get("username", ""), user.get("role", ""))
 
     parts: list[dict] = []
@@ -4779,11 +4773,10 @@ def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:
 
     # Silang tiap PN ke inventori lokal: nama Inggris katalog + stok + harga.
     pns = [p["pn"] for p in all_parts]
-    local: dict[str, dict] = {}
-    for r in part_index.search_exact_pns(pns):
-        pn = (r.get("part_number") or "").upper()
-        if pn and pn not in local:
-            local[pn] = r
+    # PN dari EPC kerap ber-suffix varian ('WG9525160004/2') sementara indeks kita
+    # menyimpan PN dasarnya → rows_for_pns mencocokkan dengan pemaaf (kalau tidak,
+    # part tampil 'stok —' padahal ADA).
+    local = part_index.rows_for_pns(pns)
 
     def _row(p: dict) -> dict:
         lr = local.get(p["pn"], {})

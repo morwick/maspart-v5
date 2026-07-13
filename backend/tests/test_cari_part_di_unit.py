@@ -39,10 +39,13 @@ def dunia(monkeypatch):
     monkeypatch.setattr(ai, "_expand_query",
                         lambda q: ([q, "brake friction plate", "brake lining"], ["kampas rem"])
                         if "kampas" in q.lower() else ([q], []))
-    monkeypatch.setattr(ai.part_index, "search_exact_pns", lambda pns: [
-        {"part_number": "AZ450045000042", "part_name": "Brake friction plate",
-         "stok": "60", "harga": "Rp 112.000", "gudang": {"02.Pekanbaru": 60}},
-    ])
+    # rows_for_pns = silang inventori PEMAAF suffix varian EPC (lihat
+    # test_pn_suffix_varian.py); di sini cukup indeks tiruan berisi 1 PN.
+    monkeypatch.setattr(ai.part_index, "rows_for_pns", lambda pns: {
+        p: {"part_number": "AZ450045000042", "part_name": "Brake friction plate",
+            "stok": "60", "harga": "Rp 112.000", "gudang": {"02.Pekanbaru": 60}}
+        for p in pns if p.upper().startswith("AZ450045000042")
+    })
     return dicari
 
 
