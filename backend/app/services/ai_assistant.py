@@ -24,7 +24,7 @@ import requests
 from ..core.config import get_settings
 from . import (accurate, ai_chat_log, ai_export, ai_knowledge, ai_sheet, catalog_bom, epc,
                epc_bom, epc_weichai, fault_codes, filter_ref, gudang, gudang_config, harga,
-               orders, part_index, populasi, repairkit, search_log, sims)
+               orders, part_index, populasi, repairkit, search_log, sims, sims_eol)
 
 logger = logging.getLogger("maspart.ai")
 
@@ -571,11 +571,12 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "cari_kode_kesalahan",
                 "description": (
-                    "Cari arti KODE KESALAHAN / fault code / DTC mesin Sinotruk-HOWO "
-                    "(ECU Bosch). Bisa pakai SPN+FMI (mis. SPN 1241 FMI 21), kode P/U "
-                    "(mis. P0410), atau kata kunci komponen. Mengembalikan deskripsi "
-                    "gangguan (teks asli Bahasa China — TERJEMAHKAN ke Indonesia untuk "
-                    "user) beserta status lampu MIL/SVS."
+                    "ARTI kode kesalahan / DTC Sinotruk-HOWO saja (kamus, instan): SPN+FMI, "
+                    "kode P/U, atau kata kunci → deskripsi gangguan (Bahasa China, TERJEMAHKAN) "
+                    "+ lampu MIL/SVS. ⛔ Untuk pertanyaan 'kenapa', 'apa penyebabnya', 'bagaimana "
+                    "cara memperbaiki', atau KELUHAN/GEJALA (mis. 'RPM tidak mau naik') → pakai "
+                    "tool `diagnosa` (ia memanggil asisten perbaikan RESMI Sinotruk + kamus ini "
+                    "sekaligus). Tool ini hanya menjawab ARTI kode, bukan penyebab/perbaikan."
                 ),
                 "parameters": {
                     "type": "object",
@@ -584,6 +585,34 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "fmi": {"type": "integer", "description": "Nomor FMI (Failure Mode Identifier)."},
                         "code": {"type": "string", "description": "Kode P/U, mis. 'P0410'."},
                         "query": {"type": "string", "description": "Kata kunci bila SPN/FMI/kode tak diketahui."},
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "diagnosa",
+                "description": (
+                    "⭐ DIAGNOSA KERUSAKAN — pakai untuk 'kenapa …', 'apa penyebab kode X', "
+                    "'bagaimana cara memperbaiki', atau KELUHAN/GEJALA truk ('RPM terkunci 1500', "
+                    "'rem angin lemah', 'asap hitam'). Menggabungkan ASISTEN PERBAIKAN RESMI "
+                    "SINOTRUK (SIMS EOL AI: manual perbaikan pabrik + kasus kerusakan nyata) "
+                    "dengan kamus DTC lokal (arti kode + lampu MIL/SVS). Jawabannya memuat "
+                    "definisi kerusakan, kemungkinan penyebab, dan langkah pemeriksaan. "
+                    "⏳ Butuh 20–90 detik (pabrik menalar) — WAJAR; jangan ulangi panggilan. "
+                    "⚠️ Bila SIMS menyatakan pengetahuannya belum memuat topik itu, sampaikan "
+                    "JUJUR — ⛔ JANGAN mengarang penyebab/langkah dari pengetahuan umum. "
+                    "Bila jawabannya menyebut komponen yang perlu diganti DAN user menyebut "
+                    "nomor rangka, lanjutkan dengan cari_part_di_unit → PN + stok + harga."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "kode": {"type": "string", "description": "Kode kesalahan bila ada (mis. 'P0645')."},
+                        "spn": {"type": "integer", "description": "SPN bila disebut user."},
+                        "fmi": {"type": "integer", "description": "FMI bila disebut user."},
+                        "keluhan": {"type": "string", "description": "Gejala/keluhan apa adanya dari user (mis. 'mesin RPM terkunci di 1500, tidak bisa naik')."},
                     },
                 },
             },
@@ -3061,6 +3090,92 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
             "MIL=lampu check engine, SVS=lampu servis."
         ),
     }
+
+
+def _t_diagnosa(args: dict, user: dict) -> dict:
+    """DIAGNOSA kerusakan/kode kesalahan — GABUNG tiga sumber:
+      1) DTC lokal (fault_codes): arti kode, SPN/FMI, lampu MIL/SVS — instan.
+      2) SIMS EOL AI: penyebab + langkah pemeriksaan dari manual perbaikan RESMI
+         Sinotruk + kasus kerusakan pabrik (20–90 dtk; jujur bilang bila tak ada).
+      3) Data kita: part tersangka → PN per-unit + stok/harga (lewat tool lain).
+
+    Rancangan pagar (PROJECT.md): query dipertegas ('truk Sinotruk/HOWO …') melawan
+    salah-tafsir istilah; jawaban SIMS TIDAK dipoles bila ia bilang 'belum terindex';
+    DTC lokal selalu disertakan sebagai jangkar fakta walau SIMS gagal/timeout."""
+    keluhan = (args.get("keluhan") or args.get("query") or "").strip()
+    kode = (args.get("kode") or "").strip()
+    try:
+        spn = int(args["spn"]) if str(args.get("spn") or "").strip() else None
+        fmi = int(args["fmi"]) if str(args.get("fmi") or "").strip() else None
+    except (TypeError, ValueError):
+        spn = fmi = None
+    if not (keluhan or kode or spn is not None):
+        return {"error": "Sebutkan kode kesalahan (P0645 / SPN+FMI) atau keluhan/gejalanya."}
+
+    # 1) Jangkar fakta: DTC lokal (instan, tak pernah gagal).
+    dtc: list[dict] = []
+    try:
+        for r in fault_codes.search(spn=spn, fmi=fmi, code=kode or None,
+                                    query=keluhan or None, limit=5):
+            dtc.append({"kode": r["code"], "spn": r["spn"], "fmi": r["fmi"],
+                        "label": r["english"], "deskripsi_cn": r["desc_cn"],
+                        "lampu_mil": r["mil"], "lampu_svs": r["svs"]})
+    except Exception:
+        logger.exception("fault_codes.search gagal (dilewati)")
+
+    # 2) SIMS EOL AI — pertanyaan DIPERTEGAS agar tak salah-tafsir istilah
+    #    (evaluasi: 'rem angin' pernah ditafsir 'damper AC').
+    bagian = []
+    if kode:
+        bagian.append(f"kode kesalahan {kode}")
+    if spn is not None:
+        bagian.append(f"SPN {spn}" + (f" FMI {fmi}" if fmi is not None else ""))
+    if keluhan:
+        bagian.append(keluhan)
+    q = ("Truk Sinotruk HOWO/SITRAK: " + ", ".join(bagian) +
+         ". Jelaskan definisi kerusakan, kemungkinan penyebab, dan langkah pemeriksaan/"
+         "perbaikan menurut manual resmi.")
+    eol = sims_eol.tanya(q)
+
+    out = {
+        "found": bool(dtc) or bool(eol.get("found")),
+        "kriteria": {"kode": kode or None, "spn": spn, "fmi": fmi, "keluhan": keluhan or None},
+        "kode_kesalahan_lokal": dtc,
+        "total_database_dtc": fault_codes.count(),
+        "sumber": ("Database DTC lokal + SIMS EOL AI (asisten diagnosa resmi Sinotruk: "
+                   "manual perbaikan + kasus kerusakan pabrik)."),
+    }
+    if eol.get("found"):
+        out["diagnosa_sims"] = eol["jawaban"]
+        out["sims_log_id"] = eol.get("log_id")
+        out["catatan"] = (
+            "'diagnosa_sims' = jawaban asisten resmi Sinotruk (manual perbaikan pabrik). "
+            "SAJIKAN isinya dengan bahasa Indonesia yang RAPI — terjemahan mentahnya kadang "
+            "kasar (mis. 'HAWO' = HOWO, 'rem ekspresi' = exhaust brake/rem gas buang); "
+            "perbaiki istilahnya TANPA mengubah maknanya. Gabungkan dengan 'kode_kesalahan_lokal' "
+            "(arti kode + lampu MIL/SVS). ⛔ JANGAN menambah penyebab/langkah yang TIDAK ada di "
+            "jawaban SIMS. Bila jawaban menyebut KOMPONEN yang mungkin diganti dan user menyebut "
+            "NOMOR RANGKA, PANGGIL cari_part_di_unit untuk komponen itu → beri PN + stok + harga. "
+            "Tutup dengan pengingat: tetap verifikasi dengan pengukuran di lapangan."
+        )
+    elif eol.get("kosong"):
+        out["diagnosa_sims"] = None
+        out["sims_tak_ada"] = eol.get("jawaban")
+        out["catatan"] = (
+            "SIMS EOL AI JUJUR menyatakan pengetahuannya BELUM memuat topik ini. ⛔ JANGAN "
+            "mengarang penyebab/langkah perbaikan. Sampaikan apa adanya, sajikan "
+            "'kode_kesalahan_lokal' bila ada (arti kode + lampu), lalu tawarkan bantuan lain "
+            "(cek part di unit, hubungi gudang/teknisi)."
+        )
+    else:
+        out["diagnosa_sims"] = None
+        out["sims_error"] = eol.get("error")
+        out["catatan"] = (
+            "SIMS EOL AI tak bisa dihubungi/timeout — sampaikan JUJUR bahwa panduan perbaikan "
+            "resmi belum bisa diambil saat ini. Tetap sajikan 'kode_kesalahan_lokal' bila ada. "
+            "⛔ JANGAN mengarang penyebab/langkah perbaikan dari pengetahuan umum."
+        )
+    return out
 
 
 def _t_cari_filter_shantui(args: dict, user: dict) -> dict:
@@ -6056,6 +6171,7 @@ _DISPATCH = {
     "stok_gudang": _t_stok_gudang,
     "daftar_unit": _t_daftar_unit,
     "cari_kode_kesalahan": _t_cari_kode_kesalahan,
+    "diagnosa": _t_diagnosa,
     "cari_filter_shantui": _t_cari_filter_shantui,
     "pesanan_saya": _t_pesanan_saya,
     "detail_pesanan": _t_detail_pesanan,
