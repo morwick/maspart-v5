@@ -69,6 +69,45 @@ def _is_pembeli(user: dict) -> bool:
     return (user.get("role") or "").lower() == "pembeli"
 
 
+# Field harga di HASIL TOOL (semua nama yang mungkin dipancarkan handler).
+_HARGA_KEYS = ("harga", "harga_lokal", "harga_sims", "harga_jual", "harga_cny",
+               "harga_idr", "harga_display", "harga_daftar")
+
+
+def _boleh_harga(user: dict) -> bool:
+    """Boleh melihat HARGA di asisten — SATU sumber kebenaran, mengikuti Menu Control.
+
+    Dulu asisten memakai gudang.can_see_price (admin/'mas' saja) & hanya dicek 2-3
+    tool → sisanya membocorkan harga lintas-peran. Kini: admin selalu; pembeli boleh
+    (harga jual = yang ia bayar, tampil juga di /toko); staf mengikuti izin kolom
+    'col_harga' dari Menu Control (halaman Cari Part/detail sudah pakai izin yang
+    SAMA — jadi asisten & halaman konsisten)."""
+    role = (user.get("role") or "").lower()
+    if role in ("admin", "pembeli"):
+        return True
+    try:
+        from . import permissions
+        return "col_harga" in permissions.effective("column", user.get("username", ""), role)
+    except Exception:
+        return False
+
+
+def _strip_harga(obj):
+    """Buang SEMUA field harga dari hasil tool (rekursif: dict & list). Penjaga
+    TERPUSAT — dijalankan di _run_tool bila user tak berhak, jadi tak bergantung
+    tiap handler ingat mengecek izin."""
+    if isinstance(obj, dict):
+        for k in list(obj.keys()):
+            if k in _HARGA_KEYS:
+                obj.pop(k, None)
+            else:
+                _strip_harga(obj[k])
+    elif isinstance(obj, list):
+        for it in obj:
+            _strip_harga(it)
+    return obj
+
+
 def _is_admin(user: dict) -> bool:
     return (user.get("role") or "").lower() == "admin"
 
@@ -4678,7 +4717,7 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
     # menyimpan PN dasarnya → rows_for_pns mencocokkan dengan pemaaf (kalau tidak,
     # part tampil 'stok —' padahal ADA).
     local = part_index.rows_for_pns(pns)
-    boleh_harga = gudang.can_see_price(user.get("username", ""), user.get("role", ""))
+    boleh_harga = _boleh_harga(user)
 
     parts: list[dict] = []
     for h in hasil[:40]:
@@ -5596,7 +5635,7 @@ def _excel_stok_harga_cols(user: dict, dengan_stok: bool, dengan_harga: bool) ->
     (aturan audit hardening) & harga di asisten HANYA admin/akun 'mas'."""
     if _is_pembeli(user):
         return False, False
-    if dengan_harga and not gudang.can_see_price(user.get("username", ""), user.get("role", "")):
+    if dengan_harga and not _boleh_harga(user):
         dengan_harga = False
     return dengan_stok, dengan_harga
 
@@ -6211,10 +6250,16 @@ def _run_tool(name: str, args: dict, user: dict, sheet_id: str = "") -> dict:
         # model tak boleh memilih file milik siapa pun lewat argumen.
         args["_sheet_id"] = sheet_id
     try:
-        return fn(args, user)
+        res = fn(args, user)
     except Exception as e:  # pragma: no cover
         logger.exception("tool %s gagal", name)
         return {"error": f"tool '{name}' gagal dijalankan: {e}"}
+    # PENJAGA HARGA TERPUSAT (defense in depth): buang SEMUA field harga bila user
+    # tak berhak — tak peduli handler-nya lupa mengecek. Menu Control 'Kolom Harga'
+    # kini menguasai asisten sama seperti halaman Cari Part/detail.
+    if isinstance(res, dict) and not _boleh_harga(user):
+        _strip_harga(res)
+    return res
 
 
 def _allowed_tool_names(user: dict, sheet_id: str = "") -> set[str]:
