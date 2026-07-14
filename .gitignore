@@ -64,3 +64,4 @@ data/accurate_session.json
 login accurate.txt
 /login accurate.txt
 backend/_accurate_cookies.txt
+data/epc_unit_items/

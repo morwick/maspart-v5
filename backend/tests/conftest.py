@@ -23,3 +23,17 @@ def _jangan_tulis_observabilitas_prod(request, monkeypatch):
         monkeypatch.setattr(ai_chat_log, "log_turn", lambda **kw: True)
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _jangan_bangun_indeks_epc_nyata(monkeypatch):
+    """Indeks item EPC per-unit: warm_items_index menembak RATUSAN panggilan EPC
+    nyata di thread latar & menulis cache disk — tak boleh terjadi dari test.
+    items_index_ready dipaksa False agar handler tak terpengaruh file cache yang
+    kebetulan ada di data/ (test yang mengujinya me-mock sendiri, menimpa ini)."""
+    try:
+        from app.services import epc_bom
+        monkeypatch.setattr(epc_bom, "warm_items_index", lambda r: None)
+        monkeypatch.setattr(epc_bom, "items_index_ready", lambda r: False)
+    except Exception:
+        pass

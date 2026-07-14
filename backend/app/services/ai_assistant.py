@@ -5090,10 +5090,16 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
     # 'ECU' 202V25803-7915 di figure MC07H common rail tak pernah keluar di match
     # (hanya 'ECU bracket'), padahal nyata terpasang. Lambat pada pencarian
     # PERTAMA per unit (~30-60 dtk, buka ratusan part list) lalu cache 1 jam.
-    mode_teliti = bool(args.get("teliti"))
+    # Indeks item unit SUDAH siap (RAM/disk) → langsung jalur lengkap: instan,
+    # cakupan penuh, SATU ronde tool, tanpa panggilan reverse per-PN. Indeks cepat
+    # EPC (match) hanya dipakai selagi indeks lengkap belum terbangun.
+    index_ready = epc_bom.items_index_ready(rangka)
+    mode_teliti = bool(args.get("teliti")) or index_ready
     auto_teliti = False
     hasil: list[dict] = []
     if not mode_teliti:
+        # Mulai bangun indeks lengkap DI LATAR — giliran/eskalasi berikut tinggal pakai.
+        epc_bom.warm_items_index(rangka)
         d = epc_bom.search_in_unit(rangka, kws)
         err = d.get("_err")
         if err in ("token_expired", "no_token"):
@@ -5185,7 +5191,8 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
         "kata_kunci_dicari": kws[:8], "catatan_sinonim": note,
         "jumlah_part": len(hasil), "parts": parts,
         "mode": ("teliti (sisir SEMUA baris part list pohon unit"
-                 + (", otomatis karena pencarian cepat nihil)" if auto_teliti else ")"))
+                 + (", otomatis karena pencarian cepat nihil)" if auto_teliti
+                    else ", indeks unit sudah siap — instan)" if index_ready else ")"))
                 if mode_teliti else "cepat (indeks pencarian EPC match/part)",
         "sumber": ("EPC per-unit — " + ("sisiran SELURUH baris katalog unit (pohon Atlas)."
                    if mode_teliti else
@@ -5204,8 +5211,9 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
             "Hasil ini dari INDEKS pencarian cepat EPC yang TIDAK meliput semua figure "
             "(mis. part internal mesin MC kerap absen). Bila part yang DIMINTA user tidak "
             "ada di daftar (misal yang muncul hanya bracket/baut-nya), JANGAN simpulkan "
-            "tidak ada — panggil ulang cari_part_di_unit dengan teliti=true (menyisir "
-            "SEMUA baris katalog unit; pencarian pertama bisa ~1 menit)."
+            "tidak ada — panggil ulang cari_part_di_unit dengan teliti=true. Indeks "
+            "lengkap unit sudah mulai dibangun di latar (±1 menit), jadi panggilan "
+            "ulangnya cepat."
         )
     if mode_teliti and d.get("incomplete"):
         out["peringatan"] = ("Sebagian node pohon gagal dibuka — hasil mungkin belum lengkap; "
@@ -7764,6 +7772,9 @@ def _prefetch_epc_rangka(history: list[dict]) -> None:
         try:
             epc.lookup(rangka)
             epc_bom.loading_list(rangka)
+            # Indeks ITEM lengkap unit (±1 mnt, persist disk 7 hari) ikut dibangun
+            # sejak rangka pertama disebut → sisiran teliti nanti tinggal pakai.
+            epc_bom.warm_items_index(rangka)
         except Exception:  # pragma: no cover — murni best-effort
             pass
 

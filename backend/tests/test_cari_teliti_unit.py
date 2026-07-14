@@ -13,14 +13,20 @@ from app.services import epc_bom as E
 ADMIN = {"username": "mas", "role": "admin"}
 FRAME = "NJ248278"
 
+# Referensi ASLI (diambil saat import, sebelum fixture conftest mem-patch-nya) —
+# untuk menguji perilaku items_index_ready sungguhan terhadap cache disk.
+_REAL_READY = E.items_index_ready
+
 ECU_ROW = {"pn": "202V25803-7915", "nama": "ECU", "nama_cn": "ECU", "qty": 1,
            "kata_kunci": "ecu",
            "dari_assembly": {"pn": "080-#0211-0477",
                              "nama": "MC07H High-pressure common rail system"}}
 
 
-def _patch_handler_deps(monkeypatch):
+def _patch_handler_deps(monkeypatch, ready=False):
     monkeypatch.setattr(A.part_index, "rows_for_pns", lambda pns: {})
+    monkeypatch.setattr(A.epc_bom, "items_index_ready", lambda r: ready)
+    monkeypatch.setattr(A.epc_bom, "warm_items_index", lambda r: None)
     monkeypatch.setattr(A.epc_bom, "reverse_find_in_unit",
                         lambda r, p: pytest.fail("reverse tak boleh dipanggil — "
                                                  "hasil teliti sudah bawa assembly induk"))
@@ -58,10 +64,11 @@ def test_cari_di_nama_cn_dan_pn_juga(monkeypatch):
     assert E.search_items_in_unit(FRAME, ["080V10311"])["found"] is True
 
 
-def test_all_items_pakai_cache_per_frame(monkeypatch):
+def test_all_items_pakai_cache_per_frame(monkeypatch, tmp_path):
     """Walk & buka node hanya SEKALI per frame per TTL — pencarian berikutnya instan."""
     frame = "TT999901"
     E._items_all_cache.pop(frame, None)
+    _fake_disk(monkeypatch, tmp_path)   # jangan menulis/membaca data/ asli
     opened = {"n": 0}
     monkeypatch.setattr(E, "_walk_all_nodes",
                         lambda r: {"found": True, "frame_number": frame, "root_id": 1,
@@ -115,8 +122,12 @@ def test_teliti_eksplisit_langsung_sisir_tanpa_match(monkeypatch):
 
 def test_mode_cepat_membawa_catatan_cakupan(monkeypatch):
     """Hasil cepat ADA tapi bisa saja bukan part yang diminta (kasus bracket) —
-    model diberi tahu cara eskalasi, dan sisiran mahal TIDAK jalan otomatis."""
+    model diberi tahu cara eskalasi, dan sisiran mahal TIDAK jalan otomatis
+    (hanya DIPANASKAN di latar)."""
     monkeypatch.setattr(A.part_index, "rows_for_pns", lambda pns: {})
+    monkeypatch.setattr(A.epc_bom, "items_index_ready", lambda r: False)
+    warmed = []
+    monkeypatch.setattr(A.epc_bom, "warm_items_index", lambda r: warmed.append(r))
     monkeypatch.setattr(A.epc_bom, "reverse_find_in_unit", lambda r, p: {"instances": []})
     monkeypatch.setattr(A.epc_bom, "search_in_unit",
                         lambda r, k: {"found": True, "frame_number": FRAME,
@@ -130,6 +141,79 @@ def test_mode_cepat_membawa_catatan_cakupan(monkeypatch):
 
     assert out["found"] is True
     assert "teliti=true" in out["catatan_cakupan"]
+    assert warmed == [FRAME]                # indeks lengkap mulai dibangun di latar
+
+
+def test_indeks_siap_langsung_jalur_lengkap_tanpa_match(monkeypatch):
+    """Indeks unit sudah hangat (RAM/disk) → SATU ronde: langsung sisiran lengkap,
+    indeks cepat yang bolong dilewati sama sekali."""
+    _patch_handler_deps(monkeypatch, ready=True)
+    monkeypatch.setattr(A.epc_bom, "search_in_unit",
+                        lambda r, k: pytest.fail("match tak boleh dipanggil saat indeks siap"))
+    monkeypatch.setattr(A.epc_bom, "search_items_in_unit",
+                        lambda r, k: {"found": True, "frame_number": FRAME,
+                                      "hasil": [ECU_ROW], "incomplete": False})
+
+    out = A._t_cari_part_di_unit({"rangka": FRAME, "kata_kunci": "ecu"}, ADMIN)
+
+    assert out["found"] is True
+    assert "indeks unit sudah siap" in out["mode"]
+    assert "catatan_cakupan" not in out     # jalur lengkap → tak perlu saran eskalasi
+
+
+# ── lapisan DISK: sekali sisir per unit, tahan restart/redeploy ──────────────
+def _fake_disk(monkeypatch, tmp_path):
+    monkeypatch.setattr(E, "_items_disk_path", lambda fr: tmp_path / f"{fr}.json")
+
+
+def test_build_lengkap_dipersist_dan_dibaca_tanpa_walk(monkeypatch, tmp_path):
+    frame = "TT999902"
+    E._items_all_cache.pop(frame, None)
+    _fake_disk(monkeypatch, tmp_path)
+    monkeypatch.setattr(E, "_walk_all_nodes",
+                        lambda r: {"found": True, "frame_number": frame, "root_id": 1,
+                                   "nodes": [{"id": 7, "part_list_id": 70, "code": "X",
+                                              "nama": "Node", "nama_cn": "", "leaf": True}],
+                                   "incomplete": False})
+    monkeypatch.setattr(E, "_atlas_items", lambda *a: [
+        {"code": "202V25803-7915", "name": "ECU", "originalName": "", "amount": 1}])
+
+    E._all_items(frame)
+    assert (tmp_path / f"{frame}.json").exists()
+
+    # Proses "baru": RAM kosong; walk DILARANG — harus terbaca dari disk.
+    E._items_all_cache.pop(frame, None)
+    monkeypatch.setattr(E, "_walk_all_nodes",
+                        lambda r: pytest.fail("walk tak boleh jalan — indeks ada di disk"))
+    monkeypatch.setattr(E, "_frame", lambda r: frame)
+
+    r = E._all_items(frame)
+    assert r["found"] is True and r["rows"][0]["pn"] == "202V25803-7915"
+    assert _REAL_READY(frame) is True
+    E._items_all_cache.pop(frame, None)
+
+
+def test_build_parsial_tidak_dipersist(monkeypatch, tmp_path):
+    """Node ada yang gagal dibuka → indeks BELUM lengkap: jangan diabadikan ke
+    disk (nanti 'part tak ada' jadi vonis permanen yang salah)."""
+    frame = "TT999903"
+    E._items_all_cache.pop(frame, None)
+    _fake_disk(monkeypatch, tmp_path)
+    monkeypatch.setattr(E, "_walk_all_nodes",
+                        lambda r: {"found": True, "frame_number": frame, "root_id": 1,
+                                   "nodes": [{"id": 7, "part_list_id": 70, "code": "X",
+                                              "nama": "Node", "nama_cn": "", "leaf": True}],
+                                   "incomplete": True})   # walk tak tuntas
+    monkeypatch.setattr(E, "_atlas_items", lambda *a: [
+        {"code": "202V25803-7915", "name": "ECU", "originalName": "", "amount": 1}])
+
+    r = E._all_items(frame)
+
+    assert r["incomplete"] is True
+    assert not (tmp_path / f"{frame}.json").exists()
+    monkeypatch.setattr(E, "_frame", lambda x: frame)
+    assert _REAL_READY(frame) is False   # parsial ≠ siap
+    E._items_all_cache.pop(frame, None)
 
 
 def test_nihil_di_kedua_mode_jujur_dan_tandai_sudah_teliti(monkeypatch):

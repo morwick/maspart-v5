@@ -1293,45 +1293,128 @@ def atlas_find_in_tree(rangka: str, keywords: list[str], max_nodes: int = 12) ->
 # di-cache per frame supaya pencarian berikutnya instan.
 _items_all_cache: dict[str, dict] = {}   # frame -> {ts, rows, incomplete}
 _items_all_lock = threading.Lock()
-_ITEMS_ALL_TTL = 3600
+_ITEMS_ALL_TTL = 3600                    # cache RAM
+_ITEMS_DISK_TTL = 7 * 86400              # cache DISK — tahan restart/redeploy
+# Lock pembangunan per-frame: prefetch latar & tool bisa minta bersamaan — yang
+# kedua MENUNGGU build yang sama, bukan menembak 388 panggilan EPC dobel.
+_items_build_locks: dict[str, threading.Lock] = {}
+_items_build_guard = threading.Lock()
+
+
+def _items_disk_path(frame: str) -> Path:
+    return get_settings().data_path / "epc_unit_items" / f"{frame}.json"
+
+
+def _items_disk_load(frame: str) -> dict | None:
+    """Indeks item dari disk (None bila absen/kedaluwarsa/rusak). Hanya build
+    LENGKAP yang pernah ditulis, jadi isi disk selalu boleh dipercaya."""
+    try:
+        p = _items_disk_path(frame)
+        if not p.exists():
+            return None
+        d = json.loads(p.read_text(encoding="utf-8"))
+        if (time.time() - float(d.get("ts") or 0)) > _ITEMS_DISK_TTL:
+            return None
+        rows = d.get("rows") or []
+        return {"ts": time.time(), "rows": rows, "incomplete": False} if rows else None
+    except Exception:
+        return None
+
+
+def _items_disk_save(frame: str, rows: list[dict]) -> None:
+    try:
+        p = _items_disk_path(frame)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"ts": time.time(), "rows": rows}, ensure_ascii=False),
+                     encoding="utf-8")
+    except Exception:   # disk penuh/read-only → cache RAM tetap jalan
+        pass
 
 
 def _all_items(rangka: str) -> dict:
     """SEMUA baris part list sebuah unit (setiap item membawa 'dari_assembly').
-    Cache per frame (_ITEMS_ALL_TTL); walk node memakai cache _walk_all_nodes."""
+
+    Tiga lapis: RAM (1 jam) → DISK (7 hari; katalog per-VIN praktis statis —
+    konfigurasi unit tak berubah setelah diproduksi) → build (sisir ~ratusan part
+    list, ±1 mnt, sekali per unit per TTL disk). Hanya build LENGKAP yang
+    dipersist; build parsial (ada node gagal) cuma di RAM supaya dicoba ulang."""
+    frame_pre = _frame(rangka)
+    if frame_pre:
+        with _items_all_lock:
+            c = _items_all_cache.get(frame_pre)
+            if c and (time.time() - c["ts"]) < _ITEMS_ALL_TTL:
+                return {"found": True, "frame_number": frame_pre,
+                        "rows": c["rows"], "incomplete": c["incomplete"]}
+        d = _items_disk_load(frame_pre)
+        if d:
+            with _items_all_lock:
+                _items_all_cache[frame_pre] = d
+            return {"found": True, "frame_number": frame_pre,
+                    "rows": d["rows"], "incomplete": False}
+
     walk = _walk_all_nodes(rangka)
     if not walk.get("found"):
         return {"found": False, "frame_number": walk.get("frame_number"),
                 "_err": walk.get("_err")}
     frame, rid = walk["frame_number"], walk["root_id"]
+
+    with _items_build_guard:
+        block = _items_build_locks.setdefault(frame, threading.Lock())
+    with block:
+        # Build lain baru saja selesai selagi kita menunggu lock → pakai hasilnya.
+        with _items_all_lock:
+            c = _items_all_cache.get(frame)
+            if c and (time.time() - c["ts"]) < _ITEMS_ALL_TTL:
+                return {"found": True, "frame_number": frame,
+                        "rows": c["rows"], "incomplete": c["incomplete"]}
+
+        nodes = [n for n in walk["nodes"] if n.get("part_list_id") and n["part_list_id"] != -1]
+        rows: list[dict] = []
+        rlock = threading.Lock()
+        errbox = [False]
+
+        def _open(n: dict) -> None:
+            for p in _atlas_items(frame, rid, n["part_list_id"], n["id"], n.get("code"), errbox):
+                row = _atlas_item_row(p, "")
+                if not row:
+                    continue
+                row["dari_assembly"] = {"pn": n.get("code"),
+                                        "nama": n.get("nama") or n.get("nama_cn")}
+                with rlock:
+                    rows.append(row)
+
+        if nodes:
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                list(ex.map(_open, nodes))
+        incomplete = bool(walk.get("incomplete") or errbox[0])
+        with _items_all_lock:
+            _items_all_cache[frame] = {"ts": time.time(), "rows": rows, "incomplete": incomplete}
+        if rows and not incomplete:
+            _items_disk_save(frame, rows)
+        return {"found": True, "frame_number": frame, "rows": rows, "incomplete": incomplete}
+
+
+def items_index_ready(rangka: str) -> bool:
+    """True bila indeks item unit SIAP & LENGKAP (RAM/disk) — pencarian teliti
+    akan instan, jadi pemanggil boleh melewati indeks cepat EPC sama sekali."""
+    frame = _frame(rangka)
+    if not frame:
+        return False
     with _items_all_lock:
         c = _items_all_cache.get(frame)
-        if c and (time.time() - c["ts"]) < _ITEMS_ALL_TTL:
-            return {"found": True, "frame_number": frame,
-                    "rows": c["rows"], "incomplete": c["incomplete"]}
+        if c and (time.time() - c["ts"]) < _ITEMS_ALL_TTL and not c["incomplete"]:
+            return True
+    return _items_disk_load(frame) is not None
 
-    nodes = [n for n in walk["nodes"] if n.get("part_list_id") and n["part_list_id"] != -1]
-    rows: list[dict] = []
-    rlock = threading.Lock()
-    errbox = [False]
 
-    def _open(n: dict) -> None:
-        for p in _atlas_items(frame, rid, n["part_list_id"], n["id"], n.get("code"), errbox):
-            row = _atlas_item_row(p, "")
-            if not row:
-                continue
-            row["dari_assembly"] = {"pn": n.get("code"),
-                                    "nama": n.get("nama") or n.get("nama_cn")}
-            with rlock:
-                rows.append(row)
-
-    if nodes:
-        with ThreadPoolExecutor(max_workers=8) as ex:
-            list(ex.map(_open, nodes))
-    incomplete = bool(walk.get("incomplete") or errbox[0])
-    with _items_all_lock:
-        _items_all_cache[frame] = {"ts": time.time(), "rows": rows, "incomplete": incomplete}
-    return {"found": True, "frame_number": frame, "rows": rows, "incomplete": incomplete}
+def warm_items_index(rangka: str) -> None:
+    """Bangun indeks item unit di THREAD LATAR (best-effort, idempoten via lock
+    build per-frame). Dipanggil prefetch chat & mode cepat — supaya saat sisiran
+    teliti akhirnya dibutuhkan, indeksnya sudah (hampir) siap."""
+    if items_index_ready(rangka):
+        return
+    threading.Thread(target=lambda: _all_items(rangka), daemon=True,
+                     name=f"epc-items-warm-{_frame(rangka) or 'x'}"[:40]).start()
 
 
 def search_items_in_unit(rangka: str, keywords: list[str]) -> dict:
