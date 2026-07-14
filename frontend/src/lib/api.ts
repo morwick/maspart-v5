@@ -1298,6 +1298,12 @@ export type ChatLogRow = {
   tool_failed: boolean;
   reply_len: number;
   outcome?: string;
+  // Biaya token DeepSeek giliran ini (jumlah semua panggilan API-nya).
+  // 0/undefined pada baris lama sebelum migrasi 021.
+  tokens_in?: number;
+  tokens_out?: number;
+  tokens_cache_hit?: number;
+  api_calls?: number;
 };
 export type ChatLogSummary = {
   total: number;
@@ -1308,6 +1314,14 @@ export type ChatLogSummary = {
   tool_gagal_rasio_persen?: number;
   tool_tersering?: [string, number][];
   outcome?: Record<string, number>;
+  token?: {
+    giliran_terukur: number;
+    total_in: number;
+    total_out: number;
+    rata2_in: number;
+    rata2_out: number;
+    cache_hit_persen: number;
+  };
 };
 export async function getChatLog(
   token: string,

@@ -12,6 +12,14 @@ import {
 } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 
+// Angka token ringkas: 1234 → "1,2rb", 1234567 → "1,2jt".
+function fmtTok(n?: number): string {
+  const v = n ?? 0;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1).replace(".", ",")}jt`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1).replace(".", ",")}rb`;
+  return String(v);
+}
+
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="surface" style={{ padding: 14, minWidth: 130, flex: 1 }}>
@@ -104,7 +112,9 @@ export default function ChatLogPage() {
         <div className="flex items-center gap-3" style={{ marginBottom: 14 }}>
           <p style={{ fontSize: 13.5, color: "var(--ink-500)", flex: 1 }}>
             Ringkasan dari maksimal 1000 giliran chat terakhir — pakai untuk memantau latensi,
-            seberapa sering guard anti-halusinasi menyala, dan tool mana yang paling dipakai.
+            biaya token DeepSeek per pesan, seberapa sering guard anti-halusinasi menyala, dan
+            tool mana yang paling dipakai. Kolom Token = input / output (arahkan kursor untuk
+            rincian cache &amp; jumlah panggilan API).
           </p>
           <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading || busy}>
             {loading ? "Memuat…" : "↻ Muat ulang"}
@@ -143,6 +153,21 @@ export default function ChatLogPage() {
                     hint={`${summary.guard_menyala ?? 0} giliran`} />
               <Stat label="Tool gagal" value={`${summary.tool_gagal_rasio_persen ?? 0}%`}
                     hint={`${summary.tool_gagal ?? 0} giliran`} />
+              {/* Biaya DeepSeek per pesan: rata-rata token masuk+keluar per giliran.
+                  Cache hit = bagian input bertarif ±1/10 (makin tinggi makin hemat). */}
+              <Stat
+                label="Token / pesan"
+                value={
+                  (summary.token?.giliran_terukur ?? 0) > 0
+                    ? `${fmtTok((summary.token?.rata2_in ?? 0) + (summary.token?.rata2_out ?? 0))}`
+                    : "—"
+                }
+                hint={
+                  (summary.token?.giliran_terukur ?? 0) > 0
+                    ? `in ${fmtTok(summary.token?.rata2_in)} · out ${fmtTok(summary.token?.rata2_out)} · cache ${summary.token?.cache_hit_persen ?? 0}%`
+                    : "belum ada data (migrasi 021)"
+                }
+              />
             </div>
 
             <div className="flex flex-wrap gap-3" style={{ marginBottom: 22 }}>
@@ -219,6 +244,7 @@ export default function ChatLogPage() {
                   <th style={{ width: 120 }}>Tool</th>
                   <th className="num" style={{ width: 70 }}>Ronde</th>
                   <th className="num" style={{ width: 80 }}>Latensi</th>
+                  <th className="num" style={{ width: 110 }}>Token</th>
                   <th style={{ width: 90 }}>Outcome</th>
                 </tr>
               </thead>
@@ -263,6 +289,19 @@ export default function ChatLogPage() {
                     </td>
                     <td className="num mono">{r.rounds}</td>
                     <td className="num mono">{(r.latency_ms / 1000).toFixed(1)}s</td>
+                    <td
+                      className="num mono"
+                      style={{ fontSize: 11, whiteSpace: "nowrap" }}
+                      title={
+                        (r.tokens_in ?? 0) || (r.tokens_out ?? 0)
+                          ? `Input ${(r.tokens_in ?? 0).toLocaleString("id-ID")} token (cache hit ${(r.tokens_cache_hit ?? 0).toLocaleString("id-ID")}) · output ${(r.tokens_out ?? 0).toLocaleString("id-ID")} token · ${r.api_calls ?? 0}x panggilan API`
+                          : "Baris lama — token belum dicatat (migrasi 021)"
+                      }
+                    >
+                      {(r.tokens_in ?? 0) || (r.tokens_out ?? 0)
+                        ? `${fmtTok(r.tokens_in)} / ${fmtTok(r.tokens_out)}`
+                        : "—"}
+                    </td>
                     <td style={{ fontSize: 11.5 }}>{r.outcome || "—"}</td>
                   </tr>
                 ))}

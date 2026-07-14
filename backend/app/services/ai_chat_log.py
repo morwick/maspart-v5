@@ -47,7 +47,11 @@ def create_table_sql() -> str:
         "  guard_hit boolean not null default false,\n"
         "  tool_failed boolean not null default false,\n"
         "  reply_len int not null default 0,\n"
-        "  outcome text\n"  # ok | not_found | empty | sanitized
+        "  outcome text,\n"  # ok | not_found | empty | sanitized
+        "  tokens_in int not null default 0,\n"         # migrations/021
+        "  tokens_out int not null default 0,\n"
+        "  tokens_cache_hit int not null default 0,\n"
+        "  api_calls int not null default 0\n"
         ");\n"
         "create index if not exists ai_chat_log_created_idx on ai_chat_log (created_at desc);\n"
     )
@@ -56,53 +60,75 @@ def create_table_sql() -> str:
 def log_turn(*, username: str | None, role: str | None, question: str,
              tools_used: list[str] | None, rounds: int, latency_ms: int,
              guard_hit: bool, tool_failed: bool, reply_len: int,
-             outcome: str) -> bool:
+             outcome: str, tokens_in: int = 0, tokens_out: int = 0,
+             tokens_cache_hit: int = 0, api_calls: int = 0) -> bool:
     """Simpan satu baris observabilitas. Best-effort: False bila gagal/tabel absen,
-    TAK melempar (pemanggil membungkus lagi, tapi tetap aman di sini)."""
-    try:
-        tools = tools_used or []
-        r = requests.post(
-            _rest_url("ai_chat_log"),
-            headers=_service_headers("return=minimal"),
-            json={
-                "username": (username or None),
-                "role": (role or None),
-                "question": (question or "")[:500] or None,
-                "tools": (", ".join(tools) if tools else None),
-                "tools_count": len(tools),
-                "rounds": int(rounds),
-                "latency_ms": int(latency_ms),
-                "guard_hit": bool(guard_hit),
-                "tool_failed": bool(tool_failed),
-                "reply_len": int(reply_len),
-                "outcome": outcome or None,
-                "created_at": _now(),
-            },
-            timeout=_TIMEOUT,
-        )
-        return r.status_code in (200, 201, 204)
-    except Exception:
-        return False
+    TAK melempar (pemanggil membungkus lagi, tapi tetap aman di sini).
+
+    tokens_* = biaya DeepSeek giliran ini (jumlah seluruh panggilan API-nya),
+    dari field `usage` respons. Kolomnya dari migrations/021 — bila belum
+    dijalankan, baris diulang TANPA kolom token agar log lama tetap tercatat."""
+    tools = tools_used or []
+    base = {
+        "username": (username or None),
+        "role": (role or None),
+        "question": (question or "")[:500] or None,
+        "tools": (", ".join(tools) if tools else None),
+        "tools_count": len(tools),
+        "rounds": int(rounds),
+        "latency_ms": int(latency_ms),
+        "guard_hit": bool(guard_hit),
+        "tool_failed": bool(tool_failed),
+        "reply_len": int(reply_len),
+        "outcome": outcome or None,
+        "created_at": _now(),
+    }
+    tok = {
+        "tokens_in": int(tokens_in or 0),
+        "tokens_out": int(tokens_out or 0),
+        "tokens_cache_hit": int(tokens_cache_hit or 0),
+        "api_calls": int(api_calls or 0),
+    }
+    for payload in ({**base, **tok}, base):
+        try:
+            r = requests.post(
+                _rest_url("ai_chat_log"),
+                headers=_service_headers("return=minimal"),
+                json=payload,
+                timeout=_TIMEOUT,
+            )
+            if r.status_code in (200, 201, 204):
+                return True
+        except Exception:
+            return False
+    return False
+
+
+_SELECT_BASE = ("id,created_at,username,role,question,tools,tools_count,"
+                "rounds,latency_ms,guard_hit,tool_failed,reply_len,outcome")
+_SELECT_TOKENS = _SELECT_BASE + ",tokens_in,tokens_out,tokens_cache_hit,api_calls"
 
 
 def list_logs(limit: int = 200) -> list[dict]:
-    """Baris observabilitas terbaru dulu (untuk halaman admin)."""
-    try:
-        r = requests.get(
-            _rest_url("ai_chat_log"),
-            headers={**_service_headers(), "Accept": "application/json"},
-            params={
-                "select": ("id,created_at,username,role,question,tools,tools_count,"
-                           "rounds,latency_ms,guard_hit,tool_failed,reply_len,outcome"),
-                "order": "created_at.desc",
-                "limit": str(max(1, min(limit, 1000))),
-            },
-            timeout=_TIMEOUT,
-        )
-        r.raise_for_status()
-        return r.json() or []
-    except Exception:
-        return []
+    """Baris observabilitas terbaru dulu (untuk halaman admin). Kolom token dicoba
+    dulu; skema lama (migrasi 021 belum jalan) → fallback tanpa kolom token."""
+    for sel in (_SELECT_TOKENS, _SELECT_BASE):
+        try:
+            r = requests.get(
+                _rest_url("ai_chat_log"),
+                headers={**_service_headers(), "Accept": "application/json"},
+                params={
+                    "select": sel,
+                    "order": "created_at.desc",
+                    "limit": str(max(1, min(limit, 1000))),
+                },
+                timeout=_TIMEOUT,
+            )
+            r.raise_for_status()
+            return r.json() or []
+        except Exception:
+            continue
+    return []
 
 
 def _delete(params: dict) -> tuple[bool, int]:
@@ -194,6 +220,21 @@ def summary() -> dict:
     def _pct(i: int) -> int:
         return lat[min(len(lat) - 1, int(len(lat) * i / 100))]
 
+    # Token DeepSeek: rata-rata dihitung HANYA dari baris yang punya data token
+    # (baris lama sebelum migrasi 021 semua 0 — ikut dirata-rata bikin angka bohong).
+    tok_rows = [r for r in rows if int(r.get("tokens_in") or 0) or int(r.get("tokens_out") or 0)]
+    tok_in = sum(int(r.get("tokens_in") or 0) for r in tok_rows)
+    tok_out = sum(int(r.get("tokens_out") or 0) for r in tok_rows)
+    tok_hit = sum(int(r.get("tokens_cache_hit") or 0) for r in tok_rows)
+    token = {
+        "giliran_terukur": len(tok_rows),
+        "total_in": tok_in,
+        "total_out": tok_out,
+        "rata2_in": round(tok_in / len(tok_rows)) if tok_rows else 0,
+        "rata2_out": round(tok_out / len(tok_rows)) if tok_rows else 0,
+        "cache_hit_persen": round(100 * tok_hit / tok_in, 1) if tok_in else 0.0,
+    }
+
     return {
         "total": n,
         "latensi_ms": {"p50": _pct(50), "p90": _pct(90), "maks": lat[-1]},
@@ -203,4 +244,5 @@ def summary() -> dict:
         "tool_gagal_rasio_persen": round(100 * failed / n, 1),
         "tool_tersering": sorted(tool_freq.items(), key=lambda kv: -kv[1])[:10],
         "outcome": outcome_freq,
+        "token": token,
     }

@@ -102,3 +102,55 @@ def test_chat_catat_outcome_not_found_saat_karangan(monkeypatch):
     assert "AZ9998887776" not in out["reply"]
     assert captured["outcome"] == "not_found"
     assert captured["guard_hit"] is True
+
+
+# ── Kolom token (migrasi 021): skema lama → fallback tanpa kolom token ───────
+
+def test_log_turn_fallback_tanpa_kolom_token(monkeypatch):
+    """Migrasi 021 belum jalan → insert dgn kolom token ditolak PostgREST;
+    baris WAJIB diulang tanpa kolom token agar log tidak hilang."""
+    payloads = []
+
+    class _R:
+        def __init__(self, code):
+            self.status_code = code
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        payloads.append(json)
+        return _R(400 if len(payloads) == 1 else 201)
+
+    monkeypatch.setattr(ai_chat_log.requests, "post", fake_post)
+
+    ok = ai_chat_log.log_turn(username="a", role="admin", question="q",
+                              tools_used=[], rounds=1, latency_ms=10,
+                              guard_hit=False, tool_failed=False, reply_len=5,
+                              outcome="ok", tokens_in=100, tokens_out=20,
+                              tokens_cache_hit=90, api_calls=2)
+
+    assert ok is True
+    assert "tokens_in" in payloads[0]           # dicoba lengkap dulu
+    assert "tokens_in" not in payloads[1]       # fallback: tanpa kolom token
+    assert payloads[1]["outcome"] == "ok"
+
+
+def test_log_turn_skema_baru_sekali_kirim(monkeypatch):
+    payloads = []
+
+    class _R:
+        status_code = 201
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        payloads.append(json)
+        return _R()
+
+    monkeypatch.setattr(ai_chat_log.requests, "post", fake_post)
+
+    ok = ai_chat_log.log_turn(username="a", role="admin", question="q",
+                              tools_used=[], rounds=1, latency_ms=10,
+                              guard_hit=False, tool_failed=False, reply_len=5,
+                              outcome="ok", tokens_in=85_000, tokens_out=1_200,
+                              tokens_cache_hit=79_000, api_calls=2)
+
+    assert ok is True and len(payloads) == 1
+    assert payloads[0]["tokens_in"] == 85_000
+    assert payloads[0]["api_calls"] == 2

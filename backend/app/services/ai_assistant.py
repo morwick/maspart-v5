@@ -7589,6 +7589,17 @@ def _post_chat(messages: list[dict], tools: list[dict]) -> dict:
         return r.json()
 
 
+def _add_usage(tot: dict, data: dict) -> None:
+    """Akumulasi field `usage` respons DeepSeek ke penghitung giliran — satu giliran
+    chat = beberapa panggilan API (ronde tool/retry/final); biaya sebenarnya =
+    jumlahnya. prompt_cache_hit_tokens = bagian input yang kena cache (≈1/10 harga)."""
+    u = (data or {}).get("usage") or {}
+    tot["calls"] += 1
+    tot["in"] += int(u.get("prompt_tokens") or 0)
+    tot["out"] += int(u.get("completion_tokens") or 0)
+    tot["cache"] += int(u.get("prompt_cache_hit_tokens") or 0)
+
+
 _HIST_RECENT_FULL = 6      # pesan terbaru yang dikirim utuh (rujukan follow-up)
 _HIST_CHARS_RECENT = 4000
 _HIST_CHARS_OLD = 1500     # pesan lama dipangkas lebih ketat — hemat token
@@ -8262,7 +8273,9 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 question=_pertanyaan, tools_used=tools_used,
                 rounds=tool_rounds, latency_ms=int((time.monotonic() - _t0) * 1000),
                 guard_hit=guard_retries > 0, tool_failed=tool_gagal_pernah,
-                reply_len=len(reply or ""), outcome=outcome_for)
+                reply_len=len(reply or ""), outcome=outcome_for,
+                tokens_in=_tok["in"], tokens_out=_tok["out"],
+                tokens_cache_hit=_tok["cache"], api_calls=_tok["calls"])
         except Exception:
             pass
         return {"reply": reply, "tools_used": tools_used,
@@ -8278,6 +8291,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     # counter-nya sendiri; _iters = pagar total agar mustahil loop selamanya.
     tool_rounds = 0
     _iters = 0
+    # Biaya token DeepSeek giliran ini (jumlah SEMUA panggilan API-nya) → ai_chat_log.
+    _tok = {"in": 0, "out": 0, "cache": 0, "calls": 0}
     _MAX_ITERS = _MAX_TOOL_ROUNDS + _MAX_EMPTY_RETRIES + _MAX_GUARD_RETRIES + 4
     #            (+1 koreksi klaim-Excel; +1 koreksi EPC-first; +2 pagar lama)
     while _iters < _MAX_ITERS:
@@ -8285,6 +8300,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
         tools_habis = tool_rounds >= _MAX_TOOL_ROUNDS
         # Ronde tool habis → jangan tawarkan tool lagi, paksa jawaban final.
         data = _post_chat(messages, [] if tools_habis else tools)
+        _add_usage(_tok, data)
         choice = (data.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
         tool_calls = msg.get("tool_calls") or []
@@ -8451,6 +8467,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
 
     # Putaran tool habis — minta jawaban final tanpa tool.
     final = _post_chat(messages, [])
+    _add_usage(_tok, final)
     msg = (final.get("choices") or [{}])[0].get("message") or {}
     reply = _strip_reasoning(msg.get("content") or "")
     if not reply:
