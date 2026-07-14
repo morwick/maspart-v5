@@ -10,8 +10,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.ratelimit import limit
 from ..deps import get_current_user, require_admin, require_buyer_ready
-from ..services import (accurate_quotation, gudang, harga, orders, part_index, payments,
-                        reservations, shipping)
+from ..services import gudang, harga, orders, part_index, payments, reservations, shipping
 from ..services import supabase_client as sb
 
 logger = logging.getLogger("maspart.orders")
@@ -22,13 +21,9 @@ router = APIRouter(prefix="/api", tags=["orders"])
 def _after_paid(order_code: str) -> None:
     """Dipanggil SEKALI saat order transisi ke lunas (webhook/polling). Memicu
     pembuatan Penawaran Accurate otomatis di THREAD LATAR — best-effort, TAK
-    PERNAH menggagalkan/menunda respons pembayaran."""
-    if not get_settings().accurate_auto_quotation:
-        return
-    try:
-        accurate_quotation.create_for_order_bg(order_code)
-    except Exception:  # pragma: no cover — jaring pengaman, jangan ganggu alur bayar
-        pass
+    PERNAH menggagalkan/menunda respons pembayaran. Satu implementasi dipakai
+    bersama jalur rekonsiliasi latar (orders.after_paid)."""
+    orders.after_paid(order_code)
 _IMG_MIME = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "pdf": "application/pdf"}
 _MAX_PROOF_BYTES = 10 * 1024 * 1024  # 10 MB
 

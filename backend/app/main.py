@@ -23,6 +23,7 @@ from .core.config import get_settings
 from .routers import admin, ai, auth, branch, buyer, chat, geo, harga, orders, parts, populasi, repairkit, stok
 from .services import (accurate, ai_chat_log, ai_sinonim_learn, geocode, image_search,
                        part_index, sims, sims_weights)
+from .services import orders as orders_service   # NB: `orders` di atas = ROUTER
 
 logging.basicConfig(
     level=logging.INFO,
@@ -91,6 +92,15 @@ def _warmup():
         geocode.start_postal_warmer()
     except Exception as e:  # pragma: no cover
         print(f"[startup] auto-isi kode pos gudang gagal: {e}")
+    try:
+        # Rekonsiliasi pembayaran (latar, tiap 10 menit). Uang pembeli tak lewat
+        # server kita, jadi server mati tak menghentikan pembayaran — yang hilang
+        # adalah NOTIFIKASI-nya (retry webhook Midtrans cuma ± 5–6 jam). Penyapu ini
+        # menanyakan sendiri status tiap order 'menunggu_pembayaran' ke gateway, jadi
+        # pembayaran tetap terkejar walau webhook hangus & pembeli tak membuka halaman.
+        orders_service.start_reconcile_scheduler()
+    except Exception as e:  # pragma: no cover
+        print(f"[startup] scheduler rekonsiliasi pembayaran gagal: {e}")
 
 
 @asynccontextmanager

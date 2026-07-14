@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -329,9 +330,12 @@ def get_order(order_code: str, username: str | None = None, gudang: str | None =
         pic = _pic_for_display(order.get("gudang") or "")
         if pic:
             order["gudang_pic"] = pic
-        # Auto-batalkan bila pembayaran sudah kedaluwarsa (VA/QRIS lewat batas).
-        if is_expired(order) and expire_order(order_code):
-            order["status"] = "batal"
+        # Pembayaran lewat batas → JANGAN langsung batal: tanya gateway dulu (webhook
+        # bisa saja hangus saat server down, padahal pembeli sudah bayar tepat waktu).
+        if is_expired(order):
+            new = reconcile_order(order)
+            if new:
+                order["status"] = new
         return order
     except Exception:
         return None
@@ -416,6 +420,120 @@ def sales_recap(gudang: str | None = None) -> dict:
         "by_gudang": sorted(by_gudang.values(), key=lambda x: x["omzet"], reverse=True),
         "by_month": sorted(by_month.values(), key=lambda x: x["month"]),
         "top_parts": top_parts,
+    }
+
+
+def status_map(order_codes: list[str]) -> dict[str, dict]:
+    """{order_code: {status, username, created_at}} untuk beberapa order sekaligus
+    (SATU query). Dipakai menjelaskan pesanan mana yang sedang menahan stok."""
+    codes = [c for c in dict.fromkeys(order_codes or []) if c]
+    if not codes:
+        return {}
+    try:
+        resp = requests.get(
+            _rest_url("orders"),
+            headers={**_service_headers(), "Accept": "application/json"},
+            params={
+                "select": "order_code,status,username,created_at",
+                "order_code": f"in.({','.join(codes)})",
+                "limit": str(len(codes)),
+            },
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return {r["order_code"]: r for r in (resp.json() or []) if r.get("order_code")}
+    except Exception:
+        logger.exception("status_map gagal")
+        return {}
+
+
+# ── Pesanan bermasalah (pemeriksaan operasional admin) ───────────────────────
+# Sinyal masalah sudah lama DICATAT (payment_note dari jaring pengaman pembayaran,
+# penawaran_status dari Penawaran Accurate otomatis) tapi tak pernah DIBACA siapa pun
+# kecuali yang membuka database. Di sinilah semuanya dikumpulkan.
+_PROBLEM_SELECT = ("order_code,username,gudang,total,status,payment_method,payment_note,"
+                   "penawaran_status,penawaran_note,paid_at,payment_expiry,created_at")
+# Skema lama (migrasi 018/019 belum jalan) → kolom penanda belum ada; jangan gagal total.
+_PROBLEM_SELECT_MIN = "order_code,username,gudang,total,status,payment_method,paid_at,payment_expiry,created_at"
+
+
+def _age_days(iso: str | None) -> int | None:
+    e = _epoch(iso)
+    return None if e is None else int((time.time() - e) // 86400)
+
+
+def problem_orders(stuck_days: int = 3, limit: int = 500) -> dict:
+    """Pesanan yang butuh perhatian admin, dikelompokkan per jenis masalah.
+
+    • uang_perlu_dicek     : payment_note terisi — dibayar setelah batal / nominal tak
+                             cocok. UANG NYATA yang menunggu refund atau konfirmasi.
+    • penawaran_gagal      : sudah lunas tapi Penawaran Accurate gagal dibuat → pesanan
+                             tak masuk pembukuan.
+    • lunas_belum_dikirim  : 'diproses' lebih dari `stuck_days` hari — pembeli menunggu.
+    • bayar_macet          : 'menunggu_pembayaran' yang sudah lewat tenggat tapi belum
+                             beres. Normalnya rekonsiliasi melunasi/membatalkannya, jadi
+                             sisa di sini = gateway tak bisa ditanya → periksa manual.
+    """
+    rows: list[dict] = []
+    for sel in (_PROBLEM_SELECT, _PROBLEM_SELECT_MIN):
+        try:
+            resp = requests.get(
+                _rest_url("orders"),
+                headers={**_service_headers(), "Accept": "application/json"},
+                params={"select": sel, "order": "created_at.desc", "limit": str(int(limit))},
+                timeout=_TIMEOUT,
+            )
+            resp.raise_for_status()
+            rows = resp.json() or []
+            break
+        except Exception:
+            continue
+
+    def _ringkas(o: dict, catatan: str = "") -> dict:
+        umur = _age_days(o.get("paid_at") or o.get("created_at"))
+        out = {
+            "order_code": o.get("order_code"),
+            "pembeli": o.get("username"),
+            "gudang": o.get("gudang"),
+            "total": int(o.get("total") or 0),
+            "status": o.get("status"),
+            "umur_hari": umur,
+        }
+        if catatan:
+            out["catatan"] = catatan
+        return out
+
+    uang: list[dict] = []
+    penawaran: list[dict] = []
+    belum_kirim: list[dict] = []
+    macet: list[dict] = []
+    for o in rows:
+        if o.get("payment_note"):
+            uang.append(_ringkas(o, str(o["payment_note"])))
+        if (o.get("penawaran_status") or "") == "failed":
+            penawaran.append(_ringkas(o, str(o.get("penawaran_note") or "Penawaran Accurate gagal dibuat.")))
+        if o.get("status") == "diproses":
+            umur = _age_days(o.get("paid_at") or o.get("created_at"))
+            if umur is not None and umur >= stuck_days:
+                belum_kirim.append(_ringkas(o, f"Lunas {umur} hari lalu, belum dikirim."))
+        if o.get("status") == "menunggu_pembayaran" and is_expired(o):
+            macet.append(_ringkas(o, "Lewat tenggat bayar tapi belum lunas/batal — gateway "
+                                     "tak bisa ditanya? periksa manual."))
+
+    total = len(uang) + len(penawaran) + len(belum_kirim) + len(macet)
+    return {
+        "ada_masalah": total > 0,
+        "ringkasan": {
+            "uang_perlu_dicek": len(uang),
+            "penawaran_gagal": len(penawaran),
+            "lunas_belum_dikirim": len(belum_kirim),
+            "bayar_macet": len(macet),
+            "diperiksa": len(rows),
+        },
+        "uang_perlu_dicek": uang,
+        "penawaran_gagal": penawaran,
+        "lunas_belum_dikirim": belum_kirim,
+        "bayar_macet": macet,
     }
 
 
@@ -539,10 +657,13 @@ def expire_order(order_code: str) -> bool:
 
 
 def sweep_expired(rows: list[dict]) -> list[dict]:
-    """Untuk daftar order: auto-batalkan yang kedaluwarsa & perbarui status di tempat."""
+    """Untuk daftar order: selesaikan yang kedaluwarsa (lunasi bila ternyata sudah
+    dibayar di gateway, selain itu batalkan) & perbarui status di tempat."""
     for o in rows or []:
-        if is_expired(o) and expire_order(o.get("order_code") or ""):
-            o["status"] = "batal"
+        if is_expired(o):
+            new = reconcile_order(o)
+            if new:
+                o["status"] = new
     return rows
 
 
@@ -634,22 +755,177 @@ def set_fulfill_gudang(order_code: str, label: str) -> bool:
         return False
 
 
+def _flag_payment(order_code: str, note: str) -> bool:
+    """Catat masalah pembayaran di order + log keras, agar uang yang sudah masuk
+    tak pernah hilang dari radar admin. Kolom `payment_note` (migrasi 019) mungkin
+    belum ada → kegagalan patch ditelan, lognya tetap ada."""
+    logger.warning("MASALAH PEMBAYARAN order %s: %s", order_code, note)
+    try:
+        return _patch(order_code, {"payment_note": note})
+    except Exception:
+        logger.exception("_flag_payment gagal (order %s)", order_code)
+        return False
+
+
 def flag_late_payment(order_code: str, amount: int = 0) -> bool:
     """Tandai order BATAL yang ternyata tetap dibayar di gateway (perlu refund).
 
     Order tidak dihidupkan kembali — stoknya sudah dilepas & bisa saja sudah terjual
-    ke pembeli lain. Yang penting uangnya tidak hilang dari radar admin: dicatat di
-    kolom `payment_note` (migrasi 019) + log peringatan, sehingga tetap terlihat
-    meski kolomnya belum ada.
+    ke pembeli lain.
     """
-    note = (f"Dibayar di gateway setelah pesanan BATAL (Rp{int(amount or 0):,}) — "
-            "perlu refund / konfirmasi ke pembeli.")
-    logger.warning("PEMBAYARAN TELAT order %s: %s", order_code, note)
+    return _flag_payment(order_code, (
+        f"Dibayar di gateway setelah pesanan BATAL (Rp{int(amount or 0):,}) — "
+        "perlu refund / konfirmasi ke pembeli."
+    ))
+
+
+def flag_amount_mismatch(order_code: str, paid: int, total: int) -> bool:
+    """Gateway lunas tapi NOMINALNYA beda dari tagihan (kurang/lebih bayar).
+    Jangan dilunasi otomatis — uangnya nyata, jadi ditandai untuk admin."""
+    return _flag_payment(order_code, (
+        f"Dibayar Rp{int(paid or 0):,} di gateway, tagihan Rp{int(total or 0):,} — "
+        "nominal tidak cocok, perlu diperiksa admin."
+    ))
+
+
+# ── Rekonsiliasi dengan gateway ───────────────────────────────────────────────
+# Uang pembeli tak pernah lewat server kita (halaman bayar ada di domain gateway),
+# jadi server mati TIDAK menghentikan pembayaran — yang rapuh cuma SINKRONISASI
+# status setelah server hidup lagi. Webhook Midtrans hanya di-retry beberapa kali
+# (jendela ± 5–6 jam), dan polling hanya jalan bila pembeli membuka halamannya.
+# Karena itu server WAJIB punya jalur ketiga yang tak bergantung pada keduanya:
+# tanya sendiri ke gateway.
+_RECONCILE_EVERY = 600     # detik antar-sapuan rekonsiliasi latar
+_RECONCILE_LIMIT = 200     # maksimum order pending yang diperiksa per sapuan
+
+
+def after_paid(order_code: str) -> None:
+    """Dipanggil SEKALI saat order transisi ke lunas (webhook / polling / rekonsiliasi):
+    memicu pembuatan Penawaran Accurate di THREAD LATAR. Best-effort — tak pernah
+    menggagalkan atau menunda alur pembayaran."""
     try:
-        return _patch(order_code, {"payment_note": note})
+        from ..core.config import get_settings
+        if not get_settings().accurate_auto_quotation:
+            return
+        from . import accurate_quotation   # lazy: accurate_quotation meng-import modul ini
+        accurate_quotation.create_for_order_bg(order_code)
+    except Exception:   # pragma: no cover — jaring pengaman, jangan ganggu alur bayar
+        logger.exception("after_paid gagal (order %s)", order_code)
+
+
+def _gateway_check(o: dict) -> tuple[str, dict | None]:
+    """Tanya gateway: sudah dibayar atau belum? → ('paid' | 'unpaid' | 'unknown', hasil).
+
+    'unknown' = gateway TAK BISA ditanya (jaringan/Midtrans down). Pemanggil harus
+    menahan diri: membatalkan order tanpa tahu jawabannya berisiko membuang pesanan
+    yang sebenarnya sudah dibayar."""
+    if (o.get("payment_method") or "") != "gateway":
+        return "unpaid", None
+    try:
+        from . import payments
+        if not payments.available():
+            # Gateway tak dikonfigurasi → tak akan pernah bisa diverifikasi. Jangan
+            # tahan order selamanya; perlakukan seperti belum dibayar (perilaku lama).
+            return "unpaid", None
+        res, err = payments.get_status(o.get("payment_ref") or o.get("order_code") or "")
     except Exception:
-        logger.exception("flag_late_payment gagal (order %s)", order_code)
-        return False
+        logger.exception("_gateway_check gagal (order %s)", o.get("order_code"))
+        return "unknown", None
+    if err or not res:
+        return "unknown", None
+    if res.get("status") == "paid":
+        return "paid", res
+    return "unpaid", res
+
+
+def reconcile_order(o: dict) -> str | None:
+    """Damaikan SATU order gateway 'menunggu_pembayaran' dengan keadaan di gateway.
+
+    Return status BARU bila berubah ('diproses' / 'batal'), None bila tidak berubah.
+    Inilah jaring pengaman saat webhook hangus (server down > jendela retry gateway):
+    order yang ternyata sudah lunas dilunasi, dan order yang kedaluwarsa baru
+    dibatalkan SETELAH gateway memastikan uangnya memang tak masuk.
+    """
+    code = o.get("order_code") or ""
+    if not code or o.get("status") != "menunggu_pembayaran":
+        return None
+    if (o.get("payment_method") or "") != "gateway":
+        return None
+
+    state, res = _gateway_check(o)
+    if state == "unknown":
+        return None      # gateway bisu → jangan ambil keputusan apa pun, coba lagi nanti
+    if state == "paid":
+        paid_amt = int((res or {}).get("amount") or 0)
+        total = int(o.get("total") or 0)
+        if paid_amt and total and paid_amt != total:
+            flag_amount_mismatch(code, paid_amt, total)
+            return None  # jangan lunasi & jangan batalkan: uang nyata, admin yang putuskan
+        if not mark_paid(code, raw=(res or {}).get("raw")):
+            # DB down: JANGAN batalkan order yang uangnya sudah masuk. Biarkan
+            # 'menunggu_pembayaran' → sapuan berikutnya mencoba lagi.
+            logger.error("rekonsiliasi: mark_paid GAGAL untuk order %s (lunas di gateway)", code)
+            return None
+        after_paid(code)
+        return "diproses"
+    # Gateway memastikan BELUM dibayar → baru boleh kedaluwarsa.
+    if is_expired(o) and expire_order(code):
+        return "batal"
+    return None
+
+
+def _pending_gateway(limit: int = _RECONCILE_LIMIT) -> list[dict]:
+    """Order gateway yang masih menunggu pembayaran (kandidat rekonsiliasi)."""
+    try:
+        resp = requests.get(
+            _rest_url("orders"),
+            headers={**_service_headers(), "Accept": "application/json"},
+            params={
+                "select": "order_code,total,status,payment_method,payment_ref,payment_expiry,created_at",
+                "status": "eq.menunggu_pembayaran",
+                "payment_method": "eq.gateway",
+                "order": "created_at.desc",
+                "limit": str(int(limit)),
+            },
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return resp.json() or []
+    except Exception:
+        logger.exception("_pending_gateway gagal")
+        return []
+
+
+def reconcile_pending(limit: int = _RECONCILE_LIMIT) -> dict:
+    """Sapu SEMUA order gateway yang menunggu pembayaran & damaikan dengan gateway.
+
+    Tak bergantung pada webhook maupun pada pembeli membuka halamannya: setelah
+    server hidup lagi, ia mengejar sendiri pembayaran yang tertinggal."""
+    stats = {"checked": 0, "lunas": 0, "batal": 0}
+    for o in _pending_gateway(limit):
+        stats["checked"] += 1
+        new = reconcile_order(o)
+        if new == "diproses":
+            stats["lunas"] += 1
+        elif new == "batal":
+            stats["batal"] += 1
+    return stats
+
+
+def start_reconcile_scheduler(interval_seconds: int = _RECONCILE_EVERY) -> None:
+    """Jalankan rekonsiliasi pembayaran berkala di THREAD LATAR (dipanggil saat startup)."""
+    def _loop() -> None:
+        time.sleep(30)   # beri ruang saat boot (index/warmup lebih dulu)
+        while True:
+            try:
+                st = reconcile_pending()
+                if st["lunas"] or st["batal"]:
+                    logger.info("rekonsiliasi pembayaran: %s", st)
+            except Exception:   # pragma: no cover
+                logger.exception("rekonsiliasi pembayaran gagal")
+            time.sleep(max(60, int(interval_seconds)))
+
+    threading.Thread(target=_loop, daemon=True, name="payment-reconcile").start()
 
 
 def set_penawaran_result(order_code: str, res: dict) -> bool:
