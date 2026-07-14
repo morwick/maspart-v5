@@ -76,6 +76,49 @@ def reserved_for(pn: str, gudang_label: str) -> int:
     return reserved_map().get(((pn or "").upper(), gudang_label or ""), 0)
 
 
+def active_rows(part_number: str = "", gudang_label: str = "", limit: int = 500) -> list[dict]:
+    """Reservasi aktif BESERTA order penahannya — untuk menjelaskan selisih antara
+    stok Accurate dan stok yang bisa dibeli ('kenapa sisa 1 padahal Accurate 3?').
+
+    Beda dari reserved_map (yang hanya menjumlah qty): di sini order_code ikut terbawa,
+    jadi bisa ditunjuk pesanan mana yang menahan. Reservasi yang sudah kedaluwarsa
+    dibuang, persis seperti reserved_map — supaya angkanya tak pernah berbeda.
+    """
+    params: dict = {"active": "eq.true", "limit": str(int(limit))}
+    if part_number:
+        params["part_number"] = f"eq.{part_number.strip().upper()}"
+    if gudang_label:
+        params["gudang_label"] = f"eq.{gudang_label}"
+    now = time.time()
+    out: list[dict] = []
+    for sel in ("order_code,part_number,gudang_label,qty,expires_at",
+                "order_code,part_number,gudang_label,qty"):
+        try:
+            r = requests.get(
+                _rest_url("stock_reservations"),
+                headers={**_service_headers(), "Accept": "application/json"},
+                params={**params, "select": sel},
+                timeout=_TIMEOUT,
+            )
+            if r.status_code != 200:
+                continue
+            for row in r.json() or []:
+                exp = _epoch(row.get("expires_at"))
+                if exp is not None and exp <= now:
+                    continue      # kedaluwarsa → stok sudah kembali tersedia
+                out.append({
+                    "order_code": row.get("order_code") or "",
+                    "part_number": str(row.get("part_number") or "").upper(),
+                    "gudang_label": row.get("gudang_label") or "",
+                    "qty": int(row.get("qty") or 0),
+                    "expires_at": row.get("expires_at"),   # None = permanen (order lunas)
+                })
+            return out
+        except Exception:
+            continue
+    return out
+
+
 def reserve(order_code: str, entries: list[tuple[str, str, int, int]], ttl_seconds: int = _DEFAULT_RESERVE_TTL):
     """Reservasi ATOMIK all-or-nothing lewat RPC `reserve_order`.
 
