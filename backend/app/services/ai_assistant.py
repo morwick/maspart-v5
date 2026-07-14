@@ -918,13 +918,19 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "('di_dalam_assembly') + stok/harga lokal. Bila hasil memuat beberapa varian "
                     "(mis. kampas DEPAN vs BELAKANG), sebutkan SEMUA & bedakan lewat assembly "
                     "induknya. Untuk memisah posisi poros depan/belakang secara eksplisit, "
-                    "part_aus_dari_rangka masih boleh dipakai sebagai pelengkap (lebih lambat)."
+                    "part_aus_dari_rangka masih boleh dipakai sebagai pelengkap (lebih lambat). "
+                    "⚠️ CAKUPAN indeks cepat TIDAK lengkap (part internal mesin MC kerap absen "
+                    "— mis. ECU mesin). Hasil kosong otomatis dieskalasi ke mode TELITI; bila "
+                    "hasil ADA tapi part yang DIMINTA user tak ada di dalamnya (cuma muncul "
+                    "bracket/baut-nya), panggil ulang dengan teliti=true — menyisir SEMUA baris "
+                    "katalog unit (pencarian pertama ~1 menit, berikutnya instan)."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "rangka": {"type": "string", "description": "Nomor rangka/VIN unit."},
                         "kata_kunci": {"type": "string", "description": "Nama part yang dicari (istilah lapangan Indonesia / Inggris / PN) — mis. 'kampas rem', 'cross joint', 'filter oli'."},
+                        "teliti": {"type": "boolean", "description": "true = sisir SEMUA baris part list pohon unit (lambat pencarian pertama, cakupan penuh). Pakai saat hasil mode cepat tidak memuat part yang diminta."},
                     },
                     "required": ["rangka", "kata_kunci"],
                 },
@@ -5079,25 +5085,50 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
     terms, matched_syn = _expand_query(kata)
     kws = [t for t in dict.fromkeys(terms) if t and len(t.strip()) >= 3]
 
-    d = epc_bom.search_in_unit(rangka, kws)
-    err = d.get("_err")
-    if err in ("token_expired", "no_token"):
-        return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
-    if err == "network":
-        return {"found": False, "error": "Gagal menghubungi server EPC (jaringan). Coba lagi."}
-    if err in ("not_found", "input"):
-        return {"found": False, "error": "Nomor rangka tak ditemukan di EPC "
-                                         "(cek VIN; hanya Sinotruk/HOWO/SITRAK)."}
+    # Mode TELITI: sisir SEMUA baris part list pohon unit. Perlu karena indeks
+    # home/match/part TIDAK mencakup figure mesin MC — kasus nyata NJ248278:
+    # 'ECU' 202V25803-7915 di figure MC07H common rail tak pernah keluar di match
+    # (hanya 'ECU bracket'), padahal nyata terpasang. Lambat pada pencarian
+    # PERTAMA per unit (~30-60 dtk, buka ratusan part list) lalu cache 1 jam.
+    mode_teliti = bool(args.get("teliti"))
+    auto_teliti = False
+    hasil: list[dict] = []
+    if not mode_teliti:
+        d = epc_bom.search_in_unit(rangka, kws)
+        err = d.get("_err")
+        if err in ("token_expired", "no_token"):
+            return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
+        if err == "network":
+            return {"found": False, "error": "Gagal menghubungi server EPC (jaringan). Coba lagi."}
+        if err in ("not_found", "input"):
+            return {"found": False, "error": "Nomor rangka tak ditemukan di EPC "
+                                             "(cek VIN; hanya Sinotruk/HOWO/SITRAK)."}
+        hasil = d.get("hasil") or []
+        if not hasil:
+            mode_teliti = auto_teliti = True   # match nihil → langsung sisir pohon
+
+    if mode_teliti:
+        d = epc_bom.search_items_in_unit(rangka, kws)
+        err = d.get("_err")
+        if err in ("token_expired", "no_token"):
+            return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
+        if err == "network":
+            return {"found": False, "error": "Gagal menghubungi server EPC (jaringan). Coba lagi."}
+        if err in ("not_found", "input"):
+            return {"found": False, "error": "Nomor rangka tak ditemukan di EPC "
+                                             "(cek VIN; hanya Sinotruk/HOWO/SITRAK)."}
+        hasil = d.get("hasil") or []
     frame = d.get("frame_number") or rangka
-    hasil = d.get("hasil") or []
     if not hasil:
         return {
             "found": False, "frame_number": frame, "kata_kunci": kata,
             "kata_kunci_dicari": kws[:8],
+            "sudah_mode_teliti": True,   # match + sisir seluruh pohon sama-sama nihil
             "error": f"Tidak ada part '{kata}' di katalog EPC unit {frame}.",
             "jawaban_wajib": ("Sampaikan JUJUR bahwa EPC unit ini tak punya part itu dengan "
-                              "istilah tsb. ⛔ JANGAN mengarang PN. Boleh tawarkan: coba istilah "
-                              "lain / nama Inggris, atau cek kategori lewat bom_dari_rangka."),
+                              "istilah tsb (sudah disisir SELURUH baris katalog unit). ⛔ JANGAN "
+                              "mengarang PN. Boleh tawarkan: coba istilah lain / nama Inggris, "
+                              "atau cek kategori lewat bom_dari_rangka."),
         }
 
     # Silang ke inventori lokal (nama katalog + stok + harga) — pola tool per-VIN lain.
@@ -5118,9 +5149,13 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
             "cocok_kata_kunci": h.get("kata_kunci"),
             "ada_di_inventori": bool(lr),
         }
-        # Assembly INDUK (reverse) — konteks pemasangan; hanya untuk beberapa PN
-        # teratas agar tetap cepat.
-        if len(parts) < 8:
+        # Assembly INDUK: hasil mode teliti SUDAH membawanya (dari node pohon yang
+        # dibuka); hasil match perlu reverse — hanya beberapa PN teratas agar cepat.
+        asm = h.get("dari_assembly") or {}
+        if asm:
+            row["di_dalam_assembly"] = asm.get("nama") or None
+            row["assembly_pn"] = asm.get("pn") or None
+        elif len(parts) < 8:
             try:
                 rv = epc_bom.reverse_find_in_unit(rangka, pn)
                 inst = (rv.get("instances") or [])
@@ -5145,18 +5180,37 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
     if matched_syn:
         note = (f"Istilah lapangan '{', '.join(dict.fromkeys(matched_syn))}' diterjemahkan ke "
                 f"kata kunci katalog EPC: {', '.join(k for k in kws if k.lower() != kata.lower())}.")
-    return {
+    out = {
         "found": True, "frame_number": frame, "kata_kunci": kata,
         "kata_kunci_dicari": kws[:8], "catatan_sinonim": note,
         "jumlah_part": len(hasil), "parts": parts,
-        "sumber": ("EPC pencarian per-unit (match/part t=car) — menjangkau SELURUH katalog "
-                   "unit ini, termasuk part di DALAM assembly yang tak ada di Loading List."),
+        "mode": ("teliti (sisir SEMUA baris part list pohon unit"
+                 + (", otomatis karena pencarian cepat nihil)" if auto_teliti else ")"))
+                if mode_teliti else "cepat (indeks pencarian EPC match/part)",
+        "sumber": ("EPC per-unit — " + ("sisiran SELURUH baris katalog unit (pohon Atlas)."
+                   if mode_teliti else
+                   "indeks pencarian match/part t=car (cepat, cakupan luas).")),
         "catatan": ("PN di 'parts' PERSIS untuk unit ini (dari EPC). Jawab sebagai DAFTAR "
                     "ringkas (PN + nama + assembly induk bila ada + stok). Bila ada beberapa "
                     "varian (mis. kampas DEPAN vs BELAKANG), SEBUTKAN semuanya & jelaskan "
                     "bedanya lewat 'di_dalam_assembly' — JANGAN pilih satu diam-diam. "
                     "⛔ JANGAN mengarang PN di luar daftar ini."),
     }
+    if not mode_teliti:
+        # Indeks match TIDAK meliput semua figure (mesin MC absen). Kalau part yang
+        # DIMINTA user tak ada di daftar (yang keluar cuma kerabatnya — bracket/baut),
+        # model wajib mengulang dengan teliti=true, BUKAN menyimpulkan tidak ada.
+        out["catatan_cakupan"] = (
+            "Hasil ini dari INDEKS pencarian cepat EPC yang TIDAK meliput semua figure "
+            "(mis. part internal mesin MC kerap absen). Bila part yang DIMINTA user tidak "
+            "ada di daftar (misal yang muncul hanya bracket/baut-nya), JANGAN simpulkan "
+            "tidak ada — panggil ulang cari_part_di_unit dengan teliti=true (menyisir "
+            "SEMUA baris katalog unit; pencarian pertama bisa ~1 menit)."
+        )
+    if mode_teliti and d.get("incomplete"):
+        out["peringatan"] = ("Sebagian node pohon gagal dibuka — hasil mungkin belum lengkap; "
+                             "part yang tak ketemu belum tentu tidak ada.")
+    return out
 
 
 def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:

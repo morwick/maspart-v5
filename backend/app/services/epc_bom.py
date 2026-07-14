@@ -1283,6 +1283,87 @@ def atlas_find_in_tree(rangka: str, keywords: list[str], max_nodes: int = 12) ->
             "incomplete": walk.get("incomplete") or errbox[0]}
 
 
+# ── Pencarian level-ITEM: sisir SEMUA baris part list unit ──────────────
+# Kenapa perlu: indeks pencarian-nama EPC (home/match/part, t=car maupun t=global)
+# TIDAK mencakup figure mesin MC — kasus nyata NJ248278: baris 'ECU' 202V25803-7915
+# di figure 'MC07H High-pressure common rail' tak pernah muncul di match (yang
+# keluar hanya 'ECU bracket' sasis), padahal reverse by-PN menemukannya. Web EPC
+# menemukannya karena mencari di POHON unit. Jalur ini meniru itu: buka SEMUA part
+# list unit (ratusan; ~30-60 dtk pertama kali) lalu cari di barisnya — hasilnya
+# di-cache per frame supaya pencarian berikutnya instan.
+_items_all_cache: dict[str, dict] = {}   # frame -> {ts, rows, incomplete}
+_items_all_lock = threading.Lock()
+_ITEMS_ALL_TTL = 3600
+
+
+def _all_items(rangka: str) -> dict:
+    """SEMUA baris part list sebuah unit (setiap item membawa 'dari_assembly').
+    Cache per frame (_ITEMS_ALL_TTL); walk node memakai cache _walk_all_nodes."""
+    walk = _walk_all_nodes(rangka)
+    if not walk.get("found"):
+        return {"found": False, "frame_number": walk.get("frame_number"),
+                "_err": walk.get("_err")}
+    frame, rid = walk["frame_number"], walk["root_id"]
+    with _items_all_lock:
+        c = _items_all_cache.get(frame)
+        if c and (time.time() - c["ts"]) < _ITEMS_ALL_TTL:
+            return {"found": True, "frame_number": frame,
+                    "rows": c["rows"], "incomplete": c["incomplete"]}
+
+    nodes = [n for n in walk["nodes"] if n.get("part_list_id") and n["part_list_id"] != -1]
+    rows: list[dict] = []
+    rlock = threading.Lock()
+    errbox = [False]
+
+    def _open(n: dict) -> None:
+        for p in _atlas_items(frame, rid, n["part_list_id"], n["id"], n.get("code"), errbox):
+            row = _atlas_item_row(p, "")
+            if not row:
+                continue
+            row["dari_assembly"] = {"pn": n.get("code"),
+                                    "nama": n.get("nama") or n.get("nama_cn")}
+            with rlock:
+                rows.append(row)
+
+    if nodes:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            list(ex.map(_open, nodes))
+    incomplete = bool(walk.get("incomplete") or errbox[0])
+    with _items_all_lock:
+        _items_all_cache[frame] = {"ts": time.time(), "rows": rows, "incomplete": incomplete}
+    return {"found": True, "frame_number": frame, "rows": rows, "incomplete": incomplete}
+
+
+def search_items_in_unit(rangka: str, keywords: list[str]) -> dict:
+    """Cari kata kunci di SEMUA BARIS part list unit (nama EN + CN + PN) — jaring
+    untuk baris yang luput dari home/match/part. Return bentuk sama dgn
+    search_in_unit: {found, frame_number, hasil:[{pn, nama, kata_kunci,
+    dari_assembly, qty}]} + incomplete. Dedup per (PN, assembly induk)."""
+    kws = [k.strip().lower() for k in (keywords or []) if k and len(k.strip()) >= 3]
+    if not kws:
+        return {"found": False, "_err": "input"}
+    base = _all_items(rangka)
+    if not base.get("found"):
+        return {"found": False, "frame_number": base.get("frame_number"),
+                "_err": base.get("_err")}
+    hasil: list[dict] = []
+    seen: set = set()
+    for row in base["rows"]:
+        hay = f'{row["nama"]} {row["nama_cn"]} {row["pn"]}'.lower()
+        kw_hit = next((k for k in kws if k in hay), None)
+        if not kw_hit:
+            continue
+        key = (row["pn"], (row.get("dari_assembly") or {}).get("pn"))
+        if key in seen:
+            continue
+        seen.add(key)
+        hasil.append({"pn": row["pn"], "nama": row["nama"], "nama_cn": row["nama_cn"],
+                      "qty": row.get("qty"), "kata_kunci": kw_hit,
+                      "dari_assembly": row.get("dari_assembly")})
+    return {"found": bool(hasil), "frame_number": base["frame_number"],
+            "jumlah": len(hasil), "hasil": hasil, "incomplete": base["incomplete"]}
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  KATALOG BERGAMBAR per KATEGORI (exploded view) — utk tool katalog_kategori
 # ═══════════════════════════════════════════════════════════════════════
