@@ -26,9 +26,11 @@ import threading
 import time
 import uuid
 
+from concurrent.futures import ThreadPoolExecutor
+
 from openpyxl import load_workbook
 
-from . import ai_export, harga, part_index
+from . import ai_export, harga, part_index, sims
 
 # ── Plafon (server RAM 3,8 GB; lihat memory server-kapasitas-ram) ──
 MAX_BYTES = 10 * 1024 * 1024   # 10 MB per unggahan chat
@@ -36,6 +38,11 @@ MAX_ROWS = 5000                # baris data yang dibaca (di luar header)
 MAX_COLS = 40
 _SAMPLE = 200                  # baris contoh utk deteksi peran kolom
 _MAX_SIMS = 150                # PN maksimum per permintaan harga SIMS (HTTP live)
+_MAX_FOTO_PN = 300             # PN maksimum per permintaan FOTO (tiap PN = 1 call SIMS)
+_MAX_FOTO_PER_PART = 3         # plafon foto per part (jaga ukuran file & RAM)
+# Penanda "tak ada foto di SIMS". Pakai EM-DASH, bukan '-': penjaga formula-injection
+# (ai_export._safe) menambah apostrof di depan teks berawalan '-' → sel tampil "'-".
+_TANPA_FOTO = "—"
 
 _STASH_TTL_SEC = 2 * 3600.0
 _STASH_MAX = 40
@@ -446,6 +453,102 @@ def fill_column(
             "📎 Kartu unduh Excel muncul otomatis di bawah jawaban — beri tahu user singkat. "
             f"{terisi} dari {len(body)} baris terisi; sisanya PN tak ditemukan di sumber — "
             "sampaikan apa adanya, ⛔ JANGAN mengarang nilai untuk baris kosong."
+        ),
+    }
+
+
+def fill_photos(sheet_id: str, user: dict, kolom_pn: str = "", jumlah: int = 2) -> dict:
+    """Tempelkan FOTO RESMI SIMS ke Excel unggahan user: `jumlah` foto per part,
+    di kolom baru di ujung kanan. Baris tanpa foto ditandai '-' (TIDAK ditebak).
+
+    Foto dicari per PART NUMBER — bukan per nama. Pencarian nama di SIMS bersifat
+    'mengandung kata' & mengembalikan part LAIN (nama 'Radiator' memunculkan pipa
+    radiator), jadi mencocokkan foto lewat nama berisiko memasang foto part yang
+    SALAH di dokumen penawaran.
+
+    Di sini hanya URL foto yang diambil (ringan, ter-cache di SIMS). Unduh + tempel
+    gambar dikerjakan SAAT KARTU DIUNDUH (ai_export builder 'sheet_foto'), karena
+    foto SIMS bisa >10 MB per file — menahannya di RAM akan menggerus server."""
+    parsed = get_sheet(sheet_id, user.get("username", ""))
+    if not parsed:
+        return {"found": False, "error": "Belum ada file Excel yang diunggah di percakapan ini "
+                                         "(atau sudah kedaluwarsa). Minta user unggah ulang."}
+    if not sims.available():
+        return {"found": False, "error": "Layanan SIMS (sumber foto) sedang tidak tersedia."}
+    try:
+        n_foto = int(jumlah or 2)
+    except (TypeError, ValueError):
+        n_foto = 2
+    n_foto = max(1, min(_MAX_FOTO_PER_PART, n_foto))
+
+    headers = list(parsed["headers"])
+    body = [list(r) for r in parsed["_body"]]
+
+    pn_i = _cari_kolom(headers, kolom_pn) if kolom_pn else None
+    if pn_i is None:
+        pn_i = parsed["roles"].index("part_number") if "part_number" in parsed["roles"] else None
+    if pn_i is None:
+        return {"found": False,
+                "error": "Kolom Part Number tidak terdeteksi. Foto SIMS hanya bisa dicari lewat "
+                         "Part Number (pencarian lewat nama part memberi foto part yang salah). "
+                         "Minta user menyebut kolom mana yang berisi Part Number."}
+
+    pns = [(r[pn_i] or "").strip().upper() if pn_i < len(r) else "" for r in body]
+    unik = [p for p in dict.fromkeys(pns) if p]
+    if not unik:
+        return {"found": False, "error": f"Kolom '{headers[pn_i]}' tidak berisi Part Number."}
+    if len(unik) > _MAX_FOTO_PN:
+        return {"found": False,
+                "error": f"Terlalu banyak Part Number ({len(unik)}) untuk pencarian foto SIMS. "
+                         f"Maksimum {_MAX_FOTO_PN} per permintaan — minta user memecah filenya."}
+
+    # Ambil URL foto per PN (SIMS ber-cache; paralel terbatas agar tak membanjiri SIMS).
+    peta: dict[str, list[str]] = {}
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for pn, urls in zip(unik, ex.map(sims.get_images, unik)):
+            peta[pn] = list(urls or [])[:n_foto]
+
+    # Kolom foto baru di ujung kanan; isi sel '-' untuk yang tak ada fotonya
+    # (gambar ditempel saat unduh, jadi selnya sengaja dibiarkan kosong di sini).
+    kol_foto = [len(headers) + i for i in range(n_foto)]
+    for i in range(n_foto):
+        headers.append(f"Foto {i + 1}" if n_foto > 1 else "Foto")
+    foto_baris: list[list[str]] = []
+    ada = 0
+    for r, p in zip(body, pns):
+        urls = peta.get(p) or []
+        foto_baris.append(urls)
+        for j, _c in enumerate(kol_foto):
+            r.append("" if j < len(urls) else _TANPA_FOTO)
+        if urls:
+            ada += 1
+
+    judul = f"{parsed['filename'].rsplit('.', 1)[0]} + Foto"
+    export_id, filename = ai_export.stash_builder(judul, {
+        "kind": "sheet_foto",
+        "judul": judul,
+        "kolom": headers,
+        "baris": body,
+        "foto": foto_baris,
+        "kol_foto": kol_foto,
+    })
+    return {
+        "found": True,
+        "export_id": export_id,
+        "filename": filename,
+        "judul": judul,
+        "jumlah_baris": len(body),
+        "kolom_part_number": headers[pn_i],
+        "foto_per_part": n_foto,
+        "baris_berfoto": ada,
+        "baris_tanpa_foto": len(body) - ada,
+        "sumber": "foto resmi SIMS (dicari per Part Number)",
+        "catatan": (
+            "📎 Kartu unduh Excel muncul otomatis di bawah jawaban — beri tahu user singkat. "
+            f"{ada} dari {len(body)} baris dapat foto; sisanya PN-nya memang TIDAK punya foto "
+            f"di SIMS dan ditandai '{_TANPA_FOTO}'. ⛔ JANGAN menjanjikan foto untuk baris itu & "
+            "JANGAN menyarankan mencocokkan foto lewat NAMA part — pencarian nama di SIMS "
+            "mengembalikan part lain (foto bisa SALAH)."
         ),
     }
 

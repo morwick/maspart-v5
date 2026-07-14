@@ -385,6 +385,15 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
                 with _stash_lock:
                     d["_path"] = str(p)
             return data, d["filename"]
+        if b.get("kind") == "sheet_foto":
+            data, err = sheet_foto_excel(b)
+            if data is None:
+                return None, err
+            p = _cache_write(export_id, data)
+            if p:
+                with _stash_lock:
+                    d["_path"] = str(p)
+            return data, d["filename"]
         if b.get("kind") == "exploded":
             if b.get("source") == "weichai":
                 data = exploded_png_weichai(b.get("svg", ""), b.get("rangka", ""), b.get("balon"))
@@ -438,6 +447,119 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue(), d["filename"]
+
+
+# ── Excel UNGGAHAN USER + FOTO part (tool `sheet_isi_foto`) ─────────────────
+# Foto SIMS berukuran besar (ada yang 6000 px / >10 MB) → WAJIB diciutkan sebelum
+# ditempel, kalau tidak workbook bisa ratusan MB & server (3,8 GB RAM) tumbang.
+_FOTO_H_PX = 105               # tinggi foto di sel
+_FOTO_COL_W = 17               # lebar kolom foto
+_FOTO_MAX_TOTAL = 700          # plafon gambar per file (300 PN × 2 + sisa)
+_FOTO_TIMEOUT = 25
+
+
+def _foto_thumb(url: str) -> bytes | None:
+    """Unduh 1 foto SIMS → JPEG kecil (tinggi _FOTO_H_PX). None bila gagal."""
+    try:
+        import requests
+        from PIL import Image as PILImage
+    except Exception:
+        return None
+    try:
+        r = requests.get(url, timeout=_FOTO_TIMEOUT)
+        if r.status_code != 200 or not r.content:
+            return None
+        pil = PILImage.open(io.BytesIO(r.content))
+        if pil.mode not in ("RGB", "L"):
+            pil = pil.convert("RGB")
+        w, h = pil.size
+        if h > _FOTO_H_PX:
+            w, h = max(1, int(w * _FOTO_H_PX / h)), _FOTO_H_PX
+            pil = pil.resize((w, h), PILImage.LANCZOS)
+        buf = io.BytesIO()
+        pil.save(buf, format="JPEG", quality=82, optimize=True)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def sheet_foto_excel(b: dict) -> tuple[bytes | None, str]:
+    """Bangun Excel unggahan user + FOTO part tertanam. Dipanggil saat kartu unduh
+    diklik (lihat generic_excel). Baris tanpa foto sudah bertanda '-' dari ai_sheet.
+    Return (bytes, pesan_error)."""
+    from openpyxl.drawing.image import Image as XLImage
+
+    kolom: list[str] = b.get("kolom") or []
+    baris: list[list] = b.get("baris") or []
+    foto: list[list[str]] = b.get("foto") or []
+    kol_foto: list[int] = b.get("kol_foto") or []
+    if not kolom:
+        return None, "Data sheet tidak ditemukan — minta asisten membuat ulang."
+
+    # Unduh SEMUA foto paralel (plafon total dijaga), lalu tempel.
+    tugas: list[tuple[int, int, str]] = []   # (baris_i, urutan_foto, url)
+    for i, urls in enumerate(foto):
+        for k, u in enumerate(urls[:len(kol_foto)]):
+            if u and len(tugas) < _FOTO_MAX_TOTAL:
+                tugas.append((i, k, u))
+    gambar: dict[tuple[int, int], bytes] = {}
+    if tugas:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for (i, k, _u), png in zip(tugas, ex.map(lambda t: _foto_thumb(t[2]), tugas)):
+                if png:
+                    gambar[(i, k)] = png
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.sheet_view.showGridLines = False
+    start = _title(ws, _safe(b.get("judul") or "Data + Foto"),
+                   f"{len(baris)} baris · foto resmi SIMS (dicocokkan per Part Number) · "
+                   "MASPART Asisten AI", max(2, len(kolom)))
+
+    mono_cols = {j for j, h in enumerate(kolom, start=1) if _MONO_HEAD_RE.search(h or "")}
+    foto_cols = {j + 1 for j in kol_foto}      # 1-based
+    for j, h in enumerate(kolom, start=1):
+        c = ws.cell(row=start, column=j, value=_safe(h))
+        c.fill = _HEAD_FILL
+        c.font = _WHITE
+        c.alignment = _CENTER
+        c.border = _BORDER
+        if j in foto_cols:
+            ws.column_dimensions[get_column_letter(j)].width = _FOTO_COL_W
+        else:
+            w = max([len(str(h or ""))] + [len(str(r[j - 1])) for r in baris if j - 1 < len(r)] or [0])
+            ws.column_dimensions[get_column_letter(j)].width = max(8, min(60, w + 4))
+
+    r = start + 1
+    for i, row in enumerate(baris):
+        for j in range(1, len(kolom) + 1):
+            val = row[j - 1] if j - 1 < len(row) else ""
+            c = ws.cell(row=r, column=j, value=_safe(val))
+            c.border = _BORDER
+            c.alignment = _CENTER if j == 1 or j in mono_cols or j in foto_cols else _LEFT
+            c.font = _MONO if j in mono_cols else _INK
+            if i % 2:
+                c.fill = _ZEBRA
+        dipasang = 0
+        for k, col0 in enumerate(kol_foto):
+            png = gambar.get((i, k))
+            if not png:
+                continue
+            img = XLImage(io.BytesIO(png))
+            ratio = img.width / img.height if img.height else 1
+            img.height = _FOTO_H_PX
+            img.width = int(_FOTO_H_PX * ratio)
+            ws.add_image(img, f"{get_column_letter(col0 + 1)}{r}")
+            dipasang += 1
+        if dipasang:
+            ws.row_dimensions[r].height = _FOTO_H_PX * 0.78
+        r += 1
+    ws.freeze_panes = ws.cell(row=start + 1, column=1)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue(), ""
 
 
 # ── KATALOG BERGAMBAR per kategori (exploded view EPC) ──────────────────────
