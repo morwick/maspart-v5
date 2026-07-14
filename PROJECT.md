@@ -4,7 +4,7 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-07-12** (oleh inspeksi langsung repo lokal + SSH ke server).
+> Terakhir diverifikasi: **2026-07-14** (oleh inspeksi langsung repo lokal + SSH ke server).
 > Ditambah **§3.5 — Cara Kerja Aplikasi (deep-dive fungsional)** pada 2026-06-25 agar AI/dev
 > langsung paham domain, alur data, logika pencarian + sinonim, AI tools, API & frontend.
 > Update **2026-06-27**: tambah fitur **Repair Kit Transmisi** (data + tool AI + endpoint +
@@ -235,6 +235,47 @@
 > 486 unit test. Pekerjaan 2026-07-10→12 LIVE di prod via push.sh dan **sudah dikomit
 > per-fitur** ke `snapshot-clean` (2026-07-12: 56ce148 Midtrans, 59580ef penawaran Accurate,
 > e415754 stok+ongkir, c28521a berat SIMS, 84233e6 Excel asisten, ae7e6b0 kecepatan+guard).
+> Update **2026-07-13**: (a) **Tool `diagnosa`** (`158555b`) — gabung **SIMS EOL AI** (asisten
+> perbaikan resmi Sinotruk: manual + kasus kerusakan, SSE streaming 20–90 dtk, auth Bearer
+> sims_fetcher — ⛔ header `Accept: text/event-stream` bikin 401) + fallback kamus DTC lokal;
+> SIMS jujur "belum terindex" → jangan dikarang. (b) **PN ber-suffix varian** (`e32439a`) —
+> katalog/EPC pakai 'WG…/2' sementara Accurate simpan PN DASAR: lookup stok/harga kini via
+> `accurate.index_key` (potong '/'+'+' bila PN dasar ada di indeks) — part SAMA (kata pemilik).
+> (c) Harga di asisten ikut **Menu Control Kolom Harga** (`bc199c6`, penjaga terpusat).
+> (d) `sheet_isi_foto` (`f9fccf0`) — tempel foto SIMS ke Excel unggahan user. (e) Materi
+> tutorial + APK 2.0.0 (`fb79f8e`).
+> Update **2026-07-14 — PEMBAYARAN TAHAN-BENCANA + 3 tool admin + biaya token + EPC teliti**:
+> (a) **Pembayaran saat server down** (`f69364c`+`2466e98`): uang pembeli tak lewat server kita
+> (Snap di domain Midtrans) — yang rapuh SINKRONISASI-nya. Ditutup 3 lapis: webhook balas **503**
+> saat mark_paid gagal (Midtrans retry; balasan 200 = notifikasi hangus), polling tak mengaku
+> 'diproses' saat gagal simpan, `payment_expiry` ditanam sejak order dibuat; lalu **rekonsiliasi**:
+> retry webhook Midtrans TERBATAS (±5–6 jam) → `reconcile_order` TANYA GATEWAY dulu sebelum
+> membatalkan order lewat-tenggat (lunas→mark_paid; gateway bisu→jangan putuskan; nominal beda→
+> flag admin) + **penyapu latar 10-menit** `start_reconcile_scheduler` menyisir semua order
+> gateway 'menunggu_pembayaran' — tak bergantung webhook/pembeli buka halaman. (b) **3 tool
+> ADMIN-only 3 lapis** (`d818091`): `stok_tertahan` (selisih stok Accurate vs bisa-dibeli:
+> penahan per kode+status pesanan), `pesanan_bermasalah` (uang_perlu_dicek/penawaran_gagal/
+> lunas_belum_dikirim/bayar_macet — pembaca `payment_note`+`penawaran_status`), `alternatif_ready`
+> (part habis → pengganti resmi SIMS+Weichai disaring HANYA yang siap kirim; definisi ready =
+> SAMA dgn checkout). (c) **Hemat prompt-cache** (`d818091`): baris `Username:` di puncak system
+> prompt bikin ~99,7% dari ~28rb token cache-MISS per user → dipindah ke pesan system `[PENGGUNA]`
+> di ekor (`_user_context_line`); prompt kini identik antar-user satu peran; ⛔ JANGAN taruh
+> apa pun per-user/tanggal di system prompt utama (`tests/test_prompt_cache.py`). Terbukti live:
+> cache hit 89–97%. (d) **Biaya token per pesan di Observabilitas AI** (`b42335e`): akumulasi
+> `usage` SEMUA panggilan API per giliran → kolom Token (in/out, hover=cache+jumlah panggilan) +
+> kartu 'Token / pesan'; kolom `tokens_*` ⚠️ **migrasi `021_ai_chat_log_tokens.sql` manual**;
+> resilient dua arah bila migrasi belum jalan. (e) **Mode TELITI `cari_part_di_unit`**
+> (`b76dfaf`+`0bfbf46`): indeks pencarian-nama EPC (match/part t=car & t=global) TIDAK meliput
+> figure mesin MC (kasus nyata NJ248278: 'ECU' 202V25803-7915 di figure MC07H common rail tak
+> pernah muncul — hanya bracket) → `search_items_in_unit` sisir SEMUA baris part list pohon unit
+> (~388 figure/3.864 baris/2.709 PN unik), **persist disk** `data/epc_unit_items/<frame>.json`
+> TTL 7 hari (~1 MB/unit; build parsial TIDAK dipersist), **prefetch latar** saat rangka disebut,
+> lock build per-frame anti-dobel; indeks siap → tool LANGSUNG jalur lengkap (1 ronde, tanpa
+> reverse per-PN). Terukur: build 56–84 dtk → pencarian berikutnya 0,01–0,13 dtk. Eskalasi:
+> hasil cepat nihil → auto-teliti; hasil ada tapi bukan yang diminta → `catatan_cakupan` suruh
+> model ulangi `teliti=true`. conftest: test DILARANG membangun indeks nyata. (f) **Saldo
+> DeepSeek habis = error 402** — asisten mati total; 402 sengaja TIDAK di-retry. **682 unit
+> test.** Semua LIVE di prod (Coolify force-recreate) & dikomit per-fitur ke `snapshot-clean`.
 
 ---
 
