@@ -20,6 +20,9 @@ logger = logging.getLogger("maspart.orders")
 
 STATUSES = ["menunggu_pembayaran", "menunggu_verifikasi", "diproses", "dikirim", "selesai", "batal"]
 
+# Batas bayar order gateway (selaras payments._EXPIRY_HOURS & TTL reservasi stok).
+_PAY_TTL_HOURS = 24
+
 # State machine: transisi status yang diizinkan {dari: {ke,...}}. Status terminal
 # (selesai, batal) tidak boleh berubah lagi. Mencegah lompatan ilegal (mis.
 # selesai→menunggu_pembayaran, atau menghidupkan order batal).
@@ -184,6 +187,11 @@ def create_order(
     tax = ppn_included(subtotal)
     total = subtotal + ship
     rcp = recipient or {}
+    # Batas bayar gateway ditanam SEJAK order dibuat, bukan menunggu attach_payment.
+    # Kalau proses mati di antara keduanya, order tanpa payment_expiry tak akan pernah
+    # kedaluwarsa (is_expired butuh kolom ini) → nyangkut selamanya di daftar pembeli.
+    # Nilainya ditimpa attach_payment dengan batas dari gateway (sama-sama 24 jam).
+    pay_expiry = _pay_deadline() if (payment_method or "") == "gateway" else None
     try:
         # Insert order — retry beberapa kali bila order_code bentrok (unique violation).
         order = None
@@ -207,6 +215,7 @@ def create_order(
                     "courier_service": courier_service or None,
                     "weight_grams": int(weight_grams or 0),
                     "payment_method": payment_method or "manual",
+                    "payment_expiry": pay_expiry,
                     "recipient_name": rcp.get("name") or None,
                     "recipient_phone": rcp.get("phone") or None,
                     "recipient_address": rcp.get("address") or None,
@@ -236,6 +245,7 @@ def create_order(
                         "courier_service": courier_service or None,
                         "weight_grams": int(weight_grams or 0),
                         "payment_method": payment_method or "manual",
+                        "payment_expiry": pay_expiry,
                         "recipient_name": rcp.get("name") or None,
                         "recipient_phone": rcp.get("phone") or None,
                         "recipient_address": rcp.get("address") or None,
@@ -497,12 +507,27 @@ def _epoch(s: str | None) -> float | None:
         return None
 
 
+def _pay_deadline(hours: int = _PAY_TTL_HOURS) -> str:
+    """Batas bayar (ISO UTC) = sekarang + `hours` jam."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + hours * 3600))
+
+
 def is_expired(o: dict) -> bool:
     """True bila order masih menunggu pembayaran & sudah lewat batas waktu bayar."""
     if o.get("status") != "menunggu_pembayaran":
         return False
     e = _epoch(o.get("payment_expiry"))
-    return e is not None and e < time.time()
+    if e is None:
+        # Order GATEWAY tanpa batas bayar = order yang gagal dilampiri transaksi
+        # (proses mati antara create_payment & attach_payment, atau dibuat sebelum
+        # batas bayar ditanam sejak awal). Tanpa jaring ini ia tak pernah kedaluwarsa
+        # dan nyangkut selamanya. Order MANUAL memang tak berbatas waktu (dibayar
+        # transfer & diverifikasi admin) → biarkan.
+        if (o.get("payment_method") or "") != "gateway":
+            return False
+        c = _epoch(o.get("created_at"))
+        return c is not None and (c + _PAY_TTL_HOURS * 3600) < time.time()
+    return e < time.time()
 
 
 def expire_order(order_code: str) -> bool:

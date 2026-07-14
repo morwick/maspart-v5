@@ -1,6 +1,7 @@
 """Router Pesanan internal: buat order, pesanan saya, detail, bukti bayar, admin status."""
 from __future__ import annotations
 
+import logging
 import secrets
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
@@ -12,6 +13,8 @@ from ..deps import get_current_user, require_admin, require_buyer_ready
 from ..services import (accurate_quotation, gudang, harga, orders, part_index, payments,
                         reservations, shipping)
 from ..services import supabase_client as sb
+
+logger = logging.getLogger("maspart.orders")
 
 router = APIRouter(prefix="/api", tags=["orders"])
 
@@ -482,8 +485,16 @@ def payment_status(code: str, user: dict = Depends(get_current_user)):
             "error": f"Nominal pembayaran (Rp{gw_amount:,}) tidak sama dengan total tagihan (Rp{int(o.get('total') or 0):,}). Hubungi admin.",
         }
     if paid and o.get("status") in _PAYABLE:
-        if orders.mark_paid(code, raw=res.get("raw")):
-            _after_paid(code)
+        if not orders.mark_paid(code, raw=res.get("raw")):
+            # Gateway bilang LUNAS tapi status gagal disimpan (DB down). Jangan
+            # laporkan 'diproses': UI berhenti polling & pembayaran seolah hilang.
+            logger.error("polling: mark_paid GAGAL untuk order %s (lunas di gateway)", code)
+            return {
+                "status": o.get("status"), "paid": False, "gateway_status": res["status"],
+                "error": "Pembayaran terdeteksi lunas, tapi status pesanan gagal diperbarui. "
+                         "Muat ulang halaman ini sebentar lagi; bila tetap, hubungi admin.",
+            }
+        _after_paid(code)
     elif paid and o.get("status") == "batal":
         orders.flag_late_payment(code, int(gw_amount or o.get("total") or 0))
     return {"status": "diproses" if paid else o.get("status"), "paid": paid, "gateway_status": res["status"]}
@@ -518,8 +529,18 @@ async def payment_webhook(request: Request):
         return {"ok": True, "ignored": f"nominal tidak cocok ({gw_amount} vs {o.get('total')})"}
     # Idempotent: hanya proses kalau order belum lunas.
     if o.get("status") in _PAYABLE:
-        if orders.mark_paid(o["order_code"], raw=data.get("raw")):
-            _after_paid(o["order_code"])
+        if not orders.mark_paid(o["order_code"], raw=data.get("raw")):
+            # Gagal simpan (mis. Supabase sedang down). JANGAN balas 200: gateway
+            # menganggap notifikasi sukses & tak pernah mengirim ulang, sedangkan
+            # order tetap 'menunggu_pembayaran' → nanti auto-batal padahal uangnya
+            # sudah masuk. Balas 5xx supaya Midtrans me-retry notifikasi ini.
+            logger.error("webhook: mark_paid GAGAL untuk order %s (uang sudah masuk di gateway)",
+                         o["order_code"])
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Gagal menandai pesanan lunas — kirim ulang notifikasi.",
+            )
+        _after_paid(o["order_code"])
         return {"ok": True}
     if o.get("status") == "batal":
         # Pembayaran MASUK untuk order yang sudah dibatalkan (mis. bayar tepat sebelum
