@@ -6802,17 +6802,27 @@ def _allowed_tool_names(user: dict, sheet_id: str = "") -> set[str]:
 _MAX_TOOL_CONTENT = 24000  # batas char JSON hasil tool yg di-append ke messages
 
 
+_TOOL_CAP_TAIL = 3000   # sisakan EKOR: builder menaruh catatan/jawaban_wajib di ujung
+
+
 def _cap_tool_content(s: str) -> str:
     """Batasi panjang JSON hasil tool yang dimasukkan ke riwayat percakapan.
     Hasil raksasa (banding_rangka_massal, katalog_mesin) bila di-append penuh
     tiap ronde membuat token membengkak & bisa menembus limit konteks model
     (→ API 400 → 502). Tool tetap mengembalikan data lengkap ke frontend lewat
-    metadata; yang dipotong hanya salinan untuk konsumsi model."""
+    metadata; yang dipotong hanya salinan untuk konsumsi model.
+
+    Potong KEPALA + EKOR (bukan kepala saja): tool builder menaruh instruksi
+    penyetir model (`catatan`/`jawaban_wajib`/`catatan_cakupan`) di UJUNG dict —
+    potong-kepala-saja menghapusnya senyap, membuat model kehilangan aturan
+    (mis. '⛔ jangan mengarang PN di luar daftar')."""
     if len(s) <= _MAX_TOOL_CONTENT:
         return s
-    return (s[:_MAX_TOOL_CONTENT]
-            + f"\n…[dipotong {len(s) - _MAX_TOOL_CONTENT} karakter — hasil terlalu "
-              "besar; rangkum dari bagian di atas, jangan menebak sisanya]")
+    dipotong = len(s) - _MAX_TOOL_CONTENT
+    marker = (f"\n…[dipotong {dipotong} karakter di tengah — hasil terlalu besar; "
+              "rangkum dari bagian atas & bawah, jangan menebak yang hilang]…\n")
+    head = _MAX_TOOL_CONTENT - _TOOL_CAP_TAIL - len(marker)
+    return s[:head] + marker + s[-_TOOL_CAP_TAIL:]
 
 
 def _compact_result(v):
