@@ -232,7 +232,27 @@ def ringkas(parsed: dict) -> dict:
     KONTEKS agar model paham maksud file: berapa baris yang Part Number-nya masih
     KOSONG (kandidat diisi) & kolom pengelompokan (sistem/bagian) + nilainya."""
     headers, roles, body = parsed["headers"], parsed["roles"], parsed["_body"]
-    kolom = [{"nama": h, "peran": p} for h, p in zip(headers, roles)]
+
+    # Per kolom: berapa sel TERISI (fill rate) + contoh nilai distinct utk kolom
+    # NON-PN berkardinalitas rendah (satuan/kategori/status/gudang). Membantu model
+    # paham ISI tiap kolom tanpa membaca body penuh — murah (≤5 nilai/kolom, hanya
+    # sekali per unggahan) & tetap patuh batas 5 baris contoh (tak bocorkan body).
+    kolom = []
+    for i, (h, p) in enumerate(zip(headers, roles)):
+        vals = [str(r[i]).strip() if i < len(r) and r[i] is not None else "" for r in body]
+        info = {"nama": h, "peran": p, "terisi": sum(1 for v in vals if v)}
+        if p != "part_number":
+            distinct: list[str] = []
+            terlalu_banyak = False
+            for v in vals:
+                if v and v not in distinct:
+                    if len(distinct) >= 6:      # >5 nilai unik = kardinalitas tinggi
+                        terlalu_banyak = True
+                        break
+                    distinct.append(v)
+            if distinct and not terlalu_banyak:
+                info["contoh_nilai"] = [v[:40] for v in distinct]
+        kolom.append(info)
 
     # Baris tanpa Part Number = yang biasanya user minta dilengkapi.
     baris_tanpa_pn = None
@@ -273,6 +293,13 @@ def ringkas(parsed: dict) -> dict:
         out["baris_tanpa_part_number"] = baris_tanpa_pn
     if kategori is not None:
         out["kolom_pengelompokan"] = kategori
+    # PN yang TAK dikenal katalog (kandidat aftermarket / salah ketik) — bantu model
+    # jujur soal berapa yang tak akan bisa diisi stok/harga.
+    if "part_number" in roles:
+        pn_i = roles.index("part_number")
+        total_pn = sum(1 for r in body
+                       if pn_i < len(r) and r[pn_i] is not None and str(r[pn_i]).strip())
+        out["part_number_tidak_dikenal"] = max(0, total_pn - parsed["pn_dikenal"])
     return out
 
 

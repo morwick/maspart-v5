@@ -434,6 +434,33 @@ def test_ringkas_sinyal_konteks(bom_unit):
     assert "AIR INTAKE" in out["kolom_pengelompokan"]["contoh_nilai"]
 
 
+def test_ringkas_fill_rate_dan_contoh_nilai(katalog):
+    """Tiap kolom bawa 'terisi' (fill rate); kolom non-PN kardinalitas rendah
+    bawa 'contoh_nilai'; kolom PN tidak (kardinalitas tinggi & untuk anti-bocor)."""
+    p = ai_sheet.parse_upload(_xlsx([
+        ["Part Number", "Satuan", "Qty"],
+        ["WG9925520270", "PCS", 4],
+        ["AZ9925520271", "SET", ""],          # Qty kosong 1 baris
+        ["WG9925520270/2", "PCS", 2],         # suffix varian → dikenal via base
+    ]), "x.xlsx")
+    out = ai_sheet.ringkas(p)
+    per = {k["nama"]: k for k in out["kolom"]}
+    assert per["Qty"]["terisi"] == 2                       # 1 sel kosong
+    assert set(per["Satuan"]["contoh_nilai"]) == {"PCS", "SET"}
+    assert "contoh_nilai" not in per["Part Number"]        # kolom PN tak diekspos
+    # 3 PN, semua dikenal (WG…/2 lewat base) → tak ada yang asing.
+    assert out["part_number_tidak_dikenal"] == 0
+
+
+def test_ringkas_pn_tidak_dikenal_dihitung(katalog):
+    p = ai_sheet.parse_upload(_xlsx([
+        ["Part Number"], ["WG9925520270"], ["ZZZ0000000"], ["QQQ1111111"],
+    ]), "x.xlsx")
+    out = ai_sheet.ringkas(p)
+    assert out["part_number_dikenal_di_katalog"] == 1
+    assert out["part_number_tidak_dikenal"] == 2
+
+
 def test_isi_pn_lewat_sinonim(monkeypatch, bom_unit):
     monkeypatch.setattr(ai, "_expand_query",
                         lambda q: ([q] + {"saringan": ["filter"], "oli": ["oil"]}.get(q.lower(), []), []))
