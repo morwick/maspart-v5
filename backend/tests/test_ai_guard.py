@@ -108,3 +108,46 @@ def test_nama_gudang_dikecualikan_dari_guard(monkeypatch):
     toks = ai._extract_pns("Stok ada di 01.Jakarta")
     assert toks  # memang tertangkap regex mirip-PN…
     assert ai._drop_unit_tokens(sorted(toks)) == []  # …tapi dikecualikan guard
+
+
+# ── P9.1: memori konteks lebih luas (3 pesan assistant ber-PN) ───────────────
+
+def test_recent_part_numbers_agregat_lintas_pesan():
+    hist = [
+        {"role": "assistant", "content": "Rem: WG9100443050 dan AZ9100443051."},
+        {"role": "user", "content": "kalau filternya?"},
+        {"role": "assistant", "content": "Filter: VG1560080012."},
+        {"role": "user", "content": "harga keduanya?"},
+    ]
+    pns = ai._recent_part_numbers(hist)
+    # BUKAN cuma pesan terakhir — part dari jawaban 2 giliran lalu tetap teringat.
+    assert "VG1560080012" in pns
+    assert "WG9100443050" in pns and "AZ9100443051" in pns
+
+
+def test_recent_part_numbers_batas_3_pesan_dan_cap():
+    hist = [{"role": "assistant", "content": f"PN AZ160000{i:04d}"} for i in range(6)]
+    pns = ai._recent_part_numbers(hist)
+    assert len(pns) <= 12
+    # hanya 3 pesan assistant TERAKHIR yang dipanen (recent-first)
+    assert "AZ1600000005" in pns and "AZ1600000000" not in pns
+
+
+# ── P9.2: _rangka_candidates buang PN katalog/kode unit yang mirip frame ─────
+
+def test_rangka_candidates_buang_pn_katalog(monkeypatch):
+    # 'AZ123456' cocok _FRAME_RE (2 huruf+6 angka) TAPI ternyata PN katalog → bukan rangka.
+    monkeypatch.setattr(ai.part_index, "search_exact_pns",
+                        lambda toks: [{"part_number": "AZ123456"}] if "AZ123456" in set(toks) else [])
+    monkeypatch.setattr(ai, "_unit_name_tokens", lambda: set())
+    # rangka asli SJ346500 tetap lolos; AZ123456 (PN) dibuang
+    out = ai._rangka_candidates("CEK AZ123456 DAN SJ346500")
+    assert "SJ346500" in out
+    assert "AZ123456" not in out
+
+
+def test_rangka_candidates_vin_tak_disaring(monkeypatch):
+    monkeypatch.setattr(ai.part_index, "search_exact_pns", lambda toks: [])
+    monkeypatch.setattr(ai, "_unit_name_tokens", lambda: set())
+    vin = "LZZ5EXSF0KX123456"      # 17 char VIN
+    assert vin in ai._rangka_candidates("UNIT " + vin)

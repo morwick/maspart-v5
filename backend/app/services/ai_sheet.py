@@ -75,6 +75,11 @@ _HEAD_KATEGORI = re.compile(
 
 # PN Sinotruk/Weichai: huruf besar + angka, boleh . / + -, minimal 5 char.
 _PN_RE = re.compile(r"^[A-Z0-9][A-Z0-9./+\-]{4,}$")
+# PN Weichai kerap MURNI-ANGKA (mis. 612630010054). Ambang 9-13 digit = sama dgn
+# chat guard `_PN_NUMERIC_RE` (≥9) — cukup panjang agar qty/harga kecil tak kena,
+# tapi kolom semacam ini WAJIB diverifikasi katalog dulu sebelum jadi PN (bisa
+# juga no. telp) — lihat `numerik` di _detect_roles.
+_NUM_PN_RE = re.compile(r"^\d{9,13}$")
 
 
 def _txt(v) -> str:
@@ -87,6 +92,8 @@ def _txt(v) -> str:
 
 def _looks_pn(s: str) -> bool:
     s = s.strip().upper()
+    if _NUM_PN_RE.match(s):          # PN Weichai murni-angka (mis. 612630010054)
+        return True
     if not _PN_RE.match(s):
         return False
     return any(c.isdigit() for c in s) and any(c.isalpha() for c in s)
@@ -102,11 +109,13 @@ def _header_row(rows: list[list]) -> int:
     return 0
 
 
-def _detect_roles(headers: list[str], cols: list[list[str]]) -> list[str]:
+def _detect_roles(headers: list[str], cols: list[list[str]]) -> tuple[list[str], int | None]:
     """Peran tiap kolom. Isi kolom mengalahkan nama header: kolom yang isinya
-    benar-benar PN katalog = part_number, walau headernya 'Kode' atau kosong."""
+    benar-benar PN katalog = part_number, walau headernya 'Kode' atau kosong.
+    Kembalikan (roles, indeks kolom PN kedua yang juga cocok katalog / None)."""
     n = len(headers)
     roles = ["lain"] * n
+    pn_lain_idx: int | None = None
 
     # 1) Sinyal ISI: berapa persen sel yang berbentuk PN, dan berapa yang benar
     #    ada di katalog. Katalog dicek sekali untuk semua kolom (satu lookup).
@@ -119,6 +128,12 @@ def _detect_roles(headers: list[str], cols: list[list[str]]) -> list[str]:
         if len(pn_like) >= max(2, int(0.6 * len(sample))):
             kandidat[i] = pn_like
 
+    # Kolom kandidat MURNI-ANGKA (PN Weichai, TAPI bisa juga qty/harga/no.telp):
+    # hanya boleh jadi PN bila TERBUKTI cocok katalog — dikecualikan dari fallback
+    # tebak posisional di bawah.
+    numerik = {i for i, pl in kandidat.items()
+               if all(_NUM_PN_RE.match(v.strip().upper()) for v in pl)}
+
     dikenal: dict[int, int] = {}
     if kandidat:
         semua = {v.upper() for vals in kandidat.values() for v in vals[:60]}
@@ -130,13 +145,23 @@ def _detect_roles(headers: list[str], cols: list[list[str]]) -> list[str]:
             dikenal[i] = sum(1 for v in vals[:60] if v.upper() in ada)
 
     if dikenal:
-        # Kolom PN = yang paling banyak cocok katalog; bila tak satu pun cocok,
-        # pakai kandidat pertama (file bisa berisi PN aftermarket di luar katalog).
+        # Kolom PN = yang paling banyak cocok katalog.
         best = max(dikenal, key=lambda k: dikenal[k])
-        pn_col = best if dikenal[best] > 0 else min(kandidat)
-        roles[pn_col] = "part_number"
-    elif kandidat:
-        roles[min(kandidat)] = "part_number"
+        if dikenal[best] > 0:
+            pn_col = best
+        else:
+            # Tak satu pun cocok katalog → pakai kandidat ALFANUMERIK pertama (PN
+            # aftermarket di luar katalog). Kolom murni-angka TAK dipakai di sini
+            # (tanpa bukti katalog, ia bisa qty/harga/no.telp).
+            non_num = sorted(i for i in kandidat if i not in numerik)
+            pn_col = non_num[0] if non_num else None
+        if pn_col is not None:
+            roles[pn_col] = "part_number"
+            # Kandidat KEDUA yang juga cocok katalog (mis. sheet 'PN lama/PN baru')
+            # → catat agar tak diam-diam jadi 'lain'.
+            lain_hit = sorted(i for i in dikenal if i != pn_col and dikenal[i] > 0)
+            if lain_hit:
+                pn_lain_idx = lain_hit[0]
 
     # 2) Sinyal HEADER untuk kolom sisanya.
     for i, h in enumerate(headers):
@@ -154,7 +179,7 @@ def _detect_roles(headers: list[str], cols: list[list[str]]) -> list[str]:
             roles[i] = "harga"
         elif _HEAD_KATEGORI.search(h):
             roles[i] = "kategori"
-    return roles
+    return roles, pn_lain_idx
 
 
 def _ringkas_ws(ws) -> dict:
@@ -202,7 +227,10 @@ def parse_upload(data: bytes, filename: str = "", pilih_sheet: str = "") -> dict
         target = pilih_sheet if pilih_sheet in sheet_names else sheet_names[0]
         ws = wb[target]
         raw: list[list] = []
+        kolom_terpotong = False
         for r in ws.iter_rows(values_only=True):
+            if len(r) > MAX_COLS:             # kolom di luar batas → dibuang (jangan senyap)
+                kolom_terpotong = True
             raw.append(list(r[:MAX_COLS]))
             if len(raw) > MAX_ROWS + 12:      # +12 = ruang baris judul sebelum header
                 break
@@ -229,19 +257,23 @@ def parse_upload(data: bytes, filename: str = "", pilih_sheet: str = "") -> dict
         return {"ok": False, "error": "Tidak ada baris data di bawah header."}
 
     cols = [[r[i] for r in body] for i in range(ncol)]
-    roles = _detect_roles(headers, cols)
+    roles, pn_lain_idx = _detect_roles(headers, cols)
 
     pn_idx = roles.index("part_number") if "part_number" in roles else None
     dikenal = 0
+    pn_tidak_dikenal_contoh: list[str] = []
     if pn_idx is not None:
         pns = [r[pn_idx].upper() for r in body if r[pn_idx]]
+        unik_pn = list(dict.fromkeys(pns))
         try:
             # PEMAAF suffix varian (PN sheet '…/2' ↔ PN dasar katalog) — 'dikenal'
             # mencerminkan kecocokan sebenarnya, bukan meleset karena suffix.
-            peta = part_index.rows_for_pns(list(dict.fromkeys(pns)))
+            peta = part_index.rows_for_pns(unik_pn)
         except Exception:
             peta = {}
         dikenal = sum(1 for p in pns if p in peta)
+        # Contoh PN yang TAK dikenal (≤20) — daftarkan agar miss sistematis terlihat.
+        pn_tidak_dikenal_contoh = [p for p in unik_pn if p not in peta][:20]
 
     parsed = {
         "ok": True,
@@ -254,10 +286,13 @@ def parse_upload(data: bytes, filename: str = "", pilih_sheet: str = "") -> dict
         "headers": headers,
         "roles": roles,
         "kolom_pn": headers[pn_idx] if pn_idx is not None else None,
+        "kolom_pn_lain": headers[pn_lain_idx] if pn_lain_idx is not None else None,
         "pn_dikenal": dikenal,
+        "pn_tidak_dikenal_contoh": pn_tidak_dikenal_contoh,
         "contoh": body[:5],
         "_body": body,
         "terpotong": len(body) >= MAX_ROWS,
+        "kolom_terpotong": kolom_terpotong,
     }
     # Simpan bytes utk pindah-sheet HANYA bila multi-sheet & tak kelewat besar
     # (jaga RAM). Tanpa ini select_sheet tak bisa re-parse tab lain.
@@ -361,6 +396,7 @@ def ringkas(parsed: dict) -> dict:
         "part_number_dikenal_di_katalog": parsed["pn_dikenal"],
         "contoh_baris": parsed["contoh"],
         "terpotong": parsed["terpotong"],
+        "kolom_terpotong": parsed.get("kolom_terpotong", False),
     }
     # Sheet lain di workbook (bila ada) — supaya model tahu tab lain berisi apa &
     # bisa menawarkan pindah lewat sheet_pilih_sheet (tanpa minta unggah ulang).
@@ -375,6 +411,10 @@ def ringkas(parsed: dict) -> dict:
         out["baris_tanpa_part_number"] = baris_tanpa_pn
     if kategori is not None:
         out["kolom_pengelompokan"] = kategori
+    # Kolom PN KEDUA yang juga cocok katalog (mis. sheet 'PN lama / PN baru') — beri
+    # tahu model supaya tak mengabaikannya diam-diam & bisa tanya kolom mana diisi.
+    if parsed.get("kolom_pn_lain"):
+        out["kolom_part_number_lain"] = parsed["kolom_pn_lain"]
     # PN yang TAK dikenal katalog (kandidat aftermarket / salah ketik) — bantu model
     # jujur soal berapa yang tak akan bisa diisi stok/harga.
     if "part_number" in roles:
@@ -382,6 +422,9 @@ def ringkas(parsed: dict) -> dict:
         total_pn = sum(1 for r in body
                        if pn_i < len(r) and r[pn_i] is not None and str(r[pn_i]).strip())
         out["part_number_tidak_dikenal"] = max(0, total_pn - parsed["pn_dikenal"])
+        contoh = parsed.get("pn_tidak_dikenal_contoh") or []
+        if contoh:
+            out["part_number_tidak_dikenal_contoh"] = contoh
     return out
 
 
@@ -447,9 +490,12 @@ def _cari_kolom(headers: list[str], nama: str) -> int | None:
         i = ord(m.group(1).upper()) - 65
         if 0 <= i < len(headers):
             return i
-    for i, h in enumerate(low):
-        if nl in h or h in nl:
-            return i
+    # Substring: utamakan header yang DIAWALI nl, lalu yang TERPENDEK yang memuat nl
+    # — supaya 'Harga' → kolom 'Harga', bukan 'Harga SIMS (IDR)' yang kebetulan duluan.
+    kandidat = [i for i, h in enumerate(low) if nl in h or h in nl]
+    if kandidat:
+        kandidat.sort(key=lambda i: (not low[i].startswith(nl), len(low[i])))
+        return kandidat[0]
     return None
 
 
@@ -561,6 +607,9 @@ def fill_column(
             terisi += 1 if r[tgt] else 0
         catatan_sumber = "indeks part lokal (stok.xlsx / harga.xlsx / katalog)"
 
+    # PN yang TAK ketemu (setelah pemaaf suffix) — DAFTARKAN, bukan cuma dihitung.
+    pn_tidak_ditemukan = [p for p in unik if p not in peta]
+
     judul = f"{parsed['filename'].rsplit('.', 1)[0]} + {label}"
     export_id, filename = ai_export.stash_export(judul, headers, body)
     return {
@@ -573,11 +622,16 @@ def fill_column(
         "kolom_part_number": headers[pn_i],
         "baris_terisi": terisi,
         "baris_kosong": len(body) - terisi,
+        "pn_tidak_ditemukan": pn_tidak_ditemukan[:20],
+        "pn_tidak_ditemukan_total": len(pn_tidak_ditemukan),
         "sumber": catatan_sumber,
         "catatan": (
             "📎 Kartu unduh Excel muncul otomatis di bawah jawaban — beri tahu user singkat. "
             f"{terisi} dari {len(body)} baris terisi; sisanya PN tak ditemukan di sumber — "
             "sampaikan apa adanya, ⛔ JANGAN mengarang nilai untuk baris kosong."
+            + (f" ⚠️ {len(pn_tidak_ditemukan)} PN tak ketemu (lihat 'pn_tidak_ditemukan') — "
+               "sebut beberapa & sarankan cek varian suffix/salah ketik."
+               if pn_tidak_ditemukan else "")
         ),
     }
 
@@ -786,6 +840,13 @@ def fill_columns(
             return "" if v in ("N/A", "—") else v
         return f
 
+    # PN yang TAK ketemu di sumber mana pun (setelah pemaaf suffix varian) —
+    # DAFTARKAN (bukan cuma dihitung) agar miss SISTEMATIS (mis. semua varian '/2',
+    # atau seluruh file salah kolom) terlihat oleh model & user. Cap 20 → hormati
+    # budget token (_compact_result/_cap_tool_content).
+    _ketemu = set(peta_lokal) | set(peta_sims)
+    pn_tidak_ditemukan = [p for p in unik if p not in _ketemu]
+
     hasil: list[dict] = []
     gudang_tak_dikenal: list[str] = []
     gudang_dipakai = 0
@@ -837,6 +898,8 @@ def fill_columns(
         "kolom_part_number": headers[pn_i],
         "kolom": hasil,
         "gudang_tak_dikenal": gudang_tak_dikenal,
+        "pn_tidak_ditemukan": pn_tidak_ditemukan[:20],
+        "pn_tidak_ditemukan_total": len(pn_tidak_ditemukan),
         "sumber": ("indeks part lokal (stok.xlsx/harga.xlsx/katalog)"
                    + (f" + {sumber_sims}" if sumber_sims else "")),
         "catatan": (
@@ -845,6 +908,9 @@ def fill_columns(
             "memintanya). Untuk stok per-gudang, '0' = terlacak tapi kosong di gudang itu, sel "
             "KOSONG = PN tak ada di sumber. "
             + (f"⚠️ Gudang tak dikenal: {gudang_tak_dikenal}. " if gudang_tak_dikenal else "")
+            + (f"⚠️ {len(pn_tidak_ditemukan)} PN tak ketemu di sumber (lihat "
+               "'pn_tidak_ditemukan' — sebut beberapa ke user & sarankan cek varian "
+               "suffix/salah ketik). " if pn_tidak_ditemukan else "")
             + "⛔ JANGAN mengarang nilai untuk baris kosong."
         ),
     }

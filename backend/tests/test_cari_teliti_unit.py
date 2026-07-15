@@ -193,6 +193,42 @@ def test_mode_cepat_membawa_catatan_cakupan(monkeypatch):
     assert warmed == [FRAME]                # indeks lengkap mulai dibangun di latar
 
 
+def test_eskalasi_teliti_saat_indeks_siap_di_tengah_call(monkeypatch):
+    """P8: indeks lengkap SELESAI dibangun selama pencarian cepat → langsung sisir
+    lengkap (instan + penuh), tanpa 'catatan_cakupan' & tanpa ronde tool kedua —
+    walau hasil cepat sebenarnya ADA (bracket)."""
+    monkeypatch.setattr(A.part_index, "rows_for_pns", lambda pns: {})
+    monkeypatch.setattr(A.epc_bom, "warm_items_index", lambda r: None)
+    monkeypatch.setattr(A.epc_bom, "reverse_find_in_unit", lambda r, p: {"instances": []})
+    ready = {"calls": 0}
+
+    def _ready(r):
+        # False saat cek awal, True saat re-cek setelah pencarian cepat (indeks selesai).
+        ready["calls"] += 1
+        return ready["calls"] > 1
+
+    monkeypatch.setattr(A.epc_bom, "items_index_ready", _ready)
+    monkeypatch.setattr(A.epc_bom, "search_in_unit",
+                        lambda r, k: {"found": True, "frame_number": FRAME,
+                                      "hasil": [{"pn": "082V11640-0287/1",
+                                                 "nama": "ECU bracket", "kata_kunci": "ecu"}]})
+    called = {"teliti": False}
+
+    def _items(r, k):
+        called["teliti"] = True
+        return {"found": True, "frame_number": FRAME, "hasil": [ECU_ROW], "incomplete": False}
+
+    monkeypatch.setattr(A.epc_bom, "search_items_in_unit", _items)
+
+    out = A._t_cari_part_di_unit({"rangka": FRAME, "kata_kunci": "ecu"}, ADMIN)
+
+    assert out["found"] is True
+    assert called["teliti"] is True                    # sisir lengkap dijalankan
+    assert "indeks unit sudah siap" in out["mode"]     # label 'instan'
+    assert "catatan_cakupan" not in out                # jalur lengkap → tak perlu saran
+    assert out["parts"][0]["part_number"] == "202V25803-7915"
+
+
 def test_indeks_siap_langsung_jalur_lengkap_tanpa_match(monkeypatch):
     """Indeks unit sudah hangat (RAM/disk) → SATU ronde: langsung sisiran lengkap,
     indeks cepat yang bolong dilewati sama sekali."""

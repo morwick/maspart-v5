@@ -50,3 +50,36 @@ def test_strip_mempertahankan_teks_sebelum_dan_sesudah():
 def test_strip_teks_bersih_tidak_berubah():
     s = "Jawaban normal dengan <b>markup html biasa</b> tetap utuh."
     assert ai._strip_tool_markup(s) == s
+
+
+# ── P9.3: hasil tool BOCOR disuntik sebagai role:system (bukan user) ──────────
+
+def test_hasil_tool_bocor_disuntik_sebagai_system(monkeypatch):
+    monkeypatch.setattr(ai, "_system_prompt", lambda user: "sys")
+    monkeypatch.setattr(ai, "_tool_specs", lambda user, sheet_id="": [])
+    monkeypatch.setattr(ai, "_unit_name_tokens", lambda: set())
+    monkeypatch.setattr(ai, "_prefetch_epc_rangka", lambda h: None)
+    seen = {"msgs": None}
+    seq = [
+        {"choices": [{"message": {"content": '<invoke name="daftar_unit"></invoke>'},
+                      "finish_reason": "stop"}]},                    # model bocorkan tool sbg teks
+        {"choices": [{"message": {"content": "Ada beberapa unit."},
+                      "finish_reason": "stop"}]},
+    ]
+    calls = {"n": 0}
+
+    def fake(messages, tools, max_tokens=6000):
+        seen["msgs"] = [dict(m) for m in messages]
+        c = seq[min(calls["n"], len(seq) - 1)]
+        calls["n"] += 1
+        return c
+
+    monkeypatch.setattr(ai, "_post_chat", fake)
+    monkeypatch.setattr(ai, "_run_tool", lambda n, a, u, sheet_id="": {"found": True, "units": ["A"]})
+
+    ai.chat({"username": "t", "role": "user"}, [{"role": "user", "content": "unit apa saja?"}])
+
+    hasil = [m for m in seen["msgs"] if "[HASIL TOOL" in (m.get("content") or "")]
+    assert hasil and all(m["role"] == "system" for m in hasil)       # disuntik sbg system
+    assert not any(m["role"] == "user" and "[HASIL TOOL" in (m.get("content") or "")
+                   for m in seen["msgs"])

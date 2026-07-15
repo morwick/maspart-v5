@@ -70,6 +70,88 @@ def test_deteksi_kolom_pn_nama_qty(katalog):
     assert roles["Jumlah"] == "qty"
 
 
+# ── P5: PN Weichai murni-angka ───────────────────────────────────────────────
+
+def test_deteksi_pn_weichai_murni_angka(monkeypatch):
+    """Kolom PN Weichai murni-angka (612630010054) TERDETEKSI bila cocok katalog;
+    kolom qty & harga murni-angka TIDAK salah jadi PN."""
+    kat = [{"part_number": "612630010054", "part_name": "Oil cooler"},
+           {"part_number": "612600115000", "part_name": "Filter"}]
+    monkeypatch.setattr(ai_sheet.part_index, "search_exact_pns",
+                        lambda pns: [r for r in kat if r["part_number"] in {str(p) for p in pns}])
+    monkeypatch.setattr(ai_sheet.part_index, "_pn_flat_map", lambda: {})
+    data = _xlsx([
+        ["Kode", "Nama", "Qty", "Harga"],
+        [612630010054, "Oil cooler", 2, 1500000],
+        [612600115000, "Filter", 5, 250000],
+    ])
+    p = ai_sheet.parse_upload(data, "weichai.xlsx")
+    assert p["ok"]
+    assert p["kolom_pn"] == "Kode"                 # kolom numerik terverifikasi → PN
+    assert p["pn_dikenal"] == 2
+    roles = dict(zip(p["headers"], p["roles"]))
+    assert roles["Qty"] != "part_number"           # qty tak salah jadi PN
+    assert roles["Harga"] != "part_number"
+
+
+def test_kolom_murni_angka_tanpa_bukti_katalog_bukan_pn(monkeypatch):
+    """Guard: kolom murni-angka TANPA bukti katalog (mis. no. telp) TAK dipaksa PN."""
+    monkeypatch.setattr(ai_sheet.part_index, "search_exact_pns", lambda pns: [])
+    monkeypatch.setattr(ai_sheet.part_index, "_pn_flat_map", lambda: {})
+    data = _xlsx([
+        ["Nama", "No HP"],
+        ["Budi", 81234567890],
+        ["Andi", 81298765432],
+    ])
+    p = ai_sheet.parse_upload(data, "kontak.xlsx")
+    assert p["ok"]
+    assert p["kolom_pn"] is None                    # angka tak terverifikasi ≠ PN
+
+
+def test_dua_kolom_pn_kolom_kedua_dicatat(monkeypatch):
+    """Dua kolom PN sama-sama cocok katalog → kolom kedua dicatat, tak jadi 'lain'."""
+    kat = [{"part_number": p, "part_name": "x"} for p in
+           ("WG9925520270", "AZ9925520271", "VG1560080012", "WG9725580006")]
+    monkeypatch.setattr(ai_sheet.part_index, "search_exact_pns",
+                        lambda pns: [r for r in kat if r["part_number"] in {str(p).upper() for p in pns}])
+    monkeypatch.setattr(ai_sheet.part_index, "_pn_flat_map", lambda: {})
+    data = _xlsx([
+        ["PN Lama", "PN Baru", "Nama"],
+        ["WG9925520270", "VG1560080012", "A"],
+        ["AZ9925520271", "WG9725580006", "B"],
+    ])
+    p = ai_sheet.parse_upload(data, "supersession.xlsx")
+    assert p["ok"]
+    assert p["kolom_pn"] in ("PN Lama", "PN Baru")
+    assert p["kolom_pn_lain"] in ("PN Lama", "PN Baru")
+    assert p["kolom_pn"] != p["kolom_pn_lain"]
+    r = ai_sheet.ringkas(p)
+    assert r["kolom_part_number_lain"] == p["kolom_pn_lain"]
+
+
+# ── P9.4/P9.5: poles _cari_kolom & truncation kolom ─────────────────────────
+
+def test_cari_kolom_utamakan_exact_lalu_terpendek():
+    # exact menang walau ada header lain yang MEMUAT kata & posisinya duluan
+    assert ai_sheet._cari_kolom(["Harga SIMS (IDR)", "Harga", "Nama"], "Harga") == 1
+    # tanpa exact: prefix + TERPENDEK menang (bukan yang kebetulan duluan)
+    assert ai_sheet._cari_kolom(["Harga SIMS (IDR)", "Harga Jual"], "harga") == 1
+
+
+def test_kolom_terpotong_ditandai():
+    """Kolom melewati MAX_COLS dibuang → DITANDAI (tak senyap)."""
+    header = [f"C{i}" for i in range(ai_sheet.MAX_COLS + 5)]
+    row = list(range(ai_sheet.MAX_COLS + 5))
+    p = ai_sheet.parse_upload(_xlsx([header, row]), "lebar.xlsx")
+    assert p["ok"] and p["kolom_terpotong"] is True
+    assert ai_sheet.ringkas(p)["kolom_terpotong"] is True
+
+
+def test_kolom_tidak_terpotong_bila_dalam_batas(katalog):
+    p = ai_sheet.parse_upload(_xlsx([["Part Number", "Qty"], ["WG9925520270", 1]]), "kecil.xlsx")
+    assert p["kolom_terpotong"] is False
+
+
 def test_tolak_format_dan_file_rusak():
     assert ai_sheet.parse_upload(b"", "a.xlsx")["error"] == "File kosong."
     assert "xlsx" in ai_sheet.parse_upload(b"x", "a.csv")["error"]
@@ -186,6 +268,47 @@ def test_isi_kolom_pemaaf_suffix_varian(katalog):
     assert r["found"] and r["baris_terisi"] == 1     # terisi lewat PN dasar
     # parse_upload juga menghitung 'dikenal' dgn pemaaf.
     assert p["pn_dikenal"] == 1
+
+
+# ── P6: daftar PN gagal-cocok ────────────────────────────────────────────────
+
+def test_pn_tidak_ditemukan_didaftar(katalog):
+    """PN yang tak ketemu DIDAFTAR (bukan cuma dihitung) di fill_column & ringkas."""
+    p = ai_sheet.parse_upload(_xlsx([
+        ["Part Number", "Qty"],
+        ["WG9925520270", 1],       # dikenal
+        ["ZZZ111AA", 2],           # tak dikenal
+        ["ZZZ222BB", 3],           # tak dikenal
+    ]), "order.xlsx")
+    sid = ai_sheet.put_sheet(USER["username"], p)
+    r = ai_sheet.fill_column(sid, USER, isi="stok")
+    assert r["found"]
+    assert set(r["pn_tidak_ditemukan"]) == {"ZZZ111AA", "ZZZ222BB"}
+    assert r["pn_tidak_ditemukan_total"] == 2
+    # sheet_ringkasan juga mendaftarkan contoh PN tak dikenal.
+    rr = ai_sheet.ringkas(p)
+    assert "ZZZ111AA" in rr["part_number_tidak_dikenal_contoh"]
+
+
+def test_pn_tidak_ditemukan_tercap_20(katalog):
+    baris = [["Part Number"]] + [[f"NOPE{i:04d}X"] for i in range(30)]
+    p = ai_sheet.parse_upload(_xlsx(baris), "besar.xlsx")
+    sid = ai_sheet.put_sheet(USER["username"], p)
+    r = ai_sheet.fill_column(sid, USER, isi="stok")
+    assert len(r["pn_tidak_ditemukan"]) == 20        # ter-cap
+    assert r["pn_tidak_ditemukan_total"] == 30       # total jujur
+
+
+def test_pn_tidak_ditemukan_absen_bila_semua_cocok(katalog):
+    p = ai_sheet.parse_upload(_xlsx([
+        ["Part Number", "Qty"],
+        ["WG9925520270", 1],
+        ["AZ9925520271", 2],
+    ]), "order.xlsx")
+    sid = ai_sheet.put_sheet(USER["username"], p)
+    r = ai_sheet.fill_column(sid, USER, isi="stok")
+    assert r["pn_tidak_ditemukan"] == []
+    assert r["pn_tidak_ditemukan_total"] == 0
 
 
 def test_isi_kolom_menimpa_kolom_yang_disebut_huruf(katalog):
@@ -367,6 +490,15 @@ def test_isi_multi_gudang_dan_harga_satu_file(gudang_stok):
     assert per["Stok JAKARTA"] == 2                       # WG=8, AZ=3
     assert per["Stok PEKANBARU"] == 2                     # WG=4, AZ='0' (terlacak)
     assert per["Harga"] == 1                              # AZ '—' → kosong
+
+
+def test_fill_columns_daftar_pn_tidak_ditemukan(gudang_stok):
+    """P6 (jalur produksi fill_columns): PN tak ketemu didaftar, bukan cuma dihitung."""
+    sid = _sheet_pn(USER)   # berisi ZZZ0000000 (di luar katalog)
+    r = ai_sheet.fill_columns(sid, USER, [{"isi": "stok", "gudang": "Jakarta"}])
+    assert r["found"]
+    assert "ZZZ0000000" in r["pn_tidak_ditemukan"]
+    assert r["pn_tidak_ditemukan_total"] == 1
 
 
 def test_isi_gudang_campur_dikenal_dan_tidak(gudang_stok):

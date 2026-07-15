@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -211,6 +213,46 @@ def build_and_save(**kw) -> Path:
 # ═══════════════════════════════════════════════════════════════════════
 _CACHE: dict = {"mtime": None, "data": None, "block": "", "block_no_gudang": ""}
 
+# Auto-rebuild: bila catalog_bom.json lebih baru dari ai_knowledge.json, bangun
+# ulang di THREAD LATAR (blok lama tetap disajikan sampai selesai). Debounce
+# lewat flag in-progress + cooldown agar tak dibangun berkali-kali / hammer saat
+# gagal. Prompt-cache tetap aman: blok role-invariant → 1 cache-miss per update
+# katalog (sama seperti rebuild manual `tools/build_ai_knowledge.py`).
+_REBUILD_LOCK = threading.Lock()
+_REBUILD: dict = {"on": False, "last": 0.0}
+_REBUILD_COOLDOWN_SEC = 30.0
+
+
+def _catalog_bom_mtime() -> float:
+    try:
+        return (get_settings().data_path / "catalog_bom.json").stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _maybe_rebuild_async(knowledge_mtime: float) -> None:
+    """Picu rebuild latar bila catalog_bom.json > ai_knowledge.json (deterministik,
+    offline). No-op bila belum berubah / rebuild sedang jalan / masih cooldown."""
+    bom_mt = _catalog_bom_mtime()
+    if not bom_mt or bom_mt <= knowledge_mtime:
+        return
+    with _REBUILD_LOCK:
+        if _REBUILD["on"] or (time.monotonic() - _REBUILD["last"]) < _REBUILD_COOLDOWN_SEC:
+            return
+        _REBUILD["on"] = True
+        _REBUILD["last"] = time.monotonic()
+
+    def _run() -> None:
+        try:
+            build_and_save()
+            logger.info("[ai_knowledge] blok pengetahuan dibangun ulang (catalog_bom.json berubah)")
+        except Exception:
+            logger.exception("[ai_knowledge] rebuild otomatis gagal")
+        finally:
+            _REBUILD["on"] = False
+
+    threading.Thread(target=_run, daemon=True, name="ai-knowledge-rebuild").start()
+
 
 def _load() -> dict | None:
     try:
@@ -223,6 +265,7 @@ def _load() -> dict | None:
             _CACHE["mtime"] = mt
             _CACHE["block"] = _render(_CACHE["data"], with_gudang=True)
             _CACHE["block_no_gudang"] = _render(_CACHE["data"], with_gudang=False)
+        _maybe_rebuild_async(mt)      # bangun ulang bila katalog sumber lebih baru
         return _CACHE["data"]
     except Exception:
         logger.exception("gagal memuat %s", _KNOWLEDGE_FILE)

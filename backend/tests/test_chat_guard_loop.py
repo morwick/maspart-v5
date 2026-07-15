@@ -117,6 +117,56 @@ def test_guard_substitusi_pn_lokal_di_jawaban_pervin(monkeypatch):
     assert "WG9114520140" in out["reply"]            # PN tetap ada (ditandai, tak dihapus)
 
 
+def test_epc_first_guard_di_follow_up_rangka_lama(monkeypatch):
+    """P3: VIN disebut 2 giliran lalu; follow-up 'kampas remnya?' → model jawab PN
+    tanpa cek EPC → guard EPC-FIRST tetap memaksa cek (bukan hanya pesan terakhir)."""
+    monkeypatch.setattr(ai.part_index, "search_exact_pns", lambda pns: [])
+    seq = [
+        {"choices": [{"message": {"content": "Kampas remnya WG9100443050."},
+                      "finish_reason": "stop"}]},                    # jawab tanpa tool rangka
+        {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": "x", "function": {"name": "part_aus_dari_rangka",
+                                     "arguments": '{"rangka":"PJ306941","query":"kampas rem"}'}}]},
+            "finish_reason": "tool_calls"}]},                        # setelah koreksi → cek EPC
+        {"choices": [{"message": {"content": "Kampas rem: AZ4007410031."},
+                      "finish_reason": "stop"}]},
+    ]
+    calls = {"n": 0}
+
+    def fake_post(messages, tools, max_tokens=6000):
+        c = seq[min(calls["n"], len(seq) - 1)]
+        calls["n"] += 1
+        return c
+    monkeypatch.setattr(ai, "_post_chat", fake_post)
+    monkeypatch.setattr(ai, "_run_tool", lambda n, a, u, sheet_id="":
+                        {"found": True, "parts_tanpa_posisi": [{"part_number": "AZ4007410031"}]})
+    out = ai.chat(USER, [
+        {"role": "user", "content": "cek unit PJ306941"},
+        {"role": "assistant", "content": "Unit PJ306941 model HOWO."},
+        {"role": "user", "content": "kampas remnya berapa?"},
+    ])
+    assert calls["n"] >= 3                            # EPC-first memaksa panggil tool rangka
+    assert "AZ4007410031" in out["reply"]             # jawaban akhir dari EPC per-VIN
+
+
+def test_substitusi_persist_di_follow_up(monkeypatch):
+    """P4: PN yg PERNAH ditandai suspect di riwayat → tetap dianotasi di follow-up
+    (rangka aktif) walau tool EPC tak dipakai lagi turn ini."""
+    monkeypatch.setattr(ai.part_index, "search_exact_pns",
+                        lambda pns: [{"part_number": "WG9114520140"}])   # grounded (ada di katalog)
+    monkeypatch.setattr(ai, "_post_chat", lambda m, t, max_tokens=6000:
+                        {"choices": [{"message": {"content": "Ya, pakai WG9114520140."},
+                                      "finish_reason": "stop"}]})
+    out = ai.chat(USER, [
+        {"role": "user", "content": "per assy depan PJ306941"},
+        {"role": "assistant", "content":
+            "⚠️ Perhatian: nomor part WG9114520140 berasal dari KATALOG LOKAL per-model, "
+            "TIDAK terverifikasi di data EPC per-VIN unit ini.\n\nFront: WG9114520140."},
+        {"role": "user", "content": "yakin WG9114520140 untuk PJ306941?"},
+    ])
+    assert "KATALOG LOKAL" in out["reply"]            # suspect riwayat → re-anotasi
+
+
 def test_guard_substitusi_tak_kena_bila_epc_tak_dipakai(monkeypatch):
     # Bila TIDAK ada tool EPC per-VIN sukses (hanya cari_part), PN lokal SAH → tak ditandai.
     monkeypatch.setattr(ai.part_index, "search_exact_pns", lambda pns: [])
@@ -254,3 +304,59 @@ def test_strip_reasoning_kosong_bila_hanya_nalar():
 def test_strip_reasoning_ambil_jawaban_setelah_penutup():
     assert ai._strip_reasoning("[PIKIR] a [/PIKIR] Jawaban.") == "Jawaban."
     assert ai._strip_reasoning("nalar bocor [/PIKIR] Jawaban.") == "Jawaban."
+
+
+# ── P1: hemat token [PIKIR] runaway ─────────────────────────────────────────
+
+def test_stub_truncated_reasoning():
+    # [PIKIR] tak-tertutup (terpotong) → dipangkas + penanda
+    s = ai._stub_truncated_reasoning("[PIKIR] " + "x" * 1000)
+    assert s.endswith(ai._STUB_REASON_MARK) and len(s) < 500
+    # nalar UTUH (ada penutup) → jangan diutak-atik
+    assert ai._stub_truncated_reasoning("[PIKIR] a [/PIKIR] Jwb") == "[PIKIR] a [/PIKIR] Jwb"
+    # tanpa [PIKIR] → apa adanya
+    assert ai._stub_truncated_reasoning("Halo") == "Halo"
+
+
+def test_budget_besar_untuk_ronde_penulisan_jawaban(monkeypatch):
+    """P1a: setelah ronde tool (tool_rounds>=1), panggilan penulis jawaban dapat
+    budget _MAX_TOKENS_ANSWER (bukan 6000) agar [PIKIR]+jawaban tak terpotong."""
+    monkeypatch.setattr(ai, "_prefetch_epc_rangka", lambda h: None)
+    state = {"n": 0, "max_tokens": []}
+    responses = [
+        {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": "t1", "function": {"name": "cari_part", "arguments": "{}"}}]},
+            "finish_reason": "tool_calls"}]},
+        {"choices": [{"message": {"content": "[PIKIR] ok [/PIKIR] Jawaban."},
+                      "finish_reason": "stop"}]},
+    ]
+
+    def fake(messages, tools, max_tokens=6000):
+        state["max_tokens"].append(max_tokens)
+        r = responses[min(state["n"], len(responses) - 1)]
+        state["n"] += 1
+        return r
+
+    monkeypatch.setattr(ai, "_post_chat", fake)
+    monkeypatch.setattr(ai, "_run_tool",
+                        lambda n, a, u, sheet_id="": {"found": True, "hasil": []})
+    out = ai.chat(USER, [{"role": "user", "content": "cek stok"}])
+    assert out["reply"] == "Jawaban."
+    assert state["max_tokens"][0] == 6000                  # ronde-0 perencanaan = default
+    assert state["max_tokens"][1] == ai._MAX_TOKENS_ANSWER  # ronde penulisan jawaban = besar
+
+
+def test_nalar_terpotong_distub_sebelum_salvage(monkeypatch):
+    """P1b: assistant-msg [PIKIR] tak-tertutup yang di-append sebelum retry salvage
+    dipangkas (stub) → hemat token & cegah model 'melanjutkan' esai mati."""
+    st = _stub_seq_fr(monkeypatch)
+    long_reason = "[PIKIR] " + ("nalar " * 400)            # >400 char, tak menutup
+    st["seq"] = [
+        (long_reason, "length"),                           # terpotong → kosong
+        ("Jawaban final.", "stop"),                        # salvage sukses
+    ]
+    out = ai.chat(USER, [{"role": "user", "content": "x"}])
+    assert out["reply"] == "Jawaban final."
+    appended = st["messages"][1][-2]["content"]            # assistant sebelum koreksi
+    assert appended.endswith(ai._STUB_REASON_MARK)
+    assert len(appended) < len(long_reason)                # benar-benar dipangkas

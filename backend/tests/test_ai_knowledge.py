@@ -95,3 +95,54 @@ def test_gudang_disembunyikan_untuk_pembeli(fake_data):
 def test_file_hilang_blok_kosong(fake_data):
     (fake_data / "ai_knowledge.json").unlink(missing_ok=True)
     assert ai_knowledge.knowledge_block({"role": "admin"}) == ""
+
+
+# ── P7: auto-rebuild saat catalog_bom.json lebih baru ───────────────────────
+
+class _SyncThread:
+    """Thread palsu yang menjalankan target SINKRON di .start() (untuk test)."""
+    def __init__(self, target=None, daemon=None, name=None):
+        self._t = target
+
+    def start(self):
+        if self._t:
+            self._t()
+
+
+def test_auto_rebuild_saat_catalog_lebih_baru(fake_data, monkeypatch):
+    import os
+    ai_knowledge.build_and_save(min_sub_count=1, min_sub_share=0.5)
+    kpath = fake_data / "ai_knowledge.json"
+    bom_mt = (fake_data / "catalog_bom.json").stat().st_mtime
+    os.utime(kpath, (bom_mt - 100, bom_mt - 100))     # knowledge LEBIH TUA dari bom
+    monkeypatch.setattr(ai_knowledge, "_CACHE",
+                        {"mtime": None, "data": None, "block": "", "block_no_gudang": ""})
+    monkeypatch.setattr(ai_knowledge, "_REBUILD", {"on": False, "last": 0.0})
+    monkeypatch.setattr(ai_knowledge.threading, "Thread", _SyncThread)
+    calls = {"n": 0}
+    real = ai_knowledge.build_and_save
+    monkeypatch.setattr(ai_knowledge, "build_and_save",
+                        lambda **kw: (calls.__setitem__("n", calls["n"] + 1),
+                                      real(min_sub_count=1, min_sub_share=0.5))[1])
+
+    blok = ai_knowledge.knowledge_block({"role": "admin"})
+    assert "PENGETAHUAN DARI DATA NYATA" in blok       # blok LAMA tetap disajikan
+    assert calls["n"] == 1                              # rebuild dipicu tepat sekali
+
+
+def test_tak_rebuild_bila_catalog_tak_lebih_baru(fake_data, monkeypatch):
+    import os
+    ai_knowledge.build_and_save(min_sub_count=1, min_sub_share=0.5)
+    kpath = fake_data / "ai_knowledge.json"
+    bom_mt = (fake_data / "catalog_bom.json").stat().st_mtime
+    os.utime(kpath, (bom_mt + 100, bom_mt + 100))     # knowledge LEBIH BARU dari bom
+    monkeypatch.setattr(ai_knowledge, "_CACHE",
+                        {"mtime": None, "data": None, "block": "", "block_no_gudang": ""})
+    monkeypatch.setattr(ai_knowledge, "_REBUILD", {"on": False, "last": 0.0})
+    monkeypatch.setattr(ai_knowledge.threading, "Thread", _SyncThread)
+    calls = {"n": 0}
+    monkeypatch.setattr(ai_knowledge, "build_and_save",
+                        lambda **kw: calls.__setitem__("n", calls["n"] + 1))
+
+    ai_knowledge.knowledge_block({"role": "admin"})
+    assert calls["n"] == 0                              # tak ada rebuild
