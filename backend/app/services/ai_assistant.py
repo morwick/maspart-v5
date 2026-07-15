@@ -6854,6 +6854,34 @@ def _dump_tool(result) -> str:
                       separators=(",", ":"), default=str)
 
 
+_TOOL_TRIM_KEEP_LAST = 2   # ronde tool TERAKHIR yang isinya dibiarkan UTUH
+
+
+def _trim_old_tool_messages(messages: list[dict], tool_msg_idx: list[dict],
+                            cur_round: int, keep_last: int = _TOOL_TRIM_KEEP_LAST) -> None:
+    """Ciutkan CONTENT pesan HASIL TOOL dari ronde LAMA (≤ cur_round - keep_last) jadi
+    stub pendek — `messages` dikirim ulang UTUH tiap panggilan API, jadi hasil tool yang
+    menumpuk lintas ronde membengkakkan token input (biaya kuadratik). Dipakai pada
+    RANTAI panjang (banding/katalog 5-8 ronde) yang paling rawan tembus limit konteks.
+
+    AMAN: grounding/PN/metadata sudah ditangkap ke state samping (`grounded`,
+    `_capture_meta`, `_track_pn_source`) saat hasil di-append — trimming tak
+    menghilangkannya. `role:tool` + `tool_call_id` DIPERTAHANKAN (pasangan
+    assistant.tool_calls↔tool wajib valid); ronde terbaru tetap utuh agar model
+    bernalar atas data terkini."""
+    batas = cur_round - keep_last
+    if batas < 1:
+        return
+    for e in tool_msg_idx:
+        if e.get("stubbed") or e["round"] > batas:
+            continue
+        i = e["i"]
+        if 0 <= i < len(messages):
+            messages[i]["content"] = (f"[hasil {e.get('name') or 'tool'} (ronde {e['round']}) "
+                                      "sudah dipakai — diringkas untuk hemat konteks]")
+        e["stubbed"] = True
+
+
 def _tool_failed(result: dict) -> bool:
     """True bila hasil tool = kegagalan/kekosongan lookup (error, ditolak, atau
     'tidak ditemukan'). Dipakai untuk mengingatkan model agar TIDAK mengarang
@@ -8486,6 +8514,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     # counter-nya sendiri; _iters = pagar total agar mustahil loop selamanya.
     tool_rounds = 0
     _iters = 0
+    # Indeks pesan HASIL TOOL (+ ronde) untuk memangkas isi ronde lama → hemat token.
+    _tool_msg_idx: list[dict] = []
     # Biaya token DeepSeek giliran ini (jumlah SEMUA panggilan API-nya) → ai_chat_log.
     _tok = {"in": 0, "out": 0, "cache": 0, "calls": 0}
     _MAX_ITERS = _MAX_TOOL_ROUNDS + _MAX_EMPTY_RETRIES + _MAX_GUARD_RETRIES + 4
@@ -8493,6 +8523,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     while _iters < _MAX_ITERS:
         _iters += 1
         tools_habis = tool_rounds >= _MAX_TOOL_ROUNDS
+        # Pangkas isi hasil tool ronde LAMA sebelum kirim ulang messages (hemat token).
+        _trim_old_tool_messages(messages, _tool_msg_idx, tool_rounds)
         # Ronde tool habis / retry jawaban-langsung → jangan tawarkan tool lagi, paksa
         # jawaban final dgn budget output lebih besar (nalar atas hasil besar bisa panjang).
         if tools_habis or force_direct:
@@ -8544,6 +8576,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                             + _cap_tool_content(_dump)
                         ),
                     })
+                    _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
                     if _tool_failed(result):
                         tool_gagal_pernah = True
                         if not lookup_gagal:
@@ -8665,6 +8698,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 "tool_call_id": tc.get("id"),
                 "content": _cap_tool_content(_dump),
             })
+            _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
             if _tool_failed(result):
                 lookup_gagal = True
                 tool_gagal_pernah = True
