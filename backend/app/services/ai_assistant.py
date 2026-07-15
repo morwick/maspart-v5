@@ -1733,10 +1733,36 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "Baca isi file Excel yang BARU diunggah user di chat ini: nama sheet, "
                     "jumlah baris/kolom, nama tiap kolom beserta PERAN yang terdeteksi "
                     "(part_number/part_name/stok/qty/harga/lain), berapa Part Number yang "
-                    "dikenal katalog, dan beberapa baris contoh. Panggil ini lebih dulu bila "
-                    "user bertanya 'isinya apa' atau sebelum mengisi kolom."
+                    "dikenal katalog, dan beberapa baris contoh. Kini juga: fill-rate & contoh "
+                    "nilai tiap kolom, jumlah PN tak dikenal, serta SHEET LAIN di workbook "
+                    "('sheet_lain_detail'). Panggil ini lebih dulu bila user bertanya 'isinya "
+                    "apa' atau sebelum mengisi kolom."
                 ),
                 "parameters": {"type": "object", "properties": {}},
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "sheet_pilih_sheet",
+                "description": (
+                    "Pindah SHEET AKTIF pada file Excel yang sudah diunggah (workbook multi-sheet). "
+                    "Default hanya sheet PERTAMA yang aktif & bisa diisi; bila user memaksudkan tab "
+                    "lain (lihat 'sheet_lain_detail' di sheet_ringkasan), panggil ini dengan nama "
+                    "sheet-nya. Setelah pindah, kolom & isi tab itu bisa langsung diisi seperti biasa "
+                    "(sheet_id tetap sama). File tunggal / terlalu besar tak bisa pindah — minta user "
+                    "mengunggah ulang tab yang diinginkan."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "nama_sheet": {
+                            "type": "string",
+                            "description": "Nama sheet/tab tujuan (persis seperti di 'sheet_lain_detail').",
+                        },
+                    },
+                    "required": ["nama_sheet"],
+                },
             },
         })
         # Pilihan isi kolom: harga_sims HANYA ditawarkan ke admin/SEE_ALL.
@@ -3436,6 +3462,13 @@ def _t_sheet_cek_qty(args: dict, user: dict) -> dict:
             "sampaikan apa adanya (qty BOM = jumlah terpasang di unit, bisa beda dari kebutuhan order)."
         ),
     }
+
+
+def _t_sheet_pilih_sheet(args: dict, user: dict) -> dict:
+    """Pindah sheet AKTIF file Excel unggahan (workbook multi-sheet). sheet_id
+    dipaksa server (args['_sheet_id']) — model tak bisa memilih file orang lain."""
+    return ai_sheet.select_sheet(args.get("_sheet_id", ""),
+                                 user, (args.get("nama_sheet") or "").strip())
 
 
 def _t_info_aplikasi(args: dict, user: dict) -> dict:
@@ -6723,6 +6756,7 @@ _DISPATCH = {
     "sheet_isi_foto": _t_sheet_isi_foto,
     "sheet_isi_part_number": _t_sheet_isi_part_number,
     "sheet_cek_qty": _t_sheet_cek_qty,
+    "sheet_pilih_sheet": _t_sheet_pilih_sheet,
     "buat_penawaran": _t_buat_penawaran,
 }
 

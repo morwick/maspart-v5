@@ -22,6 +22,19 @@ def _xlsx(rows) -> bytes:
     return buf.getvalue()
 
 
+def _xlsx_multi(sheets: dict) -> bytes:
+    """sheets = {nama_sheet: [rows]}. Sheet pertama jadi aktif default."""
+    wb = Workbook()
+    wb.remove(wb.active)
+    for nama, rows in sheets.items():
+        ws = wb.create_sheet(title=nama)
+        for r in rows:
+            ws.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 @pytest.fixture
 def katalog(monkeypatch):
     """Katalog palsu: 2 PN dikenal, lengkap dgn stok/harga/nama."""
@@ -76,6 +89,67 @@ def test_sheet_id_user_lain_tidak_terbaca(katalog):
     assert ai_sheet.get_sheet(sid, "budi") is not None
     assert ai_sheet.get_sheet(sid, "orang-lain") is None       # milik user lain
     assert ai_sheet.get_sheet("ngawur", "budi") is None
+
+
+# ── Multi-sheet ──────────────────────────────────────────────────────────────
+
+def test_parse_ringkas_sheet_lain(katalog):
+    """Sheet pertama di-parse penuh; tab lain diringkas (nama+header+baris)."""
+    data = _xlsx_multi({
+        "Order": [["Part Number", "Qty"], ["WG9925520270", 4]],
+        "Retur": [["Kode", "Alasan"], ["AZ9925520271", "rusak"], ["X", "salah"]],
+    })
+    p = ai_sheet.parse_upload(data, "wb.xlsx")
+    assert p["ok"] and p["sheet"] == "Order"
+    assert p["sheet_lain"] == ["Retur"]
+    out = ai_sheet.ringkas(p)
+    detail = {d["nama"]: d for d in out["sheet_lain_detail"]}
+    assert "Retur" in detail
+    assert detail["Retur"]["header"][:2] == ["Kode", "Alasan"]
+    assert detail["Retur"]["jumlah_baris"] == 2
+    assert "catatan_sheet" in out
+
+
+def test_pilih_sheet_ganti_aktif_dan_isi_di_tab_itu(gudang_stok):
+    data = _xlsx_multi({
+        "Kosong": [["Catatan"], ["abaikan"]],
+        "Barang": [["Part Number"], ["WG9925520270"], ["AZ9925520271"]],
+    })
+    p = ai_sheet.parse_upload(data, "wb.xlsx")
+    sid = ai_sheet.put_sheet(USER["username"], p)
+    assert p["sheet"] == "Kosong"                   # default tab pertama
+
+    r = ai_sheet.select_sheet(sid, USER, "Barang")
+    assert r["found"] and r["sheet"] == "Barang"
+    # sheet_id SAMA kini menunjuk tab 'Barang' → fill jalan di situ.
+    f = ai_sheet.fill_column(sid, USER, isi="stok")
+    assert f["found"] and f["baris_terisi"] == 2
+
+
+def test_pilih_sheet_nama_tak_ada(gudang_stok):
+    data = _xlsx_multi({"A": [["Part Number"], ["WG9925520270"]],
+                        "B": [["Part Number"], ["AZ9925520271"]]})
+    p = ai_sheet.parse_upload(data, "wb.xlsx")
+    sid = ai_sheet.put_sheet(USER["username"], p)
+    r = ai_sheet.select_sheet(sid, USER, "Zzz")
+    assert r["found"] is False and "tak ada" in r["error"].lower()
+
+
+def test_pilih_sheet_milik_user_lain_ditolak(gudang_stok):
+    data = _xlsx_multi({"A": [["Part Number"], ["WG9925520270"]],
+                        "B": [["Part Number"], ["AZ9925520271"]]})
+    p = ai_sheet.parse_upload(data, "wb.xlsx")
+    sid = ai_sheet.put_sheet("budi", p)
+    r = ai_sheet.select_sheet(sid, {"username": "orang-lain"}, "B")
+    assert r["found"] is False
+
+
+def test_tool_pilih_sheet_hanya_ada_bila_ada_lampiran():
+    tanpa = {s["function"]["name"] for s in ai._tool_specs(ADMIN)}
+    dengan = {s["function"]["name"] for s in ai._tool_specs(ADMIN, sheet_id="x")}
+    assert "sheet_pilih_sheet" not in tanpa
+    assert "sheet_pilih_sheet" in dengan
+    assert ai._DISPATCH["sheet_pilih_sheet"] is ai._t_sheet_pilih_sheet
 
 
 # ── Isi kolom ────────────────────────────────────────────────────────────────

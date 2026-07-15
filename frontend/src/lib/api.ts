@@ -1719,11 +1719,15 @@ export type AISheetSummary = {
   filename: string;
   sheet: string;
   sheet_lain: string[];
+  /** Ringkasan tab lain di workbook (nama + header + perkiraan baris). */
+  sheet_lain_detail?: { nama: string; header?: string[]; jumlah_baris?: number; kosong?: boolean }[];
+  catatan_sheet?: string;
   jumlah_baris: number;
   jumlah_kolom: number;
-  kolom: { nama: string; peran: string }[];
+  kolom: { nama: string; peran: string; terisi?: number; contoh_nilai?: string[] }[];
   kolom_part_number: string | null;
   part_number_dikenal_di_katalog: number;
+  part_number_tidak_dikenal?: number;
   contoh_baris: string[][];
   terpotong: boolean;
 };

@@ -36,6 +36,11 @@ from . import ai_export, harga, part_index, sims
 MAX_BYTES = 10 * 1024 * 1024   # 10 MB per unggahan chat
 MAX_ROWS = 5000                # baris data yang dibaca (di luar header)
 MAX_COLS = 40
+# Bytes asli disimpan (utk pindah sheet) HANYA bila multi-sheet & ≤ ambang ini —
+# jaga RAM server (stash s/d 40 entri; tanpa batas = 40×10 MB). File multi-sheet
+# lebih besar dari ini: sheet lain tetap diringkas, tapi pindah-sheet tak tersedia.
+_MULTISHEET_BYTES_MAX = 4 * 1024 * 1024
+_MAX_SHEET_LAIN = 4            # sheet lain yang diringkas (nama+baris+header)
 _SAMPLE = 200                  # baris contoh utk deteksi peran kolom
 _MAX_SIMS = 150                # PN maksimum per permintaan harga SIMS (HTTP live)
 _MAX_FOTO_PN = 300             # PN maksimum per permintaan FOTO (tiap PN = 1 call SIMS)
@@ -152,8 +157,33 @@ def _detect_roles(headers: list[str], cols: list[list[str]]) -> list[str]:
     return roles
 
 
-def parse_upload(data: bytes, filename: str = "") -> dict:
-    """Baca Excel unggahan → {ok, error?, ...}. Tidak menyentuh jaringan."""
+def _ringkas_ws(ws) -> dict:
+    """Ringkasan MURAH worksheet LAIN (tanpa parse penuh): nama, perkiraan jumlah
+    baris data, & ≤8 header dari ~15 baris pertama. Supaya model tahu tab lain ADA
+    & isinya apa, lalu bisa menawarkan pindah sheet (sheet_pilih_sheet)."""
+    total = ws.max_row if isinstance(ws.max_row, int) else None
+    sample: list[list] = []
+    for r in ws.iter_rows(values_only=True):
+        sample.append(list(r[:MAX_COLS]))
+        if len(sample) >= 15:
+            break
+    if not any(any(c is not None for c in r) for r in sample):
+        return {"nama": ws.title, "kosong": True}
+    hi = _header_row(sample)
+    headers = [_txt(c) for c in sample[hi]]
+    while headers and not headers[-1]:
+        headers.pop()
+    headers = [h for h in headers if h][:8]
+    out: dict = {"nama": ws.title, "header": headers}
+    if total is not None:
+        out["jumlah_baris"] = max(0, total - hi - 1)
+    return out
+
+
+def parse_upload(data: bytes, filename: str = "", pilih_sheet: str = "") -> dict:
+    """Baca Excel unggahan → {ok, error?, ...}. Tidak menyentuh jaringan. Sheet AKTIF
+    = `pilih_sheet` bila valid, else sheet pertama. Sheet lain diringkas (nama+baris
+    +header) supaya model tahu isinya & bisa menawarkan pindah lewat select_sheet."""
     if not data:
         return {"ok": False, "error": "File kosong."}
     if len(data) > MAX_BYTES:
@@ -168,13 +198,16 @@ def parse_upload(data: bytes, filename: str = "") -> dict:
     except Exception:
         return {"ok": False, "error": "File bukan Excel yang valid / rusak."}
     try:
-        ws = wb[wb.sheetnames[0]]
+        sheet_names = list(wb.sheetnames)
+        target = pilih_sheet if pilih_sheet in sheet_names else sheet_names[0]
+        ws = wb[target]
         raw: list[list] = []
         for r in ws.iter_rows(values_only=True):
             raw.append(list(r[:MAX_COLS]))
             if len(raw) > MAX_ROWS + 12:      # +12 = ruang baris judul sebelum header
                 break
-        sheet_names = list(wb.sheetnames)
+        lain = [n for n in sheet_names if n != target]
+        sheet_lain_ringkas = [_ringkas_ws(wb[n]) for n in lain[:_MAX_SHEET_LAIN]]
     finally:
         wb.close()
 
@@ -210,11 +243,12 @@ def parse_upload(data: bytes, filename: str = "") -> dict:
             peta = {}
         dikenal = sum(1 for p in pns if p in peta)
 
-    return {
+    parsed = {
         "ok": True,
         "filename": filename or "unggahan.xlsx",
-        "sheet": sheet_names[0],
-        "sheet_lain": sheet_names[1:],
+        "sheet": target,
+        "sheet_lain": lain,
+        "sheet_lain_ringkas": sheet_lain_ringkas,
         "jumlah_baris": len(body),
         "jumlah_kolom": ncol,
         "headers": headers,
@@ -225,6 +259,45 @@ def parse_upload(data: bytes, filename: str = "") -> dict:
         "_body": body,
         "terpotong": len(body) >= MAX_ROWS,
     }
+    # Simpan bytes utk pindah-sheet HANYA bila multi-sheet & tak kelewat besar
+    # (jaga RAM). Tanpa ini select_sheet tak bisa re-parse tab lain.
+    if len(sheet_names) > 1 and len(data) <= _MULTISHEET_BYTES_MAX:
+        parsed["_bytes"] = data
+    return parsed
+
+
+def select_sheet(sheet_id: str, user: dict, nama_sheet: str) -> dict:
+    """Pindah sheet AKTIF file yang sudah diunggah (sheet_id sama) → re-parse tab
+    terpilih di tempat. Kepemilikan divalidasi via get_sheet. Bytes asli diambil
+    dari stash (disimpan saat unggah bila multi-sheet & tak kelewat besar)."""
+    parsed = get_sheet(sheet_id, user.get("username", ""))
+    if not parsed:
+        return {"found": False, "error": "Tidak ada file Excel di percakapan ini "
+                                         "(atau sudah kedaluwarsa). Minta user unggah ulang."}
+    semua = [parsed.get("sheet")] + list(parsed.get("sheet_lain") or [])
+    semua = [s for s in semua if s]
+    nama = (nama_sheet or "").strip()
+    if not nama:
+        return {"found": False, "error": f"Sebutkan nama sheet. Tersedia: {semua}."}
+    # Cocok persis dulu, lalu case-insensitive.
+    target = next((s for s in semua if s == nama), None) \
+        or next((s for s in semua if s.lower() == nama.lower()), None)
+    if not target:
+        return {"found": False, "error": f"Sheet '{nama}' tak ada. Tersedia: {semua}."}
+    if target == parsed.get("sheet"):
+        return {"found": True, "sudah_aktif": True, "sheet": target,
+                "catatan": f"Sheet '{target}' memang sedang aktif."}
+    data = parsed.get("_bytes")
+    if not data:
+        return {"found": False,
+                "error": ("File ini tak bisa pindah sheet (terlalu besar / tunggal). "
+                          f"Minta user mengunggah ulang khusus sheet '{nama}'.")}
+    baru = parse_upload(data, parsed.get("filename", ""), pilih_sheet=target)
+    if not baru.get("ok"):
+        return {"found": False, "error": baru.get("error") or "Gagal membaca sheet itu."}
+    replace_sheet(sheet_id, user.get("username", ""), baru)
+    return {"found": True, "sheet": target, "ringkas": ringkas(baru),
+            "catatan": f"Sheet aktif kini '{target}'. Kolom & isinya di 'ringkas'."}
 
 
 def ringkas(parsed: dict) -> dict:
@@ -289,6 +362,15 @@ def ringkas(parsed: dict) -> dict:
         "contoh_baris": parsed["contoh"],
         "terpotong": parsed["terpotong"],
     }
+    # Sheet lain di workbook (bila ada) — supaya model tahu tab lain berisi apa &
+    # bisa menawarkan pindah lewat sheet_pilih_sheet (tanpa minta unggah ulang).
+    # 'sheet_lain' tetap daftar NAMA (kontrak frontend); rinciannya di key terpisah.
+    lain = parsed.get("sheet_lain_ringkas")
+    if lain:
+        out["sheet_lain_detail"] = lain
+        out["catatan_sheet"] = ("Workbook ini punya sheet lain (lihat 'sheet_lain_detail'). "
+                                "Sheet yang AKTIF & bisa diisi kini yang di 'sheet'. Bila user "
+                                "memaksudkan tab lain, panggil sheet_pilih_sheet(nama_sheet).")
     if baris_tanpa_pn is not None:
         out["baris_tanpa_part_number"] = baris_tanpa_pn
     if kategori is not None:
@@ -314,6 +396,22 @@ def put_sheet(username: str, parsed: dict) -> str:
             _stash.pop(min(_stash, key=lambda k: _stash[k]["at"]), None)
         _stash[sid] = {"at": now, "user": (username or "").lower(), "data": parsed}
     return sid
+
+
+def replace_sheet(sheet_id: str, username: str, parsed: dict) -> bool:
+    """Ganti data sheet AKTIF pada sheet_id yang sama (pindah sheet) — hanya bila
+    milik user ini & belum kedaluwarsa. sheet_id tak berubah supaya giliran
+    berikutnya tetap mereferensikan lampiran yang sama."""
+    with _lock:
+        e = _stash.get(sheet_id)
+        if not e or e["user"] != (username or "").lower():
+            return False
+        if time.monotonic() - e["at"] > _STASH_TTL_SEC:
+            _stash.pop(sheet_id, None)
+            return False
+        e["data"] = parsed
+        e["at"] = time.monotonic()
+        return True
 
 
 def get_sheet(sheet_id: str, username: str) -> dict | None:
