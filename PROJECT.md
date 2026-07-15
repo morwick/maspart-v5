@@ -244,6 +244,29 @@
 > (c) Harga di asisten ikut **Menu Control Kolom Harga** (`bc199c6`, penjaga terpusat).
 > (d) `sheet_isi_foto` (`f9fccf0`) — tempel foto SIMS ke Excel unggahan user. (e) Materi
 > tutorial + APK 2.0.0 (`fb79f8e`).
+> Update **2026-07-15 — ASISTEN LEBIH PINTAR: EPC akurat + Excel paham konteks + hemat token**
+> (8 commit `ec43da2`..`8a965ce`, 712 unit test, eval guard 3/3): (a) **Ranking hasil TELITI
+> `cari_part_di_unit`** (`ec43da2`) — `search_items_in_unit` skor per baris (kata-utuh +3 >
+> substring +1, keyword frasa/CJK +2, cakupan multi-kw +2; tiebreak nama terpendek) → pemangkasan
+> [:40] tak lagi buang match tepat; `_GENERIC` (bolt/nut/…) dihoist ke `_tekan_generik`. (b)
+> **Lebih pintar seiring waktu** (`435f474`) — jalur per-VIN (jalur UTAMA) kini lapor
+> `record_miss('asisten_unit')` → menyuplai loop belajar sinonim (dulu hanya `cari_part`/`bom`);
+> kata payung ('kopling') dijaring `_umbrella_keywords` saat sinonim tak kena; auto-teliti
+> server-side saat hit all-generik & indeks siap (hemat 1 ronde). (c) **Persist indeks item
+> PARSIAL** (`2f1f625`) — build parsial dipersist TTL 1 jam (vs 7 hari lengkap) + flag incomplete →
+> stop rebuild 56-84 dtk berulang; `items_index_ready` tetap wajib lengkap. (d) **Excel unggahan
+> pemaaf suffix varian** (`d88c903`) — `fill_columns`/`fill_column`/`pn_dikenal` pakai
+> `part_index.rows_for_pns` (bukan `search_exact_pns`): PN sheet 'WG…/2' terisi dari PN dasar
+> katalog & sebaliknya. (e) **`ringkas()` lebih kaya** (`eeaf7af`) — per kolom fill-rate +
+> ≤5 contoh nilai distinct (non-PN kardinalitas rendah) + `part_number_tidak_dikenal`. (f)
+> **Multi-sheet** (`3e1fb8a`) — `parse_upload` ringkas semua tab lain (`sheet_lain_detail`); tool
+> sheet-gated `sheet_pilih_sheet` → `ai_sheet.select_sheet` re-parse tab terpilih in-place (sheet_id
+> sama); bytes disimpan hanya bila multi-sheet & ≤4 MB (jaga RAM). (g) **Hemat token** (`ce95131`+
+> `8a965ce`) — `_compact_result` buang field kosong (jaga bool/0) + `_dump_tool` separator rapat,
+> dipanggil sekali (grounding lihat = model lihat), est. 15-35% char hasil tool lebih hemat;
+> `_cap_tool_content` potong KEPALA+EKOR agar `catatan`/`jawaban_wajib` di ujung tak hilang. ⛔
+> system prompt 83rb TIDAK diubah (cache 89-97% dijaga); `test_prompt_cache` tetap hijau.
+>
 > Update **2026-07-14 — PEMBAYARAN TAHAN-BENCANA + 3 tool admin + biaya token + EPC teliti**:
 > (a) **Pembayaran saat server down** (`f69364c`+`2466e98`): uang pembeli tak lewat server kita
 > (Snap di domain Midtrans) — yang rapuh SINKRONISASI-nya. Ditutup 3 lapis: webhook balas **503**
