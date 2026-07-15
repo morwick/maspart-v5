@@ -71,6 +71,7 @@ _SORTS = {"relevan", "harga_asc", "harga_desc", "nama", "stok"}
 _build_lock = threading.Lock()
 _cache: dict[str, Any] = {"fp": None, "ts": 0.0, "products": [], "kategori_counts": {}}
 _CACHE_TTL = 300.0  # cek ulang fingerprint paling cepat tiap 5 menit
+_EMPTY_RETRY_SEC = 30.0  # build KOSONG = transien → coba ulang setelah jeda ini
 
 
 def _flat(pn: str) -> str:
@@ -154,6 +155,10 @@ def _products() -> list[dict]:
     now = time.time()
     if _cache["fp"] is not None and now - _cache["ts"] < _CACHE_TTL:
         return _cache["products"]
+    # Build KOSONG tak pernah disimpan sebagai keadaan sah (fp None) — hanya
+    # cooldown singkat agar tak rebuild tiap request; lewat itu → coba lagi.
+    if _cache["fp"] is None and _cache["ts"] and now - _cache["ts"] < _EMPTY_RETRY_SEC:
+        return _cache["products"]
     fp = _fingerprint()
     if fp == _cache["fp"]:
         _cache["ts"] = now
@@ -166,8 +171,13 @@ def _products() -> list[dict]:
         for p in prods:
             for k in p["kategori"]:
                 counts[k] = counts.get(k, 0) + 1
-        _cache.update({"fp": fp, "ts": time.time(), "products": prods,
-                       "kategori_counts": counts})
+        # Kejadian nyata 2026-07-15: build pertama jalan saat sumber masih dingin
+        # pasca-restart → hasil [] tersimpan dgn fingerprint sah & indeks berat tak
+        # ikut fingerprint → etalase /toko KOSONG permanen sampai refresh terjadwal.
+        # Guard: hasil kosong disimpan TANPA fingerprint (fp None) sehingga request
+        # berikutnya (setelah _EMPTY_RETRY_SEC) membangun ulang — self-healing.
+        _cache.update({"fp": fp if prods else None, "ts": time.time(),
+                       "products": prods, "kategori_counts": counts})
     return _cache["products"]
 
 

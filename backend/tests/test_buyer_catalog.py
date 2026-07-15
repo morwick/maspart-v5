@@ -187,3 +187,47 @@ def test_cache_dibangun_sekali_per_fingerprint(monkeypatch):
     _page()
     _page()
     assert calls["n"] == 1
+
+
+# ── Build KOSONG = transien (jangan nyangkut) — kejadian nyata 2026-07-15 ─────
+def test_build_kosong_tidak_disimpan_sah_lalu_sembuh(monkeypatch):
+    """Build KOSONG (sumber dingin pasca-restart) TIDAK di-cache sebagai sah;
+    begitu sumber siap (build berikutnya berisi), etalase terisi SENDIRI tanpa
+    menunggu refresh terjadwal."""
+    calls = {"n": 0}
+    seq = [[], [{"part_number": "WG9100443050", "kategori": ["rem"]}]]  # kosong → berisi
+
+    def build():
+        r = seq[min(calls["n"], len(seq) - 1)]
+        calls["n"] += 1
+        return list(r)
+
+    monkeypatch.setattr(buyer_catalog, "_build_products", build)
+    buyer_catalog.invalidate_cache()
+
+    assert buyer_catalog._products() == []                 # build pertama kosong
+    assert buyer_catalog._cache["fp"] is None              # ⛔ tak di-cache sebagai sah
+
+    # Lewati cooldown → build ulang; sumber kini berisi → sembuh sendiri.
+    buyer_catalog._cache["ts"] -= buyer_catalog._EMPTY_RETRY_SEC + 1
+    prods = buyer_catalog._products()
+    assert [p["part_number"] for p in prods] == ["WG9100443050"]
+    assert buyer_catalog._cache["fp"] is not None          # kini di-cache sah
+
+
+def test_build_kosong_cooldown_tak_rebuild_beruntun(monkeypatch):
+    """Dalam masa cooldown, hasil kosong tak membangun ulang tiap request (hindari
+    badai build saat sumber memang benar-benar kosong)."""
+    calls = {"n": 0}
+
+    def build():
+        calls["n"] += 1
+        return []
+
+    monkeypatch.setattr(buyer_catalog, "_build_products", build)
+    buyer_catalog.invalidate_cache()
+
+    buyer_catalog._products()          # build #1 (kosong)
+    buyer_catalog._products()          # dalam cooldown → TIDAK rebuild
+    buyer_catalog._products()
+    assert calls["n"] == 1
