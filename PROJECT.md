@@ -4,7 +4,7 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-07-14** (oleh inspeksi langsung repo lokal + SSH ke server).
+> Terakhir diverifikasi: **2026-07-15** (oleh inspeksi langsung repo lokal + SSH ke server).
 > Ditambah **§3.5 — Cara Kerja Aplikasi (deep-dive fungsional)** pada 2026-06-25 agar AI/dev
 > langsung paham domain, alur data, logika pencarian + sinonim, AI tools, API & frontend.
 > Update **2026-06-27**: tambah fitur **Repair Kit Transmisi** (data + tool AI + endpoint +
@@ -244,6 +244,33 @@
 > (c) Harga di asisten ikut **Menu Control Kolom Harga** (`bc199c6`, penjaga terpusat).
 > (d) `sheet_isi_foto` (`f9fccf0`) — tempel foto SIMS ke Excel unggahan user. (e) Materi
 > tutorial + APK 2.0.0 (`fb79f8e`).
+> Update **2026-07-15 (malam-5) — ASISTEN 9 PENINGKATAN (token/akurasi/konteks/Excel)** (`9e436b0`,
+> LIVE): planning oleh subagent **Fable 5** (3 recon + 1 desain), eksekusi **Opus 4.8**. **P1 [token]**
+> `[PIKIR]` runaway yang habiskan budget → jawaban kosong → 3× salvage ~28k token: budget output
+> ronde-jawab dinaikkan `_MAX_TOKENS_ANSWER` (hilangkan truncation-empty) + `_stub_truncated_reasoning`
+> (ringkas nalar terpotong sebelum salvage) + plafon panjang [PIKIR] di prompt. **P2 [akurasi]** lubang
+> terbesar: **angka stok/harga dulu TAK diverifikasi** (hanya PN) → `grounded_nums` + `_claimed_nums`
+> (pola `\d+ satuan` / `Rp \d+`) → koreksi lalu anotasi (hanya bila tool jalan turn ini; total via
+> `hitung_part`). **P3 [konteks]** guard EPC-FIRST kini di FOLLOW-UP (rangka di 6 pesan terakhir).
+> **P4** substitution-guard PERSIST lintas turn (PN suspect di riwayat tetap dicurigai). **P5 [Excel]**
+> deteksi PN Weichai murni-angka (9-13 digit, hanya jadi PN bila cocok katalog). **P6** PN gagal-cocok
+> DIDAFTAR (bukan cuma dihitung). **P7** auto-rebuild `ai_knowledge.json` saat `catalog_bom.json`
+> berubah. **P8** `cari_part_di_unit` sisir TELITI instan saat indeks siap di tengah call. **P9** poles
+> (memori konteks 3 pesan/`_FRAME_RE` anti-FP/hasil tool bocor `role:system`/`_cari_kolom` rank/flag
+> >40 kolom). **783 unit test** (+28); prompt-cache STABIL; ⛔ evals tak disentuh. LIVE prod (docker
+> build+force-recreate; verifikasi via container/`https://maspart.tech`, BUKAN `curl :8001` systemd basi).
+>
+> Update **2026-07-15 (malam-4) — AUDIT JUAL-BELI: 5 FIX** (`be5daae`, LIVE): re-audit alur jual-beli
+> (planning Fable 5, eksekusi Opus 4.8). (1) **Celah ONGKIR GRATIS** (`create_order`): `server_ship`
+> dulu diseed dari `body.shipping_cost` klien & dipercaya saat `rates` kosong / shipping mati → order
+> gateway kini TOLAK 400/503 bila ongkir tak bisa dihitung dari tarif resmi. (2) **Guard refresh
+> Accurate KOSONG** (`accurate.refresh`): `fetch_all_items()==[]` dulu menimpa+persist indeks kosong →
+> etalase mati ≤12 jam; kini PERTAHANKAN indeks lama (root-fix insiden etalase). (3) **Fingerprint
+> etalase pakai `index_stamp()`** → refresh yang ubah HARGA (jumlah item sama) memicu rebuild (harga
+> pajang == checkout). (4) **PATCH status BERSYARAT** (`_patch expect_status`) → cegah order lunas
+> ditimpa 'batal' saat race (cancel/expire/mark_paid). (5) **Hook notif Telegram** dirapikan (pindah ke
+> router setelah sukses; `notify_paid` non-blocking). **755 unit test**; ⛔ evals tak disentuh.
+>
 > Update **2026-07-15 (malam-3) — NOTIF TELEGRAM + FIX ETALASE NYANGKUT KOSONG**: (a) **Notif
 > Telegram ke admin** saat pesanan MASUK (`create_order`) & LUNAS (`mark_paid`) — modul
 > `services/notify.py` (kirim best-effort di thread latar, tak menghambat order); bot @BotFather,
