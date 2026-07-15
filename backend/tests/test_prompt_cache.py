@@ -47,7 +47,7 @@ def _capture_messages(monkeypatch, user):
     """Jalankan chat() dengan _post_chat palsu; kembalikan messages yang terkirim."""
     sent: dict = {}
 
-    def _fake_post(messages, tools):
+    def _fake_post(messages, tools, max_tokens=6000):
         sent["messages"] = [dict(m) for m in messages]
         return {"choices": [{"message": {"content": "Baik, ada yang bisa dibantu?"},
                              "finish_reason": "stop"}]}

@@ -31,7 +31,7 @@ def _stub_model(monkeypatch, seq):
     """_post_chat palsu: seq = list of str (tanpa tool) atau dict respons penuh."""
     calls = {"n": 0}
 
-    def fake(messages, tools):
+    def fake(messages, tools, max_tokens=6000):
         c = seq[min(calls["n"], len(seq) - 1)]
         calls["n"] += 1
         if isinstance(c, str):

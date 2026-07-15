@@ -282,7 +282,7 @@ def test_chat_lampiran_excel_sampai_kartu_unduh(monkeypatch, katalog):
     ]
     n = {"i": 0}
 
-    def fake_post(messages, tools):
+    def fake_post(messages, tools, max_tokens=6000):
         dilihat_tools.append([t["function"]["name"] for t in (tools or [])])
         c = seq[min(n["i"], len(seq) - 1)]
         n["i"] += 1
@@ -304,7 +304,7 @@ def test_chat_sheet_id_milik_orang_lain_diabaikan(monkeypatch, katalog):
     sid = _sheet_untuk(USER, katalog)          # milik 'budi'
     dilihat: list[list[str]] = []
 
-    def fake_post(messages, tools):
+    def fake_post(messages, tools, max_tokens=6000):
         dilihat.append([t["function"]["name"] for t in (tools or [])])
         return {"choices": [{"message": {"content": "Tidak ada lampiran."}, "finish_reason": "stop"}]}
 
@@ -660,7 +660,7 @@ def test_chat_lampiran_proaktif_panggil_ringkasan(monkeypatch, katalog):
     ]
     n = {"i": 0}
 
-    def fake_post(messages, tools):
+    def fake_post(messages, tools, max_tokens=6000):
         c = seq[min(n["i"], len(seq) - 1)]
         n["i"] += 1
         return c

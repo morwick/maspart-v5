@@ -23,7 +23,7 @@ def _stub_model(monkeypatch, content):
     seq = [content] if isinstance(content, str) else list(content)
     calls = {"n": 0}
 
-    def fake(messages, tools):
+    def fake(messages, tools, max_tokens=6000):
         c = seq[min(calls["n"], len(seq) - 1)]
         calls["n"] += 1
         return {"choices": [{"message": {"content": c}, "finish_reason": "stop"}]}
@@ -98,7 +98,7 @@ def test_guard_substitusi_pn_lokal_di_jawaban_pervin(monkeypatch):
     ]
     calls = {"n": 0}
 
-    def fake_post(messages, tools):
+    def fake_post(messages, tools, max_tokens=6000):
         c = seq[min(calls["n"], len(seq) - 1)]
         calls["n"] += 1
         return c
@@ -128,7 +128,7 @@ def test_guard_substitusi_tak_kena_bila_epc_tak_dipakai(monkeypatch):
     ]
     calls = {"n": 0}
 
-    def fake_post(messages, tools):
+    def fake_post(messages, tools, max_tokens=6000):
         c = seq[min(calls["n"], len(seq) - 1)]
         calls["n"] += 1
         return c
@@ -177,6 +177,49 @@ def test_jawaban_kosong_membandel_berujung_pesan_aman(monkeypatch):
     assert calls["n"] == 1 + ai._MAX_EMPTY_RETRIES
     assert out["reply"] == ai._EMPTY_FINAL_MSG
     assert "nalar" not in out["reply"]                    # isi [PIKIR] tak bocor
+
+
+def _stub_seq_fr(monkeypatch):
+    """Stub _post_chat dgn (content, finish_reason) berurutan; rekam max_tokens &
+    messages per panggilan (untuk menguji jalur truncated → jawaban-langsung)."""
+    state = {"seq": [], "n": 0, "max_tokens": [], "messages": []}
+
+    def fake(messages, tools, max_tokens=6000):
+        state["max_tokens"].append(max_tokens)
+        state["messages"].append([dict(m) for m in messages])
+        c, fr = state["seq"][min(state["n"], len(state["seq"]) - 1)]
+        state["n"] += 1
+        return {"choices": [{"message": {"content": c}, "finish_reason": fr}]}
+
+    monkeypatch.setattr(ai, "_post_chat", fake)
+    return state
+
+
+def test_kosong_karena_terpotong_pakai_jawaban_langsung(monkeypatch):
+    """Kosong KARENA terpotong (finish_reason=length) → retry minta jawaban LANGSUNG
+    tanpa [PIKIR] + budget output BESAR — bukan koreksi generik yang minta [PIKIR] lagi."""
+    st = _stub_seq_fr(monkeypatch)
+    st["seq"] = [
+        ("[PIKIR] nalar sangat panjang tak sempat menutup", "length"),  # terpotong → kosong
+        ("Jawaban final: kategori rem.", "stop"),                       # sukses
+    ]
+    out = ai.chat(USER, [{"role": "user", "content": "kategori rem apa"}])
+    assert out["reply"] == "Jawaban final: kategori rem."
+    assert st["n"] == 2
+    assert st["max_tokens"][1] == ai._MAX_TOKENS_ANSWER          # panggilan-2 budget besar
+    assert st["messages"][1][-1]["content"] == ai._TRUNC_ANSWER_CORRECTION
+
+
+def test_kosong_bukan_terpotong_pakai_koreksi_generik(monkeypatch):
+    """Kosong TAPI finish_reason=stop (markup/lupa) → tetap koreksi generik lama."""
+    st = _stub_seq_fr(monkeypatch)
+    st["seq"] = [
+        ("[PIKIR] lupa nulis jawaban final", "stop"),
+        ("Ini jawabannya.", "stop"),
+    ]
+    out = ai.chat(USER, [{"role": "user", "content": "halo"}])
+    assert out["reply"] == "Ini jawabannya."
+    assert st["messages"][1][-1]["content"] == ai._EMPTY_REPLY_CORRECTION
 
 
 # ── Kode unit/seri sah tidak disamarkan guard ────────────────────────────────

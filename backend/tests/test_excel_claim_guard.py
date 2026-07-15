@@ -23,7 +23,7 @@ def _hermetik(monkeypatch):
 def _stub_model(monkeypatch, seq):
     calls = {"n": 0, "last_messages": None}
 
-    def fake(messages, tools):
+    def fake(messages, tools, max_tokens=6000):
         calls["last_messages"] = messages
         c = seq[min(calls["n"], len(seq) - 1)]
         calls["n"] += 1

@@ -75,7 +75,7 @@ def _hermetik(monkeypatch):
 def test_chat_mencatat_giliran(monkeypatch):
     _hermetik(monkeypatch)
     monkeypatch.setattr(ai, "_post_chat",
-                        lambda messages, tools: {"choices": [{"message": {"content": "Halo, siap membantu."},
+                        lambda messages, tools, max_tokens=6000: {"choices": [{"message": {"content": "Halo, siap membantu."},
                                                               "finish_reason": "stop"}]})
     captured = {}
     monkeypatch.setattr(ai.ai_chat_log, "log_turn",
@@ -93,7 +93,7 @@ def test_chat_catat_outcome_not_found_saat_karangan(monkeypatch):
     _hermetik(monkeypatch)
     monkeypatch.setattr(ai.part_index, "search_exact_pns", lambda pns: [])
     monkeypatch.setattr(ai, "_post_chat",
-                        lambda messages, tools: {"choices": [{"message": {"content": "PN AZ9998887776 stok 5."},
+                        lambda messages, tools, max_tokens=6000: {"choices": [{"message": {"content": "PN AZ9998887776 stok 5."},
                                                               "finish_reason": "stop"}]})
     captured = {}
     monkeypatch.setattr(ai.ai_chat_log, "log_turn",

@@ -7721,7 +7721,7 @@ def _system_prompt(user: dict) -> str:
 # ═══════════════════════════════════════════════════════════════════════
 #  PANGGILAN KE DEEPSEEK
 # ═══════════════════════════════════════════════════════════════════════
-def _post_chat(messages: list[dict], tools: list[dict]) -> dict:
+def _post_chat(messages: list[dict], tools: list[dict], max_tokens: int = 6000) -> dict:
     s = get_settings()
     if not s.ai_configured:
         raise AINotConfigured("DEEPSEEK_API_KEY belum diset di backend/.env")
@@ -7732,8 +7732,9 @@ def _post_chat(messages: list[dict], tools: list[dict]) -> dict:
         "temperature": 0.1,
         # Cukup besar agar blok pikir internal [PIKIR] (kerap panjang saat membandingkan
         # banyak part) + jawaban final tidak terpotong → jawaban kosong/pesan aman.
-        # 3500 dulu terlalu sempit utk kasus banding/daftar besar.
-        "max_tokens": 6000,
+        # 3500 dulu terlalu sempit utk kasus banding/daftar besar. Panggilan penulis-
+        # JAWABAN (tools_habis / retry direct-answer / final) memakai _MAX_TOKENS_ANSWER.
+        "max_tokens": max_tokens,
     }
     if tools:
         payload["tools"] = tools
@@ -7976,12 +7977,25 @@ def _finish_reason(data: dict) -> str | None:
 _EMPTY_FINAL_MSG = ("Maaf, jawabannya belum lengkap diproses. Coba ulangi pertanyaannya "
                     "ya — atau persempit (mis. sebutkan nomor rangka / PN).")
 _MAX_EMPTY_RETRIES = 2
+# Budget output lebih besar untuk panggilan yang WAJIB menulis jawaban (bukan ronde
+# pemanggil-tool). Batas keras deepseek-chat = 8192; 8000 beri ruang [PIKIR]+jawaban.
+_MAX_TOKENS_ANSWER = 8000
 _EMPTY_REPLY_CORRECTION = (
     "[SISTEM — KOREKSI WAJIB] Respons terakhirmu TIDAK berisi jawaban final untuk "
     "user (hanya blok [PIKIR] / kosong / terpotong). Tulis SEKARANG jawaban final "
     "yang rapi berdasarkan hasil tool & nalar sebelumnya: mulai dengan [PIKIR] "
     "SINGKAT, tutup [/PIKIR], lalu jawaban final lengkap. ⚠️ Jangan minta maaf dan "
     "jangan menyebut koreksi ini ke user."
+)
+# Kasus KHUSUS: respons kosong KARENA terpotong (finish_reason=length) — nalar [PIKIR]
+# menghabiskan budget sebelum sempat menutup [/PIKIR] + jawaban. Minta jawaban LANGSUNG
+# tanpa [PIKIR] sama sekali → seluruh budget untuk jawaban (bukan minta [PIKIR] lagi yg
+# hanya memperbesar konteks & terpotong ulang).
+_TRUNC_ANSWER_CORRECTION = (
+    "[SISTEM — KOREKSI WAJIB] Nalar [PIKIR]-mu TERPOTONG karena kepanjangan (budget "
+    "habis sebelum jawaban keluar). JANGAN tulis [PIKIR] lagi. Langsung tulis JAWABAN "
+    "FINAL sekarang — ringkas, to the point, berdasarkan hasil tool yang sudah ada. "
+    "⚠️ Jangan minta maaf dan jangan menyebut koreksi ini ke user."
 )
 
 
@@ -8411,6 +8425,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             pass  # gagal cek katalog → jangan ground dari assistant (aman by default)
     guard_retries = 0
     empty_retries = 0  # model hanya menulis [PIKIR]/kosong → paksa tulis ulang
+    force_direct = False  # true = panggilan berikut WAJIB jawaban langsung (tanpa tool, budget besar)
     excel_claim_retried = False  # klaim 'file Excel siap' tanpa kartu → 1x koreksi
     lookup_gagal = False  # ada tool lookup yang error/tak ketemu → jangan mengarang angka
     tool_gagal_pernah = False  # untuk observabilitas: pernahkah ada tool gagal turn ini
@@ -8477,8 +8492,13 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     while _iters < _MAX_ITERS:
         _iters += 1
         tools_habis = tool_rounds >= _MAX_TOOL_ROUNDS
-        # Ronde tool habis → jangan tawarkan tool lagi, paksa jawaban final.
-        data = _post_chat(messages, [] if tools_habis else tools)
+        # Ronde tool habis / retry jawaban-langsung → jangan tawarkan tool lagi, paksa
+        # jawaban final dgn budget output lebih besar (nalar atas hasil besar bisa panjang).
+        if tools_habis or force_direct:
+            data = _post_chat(messages, [], max_tokens=_MAX_TOKENS_ANSWER)
+            force_direct = False
+        else:
+            data = _post_chat(messages, tools)
         _add_usage(_tok, data)
         choice = (data.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
@@ -8531,6 +8551,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 continue
 
             reply = _strip_reasoning(content)
+            truncated = _finish_reason(data) == "length"
             # Jawaban final KOSONG (model berhenti di [PIKIR] / terpotong / hanya
             # markup): jangan langsung menyerah dgn pesan generik — paksa model
             # menulis ulang jawaban finalnya dulu (kasus nyata: repairkit-hw19710).
@@ -8538,10 +8559,16 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 if empty_retries < _MAX_EMPTY_RETRIES:
                     empty_retries += 1
                     messages.append({"role": "assistant", "content": content})
-                    messages.append({"role": "user", "content": _EMPTY_REPLY_CORRECTION})
+                    if truncated:
+                        # Kosong KARENA nalar [PIKIR] terpotong (budget habis) → minta
+                        # jawaban LANGSUNG tanpa [PIKIR] + panggilan berikut budget besar.
+                        messages.append({"role": "user", "content": _TRUNC_ANSWER_CORRECTION})
+                        force_direct = True
+                    else:
+                        messages.append({"role": "user", "content": _EMPTY_REPLY_CORRECTION})
                     continue
                 reply = _EMPTY_FINAL_MSG
-            elif _finish_reason(data) == "length":
+            elif truncated:
                 reply += _TRUNCATED_NOTE
             # GUARD KLAIM FILE: jawaban menjanjikan Excel/kartu unduh padahal tak
             # ada satu pun kartu (buat_excel/katalog/banding) yang berhasil dibuat
@@ -8646,11 +8673,20 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             messages.append({"role": "user", "content": _LOOKUP_GAGAL_NOTE})
             lookup_gagal = False
 
-    # Putaran tool habis — minta jawaban final tanpa tool.
-    final = _post_chat(messages, [])
+    # Putaran tool habis — minta jawaban final tanpa tool (budget output besar).
+    final = _post_chat(messages, [], max_tokens=_MAX_TOKENS_ANSWER)
     _add_usage(_tok, final)
     msg = (final.get("choices") or [{}])[0].get("message") or {}
     reply = _strip_reasoning(msg.get("content") or "")
+    if not reply:
+        # Kosong (kerap nalar [PIKIR] terpotong) → SATU salvage: minta jawaban langsung
+        # tanpa [PIKIR] sebelum menyerah ke pesan cadangan.
+        messages.append({"role": "assistant", "content": msg.get("content") or ""})
+        messages.append({"role": "user", "content": _TRUNC_ANSWER_CORRECTION})
+        final = _post_chat(messages, [], max_tokens=_MAX_TOKENS_ANSWER)
+        _add_usage(_tok, final)
+        msg = (final.get("choices") or [{}])[0].get("message") or {}
+        reply = _strip_reasoning(msg.get("content") or "")
     if not reply:
         reply = _EMPTY_FINAL_MSG
     elif _finish_reason(final) == "length":

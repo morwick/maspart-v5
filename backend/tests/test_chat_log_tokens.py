@@ -27,7 +27,7 @@ def test_token_diakumulasi_dari_semua_panggilan_giliran(monkeypatch):
                       "finish_reason": "stop"}],
          "usage": _usage(45_000, 900, cache=41_000)},
     ]
-    monkeypatch.setattr(A, "_post_chat", lambda m, t: responses.pop(0))
+    monkeypatch.setattr(A, "_post_chat", lambda m, t, max_tokens=6000: responses.pop(0))
     monkeypatch.setattr(A, "_run_tool", lambda n, a, u, s="": {"found": True, "hasil": []})
     monkeypatch.setattr(A, "_prefetch_epc_rangka", lambda h: None)
     logged: dict = {}
@@ -43,7 +43,7 @@ def test_token_diakumulasi_dari_semua_panggilan_giliran(monkeypatch):
 
 
 def test_respons_tanpa_usage_tidak_meledak(monkeypatch):
-    monkeypatch.setattr(A, "_post_chat", lambda m, t: {
+    monkeypatch.setattr(A, "_post_chat", lambda m, t, max_tokens=6000: {
         "choices": [{"message": {"content": "Halo."}, "finish_reason": "stop"}]})
     monkeypatch.setattr(A, "_prefetch_epc_rangka", lambda h: None)
     logged: dict = {}
