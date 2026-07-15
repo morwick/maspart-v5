@@ -244,6 +244,20 @@
 > (c) Harga di asisten ikut **Menu Control Kolom Harga** (`bc199c6`, penjaga terpusat).
 > (d) `sheet_isi_foto` (`f9fccf0`) — tempel foto SIMS ke Excel unggahan user. (e) Materi
 > tutorial + APK 2.0.0 (`fb79f8e`).
+> Update **2026-07-15 (sore) — JAWABAN KOSONG (empty) DIPERBAIKI + JAWABAN AI TAMPIL DI OBSERVABILITAS**
+> (4 commit): (a) **Fix `OUTCOME=empty`** — pada hasil tool besar model habiskan budget output
+> 6000 token utk nalar `[PIKIR]` → `finish_reason=length` sebelum menutup `[/PIKIR]`+jawaban →
+> `_strip_reasoning` buang nalar tak-tertutup → kosong; kode cek "kosong" SEBELUM "terpotong" jadi
+> retry malah minta `[PIKIR]` lagi → terpotong ulang → pesan cadangan. Perbaikan: `_post_chat` terima
+> `max_tokens`; panggilan penulis-jawaban pakai **8000** (`_MAX_TOKENS_ANSWER`); deteksi kosong-karena-
+> terpotong → retry `_TRUNC_ANSWER_CORRECTION` (jawaban LANGSUNG tanpa `[PIKIR]`, seluruh budget utk
+> jawaban) + `force_direct`; jalur fallback akhir kini punya 1 salvage. ⛔ system prompt tak diubah.
+> (b) **Teks jawaban AI disimpan & tampil** di Observabilitas AI: kolom `reply` (`migrations/022`,
+> manual Supabase), `_finalize` teruskan reply (di-cap 4000), insert/baca 3-tingkat (reply→token→base)
+> supaya log tetap jalan bila migrasi telat; halaman `/admin/chat-log` baris **klik → expand** panel
+> Pertanyaan+Jawaban AI (admin-only, retensi 30 hari). 716 unit test. LIVE prod (backend+frontend
+> force-recreate). ⚠️ jalankan `022_ai_chat_log_reply.sql` di Supabase agar teks jawaban mulai tersimpan.
+>
 > Update **2026-07-15 — ASISTEN LEBIH PINTAR: EPC akurat + Excel paham konteks + hemat token**
 > (8 commit `ec43da2`..`8a965ce`, 712 unit test, eval guard 3/3): (a) **Ranking hasil TELITI
 > `cari_part_di_unit`** (`ec43da2`) — `search_items_in_unit` skor per baris (kata-utuh +3 >
