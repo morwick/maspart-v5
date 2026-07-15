@@ -71,3 +71,31 @@ def test_stock_full_belum_ter_enrich_per_gudang_kosong(monkeypatch):
 def test_stock_full_pn_tak_ada_di_indeks(monkeypatch):
     _seed_index(monkeypatch, {})
     assert accurate.stock_full("WG999") is None  # pemanggil fallback Excel
+
+
+def test_refresh_kosong_mempertahankan_indeks_lama(monkeypatch):
+    """Guard root-cause etalase mati: bila fetch_all_items() balas [] (glitch sesi/
+    izin → 200-kosong), refresh JANGAN menimpa indeks dgn kosong — pertahankan lama."""
+    entry = {"no": "000001.WG123", "pn": "WG123", "name": "Bearing",
+             "available_to_sell": 7.0, "quantity": 7.0, "unit": "Pc",
+             "item_type": "Persediaan", "price": 1000.0, "accurate_id": 42}
+    _seed_index(monkeypatch, {"WG123": entry},
+                snap={"WG123": {"stok": 7.0, "harga": 1000.0, "unit": "Pc"}})
+    monkeypatch.setattr(accurate, "fetch_all_items", lambda: [])
+
+    out = accurate.refresh(force=True)
+    assert out["items"]                         # TIDAK terhapus
+    assert out["by_pn"].get("WG123")            # peta PN tetap ada
+    assert accurate.snapshot() == {"WG123": {"stok": 7.0, "harga": 1000.0, "unit": "Pc"}}
+
+
+def test_refresh_berisi_menimpa_indeks(monkeypatch):
+    """Sanity: fetch berisi → indeks memang diperbarui (guard hanya untuk kosong)."""
+    _seed_index(monkeypatch, {}, snap={})
+    raw = [{"no": "000009.AZ999", "name": "Spring", "availableToSell": 3,
+            "quantity": 3, "unit1": {"name": "Pc"}, "unitPrice": 500, "id": 9}]
+    monkeypatch.setattr(accurate, "fetch_all_items", lambda: raw)
+
+    out = accurate.refresh(force=True)
+    assert out["by_pn"].get("AZ999")
+    assert out["ts"] > 0

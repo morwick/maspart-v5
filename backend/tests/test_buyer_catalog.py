@@ -128,6 +128,21 @@ def test_ready_only_menyaring_yang_habis():
     assert "WG9100443050" in pns
 
 
+# ── Fingerprint ikut TIMESTAMP indeks Accurate (harga dipajang == dibayar) ────
+def test_fingerprint_berubah_saat_timestamp_indeks_berubah(monkeypatch):
+    """Refresh yang UBAH HARGA tapi jumlah item sama → timestamp indeks bergeser →
+    fingerprint berubah → etalase rebuild → harga pajang sinkron dgn checkout."""
+    monkeypatch.setattr(accurate, "index_stamp", lambda: (100.0, 50.0))
+    fp1 = buyer_catalog._fingerprint()
+    monkeypatch.setattr(accurate, "index_stamp", lambda: (200.0, 50.0))  # ts agregat naik
+    fp2 = buyer_catalog._fingerprint()
+    assert fp1 != fp2
+
+    # Tanpa perubahan ts → fingerprint stabil (tak rebuild sia-sia).
+    monkeypatch.setattr(accurate, "index_stamp", lambda: (200.0, 50.0))
+    assert buyer_catalog._fingerprint() == fp2
+
+
 # ── Pencarian, sort, pagination ──────────────────────────────────────────────
 def test_cari_pn_dan_nama():
     assert {i["part_number"] for i in _page(q="WG9100", page_size=100)["items"]} == {"WG9100443050"}

@@ -98,3 +98,40 @@ def test_create_order_menolak_gudang_tanpa_kode_pos(dunia):
         R.create_order(body, USER)
     assert e.value.status_code == 400
     assert "kode pos" in str(e.value.detail).lower()
+
+
+def _order_body(pn, shipping_cost=0):
+    return R.CreateOrderRequest(
+        items=[R.OrderItemIn(part_number=pn, qty=1)], courier="jne",
+        courier_service="REG", shipping_cost=shipping_cost, weight_grams=2000,
+        payment_method="gateway", recipient_name="Budi", recipient_phone="0811",
+        recipient_address="Jl. X", recipient_postal="99999")
+
+
+def test_create_order_ongkir_kosong_ditolak_bukan_dipercaya_klien(dunia, monkeypatch):
+    """Celah ONGKIR GRATIS: kode pos tujuan tak resolve → rates kosong. Klien kirim
+    shipping_cost=0 → HARUS ditolak 400, BUKAN dipercaya (ongkir Rp 0)."""
+    monkeypatch.setattr(R.shipping, "get_rates",
+                        lambda u, w, v, dest_postal="", origin_postal="": ([], None))
+    with pytest.raises(HTTPException) as e:
+        R.create_order(_order_body("P-JKT", shipping_cost=0), USER)
+    assert e.value.status_code == 400
+    assert "ongkir" in str(e.value.detail).lower()
+
+
+def test_create_order_shipping_unavailable_ditolak(dunia, monkeypatch):
+    """Layanan ongkir mati → order gateway ditolak 503, klien tak dipercaya."""
+    monkeypatch.setattr(R.shipping, "available", lambda: False)
+    with pytest.raises(HTTPException) as e:
+        R.create_order(_order_body("P-JKT", shipping_cost=0), USER)
+    assert e.value.status_code == 503
+
+
+def test_create_order_kurir_tak_ada_di_tarif_ditolak(dunia, monkeypatch):
+    """Kurir/servis pilihan tak ada di tarif resmi → 400 (bukan pakai nilai klien)."""
+    monkeypatch.setattr(R.shipping, "get_rates",
+                        lambda u, w, v, dest_postal="", origin_postal="":
+                        ([{"courier": "tiki", "service": "ECO", "price": 30000}], None))
+    with pytest.raises(HTTPException) as e:
+        R.create_order(_order_body("P-JKT", shipping_cost=0), USER)
+    assert e.value.status_code == 400

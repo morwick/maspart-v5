@@ -686,6 +686,16 @@ def refresh(force: bool = False) -> dict[str, Any]:
         return _index_cache
     with _index_lock:
         items = fetch_all_items()
+        if not items:
+            # Glitch sesi/izin bisa balas 200-KOSONG. Menimpa indeks dgn [] akan
+            # mengosongkan etalase + harga checkout sampai window terjadwal berikut
+            # (≤12 jam) — dan _save_index mem-persist kosong itu. Pertahankan indeks
+            # lama; jangan timpa, jangan simpan. Cache tua > cache kosong.
+            logger.warning(
+                "[accurate] refresh dapat 0 barang — indeks lama (%d) DIPERTAHANKAN",
+                len(_index_cache.get("items") or []),
+            )
+            return _index_cache
         _index_cache["items"] = [normalize_item(x) for x in items]
         _index_cache["by_pn"] = _build_by_pn(items)
         # View ringkas utk overlay hasil pencarian (dipakai snapshot()) — dibangun
@@ -1047,6 +1057,16 @@ def snapshot() -> dict[str, dict[str, Any]]:
     """{norm_pn: {stok,harga,unit}} dari indeks 5-jam bersama (tanpa tarikan
     terpisah). Bisa kosong (cold start / Accurate down) — pemanggil fallback Excel."""
     return _index_cache.get("snap") or {}
+
+
+def index_stamp() -> tuple[float, float]:
+    """(ts agregat, ts enrichment per-gudang) dari indeks aktif. Berubah TIAP
+    refresh yang benar-benar menimpa data — dipakai fingerprint etalase agar
+    perubahan HARGA (jumlah item sama) tetap memicu rebuild katalog."""
+    return (
+        float(_index_cache.get("ts") or 0.0),
+        float(_index_cache.get("gudang_ts") or 0.0),
+    )
 
 
 def items_matching(terms: Iterable[str], *, limit: int = 400) -> list[dict[str, Any]]:

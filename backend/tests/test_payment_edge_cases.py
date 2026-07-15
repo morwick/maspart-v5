@@ -77,7 +77,11 @@ def test_gagal_buat_pembayaran_membatalkan_order_dan_lepas_reservasi(monkeypatch
     dibatalkan, dilepas = [], []
     monkeypatch.setattr(R.harga, "total_weight_grams", lambda items, d, **kw: 2000)
     monkeypatch.setattr(R.payments, "available", lambda: True)
-    monkeypatch.setattr(R.shipping, "available", lambda: False)
+    monkeypatch.setattr(R.shipping, "available", lambda: True)
+    monkeypatch.setattr(R.shipping, "get_rates",
+                        lambda u, w, v, dest_postal="", origin_postal="":
+                        ([{"courier": "jne", "service": "REG", "price": 25000}], None))
+    monkeypatch.setattr(R.gudang, "origin_postal_for_label", lambda lb: "14250")
     monkeypatch.setattr(R.sb, "get_user_gudang", lambda u: "jakarta")
     monkeypatch.setattr(R.gudang, "buyer_label", lambda k: "01.Jakarta")
     monkeypatch.setattr(R.gudang, "owning_branch_label", lambda lb: lb)
@@ -91,11 +95,13 @@ def test_gagal_buat_pembayaran_membatalkan_order_dan_lepas_reservasi(monkeypatch
         {"order_code": "PO-Z", "total": 500_000, "status": "menunggu_pembayaran"}, None))
     monkeypatch.setattr(R.orders, "set_status",
                         lambda code, st: dibatalkan.append((code, st)) or True)
+    monkeypatch.setattr(R.orders, "set_fulfill_gudang", lambda code, lb: True)
     monkeypatch.setattr(R.payments, "create_payment",
                         lambda code, amt, ch, customer=None: (None, "Midtrans 503"))
 
     body = R.CreateOrderRequest(
-        items=[R.OrderItemIn(part_number="P-1", qty=1)], payment_method="gateway",
+        items=[R.OrderItemIn(part_number="P-1", qty=1)], courier="jne",
+        courier_service="REG", payment_method="gateway",
         recipient_name="Budi", recipient_phone="0811", recipient_address="Jl. X",
         recipient_postal="40111")
     with pytest.raises(HTTPException) as e:

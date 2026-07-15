@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.ratelimit import limit
 from ..deps import get_current_user, require_admin, require_buyer_ready
-from ..services import gudang, harga, orders, part_index, payments, reservations, shipping
+from ..services import gudang, harga, notify, orders, part_index, payments, reservations, shipping
 from ..services import supabase_client as sb
 
 logger = logging.getLogger("maspart.orders")
@@ -269,41 +269,48 @@ def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_re
     branch_label = gudang.owning_branch_label(fulfill_label) or fulfill_label
     order_gudang = gudang.gudang_label(branch_label) if branch_label else ""
 
-    # Ongkir dihitung ULANG di server (kurir+service+berat+asal/tujuan) — nilai
-    # dari klien tidak dipercaya untuk mencegah manipulasi ongkir.
-    server_ship = max(int(body.shipping_cost or 0), 0)
-    if shipping.available():
-        # Asal kirim = gudang PEMENUH (fulfill_label), bukan gudang pilihan pembeli —
-        # agar ongkir sesuai lokasi barang sebenarnya & konsisten dgn preview keranjang.
-        # Kode pos gudang pemenuh belum diisi admin → TOLAK; menghitung dari kode pos
-        # gudang pembeli akan menagih ongkir kota yang salah.
-        origin_postal = gudang.origin_postal_for_label(fulfill_label)
-        if not origin_postal:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                f"Ongkir dari gudang {gudang.gudang_label(fulfill_label)} belum bisa dihitung — "
-                "kode pos gudang itu belum diisi admin. Hubungi admin.",
-            )
-        rates, _rerr = shipping.get_rates(
-            user["username"], weight_grams, 0,
-            dest_postal=body.recipient_postal or "", origin_postal=origin_postal,
+    # Ongkir dihitung ULANG di server dari tarif resmi (kurir+service+berat+asal/
+    # tujuan) — nilai `body.shipping_cost` dari klien TAK PERNAH dipercaya. Semua
+    # order di sini = gateway (manual ditolak di atas), jadi bila ongkir tak bisa
+    # dihitung dari tarif segar → TOLAK; ⛔ JANGAN jatuh ke nilai klien (celah
+    # ongkir Rp 0 lewat kode pos ngawur / saat layanan tarif down).
+    if not shipping.available():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Layanan ongkir sedang tidak tersedia — coba lagi sebentar lalu cek ongkir ulang.",
         )
-        chosen = (body.courier or "").lower()
-        svc = body.courier_service or ""
-        match = next(
-            (r for r in (rates or []) if (r.get("courier") or "").lower() == chosen
-             and (r.get("service") or "") == svc),
-            None,
+    # Asal kirim = gudang PEMENUH (fulfill_label), bukan gudang pilihan pembeli.
+    origin_postal = gudang.origin_postal_for_label(fulfill_label)
+    if not origin_postal:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Ongkir dari gudang {gudang.gudang_label(fulfill_label)} belum bisa dihitung — "
+            "kode pos gudang itu belum diisi admin. Hubungi admin.",
         )
-        if match:
-            server_ship = int(match["price"])
-        elif rates:
-            # Kurir/layanan yang dipilih tidak ada di tarif resmi → minta cek ulang.
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "Ongkir tidak valid / tarif kurir berubah. Silakan cek ongkir ulang sebelum memesan.",
-            )
-        # rates kosong (gagal ambil tarif) → fallback ke nilai klien (tak bisa hitung).
+    rates, _rerr = shipping.get_rates(
+        user["username"], weight_grams, 0,
+        dest_postal=body.recipient_postal or "", origin_postal=origin_postal,
+    )
+    if not rates:
+        # Tujuan tak terselesaikan (kode pos salah) / gagal ambil tarif.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Ongkir tak bisa dihitung — periksa alamat & kode pos tujuan, lalu cek ongkir ulang.",
+        )
+    chosen = (body.courier or "").lower()
+    svc = body.courier_service or ""
+    match = next(
+        (r for r in rates if (r.get("courier") or "").lower() == chosen
+         and (r.get("service") or "") == svc),
+        None,
+    )
+    if not match:
+        # Kurir/layanan yang dipilih tak ada di tarif resmi → minta cek ulang.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Ongkir tidak valid / tarif kurir berubah. Silakan cek ongkir ulang sebelum memesan.",
+        )
+    server_ship = int(match["price"])
 
     order, err = orders.create_order(
         user["username"],
@@ -376,6 +383,14 @@ def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_re
             )
         orders.attach_payment(order["order_code"], pay)
         order["payment"] = pay
+    # Notif PESANAN MASUK ke admin — HANYA di sini, setelah reservasi + pembayaran
+    # sukses (bukan di dalam orders.create_order yang bisa berujung auto-batal).
+    # notify_new_order mengirim di thread latar; get_order best-effort (bawa items).
+    try:
+        full = orders.get_order(code) or {}
+        notify.notify_new_order(full or order, full.get("items"))
+    except Exception:  # pragma: no cover — notif tak boleh menggagalkan order
+        pass
     return order
 
 

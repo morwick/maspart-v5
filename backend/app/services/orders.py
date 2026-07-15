@@ -282,11 +282,10 @@ def create_order(
             except Exception:
                 pass
             return None, f"Gagal simpan item: {r2.status_code}"
-        # Notif Telegram ke admin — PESANAN MASUK (best-effort, di latar).
-        try:
-            notify.notify_new_order(order, rows)
-        except Exception:  # pragma: no cover — notif tak boleh menggagalkan order
-            pass
+        # ⚠️ Notif PESANAN MASUK TIDAK di sini: create_order() dipanggil SEBELUM
+        # reservasi stok & pembayaran dipasang di router. Bila reservasi 409 (stok
+        # habis) atau payment 502, order ini di-auto-batal — notif di sini akan
+        # bocor untuk order gagal. Router memicu notify_new_order SETELAH sukses.
         return {"order_code": code, "total": total, "status": "menunggu_pembayaran",
                 "payment_method": payment_method or "manual"}, None
     except Exception as e:
@@ -558,16 +557,38 @@ def order_owner_gudang(order_code: str) -> dict | None:
         return None
 
 
-def _patch(order_code: str, data: dict, username: str | None = None, gudang: str | None = None) -> bool:
+def _patch(
+    order_code: str,
+    data: dict,
+    username: str | None = None,
+    gudang: str | None = None,
+    expect_status: set[str] | None = None,
+) -> bool:
+    """PATCH 1 order. Bila `expect_status` diberi → tambah filter `status=in.(…)`
+    + minta baris terwakili; **0 baris kena = kalah race** (status sudah berubah)
+    → return False TANPA menulis. Mencegah check-then-write TOCTOU (mis. order
+    lunas ditimpa 'batal' saat pembeli klik batal berbarengan dgn webhook)."""
     params = {"order_code": f"eq.{order_code}"}
     if username:
         params["username"] = f"eq.{username}"
     if gudang:
         params["gudang"] = f"eq.{gudang}"
+    if expect_status:
+        # PostgREST: status=in.("a","b") — kutip tiap nilai agar aman.
+        params["status"] = "in.(" + ",".join(f'"{s}"' for s in expect_status) + ")"
     data["updated_at"] = _now()
+    prefer = "return=representation" if expect_status else "return=minimal"
     try:
-        resp = requests.patch(_rest_url("orders"), headers=_service_headers("return=minimal"), params=params, json=data, timeout=_TIMEOUT)
-        return resp.status_code in (200, 204)
+        resp = requests.patch(_rest_url("orders"), headers=_service_headers(prefer), params=params, json=data, timeout=_TIMEOUT)
+        if resp.status_code not in (200, 204):
+            return False
+        if expect_status:
+            # 0 baris = status tak lagi cocok (kalah race) → gagal, jangan klaim sukses.
+            try:
+                return bool(resp.json())
+            except Exception:
+                return False
+        return True
     except Exception:
         return False
 
@@ -654,8 +675,11 @@ def is_expired(o: dict) -> bool:
 
 
 def expire_order(order_code: str) -> bool:
-    """Batalkan order kedaluwarsa + lepas reservasi stok. Aman: VA sudah ditutup gateway."""
-    ok = _patch(order_code, {"status": "batal"})
+    """Batalkan order kedaluwarsa + lepas reservasi stok. Aman: VA sudah ditutup gateway.
+
+    PATCH bersyarat `menunggu_pembayaran`: bila di sela ini order keburu dibayar
+    (jadi 'diproses') → 0 baris kena → return False, order lunas TAK tertimpa batal."""
+    ok = _patch(order_code, {"status": "batal"}, expect_status={"menunggu_pembayaran"})
     if ok:
         reservations.release(order_code)
     return ok
@@ -673,6 +697,9 @@ def sweep_expired(rows: list[dict]) -> list[dict]:
 
 
 _BUYER_CANCELABLE = {"menunggu_pembayaran", "menunggu_verifikasi"}
+# Status yang boleh ditandai LUNAS (→ 'diproses'). Order 'batal'/'diproses'/dst
+# ditolak PATCH bersyarat mark_paid (idempoten + tak menghidupkan order batal).
+_PAYABLE = {"menunggu_pembayaran", "menunggu_verifikasi"}
 
 
 def confirm_received(order_code: str, username: str) -> tuple[bool, str | None]:
@@ -694,8 +721,10 @@ def cancel_by_buyer(order_code: str, username: str) -> tuple[bool, str | None]:
         return False, "Pesanan tidak ditemukan."
     if o.get("status") not in _BUYER_CANCELABLE:
         return False, "Pesanan tidak bisa dibatalkan pada status saat ini. Hubungi admin/gudang."
-    if not _patch(order_code, {"status": "batal"}, username=username):
-        return False, "Gagal membatalkan pesanan."
+    # PATCH bersyarat: bila order keburu lunas (webhook masuk berbarengan) →
+    # status bukan lagi cancelable → 0 baris → gagal → order lunas TAK dibatalkan.
+    if not _patch(order_code, {"status": "batal"}, username=username, expect_status=_BUYER_CANCELABLE):
+        return False, "Pesanan tidak bisa dibatalkan — mungkin sudah lunas/diproses. Muat ulang halaman."
     reservations.release(order_code)
     return True, None
 
@@ -735,20 +764,31 @@ def find_by_payment(ref_or_code: str) -> dict | None:
 
 
 def mark_paid(order_code: str, raw: dict | None = None) -> bool:
-    """Tandai lunas → status langsung 'diproses' (verifikasi otomatis)."""
+    """Tandai lunas → status langsung 'diproses' (verifikasi otomatis).
+
+    PATCH bersyarat `_PAYABLE`: bila order sudah 'batal'/'diproses' → 0 baris →
+    return False (idempoten; tak menghidupkan order batal / tak double-commit)."""
     data = {"status": "diproses", "paid_at": _now()}
     if raw is not None:
         data["payment_raw"] = raw
-    ok = _patch(order_code, data)
+    ok = _patch(order_code, data, expect_status=_PAYABLE)
     if ok:
         # Order lunas: jadikan reservasi stok permanen agar tidak ikut kedaluwarsa.
         reservations.commit(order_code)
-        # Notif Telegram ke admin — PEMBAYARAN LUNAS (best-effort).
+        # Notif Telegram LUNAS — di daemon thread. get_order() = 2 GET Supabase;
+        # menjalankannya sinkron di jalur webhook bisa timeout → Midtrans retry.
+        _notify_paid_async(order_code)
+    return ok
+
+
+def _notify_paid_async(order_code: str) -> None:
+    """Ambil detail order + kirim notif LUNAS di thread latar (non-blocking)."""
+    def _run() -> None:
         try:
             notify.notify_paid(get_order(order_code) or {"order_code": order_code, "total": None})
         except Exception:  # pragma: no cover
             pass
-    return ok
+    threading.Thread(target=_run, daemon=True, name=f"notify-paid-{order_code}").start()
 
 
 def set_fulfill_gudang(order_code: str, label: str) -> bool:

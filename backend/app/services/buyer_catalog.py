@@ -88,7 +88,13 @@ def _fingerprint() -> tuple:
         snap_n = len(accurate.snapshot())
     except Exception:
         snap_n = 0
-    return (st.get("indexed_at"), snap_n, len(image_search.photo_url_map()))
+    try:
+        # Timestamp indeks Accurate: refresh yang UBAH HARGA tapi jumlah item sama
+        # tetap menggeser fingerprint → etalase rebuild → harga pajang == checkout.
+        idx_ts = accurate.index_stamp()
+    except Exception:
+        idx_ts = (0.0, 0.0)
+    return (st.get("indexed_at"), snap_n, len(image_search.photo_url_map()), idx_ts)
 
 
 def _kategori_for(name_up: str) -> list[str]:
