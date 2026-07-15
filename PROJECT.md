@@ -244,6 +244,18 @@
 > (c) Harga di asisten ikut **Menu Control Kolom Harga** (`bc199c6`, penjaga terpusat).
 > (d) `sheet_isi_foto` (`f9fccf0`) — tempel foto SIMS ke Excel unggahan user. (e) Materi
 > tutorial + APK 2.0.0 (`fb79f8e`).
+> Update **2026-07-15 (malam-3) — NOTIF TELEGRAM + FIX ETALASE NYANGKUT KOSONG**: (a) **Notif
+> Telegram ke admin** saat pesanan MASUK (`create_order`) & LUNAS (`mark_paid`) — modul
+> `services/notify.py` (kirim best-effort di thread latar, tak menghambat order); bot @BotFather,
+> gratis/resmi/tanpa risiko blokir; konfig `TELEGRAM_BOT_TOKEN`+`TELEGRAM_CHAT_ID` (env Coolify,
+> aktif via `telegram_configured`); teruji e2e (pesanan uji → notif diterima). (b) **Fix `/toko`
+> nyangkut KOSONG**: `buyer_catalog._products()` dulu menyimpan build KOSONG (sumber dingin pasca-
+> restart → semua item tersaring) dgn fingerprint SAH; fingerprint tak memuat indeks berat → cache
+> kosong permanen sampai refresh terjadwal. Fix: hasil kosong disimpan `fp=None` + cooldown
+> `_EMPTY_RETRY_SEC=30dtk` → terisi SENDIRI begitu sumber siap (self-healing). Diverifikasi live:
+> etalase pulih tanpa force refresh admin. 740 unit test. ⚠️ ⛔ RESTART backend berkali-kali dalam
+> sehari bisa memicu etalase-kosong sementara (kini teratasi otomatis). ⛔ evals tak disentuh.
+>
 > Update **2026-07-15 (malam-2) — TOOL HITUNG DETERMINISTIK**: asisten dulu disuruh
 > menghitung total/subtotal & mengurutkan harga sendiri di `[PIKIR]` (aritmatika LLM rawan salah).
 > Tool baru **`hitung_part`** menghitung di Python (PASTI): total harga (± qty/item), urut
