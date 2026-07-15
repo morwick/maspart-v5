@@ -6815,6 +6815,35 @@ def _cap_tool_content(s: str) -> str:
               "besar; rangkum dari bagian di atas, jangan menebak sisanya]")
 
 
+def _compact_result(v):
+    """Buang field KOSONG (None, '', [], {}) secara rekursif dari hasil tool
+    sebelum diserialisasi ke model — memangkas 15-35% char hasil tool, komponen
+    biaya token UNCACHED terbesar per giliran (system prompt sudah ter-cache).
+    ⛔ JANGAN buang boolean atau 0: _tool_failed & guard bergantung pada
+    found:False / denied / stok 0. ⛔ JANGAN rename key (nama key = kosakata yang
+    sudah dikenal model). Panjang elemen LIST tak diubah (struktur tetap)."""
+    if isinstance(v, dict):
+        out = {}
+        for k, val in v.items():
+            c = _compact_result(val)
+            if c is None or c == "" or c == [] or c == {}:
+                continue
+            out[k] = c
+        return out
+    if isinstance(v, list):
+        return [_compact_result(x) for x in v]
+    return v
+
+
+def _dump_tool(result) -> str:
+    """Serialisasi hasil tool untuk konsumsi model: dikompakkan (buang field
+    kosong) + separator rapat (tanpa spasi). Dipakai SEKALI lalu string yang sama
+    dipakai ekstraksi PN & konten yang di-append — guard PN melihat persis yang
+    dilihat model."""
+    return json.dumps(_compact_result(result), ensure_ascii=False,
+                      separators=(",", ":"), default=str)
+
+
 def _tool_failed(result: dict) -> bool:
     """True bila hasil tool = kegagalan/kekosongan lookup (error, ditolak, atau
     'tidak ditemukan'). Dipakai untuk mengingatkan model agar TIDAK mengarang
@@ -8470,7 +8499,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                         rangka_tool_attempted = True
                     result = _run_tool(name, lc_args, user, sheet_id)
                     tools_used.append(name)
-                    _res_pns = _extract_pns(json.dumps(result, ensure_ascii=False, default=str))
+                    _dump = _dump_tool(result)
+                    _res_pns = _extract_pns(_dump)
                     grounded |= _res_pns
                     _track_pn_source(name, result, _res_pns)
                     _capture_meta(name, lc["arguments"] or {}, result)
@@ -8480,7 +8510,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                             f"[HASIL TOOL {name}] (sistem sudah MENJALANKAN tool ini — "
                             "JANGAN tulis pemanggilan tool sebagai teks; pakai hasil ini "
                             "untuk menjawab):\n"
-                            + _cap_tool_content(json.dumps(result, ensure_ascii=False, default=str))
+                            + _cap_tool_content(_dump)
                         ),
                     })
                     if _tool_failed(result):
@@ -8587,14 +8617,15 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             tools_used.append(name)
             if _args_has_rangka(args):
                 rangka_tool_attempted = True
-            _res_pns = _extract_pns(json.dumps(result, ensure_ascii=False, default=str))
+            _dump = _dump_tool(result)
+            _res_pns = _extract_pns(_dump)
             grounded |= _res_pns
             _track_pn_source(name, result, _res_pns)
             _capture_meta(name, args, result)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.get("id"),
-                "content": _cap_tool_content(json.dumps(result, ensure_ascii=False, default=str)),
+                "content": _cap_tool_content(_dump),
             })
             if _tool_failed(result):
                 lookup_gagal = True
