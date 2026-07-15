@@ -31,6 +31,9 @@ def katalog(monkeypatch):
     ]
     monkeypatch.setattr(ai_sheet.part_index, "search_exact_pns",
                         lambda pns: [r for r in rows if (r["part_number"] or "").upper() in {p.upper() for p in pns}])
+    # rows_for_pns (pemaaf suffix varian) melangkah ke _pn_flat_map utk PN tak
+    # ketemu → jangan sentuh indeks nyata di test.
+    monkeypatch.setattr(ai_sheet.part_index, "_pn_flat_map", lambda: {})
     return rows
 
 
@@ -94,6 +97,21 @@ def test_isi_kolom_stok_tambah_kolom_baru(katalog):
     # PN dikenal terisi, PN asing dibiarkan kosong (tidak dikarang).
     assert r["baris_terisi"] == 1 and r["baris_kosong"] == 1
     assert r["export_id"]
+
+
+def test_isi_kolom_pemaaf_suffix_varian(katalog):
+    """PN sheet ber-suffix varian ('WG9925520270/2') harus tetap terisi dari baris
+    PN dasar katalog ('WG9925520270') — pencocokan lewat rows_for_pns yang pemaaf.
+    Sebaliknya juga (sheet base, katalog di tes ini base) — cukup uji arah suffix."""
+    p = ai_sheet.parse_upload(_xlsx([
+        ["Part Number", "Qty"],
+        ["WG9925520270/2", 4],       # suffix varian — dulu meleset (kosong)
+    ]), "order.xlsx")
+    sid = ai_sheet.put_sheet(USER["username"], p)
+    r = ai_sheet.fill_column(sid, USER, isi="stok")
+    assert r["found"] and r["baris_terisi"] == 1     # terisi lewat PN dasar
+    # parse_upload juga menghitung 'dikenal' dgn pemaaf.
+    assert p["pn_dikenal"] == 1
 
 
 def test_isi_kolom_menimpa_kolom_yang_disebut_huruf(katalog):
@@ -251,6 +269,7 @@ def gudang_stok(monkeypatch):
                         lambda pns: [rows[p] for p in {x.upper() for x in pns} if p in rows])
     monkeypatch.setattr(ai_sheet.part_index, "gudang_names",
                         lambda: ["JAKARTA", "PEKANBARU", "MEDAN"])
+    monkeypatch.setattr(ai_sheet.part_index, "_pn_flat_map", lambda: {})
     return rows
 
 

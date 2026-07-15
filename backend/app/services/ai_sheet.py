@@ -203,10 +203,12 @@ def parse_upload(data: bytes, filename: str = "") -> dict:
     if pn_idx is not None:
         pns = [r[pn_idx].upper() for r in body if r[pn_idx]]
         try:
-            ada = {(r.get("part_number") or "").upper() for r in part_index.search_exact_pns(set(pns))}
+            # PEMAAF suffix varian (PN sheet '…/2' ↔ PN dasar katalog) — 'dikenal'
+            # mencerminkan kecocokan sebenarnya, bukan meleset karena suffix.
+            peta = part_index.rows_for_pns(list(dict.fromkeys(pns)))
         except Exception:
-            ada = set()
-        dikenal = sum(1 for p in pns if p in ada)
+            peta = {}
+        dikenal = sum(1 for p in pns if p in peta)
 
     return {
         "ok": True,
@@ -421,13 +423,11 @@ def fill_column(
         catatan_sumber = f"SIMS live (kurs CNY→IDR {res['rate']:.0f})"
     else:
         # Sumber MURAH: indeks part lokal (bukan panggilan per-PN ke Accurate).
+        # PEMAAF suffix varian (PN sheet '…/2' ↔ PN dasar katalog); kunci = PN sheet.
         try:
-            rows = part_index.search_exact_pns(set(unik))
+            peta = part_index.rows_for_pns(unik)
         except Exception as e:
             return {"found": False, "error": f"gagal membaca indeks part: {e}"}
-        peta: dict[str, dict] = {}
-        for row in rows:
-            peta.setdefault((row.get("part_number") or "").upper(), row)
         key = {ISI_STOK: "stok", ISI_NAMA: "part_name", ISI_HARGA_LOKAL: "harga"}[isi]
         for r, p in zip(body, pns):
             d = peta.get(p)
@@ -620,8 +620,11 @@ def fill_columns(
     peta_lokal: dict[str, dict] = {}
     if any(s["isi"] in (ISI_STOK, ISI_NAMA, ISI_HARGA_LOKAL) for s in specs):
         try:
-            for row in part_index.search_exact_pns(set(unik)):
-                peta_lokal.setdefault((row.get("part_number") or "").upper(), row)
+            # PEMAAF suffix varian: PN sheet 'WG9525160004/2' cocok ke baris PN
+            # dasar 'WG9525160004' (& sebaliknya) — kunci hasil = PN sheet apa
+            # adanya, jadi _nilai_fn(peta_lokal.get(p)) tetap pas. Tanpa ini part
+            # ber-suffix varian tampil kosong padahal stok/harga-nya ADA.
+            peta_lokal = part_index.rows_for_pns(unik)
         except Exception as e:
             return {"found": False, "error": f"gagal membaca indeks part: {e}"}
     peta_sims: dict[str, dict] = {}
