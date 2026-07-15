@@ -109,6 +109,14 @@ def _boleh_harga(user: dict) -> bool:
         return False
 
 
+def _rp(n) -> str:
+    """Format angka → 'Rp 112.000' (ribuan pakai titik). '—' bila None/invalid."""
+    try:
+        return "Rp " + f"{int(n):,}".replace(",", ".")
+    except (TypeError, ValueError):
+        return "—"
+
+
 def _strip_harga(obj):
     """Buang SEMUA field harga dari hasil tool (rekursif: dict & list). Penjaga
     TERPUSAT — dijalankan di _run_tool bila user tak berhak, jadi tak bergantung
@@ -1427,6 +1435,49 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         },
     ]
+
+    # HITUNG deterministik (total/urut/filter harga) — hanya ditawarkan ke yang
+    # berhak melihat harga (harga gate); model TAK menghitung sendiri.
+    if _boleh_harga(user):
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "hitung_part",
+                "description": (
+                    "HITUNG PASTI (dihitung SISTEM, bukan kamu) atas beberapa part yang SUDAH ada "
+                    "di percakapan: TOTAL harga (dengan qty per item), urutkan TERMURAH/TERMAHAL, "
+                    "atau saring (harga maksimum/minimum, hanya yang ready). Panggil ini SETIAP "
+                    "kali user minta 'totalnya berapa', 'kalau ambil N pcs', 'urutkan termurah', "
+                    "'yang di bawah X', 'yang ready saja'. ⛔ JANGAN menghitung/mengurutkan harga "
+                    "sendiri di kepala — rawan salah; tool ini pakai harga OTORITATIF Accurate. "
+                    "Kirim hanya Part Number yang sudah muncul dari tool/percakapan (PN karangan "
+                    "ditolak). Hasilnya: rincian per item + subtotal + TOTAL + item tanpa harga."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "items": {
+                            "type": "array",
+                            "description": "Part yang dihitung. Tiap elemen {pn, qty}. qty kosong = 1.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "pn": {"type": "string", "description": "Part Number (persis dari hasil tool)."},
+                                    "qty": {"type": "integer", "description": "Jumlah pcs (default 1)."},
+                                },
+                                "required": ["pn"],
+                            },
+                        },
+                        "urutkan": {"type": "string", "enum": ["termurah", "termahal"],
+                                    "description": "Opsional: urutkan hasil berdasarkan harga."},
+                        "harga_maks": {"type": "integer", "description": "Opsional: hanya harga ≤ nilai ini (mis. 1000000)."},
+                        "harga_min": {"type": "integer", "description": "Opsional: hanya harga ≥ nilai ini."},
+                        "hanya_ready": {"type": "boolean", "description": "Opsional: hanya part yang stoknya > 0."},
+                    },
+                    "required": ["items"],
+                },
+            },
+        })
 
     # Populasi Unit — data armada/unit terdaftar. HANYA admin & akun 'mas'
     # (SEE_ALL). User lain (cabang/biasa/pembeli) TIDAK diberi tool ini.
@@ -6152,6 +6203,114 @@ def _t_buat_excel(args: dict, user: dict) -> dict:
                         "tabelnya, JANGAN membuat link/URL unduhan sendiri.")}
 
 
+def _t_hitung_part(args: dict, user: dict) -> dict:
+    """HITUNG DETERMINISTIK atas part yang SUDAH ada di percakapan: total harga
+    (± qty per item), urutkan termurah/termahal, filter harga/ready. SEMUA hitungan
+    di Python (PASTI) atas harga OTORITATIF Accurate — model TAK menghitung sendiri
+    (aritmatika LLM rawan salah). Harga → hanya untuk yang berhak (harga gate); PN
+    wajib GROUNDED (anti-karangan). Kembalikan rincian + total + item tanpa harga."""
+    if not _boleh_harga(user):
+        return {"denied": True,
+                "error": "Total/urutan harga hanya untuk pengguna yang berhak melihat harga."}
+    items_in = args.get("items") or []
+    if not isinstance(items_in, list) or not items_in:
+        return {"error": "Sebutkan 'items' = daftar {pn, qty} yang mau dihitung/diurutkan."}
+
+    # Normalisasi input {pn, qty}.
+    pns_in: list[tuple[str, int]] = []
+    for it in items_in:
+        if isinstance(it, dict):
+            pn = str(it.get("pn") or it.get("part_number") or "").strip().upper()
+            try:
+                qty = int(it.get("qty") or it.get("jumlah") or 1)
+            except (TypeError, ValueError):
+                qty = 1
+        else:
+            pn, qty = str(it).strip().upper(), 1
+        if pn:
+            pns_in.append((pn, max(1, qty)))
+    if not pns_in:
+        return {"error": "Tidak ada Part Number yang bisa dihitung."}
+
+    # Anti-halusinasi: tiap PN wajib pernah muncul dari tool/riwayat (grounded).
+    grounded = args.get("_grounded")
+    if isinstance(grounded, set):
+        bad = _drop_unit_tokens(sorted({pn for pn, _ in pns_in} - grounded))
+        if bad:
+            return {"error": ("PN berikut TIDAK pernah muncul dari hasil tool/riwayat "
+                              "percakapan (dugaan karangan): " + ", ".join(bad[:10]) +
+                              ". ⛔ Panggil tool datanya dulu, lalu ulangi hitung_part.")}
+
+    # Angka MENTAH (bukan string 'Rp …') dari indeks Accurate + nama dari katalog.
+    from . import accurate
+    snap = accurate.snapshot()
+    lokal = part_index.rows_for_pns([pn for pn, _ in pns_in])
+
+    def _int_or_none(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    urut = (args.get("urutkan") or "").strip().lower()
+    hmax = _int_or_none(args.get("harga_maks"))
+    hmin = _int_or_none(args.get("harga_min"))
+    hanya_ready = bool(args.get("hanya_ready"))
+
+    items_out: list[dict] = []
+    tanpa_harga: list[str] = []
+    total_num = 0
+    seen: set[str] = set()
+    for pn, qty in pns_in:
+        if pn in seen:
+            continue
+        seen.add(pn)
+        e = snap.get(accurate.index_key(pn) or accurate.norm_pn(pn)) if snap else None
+        harga_num = _int_or_none((e or {}).get("harga"))
+        stok_num = _int_or_none((e or {}).get("stok"))
+        nama = " ".join(((lokal.get(pn, {}) or {}).get("part_name") or "").split())
+        ready = bool(stok_num and stok_num > 0)
+        if harga_num is None:
+            tanpa_harga.append(pn)
+            continue
+        if hmax is not None and harga_num > hmax:
+            continue
+        if hmin is not None and harga_num < hmin:
+            continue
+        if hanya_ready and not ready:
+            continue
+        subtotal = harga_num * qty
+        total_num += subtotal
+        items_out.append({
+            "part_number": pn, "nama": nama,
+            "harga": _rp(harga_num), "harga_num": harga_num,
+            "qty": qty, "subtotal": _rp(subtotal), "subtotal_num": subtotal,
+            "stok": stok_num, "ready": ready,
+        })
+
+    if urut in ("termurah", "murah", "asc", "naik"):
+        items_out.sort(key=lambda x: x["harga_num"])
+    elif urut in ("termahal", "mahal", "desc", "turun"):
+        items_out.sort(key=lambda x: -x["harga_num"])
+
+    if not items_out and not tanpa_harga:
+        return {"found": False,
+                "error": "Tak ada part yang cocok syarat / tak ada di indeks Accurate."}
+
+    return {
+        "found": True,
+        "items": items_out,
+        "jumlah_item": len(items_out),
+        "total": _rp(total_num),
+        "total_num": total_num,
+        "items_tanpa_harga": tanpa_harga,
+        "catatan": ("Total, subtotal, & urutan DIHITUNG SISTEM = PASTI. Sajikan apa adanya; "
+                    "⛔ JANGAN menghitung ulang / mengubah angka / menebak harga. Item di "
+                    "'items_tanpa_harga' memang TIDAK punya harga di Accurate & TAK ikut "
+                    "total — sebutkan apa adanya."),
+    }
+
+
 _EXCEL_SERVER_MAX = 4000   # plafon baris export server-side (BOM terbesar ~2rb)
 
 
@@ -6745,6 +6904,7 @@ _DISPATCH = {
     "rekap_penjualan": _t_rekap_penjualan,
     "daftar_pesanan": _t_daftar_pesanan,
     "buat_excel": _t_buat_excel,
+    "hitung_part": _t_hitung_part,
     "excel_bom_rangka": _t_excel_bom_rangka,
     "excel_stok_gudang": _t_excel_stok_gudang,
     "katalog_kategori": _t_katalog_kategori,
@@ -7506,14 +7666,16 @@ def _system_prompt(user: dict) -> str:
         "\nOLAH DATA & HITUNG (permintaan yang butuh mengolah hasil tool — kerjakan, "
         "jangan menolak; SEMUA angka sumbernya hasil tool, hitungannya kamu):\n"
         "- KUANTITAS & TOTAL: bila user menyebut jumlah ('mau ambil 4 pcs X dan 2 pcs Y, "
-        "totalnya berapa?'), ambil harga tiap PN dari tool, hitung subtotal per item "
-        "(harga × qty) dan TOTAL di dalam [PIKIR] dengan teliti, lalu sajikan rinciannya. "
-        "Bila sebagian item belum ada data harga, hitung total dari yang ada dan katakan "
-        "jelas item mana yang belum ada harganya — JANGAN menebak harga.\n"
-        "- FILTER & URUT lanjutan ('yang di bawah 1 juta', 'yang ready aja', 'urutkan "
-        "termurah', 'top 5'): terapkan pada data hasil tool yang sudah ada di percakapan "
-        "— saring & urutkan ANGKANYA persis, kerjakan perbandingannya di [PIKIR]. Bila "
-        "datanya belum lengkap untuk filter itu, panggil tool lagi dulu.\n"
+        "totalnya berapa?'), panggil tool `hitung_part` dgn items [{pn, qty}] — tool "
+        "menghitung subtotal per item & TOTAL secara PASTI dari harga Accurate. ⛔ JANGAN "
+        "menghitung total/subtotal sendiri di [PIKIR] (aritmatika manual rawan salah). "
+        "Item tanpa harga dilaporkan tool di 'items_tanpa_harga' — sebutkan apa adanya, "
+        "JANGAN menebak harga.\n"
+        "- FILTER & URUT harga ('urutkan termurah/termahal', 'yang di bawah 1 juta', "
+        "'yang ready aja', 'top 5 termurah'): panggil `hitung_part` dgn items PN terkait "
+        "+ argumen (urutkan / harga_maks / harga_min / hanya_ready) — tool menyaring & "
+        "mengurutkan ANGKANYA persis. ⛔ JANGAN mengurutkan/menyaring harga manual. Bila PN "
+        "yang mau dihitung belum pernah muncul dari tool, panggil tool datanya dulu.\n"
         "- BANDING 2+ PN ('mending mana A atau B?', 'bedanya apa'): panggil detail_part "
         "tiap PN (± unit_dari_part untuk kecocokan unit), lalu bandingkan FAKTA-nya: nama/"
         "fungsi, unit pemakai, harga, stok, spesifikasi. Simpulkan mana yang sesuai "
@@ -8615,7 +8777,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 for lc in leaked:
                     name = lc["name"]
                     lc_args = dict(lc["arguments"] or {})
-                    if name == "buat_excel":   # pagar anti-karangan isi Excel
+                    if name in ("buat_excel", "hitung_part"):   # pagar anti-karangan PN
                         lc_args["_grounded"] = grounded
                     if _args_has_rangka(lc_args):
                         rangka_tool_attempted = True
@@ -8737,7 +8899,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 args = json.loads(fn.get("arguments") or "{}")
             except Exception:
                 args = {}
-            if name == "buat_excel":   # pagar anti-karangan isi Excel
+            if name in ("buat_excel", "hitung_part"):   # pagar anti-karangan PN
                 args = {**args, "_grounded": grounded}
             return tc, name, args, _run_tool(name, args, user, sheet_id)
 
