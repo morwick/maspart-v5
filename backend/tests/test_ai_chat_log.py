@@ -33,6 +33,46 @@ def test_log_turn_kirim_payload(monkeypatch):
     assert len(sent["json"]["question"]) == 500  # dipotong
 
 
+def test_log_turn_kirim_reply_dicap(monkeypatch):
+    """Teks jawaban ikut disimpan, di-cap _REPLY_CAP; ada di payload tingkat teratas."""
+    sent = {}
+
+    class _R:
+        status_code = 201
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        sent["json"] = json
+        return _R()
+
+    monkeypatch.setattr(ai_chat_log.requests, "post", fake_post)
+    ai_chat_log.log_turn(username="u", role="admin", question="q",
+                         tools_used=[], rounds=0, latency_ms=1, guard_hit=False,
+                         tool_failed=False, reply_len=9000, outcome="ok",
+                         reply="J" * 9000)
+    assert len(sent["json"]["reply"]) == ai_chat_log._REPLY_CAP  # 4000
+    assert sent["json"]["reply_len"] == 9000                     # panjang asli tetap
+
+
+def test_log_turn_reply_fallback_bila_kolom_absen(monkeypatch):
+    """Migrasi 022 belum jalan (PostgREST 400 utk kolom reply) → jatuh ke payload
+    tanpa reply; log TETAP tercatat."""
+    seen = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        seen.append(json)
+
+        class _R:
+            status_code = 400 if "reply" in json else 201
+        return _R()
+
+    monkeypatch.setattr(ai_chat_log.requests, "post", fake_post)
+    ok = ai_chat_log.log_turn(username="u", role="admin", question="q",
+                              tools_used=[], rounds=0, latency_ms=1, guard_hit=False,
+                              tool_failed=False, reply_len=5, outcome="ok", reply="halo")
+    assert ok is True
+    assert any("reply" not in p for p in seen)   # tingkat fallback dipakai
+
+
 def test_log_turn_gagal_tak_melempar(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("supabase down")
@@ -83,6 +123,7 @@ def test_chat_mencatat_giliran(monkeypatch):
     out = ai.chat(USER, [{"role": "user", "content": "halo asisten"}])
     assert out["reply"].startswith("Halo")
     assert captured["question"] == "halo asisten"
+    assert captured["reply"] == out["reply"]      # teks jawaban ikut dicatat
     assert captured["outcome"] == "ok"
     assert captured["guard_hit"] is False
     assert captured["rounds"] == 0
@@ -107,8 +148,8 @@ def test_chat_catat_outcome_not_found_saat_karangan(monkeypatch):
 # ── Kolom token (migrasi 021): skema lama → fallback tanpa kolom token ───────
 
 def test_log_turn_fallback_tanpa_kolom_token(monkeypatch):
-    """Migrasi 021 belum jalan → insert dgn kolom token ditolak PostgREST;
-    baris WAJIB diulang tanpa kolom token agar log tidak hilang."""
+    """Migrasi 021 & 022 belum jalan → insert dgn kolom reply/token ditolak
+    PostgREST; baris WAJIB diulang berjenjang sampai base agar log tak hilang."""
     payloads = []
 
     class _R:
@@ -117,7 +158,9 @@ def test_log_turn_fallback_tanpa_kolom_token(monkeypatch):
 
     def fake_post(url, headers=None, json=None, timeout=None):
         payloads.append(json)
-        return _R(400 if len(payloads) == 1 else 201)
+        # kolom reply (022) & token (021) belum ada → hanya base yang diterima.
+        extra = ("reply" in json) or ("tokens_in" in json)
+        return _R(400 if extra else 201)
 
     monkeypatch.setattr(ai_chat_log.requests, "post", fake_post)
 
@@ -125,12 +168,13 @@ def test_log_turn_fallback_tanpa_kolom_token(monkeypatch):
                               tools_used=[], rounds=1, latency_ms=10,
                               guard_hit=False, tool_failed=False, reply_len=5,
                               outcome="ok", tokens_in=100, tokens_out=20,
-                              tokens_cache_hit=90, api_calls=2)
+                              tokens_cache_hit=90, api_calls=2, reply="halo")
 
     assert ok is True
-    assert "tokens_in" in payloads[0]           # dicoba lengkap dulu
-    assert "tokens_in" not in payloads[1]       # fallback: tanpa kolom token
-    assert payloads[1]["outcome"] == "ok"
+    assert "reply" in payloads[0]                        # tingkat terkaya dulu
+    assert "tokens_in" not in payloads[-1]               # base: tanpa token
+    assert "reply" not in payloads[-1]                   # base: tanpa reply
+    assert payloads[-1]["outcome"] == "ok"
 
 
 def test_log_turn_skema_baru_sekali_kirim(monkeypatch):

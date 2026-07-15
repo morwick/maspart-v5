@@ -51,23 +51,29 @@ def create_table_sql() -> str:
         "  tokens_in int not null default 0,\n"         # migrations/021
         "  tokens_out int not null default 0,\n"
         "  tokens_cache_hit int not null default 0,\n"
-        "  api_calls int not null default 0\n"
+        "  api_calls int not null default 0,\n"
+        "  reply text\n"                                 # migrations/022 (teks jawaban AI)
         ");\n"
         "create index if not exists ai_chat_log_created_idx on ai_chat_log (created_at desc);\n"
     )
+
+
+_REPLY_CAP = 4000  # teks jawaban di-cap (bisa beberapa KB) — cukup utk monitoring
 
 
 def log_turn(*, username: str | None, role: str | None, question: str,
              tools_used: list[str] | None, rounds: int, latency_ms: int,
              guard_hit: bool, tool_failed: bool, reply_len: int,
              outcome: str, tokens_in: int = 0, tokens_out: int = 0,
-             tokens_cache_hit: int = 0, api_calls: int = 0) -> bool:
+             tokens_cache_hit: int = 0, api_calls: int = 0, reply: str = "") -> bool:
     """Simpan satu baris observabilitas. Best-effort: False bila gagal/tabel absen,
     TAK melempar (pemanggil membungkus lagi, tapi tetap aman di sini).
 
     tokens_* = biaya DeepSeek giliran ini (jumlah seluruh panggilan API-nya),
-    dari field `usage` respons. Kolomnya dari migrations/021 — bila belum
-    dijalankan, baris diulang TANPA kolom token agar log lama tetap tercatat."""
+    dari field `usage` respons. Kolomnya dari migrations/021. `reply` = teks jawaban
+    AI (di-cap _REPLY_CAP) dari migrations/022 — utk monitoring di halaman admin.
+    Bila migrasi belum dijalankan, baris diulang TANPA kolom yang absen (3 tingkat)
+    agar log tetap tercatat."""
     tools = tools_used or []
     base = {
         "username": (username or None),
@@ -89,7 +95,10 @@ def log_turn(*, username: str | None, role: str | None, question: str,
         "tokens_cache_hit": int(tokens_cache_hit or 0),
         "api_calls": int(api_calls or 0),
     }
-    for payload in ({**base, **tok}, base):
+    full = {**base, **tok, "reply": (reply or "")[:_REPLY_CAP] or None}
+    # 3 tingkat: dgn reply (022) → dgn token (021) → base. Kolom absen (migrasi belum
+    # jalan) bikin PostgREST balas 400 → coba tingkat berikutnya (log tetap tercatat).
+    for payload in (full, {**base, **tok}, base):
         try:
             r = requests.post(
                 _rest_url("ai_chat_log"),
@@ -107,12 +116,13 @@ def log_turn(*, username: str | None, role: str | None, question: str,
 _SELECT_BASE = ("id,created_at,username,role,question,tools,tools_count,"
                 "rounds,latency_ms,guard_hit,tool_failed,reply_len,outcome")
 _SELECT_TOKENS = _SELECT_BASE + ",tokens_in,tokens_out,tokens_cache_hit,api_calls"
+_SELECT_FULL = _SELECT_TOKENS + ",reply"
 
 
 def list_logs(limit: int = 200) -> list[dict]:
-    """Baris observabilitas terbaru dulu (untuk halaman admin). Kolom token dicoba
-    dulu; skema lama (migrasi 021 belum jalan) → fallback tanpa kolom token."""
-    for sel in (_SELECT_TOKENS, _SELECT_BASE):
+    """Baris observabilitas terbaru dulu (untuk halaman admin). Kolom terkaya dicoba
+    dulu (reply=022, token=021); skema lama → fallback ke select yang lebih ramping."""
+    for sel in (_SELECT_FULL, _SELECT_TOKENS, _SELECT_BASE):
         try:
             r = requests.get(
                 _rest_url("ai_chat_log"),

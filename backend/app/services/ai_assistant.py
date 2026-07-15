@@ -8469,7 +8469,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 guard_hit=guard_retries > 0, tool_failed=tool_gagal_pernah,
                 reply_len=len(reply or ""), outcome=outcome_for,
                 tokens_in=_tok["in"], tokens_out=_tok["out"],
-                tokens_cache_hit=_tok["cache"], api_calls=_tok["calls"])
+                tokens_cache_hit=_tok["cache"], api_calls=_tok["calls"],
+                reply=reply or "")
         except Exception:
             pass
         return {"reply": reply, "tools_used": tools_used,
