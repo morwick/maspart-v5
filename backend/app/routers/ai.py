@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import json
+import queue
+import threading
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..core.config import get_settings
@@ -68,6 +70,54 @@ def ai_chat(body: AIChatRequest, user: dict = Depends(require_ai)):
     except Exception as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Asisten AI gagal merespons: {e}")
     return result
+
+
+@router.post("/chat-stream", dependencies=[Depends(limit("ai_chat", 15, 60))])
+def ai_chat_stream(body: AIChatRequest, user: dict = Depends(require_ai)):
+    """Versi STREAMING dari /chat: kirim event STATUS langkah (SSE) selagi asisten
+    bekerja ('Mencari di EPC…', 'Mengambil stok…', 'Menyusun jawaban…'), lalu satu
+    event 'done' berisi hasil AKHIR (jawaban sudah disaring guard — tak ada token
+    mentah/PN tak-terverifikasi yang di-stream). chat() dijalankan di thread; label
+    progress dialirkan lewat queue. /chat lama tetap ada (foto/sheet/klien non-stream)."""
+    history = [{"role": m.role, "content": m.content} for m in body.messages]
+    if not any(m["role"] == "user" and m["content"].strip() for m in history):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pesan kosong.")
+
+    q: "queue.Queue" = queue.Queue()
+    _SENTINEL = object()
+    box: dict = {}
+
+    def _run():
+        try:
+            box["result"] = ai_assistant.chat(
+                user, history, sheet_id=(body.sheet_id or "").strip(),
+                on_progress=lambda label: q.put(("progress", label)))
+        except ai_assistant.AINotConfigured:
+            box["error"] = "Asisten AI belum dikonfigurasi (DEEPSEEK_API_KEY kosong)."
+        except Exception as e:  # pragma: no cover - dijaga generator
+            box["error"] = f"Asisten AI gagal merespons: {e}"
+        finally:
+            q.put((_SENTINEL, None))
+
+    threading.Thread(target=_run, daemon=True, name="ai-chat-stream").start()
+
+    def _frame(obj: dict) -> str:
+        return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+    def _gen():
+        while True:
+            kind, payload = q.get()
+            if kind is _SENTINEL:
+                break
+            yield _frame({"type": "progress", "label": payload})
+        if "error" in box:
+            yield _frame({"type": "error", "message": box["error"]})
+        else:
+            yield _frame({"type": "done", "result": box.get("result")})
+
+    return StreamingResponse(
+        _gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.post("/feedback", dependencies=[Depends(limit("ai_feedback", 40, 60))])

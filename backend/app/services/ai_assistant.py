@@ -8315,8 +8315,59 @@ def _sanitize_ungrounded(reply: str, bad: list[str]) -> str:
             "lain atau sebutkan PN yang pasti.\n\n" + out)
 
 
+# Label ramah (Indonesia) untuk STATUS streaming — apa yang sedang dikerjakan asisten
+# (tanpa PN/harga; aman ditampilkan live). Fallback generik utk tool tak terdaftar.
+_TOOL_LABEL = {
+    "cari_part": "Mencari part di katalog",
+    "cari_part_di_unit": "Mencari part di unit (EPC)",
+    "detail_part": "Mengambil detail & stok part",
+    "part_aus_dari_rangka": "Menelusuri part poros unit (EPC)",
+    "bom_dari_rangka": "Menyusun BOM unit (EPC)",
+    "uraikan_mesin": "Menguraikan part mesin (Weichai)",
+    "uraikan_assembly": "Menguraikan komponen assembly",
+    "kategori_unit": "Memetakan kategori unit (EPC)",
+    "assembly_utama_unit": "Mendaftar assembly unit (EPC)",
+    "reverse_find_in_unit": "Menelusuri PN di unit (EPC)",
+    "stok_gudang": "Mengambil stok gudang",
+    "stok_accurate": "Mengambil stok Accurate",
+    "cek_kendaraan": "Mengecek data kendaraan (EPC)",
+    "pengganti_part": "Mencari part pengganti",
+    "diagnosa": "Mendiagnosa (SIMS)",
+    "katalog_kategori": "Menyiapkan katalog bergambar",
+    "katalog_mesin": "Menyiapkan katalog mesin",
+    "gambar_exploded": "Mengambil gambar exploded view",
+    "gambar_exploded_mesin": "Mengambil gambar mesin",
+    "banding_rangka": "Membandingkan unit",
+    "banding_rangka_massal": "Membandingkan banyak unit",
+    "banding_part_armada": "Membandingkan part armada",
+    "buat_penawaran": "Membuat penawaran (Accurate)",
+    "buat_excel": "Menyiapkan file Excel",
+    "excel_bom_rangka": "Menyiapkan Excel BOM unit",
+    "excel_stok_gudang": "Menyiapkan Excel stok",
+    "sheet_isi_kolom": "Mengisi kolom Excel",
+    "sheet_isi_part_number": "Mencari Part Number",
+    "sheet_cek_qty": "Memvalidasi jumlah (qty)",
+    "sheet_isi_foto": "Menempel foto part",
+    "sheet_pilih_sheet": "Membuka sheet lain",
+    "repair_kit_transmisi": "Menyiapkan repair kit",
+}
+
+
+def _tool_label(name: str) -> str:
+    return _TOOL_LABEL.get(name) or "Memproses data"
+
+
+def _emit(cb, label: str) -> None:
+    """Kirim satu event STATUS ke callback streaming (best-effort, tak melempar)."""
+    if cb:
+        try:
+            cb(label)
+        except Exception:
+            pass
+
+
 def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = None,
-         sheet_id: str = "") -> dict:
+         sheet_id: str = "", on_progress=None) -> dict:
     """
     Jalankan satu giliran percakapan.
     `history`: list {role: 'user'|'assistant', content: str} — termasuk pesan
@@ -8521,6 +8572,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     _tok = {"in": 0, "out": 0, "cache": 0, "calls": 0}
     _MAX_ITERS = _MAX_TOOL_ROUNDS + _MAX_EMPTY_RETRIES + _MAX_GUARD_RETRIES + 4
     #            (+1 koreksi klaim-Excel; +1 koreksi EPC-first; +2 pagar lama)
+    _emit(on_progress, "Memproses pertanyaan…")
     while _iters < _MAX_ITERS:
         _iters += 1
         tools_habis = tool_rounds >= _MAX_TOOL_ROUNDS
@@ -8554,6 +8606,12 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             if leaked:
                 tool_rounds += 1  # leaked = tool BENAR dijalankan → ronde produktif
                 messages.append({"role": "assistant", "content": _strip_tool_markup(content)})
+                _lbl_seen = []
+                for _lc in leaked:
+                    _lbl = _tool_label(_lc.get("name") or "")
+                    if _lbl not in _lbl_seen:
+                        _lbl_seen.append(_lbl)
+                        _emit(on_progress, _lbl)
                 for lc in leaked:
                     name = lc["name"]
                     lc_args = dict(lc["arguments"] or {})
@@ -8664,6 +8722,13 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             "content": _strip_tool_markup(content),
             "tool_calls": tool_calls,
         })
+        # STATUS streaming: apa yang sedang dikerjakan (label distinct, urut).
+        _lbl_seen: list[str] = []
+        for _tc in tool_calls:
+            _lbl = _tool_label((_tc.get("function") or {}).get("name") or "")
+            if _lbl not in _lbl_seen:
+                _lbl_seen.append(_lbl)
+                _emit(on_progress, _lbl)
 
         def _exec_call(tc: dict) -> tuple[dict, str, dict, dict]:
             fn = (tc.get("function") or {})
@@ -8712,6 +8777,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             # angka utk lookup yang gagal. Reset flag agar tak menumpuk tiap ronde.
             messages.append({"role": "user", "content": _LOOKUP_GAGAL_NOTE})
             lookup_gagal = False
+        # Hasil tool sudah masuk → panggilan berikut kemungkinan menulis jawaban.
+        _emit(on_progress, "Menyusun jawaban…")
 
     # Putaran tool habis — minta jawaban final tanpa tool (budget output besar).
     final = _post_chat(messages, [], max_tokens=_MAX_TOKENS_ANSWER)

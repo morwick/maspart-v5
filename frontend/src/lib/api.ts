@@ -1826,6 +1826,55 @@ export async function aiChat(
   return res.json();
 }
 
+/**
+ * Versi STREAMING /chat: `onProgress(label)` dipanggil tiap event STATUS langkah
+ * ("Mencari di EPC…", "Menyusun jawaban…"); resolve dgn hasil AKHIR (sudah tersaring
+ * guard). Fallback ke aiChat bila stream tak didukung/gagal di tengah.
+ */
+export async function aiChatStream(
+  token: string,
+  messages: AIChatTurn[],
+  sheetId: string | undefined,
+  onProgress: (label: string) => void,
+): Promise<AIChatResult> {
+  const res = await fetch(`${API_BASE}/api/ai/chat-stream`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, sheet_id: sheetId || "" }),
+  });
+  if (!res.ok || !res.body) throw new ApiError(res.status, await parseError(res));
+
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  let result: AIChatResult | null = null;
+  let errMsg: string | null = null;
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() ?? "";
+    for (const part of parts) {
+      const line = part.split("\n").find((l) => l.startsWith("data:"));
+      if (!line) continue;
+      let ev: { type: string; label?: string; result?: AIChatResult; message?: string };
+      try {
+        ev = JSON.parse(line.slice(5).trim());
+      } catch {
+        continue;
+      }
+      if (ev.type === "progress" && ev.label) onProgress(ev.label);
+      else if (ev.type === "done" && ev.result) result = ev.result;
+      else if (ev.type === "error") errMsg = ev.message || "Asisten AI gagal merespons.";
+    }
+  }
+  if (errMsg) throw new Error(errMsg);
+  if (!result) throw new Error("Aliran jawaban berakhir tanpa hasil.");
+  return result;
+}
+
 // ── Umpan balik Asisten AI (👍/👎) ──────────────────────────────────
 export type AIFeedbackInput = {
   rating: "up" | "down";

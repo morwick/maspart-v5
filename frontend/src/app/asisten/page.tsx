@@ -10,6 +10,7 @@ import {
   aiChat,
   aiChatImage,
   aiChatSheet,
+  aiChatStream,
   downloadBlob,
   exportAiExcel,
   exportBandingRangka,
@@ -17,6 +18,7 @@ import {
   getAiStatus,
   submitAiFeedback,
   type AIBandingExport,
+  type AIChatResult,
   type AIChatTurn,
   type AIExcelExport,
   type AIExplodedImage,
@@ -33,6 +35,7 @@ type Msg = AIChatTurn & {
   bandingExports?: AIBandingExport[];
   excelExports?: AIExcelExport[];
   explodedImages?: AIExplodedImage[]; // gambar exploded view inline (besar)
+  streamStatus?: string[]; // status langkah live saat streaming (sebelum jawaban)
   at?: number; // epoch ms — jam pesan
   rating?: "up" | "down"; // umpan balik user atas jawaban ini
 };
@@ -265,12 +268,13 @@ export default function AsistenPage() {
     setInput("");
     resetTextarea();
     setBusy(true);
-    try {
-      const payload: AIChatTurn[] = next.map((m) => ({ role: m.role, content: m.content }));
-      const res = await aiChat(token, payload, sheetId);
-      setMsgs((m) => [
-        ...m,
-        {
+    // Placeholder jawaban yang menampilkan STATUS langkah live selama streaming.
+    setMsgs((m) => [...m, { role: "assistant", content: "", streamStatus: [], at: Date.now() }]);
+
+    const applyResult = (res: AIChatResult) =>
+      setMsgs((m) => {
+        const copy = [...m];
+        copy[copy.length - 1] = {
           role: "assistant",
           content: res.reply || "(tidak ada jawaban)",
           tools: res.tools_used,
@@ -279,8 +283,33 @@ export default function AsistenPage() {
           excelExports: res.excel_exports,
           explodedImages: res.exploded_images,
           at: Date.now(),
-        },
-      ]);
+        };
+        return copy;
+      });
+
+    try {
+      const payload: AIChatTurn[] = next.map((m) => ({ role: m.role, content: m.content }));
+      let res: AIChatResult;
+      try {
+        res = await aiChatStream(token, payload, sheetId, (label) =>
+          setMsgs((m) => {
+            const copy = [...m];
+            const last = copy[copy.length - 1];
+            if (last?.role === "assistant" && last.streamStatus) {
+              const prev = last.streamStatus[last.streamStatus.length - 1];
+              if (prev !== label) {
+                copy[copy.length - 1] = { ...last, streamStatus: [...last.streamStatus, label] };
+              }
+            }
+            return copy;
+          }),
+        );
+      } catch (streamErr) {
+        // Streaming gagal (mis. proxy buffering / SSE tak didukung) → fallback ke /chat.
+        if (streamErr instanceof ApiError && streamErr.status === 401) throw streamErr;
+        res = await aiChat(token, payload, sheetId);
+      }
+      applyResult(res);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearSession();
@@ -288,9 +317,9 @@ export default function AsistenPage() {
       }
       const msg = err instanceof Error ? err.message : "Gagal menghubungi asisten.";
       setError(msg);
-      // Kembalikan input agar bisa coba lagi.
+      // Kembalikan input agar bisa coba lagi; buang placeholder + pesan user.
       setInput(body);
-      setMsgs((m) => m.slice(0, -1));
+      setMsgs((m) => m.slice(0, -2));
     } finally {
       setBusy(false);
       taRef.current?.focus();
@@ -1360,6 +1389,42 @@ function Bubble({
   }
 
   const tools = Array.from(new Set(m.tools || []));
+  // Streaming: jawaban belum ada, tampilkan STATUS langkah live.
+  if (!m.content && m.streamStatus) {
+    const steps = m.streamStatus;
+    return (
+      <div className="chat-bubble-in chat-row-ai">
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="chat-bubble-ai">
+            {steps.length === 0 ? (
+              <span style={{ color: "var(--ink-500)", fontSize: 13 }}>Memproses pertanyaan…</span>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {steps.map((s, i) => {
+                  const last = i === steps.length - 1;
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        fontSize: 13,
+                        color: last ? "var(--ink-800)" : "var(--ink-400)",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 7,
+                      }}
+                    >
+                      <span>{last ? "⏳" : "✓"}</span>
+                      <span>{s}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="chat-bubble-in chat-row-ai">
       <div style={{ minWidth: 0, flex: 1 }}>
