@@ -52,7 +52,8 @@ def create_table_sql() -> str:
         "  tokens_out int not null default 0,\n"
         "  tokens_cache_hit int not null default 0,\n"
         "  api_calls int not null default 0,\n"
-        "  reply text\n"                                 # migrations/022 (teks jawaban AI)
+        "  reply text,\n"                                # migrations/022 (teks jawaban AI)
+        "  tools_failed text\n"                          # migrations/023 (tool yang gagal)
         ");\n"
         "create index if not exists ai_chat_log_created_idx on ai_chat_log (created_at desc);\n"
     )
@@ -65,16 +66,18 @@ def log_turn(*, username: str | None, role: str | None, question: str,
              tools_used: list[str] | None, rounds: int, latency_ms: int,
              guard_hit: bool, tool_failed: bool, reply_len: int,
              outcome: str, tokens_in: int = 0, tokens_out: int = 0,
-             tokens_cache_hit: int = 0, api_calls: int = 0, reply: str = "") -> bool:
+             tokens_cache_hit: int = 0, api_calls: int = 0, reply: str = "",
+             tools_failed: list[str] | None = None) -> bool:
     """Simpan satu baris observabilitas. Best-effort: False bila gagal/tabel absen,
     TAK melempar (pemanggil membungkus lagi, tapi tetap aman di sini).
 
     tokens_* = biaya DeepSeek giliran ini (jumlah seluruh panggilan API-nya),
     dari field `usage` respons. Kolomnya dari migrations/021. `reply` = teks jawaban
-    AI (di-cap _REPLY_CAP) dari migrations/022 — utk monitoring di halaman admin.
-    Bila migrasi belum dijalankan, baris diulang TANPA kolom yang absen (3 tingkat)
-    agar log tetap tercatat."""
+    AI (di-cap _REPLY_CAP) dari migrations/022. `tools_failed` = nama tool yang gagal
+    (migrations/023). Bila migrasi belum dijalankan, baris diulang berjenjang TANPA
+    kolom yang absen agar log tetap tercatat."""
     tools = tools_used or []
+    gagal = tools_failed or []
     base = {
         "username": (username or None),
         "role": (role or None),
@@ -95,10 +98,12 @@ def log_turn(*, username: str | None, role: str | None, question: str,
         "tokens_cache_hit": int(tokens_cache_hit or 0),
         "api_calls": int(api_calls or 0),
     }
-    full = {**base, **tok, "reply": (reply or "")[:_REPLY_CAP] or None}
-    # 3 tingkat: dgn reply (022) → dgn token (021) → base. Kolom absen (migrasi belum
-    # jalan) bikin PostgREST balas 400 → coba tingkat berikutnya (log tetap tercatat).
-    for payload in (full, {**base, **tok}, base):
+    with_reply = {**base, **tok, "reply": (reply or "")[:_REPLY_CAP] or None}
+    full = {**with_reply, "tools_failed": (", ".join(gagal) if gagal else None)}
+    # 4 tingkat berjenjang: reply+tools_failed (022+023) → reply (022) → token (021)
+    # → base. Kolom absen (migrasi belum jalan) bikin PostgREST balas 400 → coba
+    # tingkat berikutnya (log tetap tercatat, degradasi bertahap).
+    for payload in (full, with_reply, {**base, **tok}, base):
         try:
             r = requests.post(
                 _rest_url("ai_chat_log"),
@@ -116,13 +121,15 @@ def log_turn(*, username: str | None, role: str | None, question: str,
 _SELECT_BASE = ("id,created_at,username,role,question,tools,tools_count,"
                 "rounds,latency_ms,guard_hit,tool_failed,reply_len,outcome")
 _SELECT_TOKENS = _SELECT_BASE + ",tokens_in,tokens_out,tokens_cache_hit,api_calls"
-_SELECT_FULL = _SELECT_TOKENS + ",reply"
+_SELECT_REPLY = _SELECT_TOKENS + ",reply"
+_SELECT_FULL = _SELECT_REPLY + ",tools_failed"
 
 
 def list_logs(limit: int = 200) -> list[dict]:
     """Baris observabilitas terbaru dulu (untuk halaman admin). Kolom terkaya dicoba
-    dulu (reply=022, token=021); skema lama → fallback ke select yang lebih ramping."""
-    for sel in (_SELECT_FULL, _SELECT_TOKENS, _SELECT_BASE):
+    dulu (tools_failed=023, reply=022, token=021); skema lama → fallback ke select
+    yang lebih ramping."""
+    for sel in (_SELECT_FULL, _SELECT_REPLY, _SELECT_TOKENS, _SELECT_BASE):
         try:
             r = requests.get(
                 _rest_url("ai_chat_log"),
@@ -218,14 +225,26 @@ def summary() -> dict:
     guard = sum(1 for r in rows if r.get("guard_hit"))
     failed = sum(1 for r in rows if r.get("tool_failed"))
     tool_freq: dict[str, int] = {}
+    tool_gagal_freq: dict[str, int] = {}
     outcome_freq: dict[str, int] = {}
     for r in rows:
         for t in (r.get("tools") or "").split(", "):
             t = t.strip()
             if t:
                 tool_freq[t] = tool_freq.get(t, 0) + 1
+        for t in (r.get("tools_failed") or "").split(", "):
+            t = t.strip()
+            if t:
+                tool_gagal_freq[t] = tool_gagal_freq.get(t, 0) + 1
         o = (r.get("outcome") or "?").strip()
         outcome_freq[o] = outcome_freq.get(o, 0) + 1
+
+    # Tool paling sering GAGAL + rasio gagal/pakai (tool bergantung server eksternal
+    # — EPC/SIMS/Accurate — paling rawan). [nama, jml_gagal, rasio_persen].
+    tool_gagal_tersering = [
+        [t, c, round(100 * c / tool_freq[t], 1) if tool_freq.get(t) else 0.0]
+        for t, c in sorted(tool_gagal_freq.items(), key=lambda kv: -kv[1])[:10]
+    ]
 
     def _pct(i: int) -> int:
         return lat[min(len(lat) - 1, int(len(lat) * i / 100))]
@@ -253,6 +272,7 @@ def summary() -> dict:
         "tool_gagal": failed,
         "tool_gagal_rasio_persen": round(100 * failed / n, 1),
         "tool_tersering": sorted(tool_freq.items(), key=lambda kv: -kv[1])[:10],
+        "tool_gagal_tersering": tool_gagal_tersering,
         "outcome": outcome_freq,
         "token": token,
     }

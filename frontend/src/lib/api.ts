@@ -1306,6 +1306,8 @@ export type ChatLogRow = {
   api_calls?: number;
   // Teks jawaban AI giliran ini (migrasi 022). undefined pada baris lama.
   reply?: string;
+  // Nama tool yang GAGAL giliran ini (migrasi 023, comma-space). undefined pada baris lama.
+  tools_failed?: string;
 };
 export type ChatLogSummary = {
   total: number;
@@ -1315,6 +1317,8 @@ export type ChatLogSummary = {
   tool_gagal?: number;
   tool_gagal_rasio_persen?: number;
   tool_tersering?: [string, number][];
+  // [nama, jml_gagal, rasio_gagal_persen] — tool paling sering gagal (migrasi 023).
+  tool_gagal_tersering?: [string, number, number][];
   outcome?: Record<string, number>;
   token?: {
     giliran_terukur: number;

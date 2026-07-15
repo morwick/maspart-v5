@@ -53,6 +53,37 @@ def test_log_turn_kirim_reply_dicap(monkeypatch):
     assert sent["json"]["reply_len"] == 9000                     # panjang asli tetap
 
 
+def test_log_turn_kirim_tools_failed(monkeypatch):
+    """Nama tool yang gagal disimpan (comma-space, seperti `tools`) di tingkat teratas."""
+    sent = {}
+
+    class _R:
+        status_code = 201
+
+    monkeypatch.setattr(ai_chat_log.requests, "post",
+                        lambda url, headers=None, json=None, timeout=None: sent.update(json=json) or _R())
+    ai_chat_log.log_turn(username="u", role="admin", question="q", tools_used=["cari_part_di_unit", "stok_gudang"],
+                         rounds=1, latency_ms=1, guard_hit=False, tool_failed=True, reply_len=5,
+                         outcome="ok", reply="halo", tools_failed=["cari_part_di_unit"])
+    assert sent["json"]["tools_failed"] == "cari_part_di_unit"
+
+
+def test_summary_tool_gagal_tersering(monkeypatch):
+    rows = [
+        {"tools": "cari_part_di_unit, stok_gudang", "tools_failed": "cari_part_di_unit",
+         "tool_failed": True, "latency_ms": 1, "outcome": "ok"},
+        {"tools": "cari_part_di_unit", "tools_failed": "cari_part_di_unit",
+         "tool_failed": True, "latency_ms": 1, "outcome": "ok"},
+        {"tools": "cari_part_di_unit", "tools_failed": "", "tool_failed": False,
+         "latency_ms": 1, "outcome": "ok"},
+    ]
+    monkeypatch.setattr(ai_chat_log, "list_logs", lambda limit=1000: rows)
+    s = ai_chat_log.summary()
+    top = s["tool_gagal_tersering"]
+    assert top[0][0] == "cari_part_di_unit" and top[0][1] == 2   # 2 gagal
+    assert top[0][2] == 66.7                                     # 2 gagal / 3 pakai
+
+
 def test_log_turn_reply_fallback_bila_kolom_absen(monkeypatch):
     """Migrasi 022 belum jalan (PostgREST 400 utk kolom reply) → jatuh ke payload
     tanpa reply; log TETAP tercatat."""

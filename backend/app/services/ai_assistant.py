@@ -8457,6 +8457,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     excel_claim_retried = False  # klaim 'file Excel siap' tanpa kartu → 1x koreksi
     lookup_gagal = False  # ada tool lookup yang error/tak ketemu → jangan mengarang angka
     tool_gagal_pernah = False  # untuk observabilitas: pernahkah ada tool gagal turn ini
+    tools_failed: list[str] = []  # nama tool yang GAGAL turn ini (observabilitas per-tool)
     # Guard EPC-FIRST: pesan terakhir user menyebut rangka? + apakah model sudah
     # MENCOBA tool ber-argumen rangka (sukses/gagal sama-sama dihitung 'mencoba').
     _last_user_up = (_pertanyaan or "").upper()
@@ -8498,7 +8499,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 reply_len=len(reply or ""), outcome=outcome_for,
                 tokens_in=_tok["in"], tokens_out=_tok["out"],
                 tokens_cache_hit=_tok["cache"], api_calls=_tok["calls"],
-                reply=reply or "")
+                reply=reply or "", tools_failed=tools_failed)
         except Exception:
             pass
         return {"reply": reply, "tools_used": tools_used,
@@ -8579,6 +8580,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                     _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
                     if _tool_failed(result):
                         tool_gagal_pernah = True
+                        if name not in tools_failed:
+                            tools_failed.append(name)
                         if not lookup_gagal:
                             lookup_gagal = True
                             messages.append({"role": "user", "content": _LOOKUP_GAGAL_NOTE})
@@ -8702,6 +8705,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             if _tool_failed(result):
                 lookup_gagal = True
                 tool_gagal_pernah = True
+                if name not in tools_failed:
+                    tools_failed.append(name)
         if lookup_gagal:
             # Ingatkan SEKALI per turn (setelah batch tool) agar model tak mengarang
             # angka utk lookup yang gagal. Reset flag agar tak menumpuk tiap ronde.

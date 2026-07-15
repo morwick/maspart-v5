@@ -182,6 +182,19 @@ export default function ChatLogPage() {
                   </div>
                 ))}
               </div>
+              {(summary.tool_gagal_tersering ?? []).length > 0 && (
+                <div className="surface" style={{ padding: 14, flex: 1, minWidth: 240 }}>
+                  <div className="stat-label" style={{ marginBottom: 8 }}>Tool paling sering gagal</div>
+                  {(summary.tool_gagal_tersering ?? []).map(([t, n, pct]) => (
+                    <div key={t} className="flex items-center justify-between" style={{ fontSize: 12.5, padding: "2px 0" }}>
+                      <span className="mono">{t}</span>
+                      <span style={{ color: "var(--ink-500)" }} title={`${n} gagal · ${pct}% dari pemakaian`}>
+                        {n} <span style={{ fontSize: 11 }}>({pct}%)</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="surface" style={{ padding: 14, flex: 1, minWidth: 240 }}>
                 <div className="stat-label" style={{ marginBottom: 8 }}>Outcome jawaban</div>
                 {Object.entries(summary.outcome ?? {}).map(([o, n]) => (
@@ -325,6 +338,11 @@ export default function ChatLogPage() {
                         <div style={{ fontSize: 12.5, color: "var(--ink-700)", marginBottom: 10, whiteSpace: "pre-wrap" }}>
                           {r.question || "—"}
                         </div>
+                        {r.tools_failed && (
+                          <div style={{ fontSize: 12, color: "var(--danger-600, #c0392b)", marginBottom: 10 }}>
+                            <b>Tool gagal:</b> <span className="mono">{r.tools_failed}</span>
+                          </div>
+                        )}
                         <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-500)", marginBottom: 3 }}>
                           Jawaban AI
                         </div>
