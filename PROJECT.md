@@ -244,6 +244,23 @@
 > (c) Harga di asisten ikut **Menu Control Kolom Harga** (`bc199c6`, penjaga terpusat).
 > (d) `sheet_isi_foto` (`f9fccf0`) — tempel foto SIMS ke Excel unggahan user. (e) Materi
 > tutorial + APK 2.0.0 (`fb79f8e`).
+> Update **2026-07-15 (malam) — STREAMING STATUS + HEMAT TOKEN IN-TURN + OBSERVABILITAS TOOL GAGAL**
+> (3 fase, 726 unit test, LIVE bertahap): **Fase 1 hemat token** — `messages` dikirim ulang UTUH tiap
+> panggilan API → hasil tool menumpuk lintas ronde (biaya kuadratik pada rantai 5-8 ronde). Helper
+> `_trim_old_tool_messages` menciutkan isi hasil tool ronde ≤ cur-2 jadi stub (jaga `role:tool`+
+> `tool_call_id`); AMAN karena grounding/PN/metadata sudah ditangkap ke state samping saat append.
+> **Fase 2 observabilitas tool gagal** — dulu `tool_failed` cuma boolean per-giliran; kini `chat()`
+> kumpulkan nama tool yang gagal → kolom `tools_failed` (`migrations/023`, manual Supabase), `summary()`
+> hitung `tool_gagal_tersering` [nama,jml,rasio gagal/pakai]; halaman `/admin/chat-log` panel "Tool
+> paling sering gagal" + nama tool gagal di expand baris; insert/baca berjenjang 4-tingkat. **Fase 3
+> streaming status** — `chat()` +param `on_progress` (label ramah per-tool, TANPA PN/harga); endpoint
+> baru `POST /api/ai/chat-stream` (`StreamingResponse` SSE; `chat()` di thread + `queue`) alirkan status
+> langkah live ("Mencari di EPC…","Menyusun jawaban…") lalu event `done` berisi hasil AKHIR. ⛔ AMAN:
+> jawaban final tetap DISARING guard penuh sebelum di-emit — tak ada token mentah/PN tak-terverifikasi
+> di-stream. `/chat` lama tetap (foto/sheet/back-compat); frontend `aiChatStream` fallback ke `/chat`
+> bila stream gagal. Pilihan pemilik: status langkah (bukan ketik-per-kata — guard jalan setelah jawaban
+> lengkap). ⛔ system prompt tak diubah (prompt-cache). ⚠️ jalankan migrasi 022 + 023 di Supabase.
+>
 > Update **2026-07-15 (sore) — JAWABAN KOSONG (empty) DIPERBAIKI + JAWABAN AI TAMPIL DI OBSERVABILITAS**
 > (4 commit): (a) **Fix `OUTCOME=empty`** — pada hasil tool besar model habiskan budget output
 > 6000 token utk nalar `[PIKIR]` → `finish_reason=length` sebelum menutup `[/PIKIR]`+jawaban →
