@@ -244,6 +244,15 @@
 > (c) Harga di asisten ikut **Menu Control Kolom Harga** (`bc199c6`, penjaga terpusat).
 > (d) `sheet_isi_foto` (`f9fccf0`) — tempel foto SIMS ke Excel unggahan user. (e) Materi
 > tutorial + APK 2.0.0 (`fb79f8e`).
+> Update **2026-07-15 (malam-2) — TOOL HITUNG DETERMINISTIK**: asisten dulu disuruh
+> menghitung total/subtotal & mengurutkan harga sendiri di `[PIKIR]` (aritmatika LLM rawan salah).
+> Tool baru **`hitung_part`** menghitung di Python (PASTI): total harga (± qty/item), urut
+> termurah/termahal, filter harga_maks/min/hanya_ready — atas harga OTORITATIF Accurate (angka
+> MENTAH `accurate.snapshot()`, bukan parse 'Rp …'). Grounded-gate (PN wajib dari tool/riwayat,
+> pola `buat_excel`) + harga-gate (spec & handler di-gate `_boleh_harga`; `_strip_harga` lapis
+> kedua); `_grounded` disuntik di 2 titik. `olah_block` diarahkan memanggil tool (⛔ jangan hitung
+> manual). Backend-only, tanpa migrasi. 733 unit test. ⛔ evals TIDAK disentuh (permintaan pemilik).
+>
 > Update **2026-07-15 (malam) — STREAMING STATUS + HEMAT TOKEN IN-TURN + OBSERVABILITAS TOOL GAGAL**
 > (3 fase, 726 unit test, LIVE bertahap): **Fase 1 hemat token** — `messages` dikirim ulang UTUH tiap
 > panggilan API → hasil tool menumpuk lintas ronde (biaya kuadratik pada rantai 5-8 ronde). Helper
