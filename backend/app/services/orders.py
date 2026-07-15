@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 import requests
 
 from .supabase_client import _rest_url, _service_headers
-from . import gudang, harga, reservations
+from . import gudang, harga, notify, reservations
 from .gudang import coords_for_display as _coords_for_display, pic_for_display as _pic_for_display
 
 logger = logging.getLogger("maspart.orders")
@@ -282,6 +282,11 @@ def create_order(
             except Exception:
                 pass
             return None, f"Gagal simpan item: {r2.status_code}"
+        # Notif Telegram ke admin — PESANAN MASUK (best-effort, di latar).
+        try:
+            notify.notify_new_order(order, rows)
+        except Exception:  # pragma: no cover — notif tak boleh menggagalkan order
+            pass
         return {"order_code": code, "total": total, "status": "menunggu_pembayaran",
                 "payment_method": payment_method or "manual"}, None
     except Exception as e:
@@ -738,6 +743,11 @@ def mark_paid(order_code: str, raw: dict | None = None) -> bool:
     if ok:
         # Order lunas: jadikan reservasi stok permanen agar tidak ikut kedaluwarsa.
         reservations.commit(order_code)
+        # Notif Telegram ke admin — PEMBAYARAN LUNAS (best-effort).
+        try:
+            notify.notify_paid(get_order(order_code) or {"order_code": order_code, "total": None})
+        except Exception:  # pragma: no cover
+            pass
     return ok
 
 

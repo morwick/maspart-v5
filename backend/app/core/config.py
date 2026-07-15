@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     ship_origin_id: str = ""                 # opsional: ID lokasi RajaOngkir asal (kalau diisi, tdk perlu cari via kode pos)
     ship_default_item_grams: int = 1000      # estimasi berat per item (gram)
 
+    # ── Notifikasi Telegram (bot @BotFather) — notif pesanan masuk/lunas ke admin ──
+    telegram_bot_token: str = ""             # token bot dari @BotFather
+    telegram_chat_id: str = ""               # chat/grup tujuan notif (bisa >1, pisah koma)
+
     # ── Pembayaran (Midtrans Snap) ──
     midtrans_server_key: str = ""            # Server Key dashboard Midtrans (Basic auth + signature webhook)
     midtrans_client_key: str = ""            # Client Key (opsional; untuk Snap.js embed di frontend)
@@ -115,6 +119,10 @@ class Settings(BaseSettings):
     @property
     def payment_configured(self) -> bool:
         return bool(self.midtrans_server_key)
+
+    @property
+    def telegram_configured(self) -> bool:
+        return bool(self.telegram_bot_token and self.telegram_chat_id)
 
     @property
     def data_path(self) -> Path:
