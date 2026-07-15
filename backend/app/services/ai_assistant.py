@@ -5100,9 +5100,17 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
     # tetap disertakan (mungkin sudah bahasa Inggris / PN).
     terms, matched_syn = _expand_query(kata)
     kws = [t for t in dict.fromkeys(terms) if t and len(t.strip()) >= 3]
+    # Kata kategori PAYUNG ('kopling','rem') tak diekspansi sinonim (trigger-nya
+    # semua frasa spt 'kampas kopling') → 'kopling' polos melewatkan hampir semua
+    # sub-part. Tambal dgn keyword keluarga penuh, HANYA saat sinonim TAK kena
+    # (kalau kena, keyword-nya sudah presisi — jangan diperlebar & banjiri hasil).
+    if not matched_syn:
+        for kw in _umbrella_keywords(kata):
+            if kw and len(kw.strip()) >= 3 and kw not in kws:
+                kws.append(kw)
     # Buang keyword generik tunggal (bolt/nut/...) bila ada keyword spesifik —
     # tanpa ini 'baut roda' membanjiri hasil dgn ratusan 'bolt' tak relevan.
-    kws = _tekan_generik(kws)
+    kws = _tekan_generik(kws)[:12]
 
     # Mode TELITI: sisir SEMUA baris part list pohon unit. Perlu karena indeks
     # home/match/part TIDAK mencakup figure mesin MC — kasus nyata NJ248278:
@@ -5131,6 +5139,17 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
         hasil = d.get("hasil") or []
         if not hasil:
             mode_teliti = auto_teliti = True   # match nihil → langsung sisir pohon
+        else:
+            # Hasil cepat ADA tapi mungkin cuma kerabat generik (bracket/baut),
+            # bukan part spesifik yang diminta (kasus MC: 'ECU' → cuma 'ECU
+            # bracket'). Bila query punya istilah SPESIFIK & indeks lengkap
+            # KEBETULAN sudah siap (dipanaskan giliran sebelumnya) → langsung
+            # sisir lengkap: hemat satu ronde model, tanpa ongkos latensi (instan).
+            punya_spesifik = any((" " in k) or any(ord(c) > 0x2E80 for c in k) for k in kws)
+            semua_generik = bool(hasil) and all(
+                (h.get("kata_kunci") or "").lower() in _GENERIC_KWS for h in hasil)
+            if punya_spesifik and semua_generik and epc_bom.items_index_ready(rangka):
+                mode_teliti = auto_teliti = True
 
     if mode_teliti:
         d = epc_bom.search_items_in_unit(rangka, kws)
@@ -5145,6 +5164,14 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
         hasil = d.get("hasil") or []
     frame = d.get("frame_number") or rangka
     if not hasil:
+        # UMPAN BALIK KAMUS: jalur per-VIN (jalur UTAMA) kini ikut menyuplai loop
+        # belajar sinonim. Hanya bila istilah TAK dikenali kamus (yang dikenali
+        # tapi 0 hasil = data unit memang tak punya, bukan celah kamus). Best-effort.
+        if not matched_syn:
+            try:
+                search_log.record_miss(kata, "unit", "asisten_unit")
+            except Exception:
+                pass
         return {
             "found": False, "frame_number": frame, "kata_kunci": kata,
             "kata_kunci_dicari": kws[:8],

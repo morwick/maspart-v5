@@ -46,6 +46,15 @@ def dunia(monkeypatch):
             "stok": "60", "harga": "Rp 112.000", "gudang": {"02.Pekanbaru": 60}}
         for p in pns if p.upper().startswith("AZ450045000042")
     })
+    # Sisiran teliti (auto saat match nihil) — kembalikan nihil juga secara default
+    # supaya cabang "jujur tidak ada" tercapai tanpa menyentuh jaringan EPC.
+    monkeypatch.setattr(ai.epc_bom, "search_items_in_unit",
+                        lambda r, k: {"found": False, "frame_number": r.upper(),
+                                      "hasil": [], "incomplete": False})
+    # Tangkap miss (JANGAN tulis ke data/search_misses.json produksi saat test).
+    dicari["misses"] = []
+    monkeypatch.setattr(ai.search_log, "record_miss",
+                        lambda *a, **k: dicari["misses"].append(a))
     return dicari
 
 
@@ -90,6 +99,53 @@ def test_tidak_ada_hasil_jawab_jujur(dunia):
     r = ai._t_cari_part_di_unit({"rangka": "SJ346500", "kata_kunci": "sayap pesawat"}, ADMIN)
     assert r["found"] is False and "Tidak ada part" in r["error"]
     assert "JANGAN mengarang" in r["jawaban_wajib"]
+
+
+def test_nihil_tanpa_sinonim_dicatat_ke_loop_belajar(dunia):
+    """Jalur per-VIN (jalur utama) menyuplai loop belajar sinonim: istilah TAK
+    dikenali kamus yang 0 hasil → tercatat sbg miss 'asisten_unit'."""
+    ai._t_cari_part_di_unit({"rangka": "SJ346500", "kata_kunci": "sayap pesawat"}, ADMIN)
+    assert ("sayap pesawat", "unit", "asisten_unit") in dunia["misses"]
+
+
+def test_nihil_tapi_dikenali_sinonim_tak_dicatat(dunia, monkeypatch):
+    """Istilah yang DIKENALI kamus tapi 0 hasil = data unit memang tak punya,
+    BUKAN celah kamus → jangan cemari daftar miss."""
+    # 'kampas rem' dikenali sinonim (matched_syn ada) tapi paksa hasil nihil.
+    monkeypatch.setattr(ai.epc_bom, "search_in_unit",
+                        lambda r, k: {"found": False, "frame_number": r.upper(), "hasil": []})
+    r = ai._t_cari_part_di_unit({"rangka": "SJ346500", "kata_kunci": "kampas rem"}, ADMIN)
+    assert r["found"] is False
+    assert dunia["misses"] == []
+
+
+def test_umbrella_hanya_saat_sinonim_tak_kena(monkeypatch):
+    """Kata payung 'kopling' (tak kena trigger sinonim frasa) → keyword keluarga
+    penuh dijaring; 'kampas kopling' (kena sinonim) TIDAK diperlebar umbrella."""
+    dipakai = {}
+
+    def _search(r, k):
+        dipakai["kw"] = list(k)
+        return {"found": False, "frame_number": r.upper(), "hasil": []}
+
+    monkeypatch.setattr(ai.epc_bom, "search_in_unit", _search)
+    monkeypatch.setattr(ai.epc_bom, "search_items_in_unit",
+                        lambda r, k: {"found": False, "hasil": [], "incomplete": False})
+    monkeypatch.setattr(ai.part_index, "rows_for_pns", lambda pns: {})
+    monkeypatch.setattr(ai.search_log, "record_miss", lambda *a, **k: None)
+    monkeypatch.setattr(ai, "_umbrella_keywords",
+                        lambda kata: ["clutch driven disc", "pressure plate"]
+                        if "kopling" in kata.lower() else [])
+    monkeypatch.setattr(ai, "_expand_query",
+                        lambda q: ([q, "clutch driven disc"], ["kampas kopling"])
+                        if "kampas" in q.lower() else ([q], []))
+
+    ai._t_cari_part_di_unit({"rangka": "SJ346500", "kata_kunci": "kopling"}, ADMIN)
+    assert "pressure plate" in dipakai["kw"]       # umbrella menjaring keluarga
+
+    dipakai.clear()
+    ai._t_cari_part_di_unit({"rangka": "SJ346500", "kata_kunci": "kampas kopling"}, ADMIN)
+    assert "pressure plate" not in dipakai["kw"]    # sinonim kena → tak diperlebar
 
 
 def test_epc_bermasalah_bukan_jawaban_kosong(dunia, monkeypatch):
