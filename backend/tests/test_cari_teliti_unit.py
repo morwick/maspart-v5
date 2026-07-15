@@ -64,6 +64,55 @@ def test_cari_di_nama_cn_dan_pn_juga(monkeypatch):
     assert E.search_items_in_unit(FRAME, ["080V10311"])["found"] is True
 
 
+def test_ranking_kata_utuh_di_atas_substring_nyerempet(monkeypatch):
+    """Match KATA-UTUH ('ecu') harus di atas baris yang cuma nyerempet substring
+    ('secure') supaya pemangkasan [:40] tak membuang jawaban tepat."""
+    rows = [
+        {"pn": "P-SEC", "nama": "Secure bracket", "nama_cn": "", "qty": 1,
+         "dari_assembly": {}},                                   # 'ecu' ⊂ 'secure'
+        {"pn": "P-ECU", "nama": "ECU", "nama_cn": "", "qty": 1,
+         "dari_assembly": {}},                                   # kata utuh
+    ]
+    monkeypatch.setattr(E, "_all_items",
+                        lambda r: {"found": True, "frame_number": FRAME,
+                                   "rows": rows, "incomplete": False})
+
+    out = E.search_items_in_unit(FRAME, ["ecu"])
+
+    assert [h["pn"] for h in out["hasil"]] == ["P-ECU", "P-SEC"]
+
+
+def test_ranking_keyword_spesifik_dan_cakupan(monkeypatch):
+    """Baris yang kena keyword SPESIFIK (frasa) + BANYAK keyword naik ke atas."""
+    rows = [
+        {"pn": "P-PIPE", "nama": "Oil pipe", "nama_cn": "", "qty": 1,
+         "dari_assembly": {}},                                   # kena 'pipe' saja
+        {"pn": "P-AIR", "nama": "Air pipe assembly", "nama_cn": "", "qty": 1,
+         "dari_assembly": {}},                                   # kena 'air pipe' + 'pipe'
+    ]
+    monkeypatch.setattr(E, "_all_items",
+                        lambda r: {"found": True, "frame_number": FRAME,
+                                   "rows": rows, "incomplete": False})
+
+    out = E.search_items_in_unit(FRAME, ["air pipe", "pipe"])
+
+    assert out["hasil"][0]["pn"] == "P-AIR"
+
+
+def test_skor_item_kata_utuh_vs_substring():
+    utuh, _ = E._skor_item("ecu module", ["ecu"])
+    serempet, _ = E._skor_item("secure bracket", ["ecu"])
+    assert utuh > serempet
+
+
+def test_tekan_generik_buang_bolt_bila_ada_spesifik():
+    assert A._tekan_generik(["wheel bolt", "bolt"]) == ["wheel bolt"]
+    # tak ada keyword spesifik → generik dipertahankan (jangan kosongkan)
+    assert A._tekan_generik(["bolt"]) == ["bolt"]
+    # keyword China dianggap spesifik
+    assert "bolt" not in A._tekan_generik(["车轮螺栓", "bolt"])
+
+
 def test_all_items_pakai_cache_per_frame(monkeypatch, tmp_path):
     """Walk & buka node hanya SEKALI per frame per TTL — pencarian berikutnya instan."""
     frame = "TT999901"

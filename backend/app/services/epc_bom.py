@@ -1417,11 +1417,41 @@ def warm_items_index(rangka: str) -> None:
                      name=f"epc-items-warm-{_frame(rangka) or 'x'}"[:40]).start()
 
 
+def _skor_item(hay: str, kws: list[str]) -> tuple[int, str | None]:
+    """Skor relevansi 1 baris terhadap keyword: match KATA-UTUH (+3) > substring
+    (+1); keyword frasa/CJK (+2); cakupan multi-keyword (+2 bila ≥2 keyword kena).
+    Kembalikan (skor, keyword pertama yang kena) — 0 berarti tak relevan. Tujuannya:
+    keyword generik ('pipe') yang cuma nyerempet tak menggusur match spesifik
+    ('air pipe'/'气管') saat hasil dipangkas [:40]."""
+    total = 0
+    hits = 0
+    first_hit: str | None = None
+    for k in kws:
+        if k not in hay:
+            continue
+        hits += 1
+        if first_hit is None:
+            first_hit = k
+        # kata-utuh vs substring nyerempet
+        if re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])", hay):
+            total += 3
+        else:
+            total += 1
+        # keyword spesifik: frasa multi-kata atau istilah China
+        if (" " in k) or any(ord(c) > 0x2E80 for c in k):
+            total += 2
+    if hits >= 2:
+        total += 2
+    return total, first_hit
+
+
 def search_items_in_unit(rangka: str, keywords: list[str]) -> dict:
     """Cari kata kunci di SEMUA BARIS part list unit (nama EN + CN + PN) — jaring
     untuk baris yang luput dari home/match/part. Return bentuk sama dgn
     search_in_unit: {found, frame_number, hasil:[{pn, nama, kata_kunci,
-    dari_assembly, qty}]} + incomplete. Dedup per (PN, assembly induk)."""
+    dari_assembly, qty}]} + incomplete. Dedup per (PN, assembly induk).
+    Hasil DIURUTKAN relevansi (skor turun; tiebreak nama terpendek = paling
+    spesifik) supaya pemangkasan [:40] di pemanggil tak membuang match tepat."""
     kws = [k.strip().lower() for k in (keywords or []) if k and len(k.strip()) >= 3]
     if not kws:
         return {"found": False, "_err": "input"}
@@ -1429,20 +1459,24 @@ def search_items_in_unit(rangka: str, keywords: list[str]) -> dict:
     if not base.get("found"):
         return {"found": False, "frame_number": base.get("frame_number"),
                 "_err": base.get("_err")}
-    hasil: list[dict] = []
+    skored: list[tuple] = []
     seen: set = set()
     for row in base["rows"]:
         hay = f'{row["nama"]} {row["nama_cn"]} {row["pn"]}'.lower()
-        kw_hit = next((k for k in kws if k in hay), None)
+        skor, kw_hit = _skor_item(hay, kws)
         if not kw_hit:
             continue
         key = (row["pn"], (row.get("dari_assembly") or {}).get("pn"))
         if key in seen:
             continue
         seen.add(key)
-        hasil.append({"pn": row["pn"], "nama": row["nama"], "nama_cn": row["nama_cn"],
-                      "qty": row.get("qty"), "kata_kunci": kw_hit,
-                      "dari_assembly": row.get("dari_assembly")})
+        skored.append((skor, len(row["nama"] or ""),
+                       {"pn": row["pn"], "nama": row["nama"], "nama_cn": row["nama_cn"],
+                        "qty": row.get("qty"), "kata_kunci": kw_hit,
+                        "dari_assembly": row.get("dari_assembly")}))
+    # skor tertinggi dulu; lalu nama TERPENDEK (paling spesifik) dulu
+    skored.sort(key=lambda x: (-x[0], x[1]))
+    hasil = [s[2] for s in skored]
     return {"found": bool(hasil), "frame_number": base["frame_number"],
             "jumlah": len(hasil), "hasil": hasil, "incomplete": base["incomplete"]}
 

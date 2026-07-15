@@ -39,6 +39,22 @@ _MAX_PART_ROWS_UNIT = 25      # batas lebih longgar saat difilter ke 1 unit (daf
 _MAX_EXPLODED_FIGURES = 6     # batas figure exploded view per panggilan gambar_exploded
                               # (render PNG per-figure + fetch per-gambar di frontend)
 
+# Token GENERIK tunggal (bolt/nut/screw/...) yang membanjiri hasil pencarian bila
+# sudah ada kata kunci SPESIFIK (frasa multi-kata atau istilah China). Mis. 'baut
+# roda' → buang 'bolt' polos, sisakan 'wheel bolt'/'车轮螺栓' → tepat. Dipakai
+# part_aus_dari_rangka & cari_part_di_unit (mode teliti) agar keyword generik tak
+# menggusur jawaban sebenarnya.
+_GENERIC_KWS = {"bolt", "nut", "screw", "washer", "pin", "ring", "plate", "cover",
+                "shaft", "bushing", "gear", "spring", "valve", "pipe", "hose"}
+
+
+def _tekan_generik(kws: list[str]) -> list[str]:
+    """Buang keyword generik tunggal bila ada keyword spesifik (frasa/CJK)."""
+    specific = [k for k in kws if (" " in k.strip()) or any(ord(c) > 0x2E80 for c in k)]
+    if specific:
+        kws = [k for k in kws if k.lower() not in _GENERIC_KWS]
+    return list(dict.fromkeys(k for k in kws if k))
+
 
 class AINotConfigured(RuntimeError):
     pass
@@ -5084,6 +5100,9 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
     # tetap disertakan (mungkin sudah bahasa Inggris / PN).
     terms, matched_syn = _expand_query(kata)
     kws = [t for t in dict.fromkeys(terms) if t and len(t.strip()) >= 3]
+    # Buang keyword generik tunggal (bolt/nut/...) bila ada keyword spesifik —
+    # tanpa ini 'baut roda' membanjiri hasil dgn ratusan 'bolt' tak relevan.
+    kws = _tekan_generik(kws)
 
     # Mode TELITI: sisir SEMUA baris part list pohon unit. Perlu karena indeks
     # home/match/part TIDAK mencakup figure mesin MC — kasus nyata NJ248278:
@@ -5256,12 +5275,7 @@ def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:
     # Buang token GENERIK tunggal (bolt/nut/screw/...) yang membanjiri hasil bila
     # sudah ada kata kunci SPESIFIK (frasa multi-kata atau istilah China). Mis.
     # 'baut roda' → buang 'bolt' polos, sisakan 'wheel bolt'/'车轮螺栓' → tepat.
-    _GENERIC = {"bolt", "nut", "screw", "washer", "pin", "ring", "plate", "cover",
-                "shaft", "bushing", "gear", "spring", "valve", "pipe", "hose"}
-    specific = [k for k in kws if (" " in k.strip()) or any(ord(c) > 0x2E80 for c in k)]
-    if specific:
-        kws = [k for k in kws if k.lower() not in _GENERIC]
-    kws = list(dict.fromkeys(k for k in kws if k))
+    kws = _tekan_generik(kws)
 
     res = epc_bom.atlas_find(rangka, kws, modules)
     err = res.get("_err")
