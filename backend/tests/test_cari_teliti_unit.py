@@ -242,9 +242,10 @@ def test_build_lengkap_dipersist_dan_dibaca_tanpa_walk(monkeypatch, tmp_path):
     E._items_all_cache.pop(frame, None)
 
 
-def test_build_parsial_tidak_dipersist(monkeypatch, tmp_path):
-    """Node ada yang gagal dibuka → indeks BELUM lengkap: jangan diabadikan ke
-    disk (nanti 'part tak ada' jadi vonis permanen yang salah)."""
+def test_build_parsial_dipersist_tapi_belum_siap(monkeypatch, tmp_path):
+    """Node ada yang gagal dibuka → indeks PARSIAL: TETAP dipersist (agar restart/
+    redeploy tak memicu rebuild 56-84 dtk lagi) TAPI ditandai incomplete, jadi
+    items_index_ready = False → jalur teliti-instan tak salah menyimpulkan lengkap."""
     frame = "TT999903"
     E._items_all_cache.pop(frame, None)
     _fake_disk(monkeypatch, tmp_path)
@@ -259,9 +260,16 @@ def test_build_parsial_tidak_dipersist(monkeypatch, tmp_path):
     r = E._all_items(frame)
 
     assert r["incomplete"] is True
-    assert not (tmp_path / f"{frame}.json").exists()
+    assert (tmp_path / f"{frame}.json").exists()            # parsial kini dipersist
     monkeypatch.setattr(E, "_frame", lambda x: frame)
-    assert _REAL_READY(frame) is False   # parsial ≠ siap
+    assert _REAL_READY(frame) is False                     # parsial ≠ siap
+    # Proses "baru": RAM kosong, walk DILARANG rebuild — disk parsial terbaca ulang
+    # (menahan rebuild) tapi tetap incomplete.
+    E._items_all_cache.pop(frame, None)
+    monkeypatch.setattr(E, "_walk_all_nodes",
+                        lambda r: pytest.fail("rebuild tak perlu — parsial ada di disk & masih segar"))
+    r2 = E._all_items(frame)
+    assert r2["found"] is True and r2["incomplete"] is True
     E._items_all_cache.pop(frame, None)
 
 

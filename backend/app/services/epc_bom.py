@@ -1294,7 +1294,8 @@ def atlas_find_in_tree(rangka: str, keywords: list[str], max_nodes: int = 12) ->
 _items_all_cache: dict[str, dict] = {}   # frame -> {ts, rows, incomplete}
 _items_all_lock = threading.Lock()
 _ITEMS_ALL_TTL = 3600                    # cache RAM
-_ITEMS_DISK_TTL = 7 * 86400              # cache DISK — tahan restart/redeploy
+_ITEMS_DISK_TTL = 7 * 86400              # cache DISK build LENGKAP — tahan restart/redeploy
+_ITEMS_PARTIAL_TTL = 3600                # cache DISK build PARSIAL — pendek, dibangun ulang
 # Lock pembangunan per-frame: prefetch latar & tool bisa minta bersamaan — yang
 # kedua MENUNGGU build yang sama, bukan menembak 388 panggilan EPC dobel.
 _items_build_locks: dict[str, threading.Lock] = {}
@@ -1306,26 +1307,32 @@ def _items_disk_path(frame: str) -> Path:
 
 
 def _items_disk_load(frame: str) -> dict | None:
-    """Indeks item dari disk (None bila absen/kedaluwarsa/rusak). Hanya build
-    LENGKAP yang pernah ditulis, jadi isi disk selalu boleh dipercaya."""
+    """Indeks item dari disk (None bila absen/kedaluwarsa/rusak). Build LENGKAP
+    dipercaya 7 hari; build PARSIAL (ada node gagal) hanya 1 jam lalu dibangun
+    ulang — supaya persist-nya cuma menahan rebuild 56-84 dtk yang berulang, TAPI
+    'part tak ada' tak jadi vonis permanen yang salah. File lama tanpa flag
+    'incomplete' dianggap LENGKAP (kompatibel mundur)."""
     try:
         p = _items_disk_path(frame)
         if not p.exists():
             return None
         d = json.loads(p.read_text(encoding="utf-8"))
-        if (time.time() - float(d.get("ts") or 0)) > _ITEMS_DISK_TTL:
+        incomplete = bool(d.get("incomplete"))
+        ttl = _ITEMS_PARTIAL_TTL if incomplete else _ITEMS_DISK_TTL
+        if (time.time() - float(d.get("ts") or 0)) > ttl:
             return None
         rows = d.get("rows") or []
-        return {"ts": time.time(), "rows": rows, "incomplete": False} if rows else None
+        return {"ts": time.time(), "rows": rows, "incomplete": incomplete} if rows else None
     except Exception:
         return None
 
 
-def _items_disk_save(frame: str, rows: list[dict]) -> None:
+def _items_disk_save(frame: str, rows: list[dict], incomplete: bool = False) -> None:
     try:
         p = _items_disk_path(frame)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"ts": time.time(), "rows": rows}, ensure_ascii=False),
+        p.write_text(json.dumps({"ts": time.time(), "rows": rows,
+                                 "incomplete": bool(incomplete)}, ensure_ascii=False),
                      encoding="utf-8")
     except Exception:   # disk penuh/read-only → cache RAM tetap jalan
         pass
@@ -1336,8 +1343,9 @@ def _all_items(rangka: str) -> dict:
 
     Tiga lapis: RAM (1 jam) → DISK (7 hari; katalog per-VIN praktis statis —
     konfigurasi unit tak berubah setelah diproduksi) → build (sisir ~ratusan part
-    list, ±1 mnt, sekali per unit per TTL disk). Hanya build LENGKAP yang
-    dipersist; build parsial (ada node gagal) cuma di RAM supaya dicoba ulang."""
+    list, ±1 mnt, sekali per unit per TTL disk). Build LENGKAP dipersist 7 hari;
+    build PARSIAL (ada node gagal) dipersist 1 jam saja — cukup menahan rebuild
+    56-84 dtk berulang, tapi tetap dibangun ulang agar cakupan menyusul lengkap."""
     frame_pre = _frame(rangka)
     if frame_pre:
         with _items_all_lock:
@@ -1350,7 +1358,7 @@ def _all_items(rangka: str) -> dict:
             with _items_all_lock:
                 _items_all_cache[frame_pre] = d
             return {"found": True, "frame_number": frame_pre,
-                    "rows": d["rows"], "incomplete": False}
+                    "rows": d["rows"], "incomplete": d["incomplete"]}
 
     walk = _walk_all_nodes(rangka)
     if not walk.get("found"):
@@ -1389,8 +1397,11 @@ def _all_items(rangka: str) -> dict:
         incomplete = bool(walk.get("incomplete") or errbox[0])
         with _items_all_lock:
             _items_all_cache[frame] = {"ts": time.time(), "rows": rows, "incomplete": incomplete}
-        if rows and not incomplete:
-            _items_disk_save(frame, rows)
+        if rows:
+            # Persist LENGKAP maupun PARSIAL — TTL disk yang membedakan (7 hari vs
+            # 1 jam). Parsial dipersist agar restart/redeploy tak memicu rebuild
+            # 56-84 dtk lagi; items_index_ready tetap False untuk parsial.
+            _items_disk_save(frame, rows, incomplete)
         return {"found": True, "frame_number": frame, "rows": rows, "incomplete": incomplete}
 
 
@@ -1404,7 +1415,8 @@ def items_index_ready(rangka: str) -> bool:
         c = _items_all_cache.get(frame)
         if c and (time.time() - c["ts"]) < _ITEMS_ALL_TTL and not c["incomplete"]:
             return True
-    return _items_disk_load(frame) is not None
+    d = _items_disk_load(frame)
+    return bool(d) and not d["incomplete"]   # parsial (bolong) ≠ siap
 
 
 def warm_items_index(rangka: str) -> None:
