@@ -1304,6 +1304,8 @@ export type ChatLogRow = {
   tokens_out?: number;
   tokens_cache_hit?: number;
   api_calls?: number;
+  // Teks jawaban AI giliran ini (migrasi 022). undefined pada baris lama.
+  reply?: string;
 };
 export type ChatLogSummary = {
   total: number;

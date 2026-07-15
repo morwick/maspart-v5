@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import {
@@ -40,6 +40,8 @@ export default function ChatLogPage() {
   const [notice, setNotice] = useState<string | null>(null);
   // Filter per akun: klik nama user di tabel → lihat pertanyaan dia saja.
   const [filterUser, setFilterUser] = useState("");
+  // Baris yang di-expand → tampilkan teks jawaban AI (monitoring).
+  const [openId, setOpenId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -249,14 +251,21 @@ export default function ChatLogPage() {
                 </tr>
               </thead>
               <tbody>
-                {tampil.map((r) => (
-                  <tr key={r.id}>
+                {tampil.map((r) => {
+                  const open = openId === r.id;
+                  return (
+                  <Fragment key={r.id}>
+                  <tr
+                    onClick={() => setOpenId(open ? null : r.id)}
+                    style={{ cursor: "pointer" }}
+                    title="Klik untuk lihat jawaban AI"
+                  >
                     <td style={{ fontSize: 11.5, color: "var(--ink-500)", whiteSpace: "nowrap" }}>
                       {new Date(r.created_at).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" })}
                     </td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button
-                        onClick={() => setFilterUser(filterUser === r.username ? "" : r.username || "")}
+                        onClick={(e) => { e.stopPropagation(); setFilterUser(filterUser === r.username ? "" : r.username || ""); }}
                         title={r.role ? `Peran: ${r.role}` : undefined}
                         style={{
                           background: "transparent",
@@ -302,9 +311,43 @@ export default function ChatLogPage() {
                         ? `${fmtTok(r.tokens_in)} / ${fmtTok(r.tokens_out)}`
                         : "—"}
                     </td>
-                    <td style={{ fontSize: 11.5 }}>{r.outcome || "—"}</td>
+                    <td style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>
+                      {r.outcome || "—"}
+                      <span style={{ marginLeft: 6, color: "var(--ink-400)" }}>{open ? "▾" : "▸"}</span>
+                    </td>
                   </tr>
-                ))}
+                  {open && (
+                    <tr>
+                      <td colSpan={8} style={{ background: "var(--surface-2, rgba(0,0,0,0.03))", padding: "10px 14px" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-500)", marginBottom: 3 }}>
+                          Pertanyaan
+                        </div>
+                        <div style={{ fontSize: 12.5, color: "var(--ink-700)", marginBottom: 10, whiteSpace: "pre-wrap" }}>
+                          {r.question || "—"}
+                        </div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-500)", marginBottom: 3 }}>
+                          Jawaban AI
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            color: "var(--ink-800)",
+                            whiteSpace: "pre-wrap",
+                            maxHeight: 340,
+                            overflowY: "auto",
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          {r.reply
+                            ? r.reply
+                            : "— (jawaban tak tersimpan untuk giliran ini — hanya giliran setelah fitur ini aktif yang menyimpan teks jawaban)"}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
