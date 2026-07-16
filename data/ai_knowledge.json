@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-07-16T09:01:56+00:00",
+ "generated_at": "2026-07-16T09:34:44+00:00",
  "sumber": [
   "catalog_bom.json (EPC Sinotruk per-model)",
   "gudang_config.json",
@@ -624,18 +624,64 @@
   "SR10",
   "SG15-B6"
  ],
- "maintenance_shantui_models": [
-  "SD22",
-  "SD16",
-  "SD32",
-  "L36-B5",
-  "L36-B3",
-  "L39-B3",
-  "L55-B5",
-  "L58K-B5",
-  "L68K-B5",
-  "L56-B5"
- ],
+ "maintenance_shantui": {
+  "dozer": [
+   "SD22",
+   "SL50WN",
+   "SL30WN",
+   "SL20WN",
+   "DH17",
+   "DH24",
+   "DH46",
+   "SD16",
+   "SD32",
+   "L55-B5",
+   "L68K-B5",
+   "DH24-B2",
+   "DH08-B3",
+   "SD22E",
+   "SD60-C5",
+   "DH36",
+   "DH24-B3",
+   "SD34-C3"
+  ],
+  "loader": [
+   "SL50WN",
+   "L20",
+   "L76-C5",
+   "L36-B5",
+   "L36-B3",
+   "L39-B3",
+   "L55-B5",
+   "L58K-B5",
+   "L68K-B5",
+   "L56-B5"
+  ],
+  "grader": [
+   "SG15-B6",
+   "SG14-B5",
+   "SG19-B6",
+   "SG21-B6",
+   "SR14M-B6",
+   "SR12-B6"
+  ],
+  "roller": [
+   "SR10-B6"
+  ],
+  "excavator": [
+   "SE60W",
+   "SE75W",
+   "SE135W",
+   "SE135FW",
+   "SE210W",
+   "SE215W",
+   "SE335W",
+   "SE375W",
+   "SE800LCW",
+   "SE980LCW",
+   "SE1250LCW"
+  ]
+ },
  "gearbox_repairkit": [
   {
    "model": "8JS85TE",

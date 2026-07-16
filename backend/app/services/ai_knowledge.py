@@ -170,12 +170,13 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
             filter_units = list(_fr.units())
     except Exception:
         pass
-    # Model Shantui yang PUNYA jadwal perawatan berkala (data/manuals).
-    maintenance_models: list[str] = []
+    # Model Shantui yang PUNYA jadwal perawatan berkala (data/manuals),
+    # dikelompokkan per jenis alat (dozer/loader/excavator/grader/roller).
+    maintenance_by_jenis: dict[str, list[str]] = {}
     try:
         from . import maintenance_ref as _mr
         if _mr.available():
-            maintenance_models = list(_mr.models())
+            maintenance_by_jenis = _mr.models_by_jenis()
     except Exception:
         pass
     # Model gearbox yang PUNYA data repair kit (transmisi.json — kurasi resmi).
@@ -205,7 +206,7 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         "gudang": gudang,
         "fault_codes": {"jumlah": fault_n},
         "filter_shantui_units": filter_units,
-        "maintenance_shantui_models": maintenance_models,
+        "maintenance_shantui": maintenance_by_jenis,
         "gearbox_repairkit": gearbox_models,
     }
 
@@ -318,13 +319,14 @@ def _render(d: dict, with_gudang: bool) -> str:
             "• FILTER SHANTUI: data cross-reference filter (Fleetguard/Donaldson/Sakura/dll) "
             "TERSEDIA untuk unit: " + ", ".join(fu) +
             " — pertanyaan filter unit-unit ini WAJIB via cari_filter_shantui.")
-    mm = d.get("maintenance_shantui_models") or []
-    if mm:
+    mbj = d.get("maintenance_shantui") or {}
+    if mbj:
+        per = "; ".join(f"{jn}: {', '.join(ms)}" for jn, ms in mbj.items() if ms)
         lines.append(
             "• JADWAL PERAWATAN BERKALA Shantui (part yang diganti tiap interval jam "
-            "servis 50–2000 + PN Shantui + qty) TERSEDIA untuk model: " + ", ".join(mm) +
-            " — pertanyaan 'part apa diganti saat servis X jam / jadwal servis berkala' "
-            "model-model ini WAJIB via jadwal_perawatan.")
+            "servis 50–3000 + PN Shantui + qty) TERSEDIA per jenis alat — " + per +
+            ". Pertanyaan 'part apa diganti saat servis X jam / jadwal servis berkala' "
+            "model-model ini WAJIB via jadwal_perawatan (isi 'jenis' & 'jam' bila disebut).")
     gm = d.get("gearbox_repairkit") or []
     if gm:
         daftar = ", ".join(
