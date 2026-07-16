@@ -3675,7 +3675,29 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
     if spn is None and fmi is None and not code and not query and not unit:
         return {"error": "Sebutkan SPN+FMI, kode DTC, kata kunci komponen, atau unit kontrol."}
 
+    # ── Pengaman input & tangga fallback SPN/FMI (anti "jawaban pertama meleset").
+    flags: dict = {}
+    if fmi is not None and fmi > 31:  # FMI valid J1939 hanya 0–31 → pasti tertukar/salah
+        if spn is None or spn <= 31:
+            spn, fmi = fmi, spn
+            flags["spn_fmi_ditukar"] = True
+        else:
+            flags["fmi_di_luar_rentang"] = fmi
+            fmi = None
+
     hits = fault_codes.search(spn=spn, fmi=fmi, code=code, query=query, limit=20)
+    if spn is not None and fmi is not None and not hits:
+        # Pasangan persis tak terdaftar → JANGAN kosong diam-diam: tampilkan
+        # semua FMI yang ADA untuk SPN itu + tandai jujur.
+        alt = fault_codes.search(spn=spn, limit=20)
+        if alt:
+            hits = alt
+            flags["fmi_diminta_tak_terdaftar"] = fmi
+            flags["fmi_tersedia"] = sorted(
+                {r["fmi"] for r in alt if r.get("fmi") is not None})
+    if spn is not None and not hits and not code and not query:
+        flags["spn_tak_terdaftar"] = True
+
     hasil = []
     for r in hits:
         row = {
@@ -3718,24 +3740,59 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
         for r in eol_hits
     ]
 
+    catatan = (
+        "'hasil' = tabel mesin Bosch (deskripsi_cn Bahasa China — sajikan "
+        "terjemahan Indonesianya; MIL=lampu check engine, SVS=lampu servis). "
+        "'hasil_eol' & 'perbaikan_eol' = database EOL CNHTC resmi SEMUA unit "
+        "kontrol (mesin, ABS/ESP, transmisi, BMS/VCU EV, BCM, airbag, radar, "
+        "SCR) — SUDAH Bahasa Indonesia, berisi penyebab + LANGKAH PERBAIKAN + "
+        "part terkait. Sajikan langkah perbaikan apa adanya, JANGAN mengarang "
+        "langkah tambahan. Untuk perbaikan kritis ingatkan cek manual resmi. "
+        "Kode EMS EOL berformat kode+suffix (P0100F7 = keluarga P0100)."
+    )
+    if flags.get("spn_fmi_ditukar"):
+        catatan += (
+            " ⚠️ Angka SPN/FMI dari pertanyaan tampak TERTUKAR (FMI valid hanya "
+            "0–31) — sudah dikoreksi otomatis; beri tahu user koreksi ini."
+        )
+    if flags.get("fmi_di_luar_rentang") is not None:
+        catatan += (
+            f" ⚠️ FMI {flags['fmi_di_luar_rentang']} di LUAR rentang valid 0–31 — "
+            "diabaikan; hasil = semua FMI utk SPN itu. Minta user cek ulang angkanya."
+        )
+    if flags.get("fmi_diminta_tak_terdaftar") is not None:
+        catatan += (
+            f" ⚠️ PENTING: pasangan SPN {spn} + FMI "
+            f"{flags['fmi_diminta_tak_terdaftar']} TIDAK ADA di database — katakan "
+            "itu TEGAS ke user. 'hasil' berisi FMI LAIN yang terdaftar untuk SPN "
+            f"yang sama (fmi_tersedia={flags.get('fmi_tersedia')}) — sajikan sebagai "
+            "KEMUNGKINAN yang dimaksud + minta user cek ulang angka FMI di scan-tool. "
+            "⛔ JANGAN menyajikan arti FMI lain seolah itu jawaban pasti."
+        )
+    if flags.get("spn_tak_terdaftar"):
+        catatan += (
+            f" ⚠️ SPN {spn} TIDAK terdaftar di database mesin — sampaikan jujur. "
+            "Sarankan cek ulang angka; bila kode dari ECU NON-mesin (ABS/transmisi/"
+            "EV/radar), minta kode DTC-nya (P/B/U) atau gejalanya lalu cari via "
+            "'code'/'query' (database EOL tidak ber-SPN)."
+        )
+    if (spn is not None and fmi is not None and len(hits) > 1
+            and "fmi_diminta_tak_terdaftar" not in flags):
+        catatan += (
+            f" ⚠️ Ada {len(hits)} KODE BERBEDA untuk pasangan SPN/FMI ini — "
+            "tampilkan SEMUANYA, jangan pilih salah satu."
+        )
+
     return {
         "total_database": fault_codes.count(),
         "total_database_eol": eol_dtc.count(),
         "kriteria": {"spn": spn, "fmi": fmi, "code": code, "query": query, "unit": unit},
+        **flags,
         "jumlah_cocok": len(hits),
         "hasil": hasil,
         "jumlah_cocok_eol": len(hasil_eol),
         "hasil_eol": hasil_eol,
-        "catatan": (
-            "'hasil' = tabel mesin Bosch (deskripsi_cn Bahasa China — sajikan "
-            "terjemahan Indonesianya; MIL=lampu check engine, SVS=lampu servis). "
-            "'hasil_eol' & 'perbaikan_eol' = database EOL CNHTC resmi SEMUA unit "
-            "kontrol (mesin, ABS/ESP, transmisi, BMS/VCU EV, BCM, airbag, radar, "
-            "SCR) — SUDAH Bahasa Indonesia, berisi penyebab + LANGKAH PERBAIKAN + "
-            "part terkait. Sajikan langkah perbaikan apa adanya, JANGAN mengarang "
-            "langkah tambahan. Untuk perbaikan kritis ingatkan cek manual resmi. "
-            "Kode EMS EOL berformat kode+suffix (P0100F7 = keluarga P0100)."
-        ),
+        "catatan": catatan,
     }
 
 
@@ -3761,12 +3818,21 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
 
     # 1) Jangkar fakta: DTC lokal (instan, tak pernah gagal).
     dtc: list[dict] = []
+    fmi_fallback = False
     try:
         for r in fault_codes.search(spn=spn, fmi=fmi, code=kode or None,
                                     query=keluhan or None, limit=5):
             dtc.append({"kode": r["code"], "spn": r["spn"], "fmi": r["fmi"],
                         "label": r["english"], "deskripsi_cn": r["desc_cn"],
                         "lampu_mil": r["mil"], "lampu_svs": r["svs"]})
+        # Pasangan SPN+FMI persis tak terdaftar → jangan kehilangan jangkar:
+        # tampilkan FMI lain untuk SPN yang sama (ditandai jujur).
+        if not dtc and spn is not None and fmi is not None:
+            for r in fault_codes.search(spn=spn, limit=5):
+                dtc.append({"kode": r["code"], "spn": r["spn"], "fmi": r["fmi"],
+                            "label": r["english"], "deskripsi_cn": r["desc_cn"],
+                            "lampu_mil": r["mil"], "lampu_svs": r["svs"]})
+            fmi_fallback = bool(dtc)
     except Exception:
         logger.exception("fault_codes.search gagal (dilewati)")
 
@@ -3803,6 +3869,13 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
         "sumber": ("Database DTC lokal (Bosch + EOL CNHTC ber-langkah-perbaikan) + SIMS EOL AI "
                    "(asisten diagnosa resmi Sinotruk: manual perbaikan + kasus kerusakan pabrik)."),
     }
+    if fmi_fallback:
+        out["fmi_diminta_tak_terdaftar"] = fmi
+        out["catatan_dtc"] = (
+            f"⚠️ Pasangan SPN {spn} + FMI {fmi} TIDAK ADA di database — sampaikan "
+            "TEGAS. 'kode_kesalahan_lokal' berisi FMI LAIN untuk SPN yang sama "
+            "(kemungkinan yang dimaksud); minta user cek ulang angka FMI di scan-tool."
+        )
     if eol.get("found"):
         out["diagnosa_sims"] = eol["jawaban"]
         out["sims_log_id"] = eol.get("log_id")
@@ -8067,7 +8140,15 @@ def _system_prompt(user: dict) -> str:
         "dan memuat PENYEBAB + LANGKAH PERBAIKAN resmi EOL + part terkait — sajikan "
         "langkahnya apa adanya (jangan menambah langkah karangan); 'deskripsi_cn' "
         "berbahasa China — sajikan terjemahan Indonesianya. Sebutkan SPN/FMI/kode & "
-        "lampu MIL/SVS bila ada. Bila tak ada yang cocok, sarankan cek ulang angkanya.\n"
+        "lampu MIL/SVS bila ada. KEJUJURAN SPN/FMI: bila hasil menandai "
+        "'fmi_diminta_tak_terdaftar' atau 'spn_tak_terdaftar', katakan TEGAS bahwa "
+        "pasangan/angka yang diminta TIDAK ADA di database, lalu sajikan "
+        "'fmi_tersedia' (+ arti tiap FMI) sebagai KEMUNGKINAN yang dimaksud dan "
+        "minta user cek ulang angka di scan-tool — ⛔ JANGAN menyajikan arti FMI "
+        "lain seolah jawaban pasti. Bila 'spn_fmi_ditukar', beri tahu angkanya "
+        "tampak tertukar & sudah dikoreksi. Bila SATU pasangan SPN+FMI punya "
+        "BEBERAPA kode, tampilkan SEMUANYA. Bila tetap tak ada yang cocok, "
+        "sarankan cek ulang angkanya.\n"
         "12. FILTER alat berat SHANTUI (excavator, bulldozer, roller, grader): untuk "
         "pertanyaan soal filter unit Shantui — filter oli, solar/bahan bakar, udara, "
         "hidrolik, water separator — WAJIB panggil tool cari_filter_shantui (JANGAN "
