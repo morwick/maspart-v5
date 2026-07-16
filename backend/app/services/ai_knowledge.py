@@ -170,6 +170,22 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
             filter_units = list(_fr.units())
     except Exception:
         pass
+    # Kode error EOL CNHTC (semua unit kontrol; Indonesia + langkah perbaikan)
+    # + diagram wiring.
+    eol_n = 0
+    eol_units_n = 0
+    wiring_n = 0
+    try:
+        from . import eol_dtc as _eol
+        eol_n = int(_eol.count() or 0)
+        eol_units_n = len(_eol.units())
+    except Exception:
+        pass
+    try:
+        from . import wiring_ref as _wr
+        wiring_n = int(_wr.count() or 0)
+    except Exception:
+        pass
     # Model Shantui yang PUNYA jadwal perawatan berkala (data/manuals),
     # dikelompokkan per jenis alat (dozer/loader/excavator/grader/roller).
     maintenance_by_jenis: dict[str, list[str]] = {}
@@ -204,7 +220,8 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         "prefix_pn": prefixes,
         "sub_prefix_pn": sub_rows,
         "gudang": gudang,
-        "fault_codes": {"jumlah": fault_n},
+        "fault_codes": {"jumlah": fault_n, "jumlah_eol": eol_n,
+                        "unit_kontrol_eol": eol_units_n, "wiring": wiring_n},
         "filter_shantui_units": filter_units,
         "maintenance_shantui": maintenance_by_jenis,
         "gearbox_repairkit": gearbox_models,
@@ -308,11 +325,24 @@ def _render(d: dict, with_gudang: bool) -> str:
             "• GUDANG/CABANG RESMI (untuk memahami sebutan user spt 'jkt', "
             "'plg', 'mks' — cocokkan longgar ke nama ini): "
             + ", ".join(d["gudang"]))
-    fc = (d.get("fault_codes") or {}).get("jumlah") or 0
+    fcd = d.get("fault_codes") or {}
+    fc = fcd.get("jumlah") or 0
     if fc:
+        eol_n = fcd.get("jumlah_eol") or 0
+        ekstra = (f" + database EOL CNHTC {eol_n} kode SEMUA unit kontrol "
+                  f"({fcd.get('unit_kontrol_eol') or 0} ECU: mesin/ABS-ESP/transmisi/"
+                  "EV/BCM/airbag/radar/SCR) BERBAHASA INDONESIA lengkap penyebab + "
+                  "LANGKAH PERBAIKAN" if eol_n else "")
         lines.append(
-            f"• KODE KESALAHAN (DTC): database resmi memuat {fc} entri SPN/FMI/kode P — "
-            "pertanyaan kode error/fault code WAJIB via cari_kode_kesalahan, jangan dari ingatan.")
+            f"• KODE KESALAHAN (DTC): database resmi memuat {fc} entri SPN/FMI/kode P"
+            f"{ekstra} — pertanyaan kode error/fault code WAJIB via cari_kode_kesalahan, "
+            "jangan dari ingatan.")
+        wr = fcd.get("wiring") or 0
+        if wr:
+            lines.append(
+                f"• DIAGRAM WIRING: {wr} diagram pin/kabel sensor-aktuator mesin Bosch & "
+                "SCR/AdBlue tersedia — permintaan skema kabel/pin/konektor WAJIB via "
+                "diagram_wiring (gambar tampil inline).")
     fu = d.get("filter_shantui_units") or []
     if fu:
         lines.append(

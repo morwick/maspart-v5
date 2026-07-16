@@ -54,6 +54,7 @@ const TOOL_LABELS: Record<string, string> = {
   info_aplikasi: "Status aplikasi",
   daftar_unit: "Daftar unit",
   cari_kode_kesalahan: "Kode kesalahan",
+  diagram_wiring: "Diagram wiring",
   cari_filter_shantui: "Filter Shantui",
   jadwal_perawatan: "Jadwal perawatan",
   repair_kit_transmisi: "Repair kit transmisi",

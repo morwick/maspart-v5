@@ -22,10 +22,10 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 from ..core.config import get_settings
-from . import (accurate, ai_chat_log, ai_export, ai_knowledge, ai_sheet, catalog_bom, epc,
-               epc_bom, epc_weichai, fault_codes, filter_ref, gudang, gudang_config, harga,
-               maintenance_ref, orders, part_index, populasi, repairkit, reservations,
-               search_log, sims, sims_eol)
+from . import (accurate, ai_chat_log, ai_export, ai_knowledge, ai_sheet, catalog_bom, eol_dtc,
+               epc, epc_bom, epc_weichai, fault_codes, filter_ref, gudang, gudang_config,
+               harga, maintenance_ref, orders, part_index, populasi, repairkit, reservations,
+               search_log, sims, sims_eol, wiring_ref)
 
 logger = logging.getLogger("maspart.ai")
 
@@ -635,21 +635,51 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "cari_kode_kesalahan",
                 "description": (
-                    "ARTI kode kesalahan / DTC Sinotruk-HOWO saja (kamus, instan): SPN+FMI, "
-                    "kode P/U, atau kata kunci → deskripsi gangguan (Bahasa China, TERJEMAHKAN) "
-                    "+ lampu MIL/SVS. ⛔ Untuk pertanyaan 'kenapa', 'apa penyebabnya', 'bagaimana "
-                    "cara memperbaiki', atau KELUHAN/GEJALA (mis. 'RPM tidak mau naik') → pakai "
-                    "tool `diagnosa` (ia memanggil asisten perbaikan RESMI Sinotruk + kamus ini "
-                    "sekaligus). Tool ini hanya menjawab ARTI kode, bukan penyebab/perbaikan."
+                    "KODE KESALAHAN / DTC truk Sinotruk-HOWO (kamus lokal, INSTAN): SPN+FMI, "
+                    "kode DTC (P/B/U atau hex EV), atau kata kunci → arti gangguan + PENYEBAB + "
+                    "LANGKAH PERBAIKAN resmi EOL (Bahasa Indonesia) + part terkait + lampu "
+                    "MIL/SVS. Cakupan SEMUA unit kontrol: mesin (EMS), transmisi (TCU/ZF/AMT), "
+                    "rem ABS/ESP/EBS, EV (BMS/VCU/MCU), BCM, airbag (ACU), radar/kamera ADAS, "
+                    "SCR/AdBlue, dll — filter dengan 'unit' bila user menyebutnya. ⛔ Untuk "
+                    "KELUHAN/GEJALA bebas tanpa kode (mis. 'RPM tidak mau naik', 'asap hitam') "
+                    "→ pakai tool `diagnosa` (asisten perbaikan resmi Sinotruk yang menalar)."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "spn": {"type": "integer", "description": "Nomor SPN (Suspect Parameter Number)."},
                         "fmi": {"type": "integer", "description": "Nomor FMI (Failure Mode Identifier)."},
-                        "code": {"type": "string", "description": "Kode P/U, mis. 'P0410'."},
-                        "query": {"type": "string", "description": "Kata kunci bila SPN/FMI/kode tak diketahui."},
+                        "code": {"type": "string", "description": "Kode DTC, mis. 'P0410', 'B1117', '18FFAAF3'. Kode pendek otomatis cocok keluarga (P0100 → P0100F7)."},
+                        "query": {"type": "string", "description": "Kata kunci Indonesia bila kode tak diketahui, mis. 'tekanan rail', 'radar terhalang', 'tegangan sel'."},
+                        "unit": {"type": "string", "description": "Filter unit kontrol (opsional): EMS, TCU, TCUZF, ESP, BMS, VCU, MCU, BCM, ACU, IFC, SCR, dll."},
                     },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "diagram_wiring",
+                "description": (
+                    "DIAGRAM WIRING / definisi PIN sensor & aktuator mesin Bosch dan "
+                    "sistem SCR/AdBlue truk Sinotruk (55 diagram resmi EOL) — gambar "
+                    "tampil INLINE di chat. Pakai saat user minta diagram/skema kabel/"
+                    "pin/konektor komponen, atau saat menelusuri gangguan KABEL/KONEKTOR "
+                    "dari kode error (langkah perbaikan sering berbunyi 'periksa "
+                    "rangkaian/kabel'). Contoh komponen: pedal gas (APP), sensor tekanan "
+                    "rail, sensor suhu coolant, MAF/HFM, boost, turbo, EGR, DPF, kipas "
+                    "radiator, katup dosis AdBlue/SCR, konektor OBD, jaringan CAN, "
+                    "sensor kecepatan (VSS), camshaft, relay starter, cruise control."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "komponen": {
+                            "type": "string",
+                            "description": "Nama komponen/sensor, mis. 'pedal gas', 'tekanan rail', 'coolant', 'adblue', 'OBD', 'kipas radiator'.",
+                        },
+                    },
+                    "required": ["komponen"],
                 },
             },
         },
@@ -3635,35 +3665,76 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
     fmi = args.get("fmi")
     code = (args.get("code") or "").strip() or None
     query = (args.get("query") or "").strip() or None
+    unit = (args.get("unit") or "").strip() or None
     try:
         spn = int(spn) if spn not in (None, "") else None
         fmi = int(fmi) if fmi not in (None, "") else None
     except (TypeError, ValueError):
         spn = fmi = None
 
-    if spn is None and fmi is None and not code and not query:
-        return {"error": "Sebutkan SPN+FMI, kode P/U, atau kata kunci komponen."}
+    if spn is None and fmi is None and not code and not query and not unit:
+        return {"error": "Sebutkan SPN+FMI, kode DTC, kata kunci komponen, atau unit kontrol."}
 
     hits = fault_codes.search(spn=spn, fmi=fmi, code=code, query=query, limit=20)
+    hasil = []
+    for r in hits:
+        row = {
+            "kode": r["code"],
+            "spn": r["spn"],
+            "fmi": r["fmi"],
+            "label": r["english"],
+            "deskripsi_cn": r["desc_cn"],  # Bahasa China — terjemahkan ke Indonesia
+            "lampu_mil": r["mil"],
+            "lampu_svs": r["svs"],
+        }
+        # Jembatan → langkah perbaikan EOL (Indonesia) via kode P/U yang sama.
+        try:
+            rep = eol_dtc.repair_for(r["code"])
+        except Exception:  # pragma: no cover
+            rep = None
+        if rep:
+            row["perbaikan_eol"] = {
+                "kode": rep["kode"], "deskripsi": rep["deskripsi"],
+                "penyebab": rep["penyebab"], "perbaikan": rep["perbaikan"],
+                "part_terkait": rep["part"],
+            }
+        hasil.append(row)
+
+    # Database EOL CNHTC (semua unit kontrol, Bahasa Indonesia + cara perbaikan).
+    try:
+        eol_hits = eol_dtc.search(code=code or "", query=query or "",
+                                  unit=unit or "", limit=15)
+    except Exception:  # pragma: no cover
+        eol_hits = []
+    hasil_eol = [
+        {
+            "unit_kontrol": r["unit"],
+            "kode": r["kode"],
+            "deskripsi": r["deskripsi"],
+            "penyebab": r["penyebab"],
+            "perbaikan": r["perbaikan"],
+            "part_terkait": r["part"],
+        }
+        for r in eol_hits
+    ]
+
     return {
         "total_database": fault_codes.count(),
-        "kriteria": {"spn": spn, "fmi": fmi, "code": code, "query": query},
+        "total_database_eol": eol_dtc.count(),
+        "kriteria": {"spn": spn, "fmi": fmi, "code": code, "query": query, "unit": unit},
         "jumlah_cocok": len(hits),
-        "hasil": [
-            {
-                "kode": r["code"],
-                "spn": r["spn"],
-                "fmi": r["fmi"],
-                "label": r["english"],
-                "deskripsi_cn": r["desc_cn"],  # Bahasa China — terjemahkan ke Indonesia
-                "lampu_mil": r["mil"],
-                "lampu_svs": r["svs"],
-            }
-            for r in hits
-        ],
+        "hasil": hasil,
+        "jumlah_cocok_eol": len(hasil_eol),
+        "hasil_eol": hasil_eol,
         "catatan": (
-            "deskripsi_cn dalam Bahasa China — sajikan terjemahan Indonesianya. "
-            "MIL=lampu check engine, SVS=lampu servis."
+            "'hasil' = tabel mesin Bosch (deskripsi_cn Bahasa China — sajikan "
+            "terjemahan Indonesianya; MIL=lampu check engine, SVS=lampu servis). "
+            "'hasil_eol' & 'perbaikan_eol' = database EOL CNHTC resmi SEMUA unit "
+            "kontrol (mesin, ABS/ESP, transmisi, BMS/VCU EV, BCM, airbag, radar, "
+            "SCR) — SUDAH Bahasa Indonesia, berisi penyebab + LANGKAH PERBAIKAN + "
+            "part terkait. Sajikan langkah perbaikan apa adanya, JANGAN mengarang "
+            "langkah tambahan. Untuk perbaikan kritis ingatkan cek manual resmi. "
+            "Kode EMS EOL berformat kode+suffix (P0100F7 = keluarga P0100)."
         ),
     }
 
@@ -3699,6 +3770,16 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
     except Exception:
         logger.exception("fault_codes.search gagal (dilewati)")
 
+    # 1b) DTC EOL CNHTC lokal (semua unit kontrol; Indonesia + langkah perbaikan).
+    eol_rows: list[dict] = []
+    try:
+        for r in eol_dtc.search(code=kode, query=keluhan, limit=5):
+            eol_rows.append({"unit_kontrol": r["unit"], "kode": r["kode"],
+                             "deskripsi": r["deskripsi"], "penyebab": r["penyebab"],
+                             "perbaikan": r["perbaikan"], "part_terkait": r["part"]})
+    except Exception:
+        logger.exception("eol_dtc.search gagal (dilewati)")
+
     # 2) SIMS EOL AI — pertanyaan DIPERTEGAS agar tak salah-tafsir istilah
     #    (evaluasi: 'rem angin' pernah ditafsir 'damper AC').
     bagian = []
@@ -3714,12 +3795,13 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
     eol = sims_eol.tanya(q)
 
     out = {
-        "found": bool(dtc) or bool(eol.get("found")),
+        "found": bool(dtc) or bool(eol_rows) or bool(eol.get("found")),
         "kriteria": {"kode": kode or None, "spn": spn, "fmi": fmi, "keluhan": keluhan or None},
         "kode_kesalahan_lokal": dtc,
+        "kode_kesalahan_eol": eol_rows,  # Indonesia: penyebab + langkah perbaikan resmi EOL
         "total_database_dtc": fault_codes.count(),
-        "sumber": ("Database DTC lokal + SIMS EOL AI (asisten diagnosa resmi Sinotruk: "
-                   "manual perbaikan + kasus kerusakan pabrik)."),
+        "sumber": ("Database DTC lokal (Bosch + EOL CNHTC ber-langkah-perbaikan) + SIMS EOL AI "
+                   "(asisten diagnosa resmi Sinotruk: manual perbaikan + kasus kerusakan pabrik)."),
     }
     if eol.get("found"):
         out["diagnosa_sims"] = eol["jawaban"]
@@ -3792,6 +3874,51 @@ def _t_cari_filter_shantui(args: dict, user: dict) -> dict:
             "cross_reference = part filter SETARA dari merek lain (Fleetguard, Donaldson, "
             "Weichai, HIFI, Sakura, Baldwin, Cummins) — bisa dipakai sebagai pengganti. "
             "part_number_shantui = nomor part asli Shantui."
+        ),
+    }
+
+
+def _t_diagram_wiring(args: dict, user: dict) -> dict:
+    if not wiring_ref.available():
+        return {"error": "Data diagram wiring belum tersedia di server."}
+    komponen = (args.get("komponen") or args.get("query") or "").strip()
+    if not komponen:
+        return {
+            "error": "Sebutkan komponen/sensornya.",
+            "diagram_tersedia": wiring_ref.labels(),
+        }
+    rows = wiring_ref.search(komponen, limit=6)
+    if not rows:
+        logger.info("MISS diagram_wiring q=%r user=%s", komponen,
+                    user.get("username") or "?")
+        return {
+            "jumlah": 0,
+            "catatan": (f"Tidak ada diagram wiring cocok untuk '{komponen}'. "
+                        "Diagram yang tersedia: " + "; ".join(wiring_ref.labels())),
+        }
+    gambar = []
+    for r in rows:
+        data = wiring_ref.image_bytes(r["file"])
+        if not data:
+            continue
+        label = r.get("label") or r["file"]
+        image_id, filename = ai_export.stash_raw(
+            f"Diagram wiring — {label}", data, f"wiring_{r['file']}")
+        gambar.append({"image_id": image_id, "filename": filename,
+                       "pn": label, "nama_figure": label,
+                       "kategori": r.get("grp") or "Wiring"})
+    if not gambar:
+        return {"error": "File diagram tidak terbaca di server."}
+    return {
+        "found": True,
+        "jumlah": len(gambar),
+        "diagram": [{"label": g["pn"], "grup": g["kategori"]} for g in gambar],
+        "gambar": gambar,
+        "catatan": (
+            "Diagram WIRING/pin SIAP — tampil OTOMATIS (inline) di bawah jawabanmu. "
+            "Ini diagram koneksi/definisi pin resmi (EOL CNHTC) untuk menelusuri "
+            "gangguan kabel/konektor. Jawab SINGKAT (sebut nama diagram & kegunaannya); "
+            "gambar sudah tampil sendiri — ⛔ JANGAN buat link/gambar/URL sendiri."
         ),
     }
 
@@ -7000,6 +7127,7 @@ _DISPATCH = {
     "diagnosa": _t_diagnosa,
     "cari_filter_shantui": _t_cari_filter_shantui,
     "jadwal_perawatan": _t_jadwal_perawatan,
+    "diagram_wiring": _t_diagram_wiring,
     "pesanan_saya": _t_pesanan_saya,
     "detail_pesanan": _t_detail_pesanan,
     "rekap_penjualan": _t_rekap_penjualan,
@@ -7931,12 +8059,15 @@ def _system_prompt(user: dict) -> str:
         "PN, panggil detail_part dan sebutkan apa adanya dari `spesifikasi`. Bila "
         "field itu tidak ada (SIMS tak punya data), katakan berat belum tersedia — "
         "JANGAN mengarang angka.\n"
-        "11. Untuk pertanyaan KODE KESALAHAN / fault code / DTC / SPN / FMI / kode P "
-        "(mis. 'kode kesalahan SPN 1241 FMI 21' atau 'apa arti P0410'), WAJIB panggil "
-        "tool cari_kode_kesalahan. Deskripsi dari tool berbahasa China — SELALU "
-        "sajikan TERJEMAHAN BAHASA INDONESIA-nya (boleh sertakan teks asli sebagai "
-        "rujukan). Sebutkan SPN, FMI, kode, dan status lampu MIL/SVS. Bila tak ada "
-        "yang cocok, sarankan cek ulang angka SPN/FMI.\n"
+        "11. Untuk pertanyaan KODE KESALAHAN / fault code / DTC / SPN / FMI / kode "
+        "P-B-U (mis. 'kode kesalahan SPN 1241 FMI 21', 'apa arti P0410', 'kode error "
+        "ABS B1117'), WAJIB panggil tool cari_kode_kesalahan — cakupannya SEMUA unit "
+        "kontrol (mesin, transmisi, ABS/ESP, EV BMS/VCU, BCM, airbag, radar, SCR). "
+        "Hasil 'hasil_eol'/'perbaikan_eol'/'kode_kesalahan_eol' SUDAH Bahasa Indonesia "
+        "dan memuat PENYEBAB + LANGKAH PERBAIKAN resmi EOL + part terkait — sajikan "
+        "langkahnya apa adanya (jangan menambah langkah karangan); 'deskripsi_cn' "
+        "berbahasa China — sajikan terjemahan Indonesianya. Sebutkan SPN/FMI/kode & "
+        "lampu MIL/SVS bila ada. Bila tak ada yang cocok, sarankan cek ulang angkanya.\n"
         "12. FILTER alat berat SHANTUI (excavator, bulldozer, roller, grader): untuk "
         "pertanyaan soal filter unit Shantui — filter oli, solar/bahan bakar, udara, "
         "hidrolik, water separator — WAJIB panggil tool cari_filter_shantui (JANGAN "
@@ -8854,9 +8985,11 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             if item["id"] and item not in excel_exports:
                 excel_exports.append(item)
         elif name in ("gambar_exploded", "gambar_exploded_mesin",
-                      "uraikan_mesin", "part_aus_dari_rangka") and result.get("found"):
+                      "uraikan_mesin", "part_aus_dari_rangka",
+                      "diagram_wiring") and result.get("found"):
             # gambar_exploded* = gambar yang diminta eksplisit; uraikan_mesin/
-            # part_aus = gambar OTOMATIS part utama yang menyertai cek part.
+            # part_aus = gambar OTOMATIS part utama yang menyertai cek part;
+            # diagram_wiring = diagram pin/kabel EOL (jpg dari data/wiring).
             for g in (result.get("gambar") or []):
                 item = {"id": g.get("image_id"), "pn": g.get("pn") or result.get("pn"),
                         "balon": g.get("balon"), "nama_figure": g.get("nama_figure"),

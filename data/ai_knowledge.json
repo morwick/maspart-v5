@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-07-16T09:34:44+00:00",
+ "generated_at": "2026-07-16T15:50:00+00:00",
  "sumber": [
   "catalog_bom.json (EPC Sinotruk per-model)",
   "gudang_config.json",
@@ -609,7 +609,10 @@
   "28.Ruko Stadion"
  ],
  "fault_codes": {
-  "jumlah": 2276
+  "jumlah": 2276,
+  "jumlah_eol": 5254,
+  "unit_kontrol_eol": 52,
+  "wiring": 55
  },
  "filter_shantui_units": [
   "SE60W1 DAN SE75W1",

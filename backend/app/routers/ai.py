@@ -191,9 +191,11 @@ def export_ai_excel(export_id: str, _user: dict = Depends(require_ai)):
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, fname)
     fl = fname.lower()
-    # Gambar exploded view = tampil INLINE (dipakai <img> di chat); file lain = unduh.
-    if fl.endswith(".png"):
-        return Response(content=data, media_type="image/png",
+    # Gambar (exploded PNG / diagram wiring JPG) = tampil INLINE (dipakai <img>
+    # di chat); file lain = unduh.
+    if fl.endswith((".png", ".jpg", ".jpeg")):
+        mime_img = "image/png" if fl.endswith(".png") else "image/jpeg"
+        return Response(content=data, media_type=mime_img,
                         headers={"Content-Disposition": f'inline; filename="{fname}"',
                                  "Cache-Control": "private, max-age=86400"})
     mime = "application/pdf" if fl.endswith(".pdf") else _XLSX_MIME

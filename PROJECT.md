@@ -579,7 +579,8 @@ kamus sinonim **juga disuntikkan ke system prompt** ("KAMUS ISTILAH LAPANGAN"). 
 | `stok_gudang` | **DAFTAR part 1 KATEGORI yang READY (stok>0) di SATU GUDANG** — "cek stok part kopling yang ready di Palembang"; payung kategori (kopling→driven disc/matahari/drek laher/…), per-gudang dari INDEKS Accurate (enrichment 5-jam, instan); mengungkap antar-gudang → **BUKAN pembeli** | semua kecuali pembeli |
 | `info_aplikasi` | ringkasan index/stok/harga/gudang/kurs | semua |
 | `daftar_unit` | daftar unit/model truk tersedia | semua |
-| `cari_kode_kesalahan` | DTC/fault code Sinotruk-HOWO (ECU Bosch) via SPN+FMI / P-code / kata kunci | semua |
+| `cari_kode_kesalahan` | DTC/fault code Sinotruk-HOWO via SPN+FMI / kode / kata kunci / `unit` — tabel Bosch (SPN/FMI, mesin) **+ database EOL CNHTC 5.254 kode 52 unit kontrol (ABS/ESP, TCU/ZF, EV BMS/VCU, BCM, airbag, radar, SCR) BERBAHASA INDONESIA + penyebab + LANGKAH PERBAIKAN + part terkait** (`eol_dtc.json.gz`, 2026-07-16); SPN/FMI otomatis dijembatani ke perbaikan EOL | semua |
+| `diagram_wiring` | **DIAGRAM WIRING / definisi PIN** sensor-aktuator mesin Bosch & SCR/AdBlue (55 diagram resmi EOL CNHTC, `data/wiring/`) — gambar tampil INLINE di chat (kanal `exploded_images`); sinonim lapangan ID ("pedal gas"→APP, "rail", "adblue", "OBD") (2026-07-16) | semua |
 | `repair_kit_transmisi` | komponen repair kit per **transmisi assy** (seal kit perpak / overhaul / semua), resolve via kode model · assy PN · nama unit · **nomor rangka (gearbox PERSIS per-VIN via EPC, §3.5.5a)** | semua |
 | `daftar_transmisi_assy` | daftar LENGKAP & pasti semua transmisi/gearbox assy di katalog (anti-undercount) | semua |
 | `banding_assy` | **bandingkan ISI DALAM 2 PN assembly** (transmisi/kopling/gardan/mesin/kabin) → part sama/beda + % + verdict (§3.5.5b) | semua |
