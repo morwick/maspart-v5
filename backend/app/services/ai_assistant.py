@@ -24,8 +24,8 @@ import requests
 from ..core.config import get_settings
 from . import (accurate, ai_chat_log, ai_export, ai_knowledge, ai_sheet, catalog_bom, epc,
                epc_bom, epc_weichai, fault_codes, filter_ref, gudang, gudang_config, harga,
-               orders, part_index, populasi, repairkit, reservations, search_log, sims,
-               sims_eol)
+               maintenance_ref, orders, part_index, populasi, repairkit, reservations,
+               search_log, sims, sims_eol)
 
 logger = logging.getLogger("maspart.ai")
 
@@ -704,6 +704,41 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "query": {
                             "type": "string",
                             "description": "Jenis/kata kunci filter, mis. 'oli', 'solar', 'udara', 'hidrolik', 'water separator'. Kosong = semua filter unit itu.",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "jadwal_perawatan",
+                "description": (
+                    "JADWAL PERAWATAN BERKALA (service/maintenance table) alat berat "
+                    "SHANTUI — dozer (SD16/SD22/SD32) & loader (L36-B5, L36-B3, L39-B3, "
+                    "L55-B5, L56-B5, L58K-B5, L68K-B5). Mengembalikan item yang DIGANTI "
+                    "tiap interval jam kerja (50/100/250/500/750/1000…2000 jam): nama "
+                    "servis, NOMOR PART SHANTUI, kuantitas, dan pada jam berapa saja "
+                    "diganti — dikelompokkan per sistem (mesin, transmisi/konverter, "
+                    "hidrolik, gardan, rem). Pakai untuk 'part apa yang diganti saat "
+                    "servis 500 jam SD22', 'nomor part filter solar loader L36-B5', "
+                    "'oli & filter apa untuk perawatan 1000 jam L55-B5', 'jadwal servis "
+                    "berkala dozer SD16'. ⛔ JANGAN pakai cari_part untuk ini."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "model": {
+                            "type": "string",
+                            "description": "Kode model unit Shantui, mis. SD22, SD16, SD32, L36-B5, L55-B5, L68K-B5. Kosong = semua model.",
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Kata kunci jenis part/servis (opsional), mis. 'oli', 'solar', 'udara', 'hidrolik', 'coolant', 'transmisi', 'rem'. Kosong = semua item.",
+                        },
+                        "jam": {
+                            "type": "integer",
+                            "description": "Interval jam servis (opsional), mis. 250, 500, 1000, 2000 — hanya item yang diganti pada jam itu. Kosong = semua interval.",
                         },
                     },
                 },
@@ -3750,6 +3785,60 @@ def _t_cari_filter_shantui(args: dict, user: dict) -> dict:
             "cross_reference = part filter SETARA dari merek lain (Fleetguard, Donaldson, "
             "Weichai, HIFI, Sakura, Baldwin, Cummins) — bisa dipakai sebagai pengganti. "
             "part_number_shantui = nomor part asli Shantui."
+        ),
+    }
+
+
+def _t_jadwal_perawatan(args: dict, user: dict) -> dict:
+    if not maintenance_ref.available():
+        return {"error": "Data jadwal perawatan Shantui belum tersedia di server."}
+    model = (args.get("model") or "").strip()
+    query = (args.get("query") or "").strip()
+    jam_raw = args.get("jam")
+    jam = None
+    if jam_raw not in (None, ""):
+        try:
+            jam = int(str(jam_raw).strip().lower().replace("h", "").replace("jam", "").strip())
+        except (TypeError, ValueError):
+            jam = None
+    rows = maintenance_ref.search(model, query, jam)
+    if not rows:
+        logger.info(
+            "MISS jadwal_perawatan model=%r query=%r jam=%r user=%s",
+            model or None, query or None, jam, user.get("username") or "?",
+        )
+        return {
+            "jumlah": 0,
+            "hasil": [],
+            "catatan": (
+                f"Tidak ada item perawatan cocok untuk model '{model or '(semua)'}' / "
+                f"kata kunci '{query or '(semua)'}' / jam '{jam if jam is not None else '(semua)'}'. "
+                "Model Shantui yang ada jadwalnya: " + ", ".join(maintenance_ref.models())
+                + ". Interval jam yang lazim: 250/500/1000/2000."
+            ),
+        }
+    return {
+        "model_diminta": model or "(semua)",
+        "jam_diminta": jam,
+        "jumlah": len(rows),
+        "hasil": [
+            {
+                "model": r["model"],
+                "sistem": r["sistem"],
+                "nama": r["nama"],
+                "part_number_shantui": r["part_number"],
+                "jumlah": r["qty"],
+                "ganti_pada_jam": r["ganti_jam"],
+            }
+            for r in rows[:80]
+        ],
+        "model_tersedia": maintenance_ref.models(),
+        "catatan": (
+            "Ini JADWAL PERAWATAN BERKALA resmi Shantui. 'ganti_pada_jam' = daftar jam "
+            "kerja (kelipatan servis) saat part itu diganti — mis. [250,500,1000] berarti "
+            "diganti tiap servis 250/500/1000 jam. 'part_number_shantui' = nomor part asli "
+            "Shantui (untuk oli/coolant/gemuk berisi spesifikasi, mis. 'SAE 15W-40'). "
+            "'jumlah' = kuantitas per penggantian. Sajikan dikelompokkan per 'sistem'."
         ),
     }
 
@@ -6896,6 +6985,7 @@ _DISPATCH = {
     "cari_kode_kesalahan": _t_cari_kode_kesalahan,
     "diagnosa": _t_diagnosa,
     "cari_filter_shantui": _t_cari_filter_shantui,
+    "jadwal_perawatan": _t_jadwal_perawatan,
     "pesanan_saya": _t_pesanan_saya,
     "detail_pesanan": _t_detail_pesanan,
     "rekap_penjualan": _t_rekap_penjualan,
@@ -7840,7 +7930,14 @@ def _system_prompt(user: dict) -> str:
         "CROSS-REFERENCE merek lain (Fleetguard/Donaldson/Weichai/HIFI/Sakura/Baldwin/"
         "Cummins) sebagai pilihan pengganti. Kelompokkan per model unit & jenis filter "
         "(hidrolik/mesin), dan tulis nama model unit lengkap apa adanya (mis. "
-        "'SE215W（WP6H)', 'SE60W1 DAN SE75W1').\n\n"
+        "'SE215W（WP6H)', 'SE60W1 DAN SE75W1').\n"
+        "13. JADWAL PERAWATAN BERKALA Shantui (dozer SD16/SD22/SD32 & loader L36/L39/"
+        "L55/L56/L58K/L68K): untuk pertanyaan 'part apa yang diganti saat servis X jam', "
+        "'nomor part filter/oli untuk perawatan model Y', 'jadwal servis berkala unit Z' "
+        "— WAJIB panggil tool jadwal_perawatan (JANGAN pakai cari_part/cari_filter_shantui "
+        "untuk ini). Isi 'jam' bila user menyebut interval (mis. 500 jam). Sajikan "
+        "dikelompokkan per sistem, dan sebut Part Number Shantui + kuantitas + pada jam "
+        "berapa saja diganti. JANGAN mengarang nomor part / interval.\n\n"
         "CARA MENJAWAB PENCARIAN PART (penting agar terasa pintar):\n"
         "- DASAR REKOMENDASI = KECOCOKAN/KOMPATIBILITAS PART DENGAN KATALOG, BUKAN STOK. "
         "Pilih & rekomendasikan part yang paling tepat untuk unit/kebutuhan user menurut "

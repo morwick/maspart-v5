@@ -1,10 +1,11 @@
 {
- "generated_at": "2026-07-10T17:59:15+00:00",
+ "generated_at": "2026-07-16T09:01:56+00:00",
  "sumber": [
   "catalog_bom.json (EPC Sinotruk per-model)",
   "gudang_config.json",
   "fault_codes.json (DTC resmi)",
   "filter Shantui (data/manuals)",
+  "jadwal perawatan Shantui (data/manuals)",
   "transmisi.json (repair kit gearbox)"
  ],
  "cakupan": {
@@ -622,6 +623,18 @@
   "SD16",
   "SR10",
   "SG15-B6"
+ ],
+ "maintenance_shantui_models": [
+  "SD22",
+  "SD16",
+  "SD32",
+  "L36-B5",
+  "L36-B3",
+  "L39-B3",
+  "L55-B5",
+  "L58K-B5",
+  "L68K-B5",
+  "L56-B5"
  ],
  "gearbox_repairkit": [
   {

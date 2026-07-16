@@ -49,9 +49,10 @@ def fake_data(tmp_path, monkeypatch):
                         lambda: {"01.Jakarta": (0, 0), "04.Palembang": (0, 0)})
     # Sumber fakta tambahan dibuat DETERMINISTIK (tanpa file data nyata):
     # fault_codes angka pasti; filter/gearbox dimatikan (dirender-test terpisah).
-    from app.services import fault_codes, filter_ref, repairkit
+    from app.services import fault_codes, filter_ref, maintenance_ref, repairkit
     monkeypatch.setattr(fault_codes, "count", lambda: 7)
     monkeypatch.setattr(filter_ref, "available", lambda: False)
+    monkeypatch.setattr(maintenance_ref, "available", lambda: False)
     monkeypatch.setattr(repairkit, "available", lambda: False)
     return tmp_path
 

@@ -170,6 +170,14 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
             filter_units = list(_fr.units())
     except Exception:
         pass
+    # Model Shantui yang PUNYA jadwal perawatan berkala (data/manuals).
+    maintenance_models: list[str] = []
+    try:
+        from . import maintenance_ref as _mr
+        if _mr.available():
+            maintenance_models = list(_mr.models())
+    except Exception:
+        pass
     # Model gearbox yang PUNYA data repair kit (transmisi.json — kurasi resmi).
     gearbox_models: list[dict] = []
     try:
@@ -186,6 +194,7 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "sumber": ["catalog_bom.json (EPC Sinotruk per-model)", "gudang_config.json",
                    "fault_codes.json (DTC resmi)", "filter Shantui (data/manuals)",
+                   "jadwal perawatan Shantui (data/manuals)",
                    "transmisi.json (repair kit gearbox)"],
         "cakupan": {
             "unit_katalog_bom": len(bom.get("units") or {}),
@@ -196,6 +205,7 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         "gudang": gudang,
         "fault_codes": {"jumlah": fault_n},
         "filter_shantui_units": filter_units,
+        "maintenance_shantui_models": maintenance_models,
         "gearbox_repairkit": gearbox_models,
     }
 
@@ -308,6 +318,13 @@ def _render(d: dict, with_gudang: bool) -> str:
             "• FILTER SHANTUI: data cross-reference filter (Fleetguard/Donaldson/Sakura/dll) "
             "TERSEDIA untuk unit: " + ", ".join(fu) +
             " — pertanyaan filter unit-unit ini WAJIB via cari_filter_shantui.")
+    mm = d.get("maintenance_shantui_models") or []
+    if mm:
+        lines.append(
+            "• JADWAL PERAWATAN BERKALA Shantui (part yang diganti tiap interval jam "
+            "servis 50–2000 + PN Shantui + qty) TERSEDIA untuk model: " + ", ".join(mm) +
+            " — pertanyaan 'part apa diganti saat servis X jam / jadwal servis berkala' "
+            "model-model ini WAJIB via jadwal_perawatan.")
     gm = d.get("gearbox_repairkit") or []
     if gm:
         daftar = ", ".join(
