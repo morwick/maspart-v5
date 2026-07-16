@@ -378,6 +378,58 @@
 > model ulangi `teliti=true`. conftest: test DILARANG membangun indeks nyata. (f) **Saldo
 > DeepSeek habis = error 402** — asisten mati total; 402 sengaja TIDAK di-retry. **682 unit
 > test.** Semua LIVE di prod (Coolify force-recreate) & dikomit per-fitur ke `snapshot-clean`.
+> Update **2026-07-16** (aplikasi mobile + metadata app): (a) **Endpoint metadata aplikasi mobile
+> `GET /api/app/meta` (PUBLIK)** — `services/app_config.py` (file JSON `<DATA_DIR>/app_config.json`,
+> pola `gudang_config`, seed dari env `Settings.latest_app_*`/`min_app_*`) + `routers/app_meta.py`.
+> Berisi `version` (notifikasi update in-app) + `config` (feature-flag: saran Asisten, default
+> Cari-by-Foto, limit Cari Part). TANPA migrasi DB. (b) **Panel admin `/admin/app-config`
+> ("Config Aplikasi")** — edit versi & feature-flag TANPA rebuild/deploy; `GET/POST
+> /api/admin/app-config` (`require_admin`). Berbasis **nama versi (semver)**, admin cukup isi
+> "2.1.4" (bukan versionCode). Menu di `AppShell.tsx` NAV_ADMIN. (c) **Aplikasi mobile 2.1.4**
+> (repo `maspart_mobile`) LIVE di `/download` — notifikasi update HALAMAN PENUH (force-able),
+> config server-driven, fitur Invoice PDF pembeli, gating izin kolom stok/harga, parity Asisten
+> AI/Cari Part/Cari-by-Foto/Observabilitas, dll. Lihat `PROJECT.md` repo mobile §9. Backend+frontend
+> LIVE (push.sh + `docker compose up -d --force-recreate`). ⚠️ `app_config.json` disimpan di
+> bind-mount `/opt/maspart/data` (persisten) — edit langsung perlu restart backend agar cache segar;
+> lewat panel admin (POST) cache di-invalidasi otomatis (tanpa restart).
+> Update **2026-07-16 — JADWAL PERAWATAN BERKALA SHANTUI (tool `jadwal_perawatan`)**:
+> asisten kini paham **tabel servis berkala** alat berat Shantui dari `data/manuals/`.
+> **Tahap 1** (`58969f0`, LIVE): 1 file Loader. **Tahap 2** (`de425df`, LIVE penuh
+> push.sh + force-recreate + health 200): **MULTI-FILE** — pindai `data/manuals/*.xlsx`
+> ber-nama `maintenance`/`periodic`/`cycle table` (⛔ `PART FILTER SHANTUI.xlsx` = milik
+> `cari_filter_shantui`). 4 file (Loader/Bulldozer/Excavator/Motor Grader) → **43 model,
+> 736 baris, 5 jenis** (dozer 18/loader 10/grader 6/roller 1/excavator 11). (a) Modul
+> `services/maintenance_ref.py` — parser **template-agnostik** (jangkar sel `N/P SHANTUI`,
+> bukan `SERVICIOS`): 3 template (Spanyol `X` / Inggris `√` dgn angka jam di baris SETELAH
+> header / bilingual `中英文`); **kolom PN/qty/Part Name terdeteksi dinamis** (excavator PN@2,
+> interval `2,250h` s/d 3000 jam); `_is_mark` cegah sel catatan panjang terhitung tanda ganti;
+> kode model = token pertama ber-huruf+angka (lewati `:`/tanggal/kata jenis alat); **varian**
+> (国二/国三→Euro II/III + kode mesin WP6H) dipisah; dedup baris identik + sheet `中英文` (cocok
+> longgar `SD22E`→`SD22`) digabung. Cache per-gabungan mtime. (b) Tool `jadwal_perawatan`
+> (semua peran) param `model`/`jenis`/`query`/`jam` → item diganti tiap interval + PN Shantui +
+> qty + varian, per sistem; sinonim query lintas-bahasa + batas-kata (`hidrolik`≠`oli`).
+> (c) `ai_knowledge` kesadaran per jenis alat; aturan #13 system prompt; label frontend
+> "Jadwal perawatan". **791 unit test.** ⚠️ file xlsx dideploy via `scp` ke
+> `/opt/maspart/data/manuals/` (tak ikut git); rebuild ai_knowledge di server via
+> `docker exec <backend> python -c "from app.services import ai_knowledge; ai_knowledge.build_and_save()"`
+> (`push.sh` tak kirim `backend/tools/`). ⛔ Evals tak disentuh.
+> Update **2026-07-17 — AUDIT AKURASI ASISTEN (3 agen): PN pemaaf + fallback + anti-karang + hemat token**:
+> audit menyeluruh `ai_assistant.py`/`part_index`/`accurate` → perbaikan terkurasi (yang berisiko
+> ditunda). (a) **`detail_part` tangga PEMAAF**: eksak → basis↔varian (PN dasar 'WG…004' = varian
+> '…004/2', part SAMA) → pemaaf pemisah/suffix → varian O↔0 → saran fuzzy; ⛔ FIX false-positive
+> substring (PN parsial dulu diam-diam balikan part superstring SALAH sbg found); label
+> 'aftermarket' kini hanya bila benar-benar absen; +`pengganti` SIMS terlampir; +record_miss
+> (detail_part/stok_accurate/pengganti_part). (b) **`pengganti_part`** cross-ref pemaaf
+> (`rows_for_pns`) + stok/harga pengganti di luar katalog via indeks Accurate; `sheet_cek_qty`
+> kunci pemaaf `_pn_flat`. (c) **Anti-karang**: `found=False` pd miss cari_part/cari_kode/filter/
+> jadwal/wiring → `_LOOKUP_GAGAL_NOTE` kini menyala; guard ANGKA diperluas (kg/cm/mm/jam/liter/
+> Nm/HP + harga TANPA 'Rp') & menyala juga di follow-up tanpa tool (angka riwayat di-ground);
+> aturan 7 (⛔ janji ETA/waktu kirim) & 10 (semua angka spesifikasi) diperketat; exception tool
+> tak lagi bocor mentah; jalur terminal (ronde habis) dapat mitigasi Excel-claim/DTC/EPC.
+> (d) **Hemat token**: catatan statis hasil tool dipangkas (part_aus 1.224→~600c, banding,
+> repair_kit, jadwal, _LOOKUP_NOTE) + deskripsi tool terpanjang diringkas (specs −929c/permintaan)
+> — guard TIDAK disentuh. DITUNDA (butuh keputusan+eval): subset KAMUS −5k tok, pindah domain_block
+> −7k tok, merger gambar_exploded*/katalog_*, gating tool pembeli. Test +8 (`test_akurasi_audit.py`).
 
 ---
 

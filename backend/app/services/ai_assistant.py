@@ -1003,23 +1003,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "cari_part_di_unit",
                 "description": (
-                    "⭐ JALUR UTAMA saat user menyebut NOMOR RANGKA + NAMA PART ('kampas rem "
-                    "SJ346500', 'cross joint unit LZZ…', 'filter oli untuk rangka ini'). "
-                    "Mencari langsung DI KATALOG EPC UNIT ITU lewat pencarian nama per-kendaraan: "
-                    "CEPAT (~1-2 detik) dan menjangkau SELURUH katalog unit — termasuk part yang "
-                    "TERSEMBUNYI DI DALAM assembly. ⛔ bom_dari_rangka (Loading List) MELEWATKAN "
-                    "part semacam itu: 'kampas rem' di sana hasilnya 0 padahal kampas depan & "
-                    "belakang unit itu ADA. Istilah lapangan Indonesia otomatis diterjemahkan ke "
-                    "nama katalog EPC (kamus sinonim). Tiap PN dilengkapi assembly INDUK "
-                    "('di_dalam_assembly') + stok/harga lokal. Bila hasil memuat beberapa varian "
-                    "(mis. kampas DEPAN vs BELAKANG), sebutkan SEMUA & bedakan lewat assembly "
-                    "induknya. Untuk memisah posisi poros depan/belakang secara eksplisit, "
-                    "part_aus_dari_rangka masih boleh dipakai sebagai pelengkap (lebih lambat). "
-                    "⚠️ CAKUPAN indeks cepat TIDAK lengkap (part internal mesin MC kerap absen "
-                    "— mis. ECU mesin). Hasil kosong otomatis dieskalasi ke mode TELITI; bila "
-                    "hasil ADA tapi part yang DIMINTA user tak ada di dalamnya (cuma muncul "
-                    "bracket/baut-nya), panggil ulang dengan teliti=true — menyisir SEMUA baris "
-                    "katalog unit (pencarian pertama ~1 menit, berikutnya instan)."
+                    "⭐ JALUR UTAMA saat user menyebut NOMOR RANGKA + NAMA PART ('kampas "
+                    "rem SJ346500'). Pencarian nama DI KATALOG EPC UNIT ITU: cepat (~1-2 "
+                    "dtk), menjangkau part TERSEMBUNYI di dalam assembly (yang dilewatkan "
+                    "bom_dari_rangka). Istilah lapangan ID otomatis diterjemahkan. Tiap PN "
+                    "ber-'di_dalam_assembly' + stok/harga. Beberapa varian (DEPAN vs "
+                    "BELAKANG) → sebutkan SEMUA, bedakan via assembly induk (pemisahan "
+                    "posisi eksplisit: part_aus_dari_rangka). ⚠️ Hasil kosong auto-eskalasi "
+                    "TELITI; hasil ada tapi part diminta tak termuat (cuma bracket/baut) → "
+                    "panggil ulang teliti=true (sisir semua baris; pertama ~1 mnt)."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1037,28 +1029,16 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "bom_dari_rangka",
                 "description": (
-                    "Daftar PART (BOM PABRIK) untuk SATU unit dari NOMOR RANGKA/VIN — "
-                    "diambil LANGSUNG dari EPC Sinotruk resmi, jadi PERSIS untuk unit itu "
-                    "(bukan asumsi katalog per-model). Pakai untuk 'part apa saja di unit "
-                    "rangka X' dan RINGKASAN/kategori_breakdown unit. "
-                    "⛔ JANGAN pakai untuk MENCARI SATU NAMA PART di unit ('kampas rem rangka X') "
-                    "— Loading List DATAR tak memuat part yang tersembunyi di dalam assembly, "
-                    "jadi hasilnya bisa 0 padahal part-nya ADA di unit itu (kampas rem = kasus "
-                    "nyata). Untuk itu pakai cari_part_di_unit (cepat, seluruh katalog unit). "
-                    "Bisa filter dengan kata_kunci "
-                    "(istilah lapangan Indonesia / Inggris / PN — mis. 'injector', 'kampas "
-                    "rem', 'WG9'). Tiap part disilangkan ke STOK & HARGA lokal kita bila ada. "
-                    "Hasil SELALU memuat 'kategori_breakdown' = JUMLAH part per kategori (kabin, "
-                    "rem, transmisi, dll) PERSIS untuk unit INI — pakai ini untuk 'berapa part "
-                    "<kategori> di unit ini' (JANGAN pakai isi_kategori yang per-model). Beri "
-                    "arg 'kategori' untuk daftar part satu kategori unit itu. Tanpa kata_kunci & "
-                    "tanpa kategori = RINGKASAN + breakdown. HANYA unit Sinotruk/HOWO/SITRAK. "
-                    "⚠️ CATATAN OTORITAS: ini Loading List DATAR (BOM pabrik). Untuk PN ASSEMBLY "
-                    "STRUKTURAL — PEGAS DAUN/per daun/leaf spring, SUSPENSI, BRACKET, POROS/REM — "
-                    "Loading List kadang memuat PN assembly USANG/generik yang BEDA dari katalog "
-                    "resmi. Untuk part2 itu, UTAMAKAN part_aus_dari_rangka (Parts Atlas terstruktur "
-                    "= PERSIS seperti tampilan EPC web/figure); pakai bom_dari_rangka utk itu HANYA "
-                    "sbg pelengkap, JANGAN sebagai PN assembly utama."
+                    "Daftar PART (BOM pabrik/Loading List) SATU unit dari NOMOR RANGKA/VIN "
+                    "— EPC Sinotruk resmi, PERSIS unit itu. Pakai utk 'part apa saja di "
+                    "unit rangka X', ringkasan & 'kategori_breakdown' (jumlah part per "
+                    "kategori unit INI; arg 'kategori' = daftar satu kategori). Filter "
+                    "kata_kunci (istilah ID/EN/PN). Tiap part disilangkan stok & harga. "
+                    "HANYA Sinotruk/HOWO/SITRAK. ⛔ BUKAN utk mencari SATU nama part "
+                    "('kampas rem rangka X') — list DATAR bisa 0 padahal part ada di dalam "
+                    "assembly → pakai cari_part_di_unit. ⚠️ Utk PN assembly STRUKTURAL "
+                    "(pegas daun/suspensi/bracket/poros/rem) UTAMAKAN part_aus_dari_rangka "
+                    "(Atlas terstruktur); Loading List kadang memuat PN assembly usang."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1143,17 +1123,14 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "part_aus_dari_rangka",
                 "description": (
-                    "PART persis untuk SATU unit dari NOMOR RANGKA/VIN — diuraikan dari EPC PARTS "
-                    "ATLAS (katalog terstruktur resmi). Tool OTOMATIS memilih modul Atlas sesuai "
-                    "part: POROS/REM (kampas rem, sepatu rem, baut/mur roda, hub, bearing, seal "
-                    "poros — dipisah DEPAN/BELAKANG), MESIN/POWERTRAIN (INJECTOR, common rail, "
-                    "pompa injeksi, piston, ring, klep, noken/kruk as, pompa oli/air, turbo, filter "
-                    "mesin), KOPLING, atau GEARBOX. INI TOOL WAJIB tiap user sebut NOMOR RANGKA + "
-                    "nama part — memberi PN PERSIS per-VIN (mis. injector engine MC07, kampas rem "
-                    "depan). ⛔ JANGAN pakai bom_dari_rangka (Loading List datar: internal mesin "
-                    "terbungkus assembly, poros tanpa posisi) atau cari_part (lokal per-model, bisa "
-                    "salah varian) bila rangka ADA. Untuk poros: isi 'posisi' (depan/belakang) bila "
-                    "user minta satu sisi. HANYA unit Sinotruk/HOWO/SITRAK."
+                    "PART persis SATU unit dari NOMOR RANGKA/VIN via EPC PARTS ATLAS "
+                    "(terstruktur resmi; modul dipilih otomatis): POROS/REM dipisah "
+                    "DEPAN/BELAKANG (kampas, sepatu rem, baut/mur roda, hub, bearing, "
+                    "seal), MESIN/POWERTRAIN (injector, rail, piston, klep, turbo, filter), "
+                    "KOPLING, GEARBOX. WAJIB utk part aus/poros ber-POSISI per-VIN. ⛔ Bila "
+                    "rangka ada, JANGAN jawab dari bom_dari_rangka (datar, tanpa posisi) "
+                    "atau cari_part (per-model). Isi 'posisi' bila user minta satu sisi. "
+                    "HANYA Sinotruk/HOWO/SITRAK."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1428,18 +1405,14 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "buat_excel",
                 "description": (
-                    "BUAT FILE EXCEL (kartu unduh) untuk TABEL KECIL AD-HOC dari data yang SUDAH "
-                    "dibahas — mis. rangkuman beberapa part, hasil perbandingan singkat, daftar "
-                    "pilihan. Isi 'baris' WAJIB disalin PERSIS dari hasil tool di percakapan ini "
-                    "(PN/nama/qty/stok/harga apa adanya) — ⛔ JANGAN mengarang/menambah data; PN "
-                    "yang tak pernah muncul dari tool akan DITOLAK. Bila datanya belum pernah "
-                    "diambil tool, panggil tool datanya DULU, baru buat_excel. "
-                    "⛔ PILIH TOOL YANG TEPAT — JANGAN pakai buat_excel untuk data BESAR yang bisa "
-                    "dibangun server LENGKAP: BOM/part per-rangka → excel_bom_rangka; daftar stok "
-                    "kategori per gudang → excel_stok_gudang; katalog BERGAMBAR → katalog_kategori/"
-                    "katalog_mesin; perbandingan armada → banding_rangka_massal; mengisi file Excel "
-                    "UNGGAHAN user → sheet_isi_kolom/sheet_isi_part_number. Setelah sukses, kartu "
-                    "unduh muncul OTOMATIS — jawab singkat, JANGAN tulis ulang tabel/membuat link."
+                    "BUAT FILE EXCEL (kartu unduh) untuk TABEL KECIL AD-HOC dari data yang "
+                    "SUDAH dibahas. Isi 'baris' WAJIB disalin PERSIS dari hasil tool "
+                    "percakapan ini — ⛔ PN yang tak pernah muncul dari tool DITOLAK; belum "
+                    "ada datanya → panggil tool datanya dulu. ⛔ Data BESAR pakai tool "
+                    "server: BOM per-rangka→excel_bom_rangka; stok kategori→"
+                    "excel_stok_gudang; katalog bergambar→katalog_kategori/katalog_mesin; "
+                    "armada→banding_rangka_massal; Excel UNGGAHAN user→sheet_isi_*. Kartu "
+                    "unduh muncul OTOMATIS — jawab singkat, jangan tulis ulang tabel/link."
                 ),
                 "parameters": {
                     "type": "object",
@@ -2468,6 +2441,9 @@ def _t_cari_part(args: dict, user: dict) -> dict:
 
     out_res = {
         "query": q, "kata_kunci_dicari": search_terms, "unit_filter": unit or None,
+        # found=False saat NIHIL total → _tool_failed/_LOOKUP_GAGAL_NOTE menyala
+        # (dulu miss cari_part — tool paling ramai — tak terdeteksi sistem).
+        "found": bool(items) or bool(hasil_sims) or bool(stok_lokal),
         "catatan": note,
         "jumlah_part_unik": len(items), "jumlah_relevan_kuat": jumlah_relevan,
         "ditampilkan": len(out),
@@ -2620,17 +2596,76 @@ def _t_daftar_unit(args: dict, user: dict) -> dict:
     return {"jumlah": len(units), "unit": units}
 
 
+def _detail_lookup_pemaaf(pn: str) -> tuple[list[dict], str | None, list[dict]]:
+    """Tangga lookup 1-PN yang PEMAAF tapi JUJUR (anti false-positive):
+      1) eksak; 2) varian suffix/pemisah (rows_for_pns); 3) smart_pn_search
+         (bebas-pemisah / basis-PN) — dipakai hanya bila hasilnya SATU PN unik;
+      4) varian O→0 utk token nyaris-numerik.
+    Return (hits, catatan_pemaaf, saran). Kecocokan SUBSTRING (superstring PN
+    lain) TIDAK dianggap ketemu — diturunkan jadi saran."""
+    up = pn.upper()
+    rows = part_index.search_part_number(pn)
+    exact = [r for r in rows if (r.get("part_number") or "").upper() == up]
+    if exact:
+        return exact, None, []
+    # BASIS→VARIAN: query PN dasar, katalog menyimpan varian ('WG9525160004' →
+    # '…004/2') — part SAMA (aturan pemilik). Terima bila SEMUA kandidat
+    # substring berbasis sama dengan query.
+    def _base(s: str) -> str:
+        return re.split(r"[/+]", (s or "").upper())[0].replace(" ", "").replace("-", "")
+    if rows:
+        uniq0 = {(r.get("part_number") or "").upper() for r in rows}
+        if {_base(u0) for u0 in uniq0} == {_base(up)}:
+            note = None
+            if len(uniq0) > 1:
+                note = (f"PN dasar '{pn}' punya {len(uniq0)} varian katalog "
+                        f"({', '.join(sorted(uniq0)[:4])}) — part SAMA.")
+            elif next(iter(uniq0)) != up:
+                note = f"'{pn}' dicocokkan ke PN varian katalog '{next(iter(uniq0))}' (part sama)."
+            return rows, note, []
+    fr = part_index.rows_for_pns([pn])
+    hit = fr.get(up)
+    if hit:
+        return [hit], (f"PN '{pn}' dicocokkan pemaaf (suffix varian/pemisah) ke "
+                       f"PN katalog '{hit.get('part_number')}'."), []
+    srows, snote = part_index.smart_pn_search(pn)
+    uniq = {(r.get("part_number") or "").upper() for r in srows}
+    # Terima bila SATU PN unik, ATAU semua kandidat = VARIAN dari basis yang
+    # SAMA dgn query (aturan pemilik: 'WG9525160004/2' = 'WG9525160004', part
+    # SAMA) — dulu basis→varian dianggap 'tak ketemu'.
+    if srows and (len(uniq) == 1 or {_base(u0) for u0 in uniq} == {_base(up)}):
+        note = snote
+        if len(uniq) > 1:
+            note = (f"PN dasar '{pn}' punya {len(uniq)} varian katalog "
+                    f"({', '.join(sorted(uniq)[:4])}) — part SAMA, stok/harga per PN dasar.")
+        return srows, note, []
+    # Varian O→0 (salah baca huruf O vs angka nol pada PN numerik/campuran).
+    if "O" in up and re.fullmatch(r"[0-9O\-/. ]+", up):
+        alt = up.replace("O", "0")
+        fr2 = part_index.rows_for_pns([alt])
+        hit2 = fr2.get(alt)
+        if hit2:
+            return [hit2], (f"PN '{pn}' tampak salah ketik huruf O vs angka 0 — "
+                            f"dicocokkan ke '{hit2.get('part_number')}'."), []
+    # Tidak ketemu: kumpulkan SARAN (fuzzy 1-2 karakter + kandidat substring).
+    saran = part_index.suggest_pns(pn)
+    for r in (srows or rows)[:5]:
+        s = {"part_number": r.get("part_number"), "part_name": r.get("part_name")}
+        if s["part_number"] and s not in saran:
+            saran.append(s)
+    return [], None, saran[:6]
+
+
 def _t_detail_part(args: dict, user: dict) -> dict:
     pn = (args.get("part_number") or "").strip()
     if not pn:
         return {"error": "part_number kosong"}
-    rows = part_index.search_part_number(pn)
-    exact = [r for r in rows if (r.get("part_number") or "").upper() == pn.upper()]
-    hits = exact or rows
+    hits, catatan_pemaaf, saran = _detail_lookup_pemaaf(pn)
     if not hits:
         # FALLBACK STOK LOKAL: PN di luar katalog Sinotruk bisa jadi barang stok
         # gudang aftermarket/lokal (indeks Accurate) — mis. 'Alternator Regulator'
         # 2915YNZ-3000-W. Tanpa ini asisten bilang 'tidak ada' padahal barangnya dijual.
+        # (Cek katalog pemaaf sudah dilalui → label 'di luar katalog' kini akurat.)
         acc = None
         if accurate.available():
             try:
@@ -2651,7 +2686,20 @@ def _t_detail_part(args: dict, user: dict) -> dict:
                 out["harga_lokal"] = "Rp " + f"{int(acc['price']):,}".replace(",", ".")
                 out["sumber_harga"] = "Accurate (sinkron berkala)"
             return _hide_gudang_for_buyer(out, user)
-        return {"part_number": pn, "found": False, "pesan": "Tidak ditemukan di database lokal."}
+        try:
+            search_log.record_miss(pn, "pn", "detail_part")
+        except Exception:
+            pass
+        out_miss: dict = {
+            "part_number": pn, "found": False,
+            "pesan": ("Tidak ditemukan di database lokal (sudah dicoba pemaaf: varian "
+                      "suffix, tanpa pemisah, O↔0). Cek ejaan PN, atau cari per NAMA "
+                      "part via cari_part."),
+        }
+        if saran:
+            out_miss["saran_mungkin_maksud"] = saran
+            out_miss["pesan"] += " Lihat 'saran_mungkin_maksud' — konfirmasi ke user."
+        return out_miss
     # Semua varian unit yang memakai PN ini.
     varian = []
     for r in hits:
@@ -2671,6 +2719,8 @@ def _t_detail_part(args: dict, user: dict) -> dict:
         "jumlah_varian": len(varian),
         "info_stok_harga": "Stok & harga berlaku per Part Number (sama untuk semua varian unit).",
     }
+    if catatan_pemaaf:
+        result["catatan_pn"] = catatan_pemaaf + " Sampaikan pencocokan ini ke user."
     # STOK & HARGA dari Accurate = sumber UTAMA (samakan tampilan web); Excel = FALLBACK
     # bila fetch Accurate gagal/PN tak ada (Excel di-export dari Accurate → data sama).
     # Stok per-gudang hanya utk non-pembeli (pembeli pakai stok lokal terscope); HARGA
@@ -2701,6 +2751,16 @@ def _t_detail_part(args: dict, user: dict) -> dict:
     pos = _axle_posisi(pn)
     if pos:
         result["posisi_poros"] = pos
+    # Part PENGGANTI (supersession SIMS) — penting saat stok kosong/discontinued.
+    try:
+        eq = sims.equivalents_for(pn)
+    except Exception:
+        eq = {}
+    pgl = (eq or {}).get("digantikan_oleh") or []
+    if pgl:
+        result["pengganti"] = [{"pn": e["pn"], "nama": e.get("nama")} for e in pgl[:5]]
+        result["info_pengganti"] = ("PN ini punya part PENGGANTI resmi — bila stok kosong, "
+                                    "tawarkan cek pengganti (tool pengganti_part utk detail).")
     return result
 
 
@@ -2982,8 +3042,13 @@ def _t_stok_accurate(args: dict, user: dict) -> dict:
     except accurate.AccurateError as e:
         return {"part_number": pn, "tersedia": False, "pesan": f"Accurate tak dapat diakses: {e}"}
     if not hit:
+        try:
+            search_log.record_miss(pn, "pn", "stok_accurate")
+        except Exception:
+            pass
         return {"part_number": pn, "sumber": "Accurate", "ditemukan": False,
-                "pesan": "PN ini tidak ada di data Accurate."}
+                "pesan": ("PN ini tidak ada di data Accurate. Cek ejaan PN, atau coba "
+                          "detail_part (katalog + pemaaf varian) / cari per NAMA via cari_part.")}
     out = {
         "part_number": pn,
         "sumber": "Accurate (sinkron berkala)",
@@ -3023,7 +3088,8 @@ def _t_harga_sims(args: dict, user: dict) -> dict:
             "catatan": d.get("note"),
         }
     except Exception as e:  # pragma: no cover
-        return {"error": f"gagal ambil harga SIMS: {e}"}
+        logger.exception("harga SIMS gagal")
+        return {"error": "gagal ambil harga SIMS (gangguan internal/jaringan)"}
 
 
 def _t_buat_penawaran(args: dict, user: dict) -> dict:
@@ -3531,7 +3597,11 @@ def _t_sheet_cek_qty(args: dict, user: dict) -> dict:
         return {"found": False,
                 "error": "BOM unit ini tidak ditemukan di EPC (cek nomor rangka; hanya unit "
                          "Sinotruk/HOWO/SITRAK)."}
+    # Kunci PEMAAF (bebas pemisah/suffix) — PN Excel pelanggan vs PN EPC sering
+    # beda format ('WG9525160004/2' vs 'WG9525160004') → dulu equality polos
+    # membuat baris valid tercap 'tanpa_referensi_bom' diam-diam.
     qty_by_pn = {row["pn"]: row["qty"] for row in bom["peta"] if row.get("qty") is not None}
+    qty_by_flat = {part_index._pn_flat(k): v for k, v in qty_by_pn.items()}
     if not qty_by_pn:
         return {"found": False,
                 "error": "BOM unit ini tak memuat data jumlah (qty) per part — tak bisa validasi qty."}
@@ -3547,6 +3617,12 @@ def _t_sheet_cek_qty(args: dict, user: dict) -> dict:
     for r in body:
         pn = (str(r[pn_i]).strip().upper() if pn_i < len(r) and r[pn_i] is not None else "")
         bom_q = qty_by_pn.get(pn)
+        if bom_q is None and pn:            # pemaaf format: bebas-pemisah + basis suffix
+            fl = part_index._pn_flat(pn)
+            bom_q = qty_by_flat.get(fl)
+            if bom_q is None and ("/" in pn or "+" in pn):
+                base = re.split(r"[/+]", pn)[0]
+                bom_q = qty_by_pn.get(base) or qty_by_flat.get(part_index._pn_flat(base))
         if not pn or bom_q is None:         # tak ada PN / part tak punya qty BOM
             if pn:
                 tanpa_ref += 1
@@ -3807,6 +3883,19 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
             f" ⚠️ Ada {len(hits)} KODE BERBEDA untuk pasangan SPN/FMI ini — "
             "tampilkan SEMUANYA, jangan pilih salah satu."
         )
+    total_kosong = not hits and not hasil_eol and not pdf_cards
+    if total_kosong:
+        catatan += (
+            " ⚠️ TIDAK ADA yang cocok di SEMUA database (Bosch, EOL, lembar PDF) — "
+            "sampaikan jujur ke user; minta cek ulang angka/kode di scan-tool, atau "
+            "tanyakan GEJALA-nya lalu pakai tool diagnosa."
+        )
+    if any((h.get("part_terkait") or "").strip() for h in hasil_eol) or any(
+            (h.get("perbaikan_eol", {}) or {}).get("part_terkait") for h in hasil):
+        catatan += (
+            " Ada 'part_terkait' (komponen tersangka) — TAWARKAN ke user: cek "
+            "ketersediaan & harga part itu via cari_part (sebut nama komponennya)."
+        )
     if pdf_cards:
         pasang = ", ".join(f"SPN {c['spn']} FMI {c['fmi']}" for c in pdf_cards)
         catatan += (
@@ -3826,6 +3915,7 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
         "total_database_eol": eol_dtc.count(),
         "kriteria": {"spn": spn, "fmi": fmi, "code": code, "query": query, "unit": unit},
         **flags,
+        "found": not total_kosong,
         "jumlah_cocok": len(hits),
         "hasil": hasil,
         "jumlah_cocok_eol": len(hasil_eol),
@@ -3969,6 +4059,7 @@ def _t_cari_filter_shantui(args: dict, user: dict) -> dict:
             unit or None, query or None, user.get("username") or "?",
         )
         return {
+            "found": False,
             "jumlah": 0,
             "hasil": [],
             "catatan": (
@@ -4013,6 +4104,7 @@ def _t_diagram_wiring(args: dict, user: dict) -> dict:
         logger.info("MISS diagram_wiring q=%r user=%s", komponen,
                     user.get("username") or "?")
         return {
+            "found": False,
             "jumlah": 0,
             "catatan": (f"Tidak ada diagram wiring cocok untuk '{komponen}'. "
                         "Diagram yang tersedia: " + "; ".join(wiring_ref.labels())),
@@ -4064,6 +4156,7 @@ def _t_jadwal_perawatan(args: dict, user: dict) -> dict:
             model or None, jenis or None, query or None, jam, user.get("username") or "?",
         )
         return {
+            "found": False,
             "jumlah": 0,
             "hasil": [],
             "model_tersedia": maintenance_ref.models_by_jenis(),
@@ -4094,13 +4187,10 @@ def _t_jadwal_perawatan(args: dict, user: dict) -> dict:
         ],
         "model_tersedia": maintenance_ref.models_by_jenis(),
         "catatan": (
-            "Ini JADWAL PERAWATAN BERKALA resmi Shantui. 'ganti_pada_jam' = daftar jam "
-            "kerja (kelipatan servis) saat part itu diganti — mis. [250,500,1000] berarti "
-            "diganti tiap servis 250/500/1000 jam. 'part_number_shantui' = nomor part asli "
-            "Shantui (untuk oli/coolant/gemuk berisi spesifikasi, mis. 'SAE 15W-40'). "
-            "'jumlah' = kuantitas per penggantian. 'varian' membedakan versi model (emisi "
-            "Euro II/III atau kode mesin) — bila satu model punya >1 varian, sebutkan "
-            "varian-nya agar tak keliru. Sajikan dikelompokkan per 'sistem'."
+            "JADWAL PERAWATAN BERKALA resmi Shantui. 'ganti_pada_jam' = jam servis saat "
+            "part diganti; 'part_number_shantui' = PN asli (oli/coolant = spesifikasi); "
+            "'jumlah' = qty per penggantian. Model ber->1 'varian' (Euro/mesin) → sebutkan "
+            "variannya. Sajikan per 'sistem'."
         ),
     }
 
@@ -4113,7 +4203,8 @@ def _t_cek_populasi(args: dict, user: dict) -> dict:
     try:
         res = populasi.search_summary(q, limit=15)
     except Exception as e:  # pragma: no cover
-        return {"error": f"gagal baca data populasi: {e}"}
+        logger.exception("populasi gagal dibaca")
+        return {"error": "gagal baca data populasi (gangguan internal)"}
     if not res.get("available"):
         return {
             "available": False,
@@ -4153,7 +4244,8 @@ def _t_banding_part_armada(args: dict, user: dict) -> dict:
     try:
         pop = populasi.units_for_customer(customer)
     except Exception as e:  # pragma: no cover
-        return {"error": f"gagal baca data populasi: {e}"}
+        logger.exception("populasi gagal dibaca")
+        return {"error": "gagal baca data populasi (gangguan internal)"}
     if not pop.get("available"):
         return {"available": False,
                 "error": "Data populasi unit belum tersedia (file populasi.xlsx belum diunggah admin)."}
@@ -4365,16 +4457,11 @@ def _t_repair_kit_transmisi(args: dict, user: dict) -> dict:
             "total_model": len(models),
             "total_unit_tercatat": len(unit_tercatat),
             "unit_tercatat": unit_tercatat,
-            "catatan": "'unit_tercatat' = unit yang PUNYA transmisi assy + DATA repair kit "
-                       "(khusus truk Sinotruk/HOWO — ini sumber kebenaran repair kit). "
-                       "PENTING: daftar ini BUKAN daftar lengkap semua unit ber-transmisi. "
-                       "Unit di LUAR daftar ini (mis. Shantui SD16/SG21/L55, varian Wechai) "
-                       "BISA tetap punya transmisi/gearbox assy di katalog walau tanpa data "
-                       "repair kit — untuk unit spesifik, JANGAN klaim 'tidak punya transmisi "
-                       "assy' dari daftar ini; cek dulu via cari_part(query='transmisi', "
-                       "unit=<nama unit>). Sebutkan model/PN/unit (mis. 'HW19709', "
-                       "'ZF16S2531TO', '8JS85', PN gearbox assy, atau nama unit) untuk "
-                       "melihat repair kit-nya.",
+            "catatan": "'unit_tercatat' = unit ber-DATA repair kit — BUKAN daftar lengkap "
+                       "unit ber-transmisi. Unit di luar daftar BISA tetap punya gearbox: "
+                       "JANGAN klaim 'tidak punya transmisi' dari daftar ini; cek "
+                       "cari_part(query='transmisi', unit=…). Sebut model/PN/unit utk "
+                       "melihat kit-nya.",
         }
     hits = repairkit.find(q)
     if not hits:
@@ -5092,16 +5179,11 @@ def _t_banding_rangka(args: dict, user: dict) -> dict:
         "daftar_lengkap": (len(only1) <= cap and len(only2) <= cap),  # True = SEMUA beda ditampilkan
         "sumber": ("EPC Loading List per-VIN — membandingkan PART NYATA kedua unit (set PN "
                    "sebenarnya), BUKAN tebakan dari kemiripan kode model/spesifikasi."),
-        "catatan": ("identik=true → semua PN di kategori ini SAMA. identik=FALSE → ADA part BEDA: "
-                    "WAJIB sebutkan part yang beda (hanya_di_rangka_1 / hanya_di_rangka_2). ⚠️ ANGKA: "
-                    "'jumlah_beda' = TOTAL kedua sisi; untuk JUMLAH TIAP SISI pakai "
-                    "'jumlah_hanya_di_rangka_1' & '..._2' (JANGAN pakai jumlah_beda utk satu sisi). "
-                    "Bila daftar_lengkap=true, SEMUA part beda sudah ada di list — JANGAN tulis "
-                    "'sebagian ditampilkan'. JANGAN bilang 'sama persis'. ⛔ JANGAN menyimpulkan "
-                    "sama/beda dari kode model atau spesifikasi — pakai angka PART ini. PN & qty apa "
-                    "adanya; nama boleh diterjemah (nama_china rujukannya). 📎 Sebuah kartu 'Unduh "
-                    "Excel' otomatis muncul di bawah jawaban ini (memuat SELURUH part beda & sama, "
-                    "tak dibatasi) — beri tahu user singkat bahwa mereka bisa mengunduhnya bila perlu."),
+        "catatan": ("identik=FALSE → WAJIB sebutkan part beda (hanya_di_rangka_1/_2). ⚠️ "
+                    "'jumlah_beda'=TOTAL dua sisi; per sisi pakai 'jumlah_hanya_di_rangka_1/_2'. "
+                    "daftar_lengkap=true → semua sudah di list. ⛔ JANGAN menyimpulkan sama/"
+                    "beda dari kode model — pakai angka PART ini; PN & qty apa adanya. "
+                    "📎 Kartu 'Unduh Excel' (lengkap) otomatis muncul — sebutkan singkat."),
     }
 
 
@@ -5146,8 +5228,9 @@ def _t_banding_rangka_massal(args: dict, user: dict) -> dict:
                              "User lain bisa memberi DAFTAR nomor rangka langsung (rangka_list)."}
         try:
             pop = populasi.units_for_customer(customer)
-        except Exception as e:  # pragma: no cover
-            return {"error": f"gagal baca data populasi: {e}"}
+        except Exception:  # pragma: no cover
+            logger.exception("populasi gagal dibaca")
+            return {"error": "gagal baca data populasi (gangguan internal)"}
         if not pop.get("available"):
             return {"available": False,
                     "error": "Data populasi unit belum tersedia (populasi.xlsx belum diunggah admin)."}
@@ -5894,28 +5977,16 @@ def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:
         "query": query,
         "posisi_diminta": posisi or "semua (depan & belakang)",
         "jumlah_dari_loading_list": len(ll_extra),
-        "sumber": ("EPC Parts Atlas (katalog terstruktur resmi Sinotruk) — diuraikan dari "
-                   "assembly sampai tiap komponen, PERSIS untuk unit/VIN ini. Sebagian part "
-                   "(yang bertanda 'sumber_baris') dilengkapi dari EPC Loading List karena ada "
-                   "di rakitan roda, bukan modul poros. Keduanya data EPC resmi per-VIN — BUKAN "
-                   "katalog lokal per-model, BUKAN tebakan."),
-        "catatan": ("posisi_poros dari Atlas sudah PASTI (DEPAN=Driven axle 06/从动桥, "
-                    "BELAKANG=Drive axle 07/驱动桥). Part bertanda 'sumber_baris' = dari Loading "
-                    "List, posisi TIDAK dipisah — JANGAN mengarang posisi/keterangan 'sudah "
-                    "termasuk part lain'; sebut apa adanya (PN + qty + 'posisi tak dipisah di "
-                    "EPC'). 'part_pengganti' bila ada = PERSAMAAN/PENGGANTI resmi EPC (PN lama "
-                    "digantikan PN baru ini, format {pn, nama}) — pakai untuk jawab 'persamaan/"
-                    "pengganti part X'. Tampilkan stok/harga lokal bila ada. Baris dengan "
-                    "'di_dalam_assembly' = KOMPONEN/ELEMENT di dalam assembly tsb (mis. safety/"
-                    "main element di dalam air filter assembly) — ini yang biasanya DIBELI saat "
-                    "servis: JANGAN dihilangkan; kelompokkan di bawah assembly induknya. "
-                    "⛔⛔ PN WAJIB DARI DAFTAR INI SAJA (data EPC per-VIN unit ini). DILARANG "
-                    "KERAS menamb/mengganti PN 'assembly utuh' dari katalog lokal/model lain / "
-                    "ingatan — mis. bila EPC hanya punya varian 'Front RIGHT/LEFT plate spring "
-                    "assembly' atau per-lembar (WG95…641/1, +001/1), SEBUT itu apa adanya; JANGAN "
-                    "menggantinya dgn PN 'front plate spring assembly utuh' generik yang TIDAK ada "
-                    "di daftar ini (itu bisa BEDA/ SALAH untuk unit ini). Bila tak ada 1 PN 'utuh', "
-                    "katakan apa adanya bahwa EPC memberi per-sisi/per-lembar."),
+        "sumber": ("EPC Parts Atlas resmi per-VIN (+'sumber_baris' = pelengkap dari "
+                   "Loading List) — bukan katalog per-model, bukan tebakan."),
+        "catatan": ("posisi_poros dari Atlas PASTI (DEPAN=Driven axle 06, BELAKANG=Drive "
+                    "axle 07); baris 'sumber_baris' posisinya TIDAK dipisah — sebut apa "
+                    "adanya, JANGAN mengarang posisi. 'part_pengganti' = pengganti resmi "
+                    "EPC. Baris 'di_dalam_assembly' = komponen di dalam assembly (yang "
+                    "biasa dibeli saat servis) — JANGAN dihilangkan, kelompokkan di bawah "
+                    "induknya. ⛔⛔ PN WAJIB DARI DAFTAR INI SAJA; bila EPC hanya punya "
+                    "varian per-sisi/per-lembar, sebut apa adanya — JANGAN menggantinya "
+                    "dengan PN 'assembly utuh' dari katalog/ingatan (bisa SALAH utk unit ini)."),
         "terpotong_walk": res.get("terpotong", False),
         **({"peringatan_tidak_lengkap":
             "⚠️ Penelusuran EPC belum tuntas (sebagian data gagal diambil/terpotong) — "
@@ -5990,16 +6061,12 @@ def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:
     if tanpa:
         base["parts_tanpa_posisi"] = tanpa
     base["peringatan_posisi"] = (
-        "⚠️ KRITIS: hasil ini MEMUAT KEDUA sisi — 'parts_depan' (poros penumpu / driven "
-        "axle) DAN 'parts_belakang' (poros penggerak / drive axle). Keduanya OTORITATIF & "
-        "SUDAH BENAR untuk VIN ini. Kampas/sepatu rem depan & belakang BIASANYA BEDA PN "
-        "(ukuran beda). ATURAN MUTLAK: saat menjawab posisi tertentu, AMBIL PN HANYA dari "
-        "grup posisi ITU — DILARANG menyalin PN dari grup posisi lain, dan DILARANG "
-        "menjawab dari ingatan/turn sebelumnya. Bila user tanya 'depan' → pakai "
-        "parts_depan; 'belakang' → parts_belakang; tak sebut sisi → tampilkan KEDUANYA "
-        "sebagai dua kelompok. Boleh bilang 'sama' HANYA bila PN yang sama benar-benar "
-        "muncul di kedua grup. 'parts_tanpa_posisi' (bila ada) = dari Loading List, posisi "
-        "tak dipisah — jangan diklaim milik salah satu sisi.")
+        "⚠️ KRITIS: 'parts_depan' (driven axle) ≠ 'parts_belakang' (drive axle) — "
+        "depan & belakang BIASANYA BEDA PN. ATURAN MUTLAK: jawab posisi tertentu "
+        "HANYA dari grup posisi itu; DILARANG menyalin PN grup lain / menjawab dari "
+        "ingatan. Tanpa sebutan sisi → tampilkan keduanya. Bilang 'sama' HANYA bila "
+        "PN muncul di kedua grup. 'parts_tanpa_posisi' = Loading List (posisi tak "
+        "dipisah) — jangan diklaim milik satu sisi.")
     return base
 
 
@@ -6411,16 +6478,33 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
             _add(lama, seen_m, x.get("pn"), None, tanggal=x.get("tanggal"), tipe=x.get("tipe"), sumber="Weichai")
 
     if not diganti and not lama:
+        try:
+            search_log.record_miss(pn, "pn", "pengganti_part")
+        except Exception:
+            pass
         return {"found": False, "part_number": pn,
                 "error": "Tidak ada data persamaan/pengganti untuk PN ini (dicek SIMS Sinotruk & EPC Weichai)."}
 
-    # Silang PN pengganti/lama ke katalog lokal (stok+harga+nama).
+    # Silang PN pengganti/lama ke katalog lokal — PEMAAF varian suffix/pemisah
+    # (dulu search_exact_pns → pengganti ready bisa tercap 'belum ada di katalog').
     all_pn = [x["pn"] for x in diganti] + [x["pn"] for x in lama]
-    local: dict[str, dict] = {}
-    for r in part_index.search_exact_pns(all_pn):
-        p = (r.get("part_number") or "").upper()
-        if p and p not in local:
-            local[p] = r
+    local = part_index.rows_for_pns(all_pn)
+
+    def _acc_stok(pn_: str) -> dict:
+        """Stok/harga langsung dari indeks Accurate (index_key pemaaf) — utk
+        pengganti yang tak ada di katalog Excel tapi DISTOK gudang."""
+        if not accurate.available():
+            return {}
+        try:
+            acc = accurate.stock_full(pn_)
+        except accurate.AccurateError:
+            return {}
+        if not acc:
+            return {}
+        out = {"stok_total": f"{acc['available_to_sell']:.0f} {acc.get('unit') or ''}".strip()}
+        if acc.get("price"):
+            out["harga_lokal"] = "Rp " + f"{int(acc['price']):,}".replace(",", ".")
+        return out
 
     def _row(x: dict) -> dict:
         lr = local.get((x["pn"] or "").upper(), {})
@@ -6436,7 +6520,12 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
             row["harga_lokal"] = lr.get("harga")
             row["ada_di_katalog"] = True
         else:
-            row["catatan"] = "belum ada di katalog lokal"
+            acc = _acc_stok(x["pn"] or "")
+            if acc:
+                row.update(acc)
+                row["sumber_stok"] = "Accurate (sinkron berkala)"
+            else:
+                row["catatan"] = "belum ada di katalog/stok lokal"
         return row
 
     return {
@@ -7291,9 +7380,12 @@ def _run_tool(name: str, args: dict, user: dict, sheet_id: str = "") -> dict:
         args["_sheet_id"] = sheet_id
     try:
         res = fn(args, user)
-    except Exception as e:  # pragma: no cover
+    except Exception:  # pragma: no cover
+        # Detail exception hanya ke log server — JANGAN bocorkan pesan internal
+        # (path/stack/URL) ke model/user.
         logger.exception("tool %s gagal", name)
-        return {"error": f"tool '{name}' gagal dijalankan: {e}"}
+        return {"error": f"tool '{name}' gagal dijalankan (gangguan internal — "
+                         "sampaikan jujur ke user, jangan mengarang data)."}
     # PENJAGA HARGA TERPUSAT (defense in depth): buang SEMUA field harga bila user
     # tak berhak — tak peduli handler-nya lupa mengecek. Menu Control 'Kolom Harga'
     # kini menguasai asisten sama seperti halaman Cari Part/detail.
@@ -7408,11 +7500,9 @@ def _tool_failed(result: dict) -> bool:
 
 
 _LOOKUP_GAGAL_NOTE = (
-    "[CATATAN SISTEM] Sebagian tool di atas GAGAL / tidak menemukan data (lihat "
-    "field 'error'/'denied'/'found=false'). DILARANG mengarang angka stok, harga, "
-    "atau ketersediaan untuk item yang datanya gagal diambil. Sampaikan apa adanya "
-    "bahwa data tidak tersedia / gagal diambil, dan bila relevan sarankan langkah "
-    "(coba lagi, cek nomor, atau hubungi admin)."
+    "[CATATAN SISTEM] Ada tool yang GAGAL/tak menemukan data. DILARANG mengarang "
+    "stok/harga/ketersediaan untuk item itu — sampaikan apa adanya, sarankan "
+    "langkah (cek nomor / coba lagi / hubungi admin)."
 )
 
 
@@ -8169,7 +8259,9 @@ def _system_prompt(user: dict) -> str:
         "6. Bila tool mengembalikan kosong / tidak ditemukan, katakan terus terang "
         "dan sarankan langkah lain (cek ejaan PN, cari per nama, atau daftar_unit).\n"
         "7. Jangan menjanjikan aksi yang tak bisa Anda lakukan (Anda hanya membaca "
-        "data & memberi info; tidak membuat/mengubah pesanan).\n"
+        "data & memberi info; tidak membuat/mengubah pesanan). ⛔ JANGAN menjanjikan "
+        "WAKTU KIRIM/ETA/tanggal kedatangan stok/lead time — data itu TIDAK ada di "
+        "sistem; arahkan user konfirmasi ke admin/gudang.\n"
         "8. Jika pertanyaan di luar konteks MASPART, jawab singkat & arahkan kembali "
         "ke fungsi aplikasi.\n"
         "9. Boleh memanggil beberapa tool berturut-turut bila perlu (mis. daftar_unit "
@@ -8179,7 +8271,9 @@ def _system_prompt(user: dict) -> str:
         "dimensi_cm, satuan, merek). Bila user bertanya berat/dimensi/ukuran sebuah "
         "PN, panggil detail_part dan sebutkan apa adanya dari `spesifikasi`. Bila "
         "field itu tidak ada (SIMS tak punya data), katakan berat belum tersedia — "
-        "JANGAN mengarang angka.\n"
+        "JANGAN mengarang angka. Berlaku utk SEMUA angka spesifikasi teknis "
+        "(torsi, daya/HP, kapasitas oli, tekanan, rating Euro, volume): hanya dari "
+        "hasil tool — tak ada di data = katakan belum tersedia.\n"
         "11. Untuk pertanyaan KODE KESALAHAN / fault code / DTC / SPN / FMI / kode "
         "P-B-U (mis. 'kode kesalahan SPN 1241 FMI 21', 'apa arti P0410', 'kode error "
         "ABS B1117'), WAJIB panggil tool cari_kode_kesalahan — cakupannya SEMUA unit "
@@ -8738,6 +8832,14 @@ _NUM_RUN_RE = re.compile(r"\d[\d.,]*\d|\d")
 _STOK_CLAIM_RE = re.compile(
     r"(\d[\d.,]{0,8})\s*(?:pcs?|unit|buah|biji|set|pasang|lembar)\b", re.IGNORECASE)
 _HARGA_CLAIM_RE = re.compile(r"\bRp\.?\s*(\d[\d.,]{2,})", re.IGNORECASE)
+# Angka SPESIFIKASI ber-satuan (berat/dimensi/kapasitas/interval/torsi) — sumber
+# rawan karangan: detail_part.spesifikasi & jadwal_perawatan. Ikut diground.
+_SPEC_CLAIM_RE = re.compile(
+    r"(\d[\d.,]{0,8})\s*(?:kg|gram|gr|ton|cm|mm|meter|m3|liter|ltr|nm|hp|kw|jam)\b",
+    re.IGNORECASE)
+# Harga TANPA 'Rp' — angka ≥4 digit dalam jarak dekat kata 'harga/hrg/seharga'.
+_HARGA_POLOS_RE = re.compile(
+    r"(?:harga|hrg|seharga)[^.\n\d]{0,40}(\d[\d.,]{3,})", re.IGNORECASE)
 
 
 def _canon_num(s: str) -> str:
@@ -8757,7 +8859,7 @@ def _claimed_nums(reply: str) -> set[str]:
     if not reply:
         return set()
     out: set[str] = set()
-    for rx in (_STOK_CLAIM_RE, _HARGA_CLAIM_RE):
+    for rx in (_STOK_CLAIM_RE, _HARGA_CLAIM_RE, _SPEC_CLAIM_RE, _HARGA_POLOS_RE):
         for m in rx.finditer(reply):
             c = _canon_num(m.group(1))
             if c:
@@ -9207,6 +9309,10 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             grounded_nums |= _extract_nums(_content)
         elif role == "assistant":
             _asst_pns |= pns
+            # Angka yang PERNAH disajikan asisten = sah diulang di follow-up
+            # (memungkinkan guard angka juga MENYALA di follow-up tanpa tool —
+            # angka BARU yang tiba-tiba muncul tetap tertangkap).
+            grounded_nums |= _extract_nums(_content)
     if _asst_pns:
         try:
             _ada = {(r.get("part_number") or "").upper()
@@ -9455,10 +9561,11 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             _suspect = _suspect_pool - epc_vin_pns
             if _suspect and (epc_vin_used or (user_rangka_recent and hist_suspect)):
                 subst = _drop_unit_tokens([p for p in _extract_pns(reply) if p in _suspect])
-            # GUARD ANGKA: klaim stok/harga yang tak ada di hasil tool → dugaan
-            # karangan. HANYA bila tool BENAR jalan turn ini (follow-up murni-riwayat
-            # dilewati → nol false-positive dari data turn lalu).
-            num_bad: list[str] = sorted(_claimed_nums(reply) - grounded_nums) if tools_used else []
+            # GUARD ANGKA: klaim stok/harga/spesifikasi yang tak ada di hasil tool
+            # MAUPUN riwayat → dugaan karangan. Kini juga menyala di follow-up
+            # tanpa tool (angka riwayat asisten sudah diground di atas → angka
+            # lama sah diulang; angka BARU yang tiba-tiba muncul tertangkap).
+            num_bad: list[str] = sorted(_claimed_nums(reply) - grounded_nums)
             if (bad or subst or num_bad) and guard_retries < _MAX_GUARD_RETRIES:
                 guard_retries += 1
                 messages.append({"role": "assistant", "content": content})
@@ -9475,6 +9582,10 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 reply = _sanitize_ungrounded(reply, bad)
             if subst:
                 reply = _annotate_subst(reply, subst)
+            if num_bad:
+                # Hanya angka yang MASIH ada di reply (sanitasi PN bisa sudah
+                # mengganti seluruh jawaban → jangan anotasi teks pengganti).
+                num_bad = sorted(set(num_bad) & _extract_nums(reply))
             if num_bad:
                 reply = _annotate_unverified_nums(reply, num_bad)
             return _finalize(reply)
@@ -9577,8 +9688,19 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
         _subst = _drop_unit_tokens([p for p in _extract_pns(reply) if p in _suspect])
         if _subst:
             reply = _annotate_subst(reply, _subst)
-    if tools_used:
-        _num_bad = sorted(_claimed_nums(reply) - grounded_nums)
-        if _num_bad:
-            reply = _annotate_unverified_nums(reply, _num_bad)
+    _num_bad = sorted(_claimed_nums(reply) - grounded_nums)
+    if _num_bad:
+        reply = _annotate_unverified_nums(reply, _num_bad)
+    # Jalur terminal DULU lolos 3 guard kejujuran (Excel-claim / DTC-first /
+    # EPC-first) karena tak ada ronde tersisa utk koreksi — mitigasi ringan:
+    if (not (excel_exports or banding_exports or repairkit_models)
+            and _EXCEL_CLAIM_RE.search(reply) and _EXCEL_CLAIM_DONE_RE.search(reply)):
+        reply += ("\n\n⚠️ Catatan sistem: kartu file yang disebut BELUM tersedia — "
+                  "minta asisten membuatkannya lagi bila perlu.")
+    elif ((user_dtc_tokens and not dtc_tool_attempted
+           and any(t in reply.upper() for t in user_dtc_tokens))
+          or (user_rangka_recent and not rangka_tool_attempted
+              and _drop_unit_tokens(list(_extract_pns(reply))))):
+        reply += ("\n\n⚠️ Jawaban ini belum sempat diverifikasi penuh ke database/EPC "
+                  "— mohon tanyakan ulang untuk kepastian.")
     return _finalize(reply)

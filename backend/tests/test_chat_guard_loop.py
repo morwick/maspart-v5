@@ -42,10 +42,21 @@ def test_pn_karangan_membandel_diganti_pesan_jujur(monkeypatch):
 
 
 def test_pn_yang_user_sebut_dianggap_sah(monkeypatch):
-    calls = _stub_model(monkeypatch, "Stok WG2210040097 saat ini 5 pcs.")
+    # PN dari pesan user = grounded. (Jawaban stub TANPA klaim angka — sejak
+    # audit 2026-07-17 klaim stok/harga tanpa tool/riwayat ikut kena guard
+    # angka, dan itu memang karangan.)
+    calls = _stub_model(monkeypatch, "Untuk WG2210040097 perlu saya cek stoknya dulu ya.")
     out = ai.chat(USER, [{"role": "user", "content": "stok WG2210040097 berapa?"}])
     assert calls["n"] == 1                       # tanpa retry — langsung lolos
-    assert out["reply"] == "Stok WG2210040097 saat ini 5 pcs."
+    assert out["reply"] == "Untuk WG2210040097 perlu saya cek stoknya dulu ya."
+
+
+def test_stok_tanpa_tool_kena_guard_angka(monkeypatch):
+    # Klaim STOK tanpa tool & tanpa riwayat = karangan → dikoreksi/dianotasi.
+    calls = _stub_model(monkeypatch, "Stok WG2210040097 saat ini 5 pcs.")
+    out = ai.chat(USER, [{"role": "user", "content": "stok WG2210040097 berapa?"}])
+    assert calls["n"] == 1 + ai._MAX_GUARD_RETRIES
+    assert "tidak terverifikasi" in out["reply"].lower()
 
 
 def test_pn_dari_jawaban_asisten_sebelumnya_dianggap_sah(monkeypatch):

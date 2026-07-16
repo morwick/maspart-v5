@@ -77,14 +77,33 @@ def test_angka_ada_di_hasil_tool_lolos(monkeypatch):
     assert "5 pc" in out["reply"] and "1.500.000" in out["reply"]
 
 
-def test_follow_up_tanpa_tool_tak_kena_guard(monkeypatch):
-    """Tanpa tool jalan turn ini (follow-up murni-riwayat) → guard angka DILEWATI."""
+def test_follow_up_ulang_angka_riwayat_lolos(monkeypatch):
+    """Follow-up tanpa tool yang MENGULANG angka dari jawaban asisten sebelumnya
+    → sah (angka riwayat di-ground), tak dikoreksi. (Audit 2026-07-17: guard
+    angka kini juga menyala di follow-up — dulu dilewati total.)"""
     def fake(messages, tools, max_tokens=6000):
-        return {"choices": [{"message": {"content": "Kira-kira Rp 2.500.000 seperti tadi."},
+        return {"choices": [{"message": {"content": "Seperti tadi: Rp 2.500.000."},
                              "finish_reason": "stop"}]}
     monkeypatch.setattr(ai, "_post_chat", fake)
     out = ai.chat(USER, [
+        {"role": "user", "content": "harga WG9925520270?"},
+        {"role": "assistant", "content": "Harga WG9925520270 Rp 2.500.000."},
         {"role": "user", "content": "tadi berapa harganya?"},
     ])
-    assert out["reply"].startswith("Kira")                  # tak dikoreksi/dianotasi
+    assert out["reply"].startswith("Seperti")               # tak dikoreksi/dianotasi
     assert out["tools_used"] == []
+
+
+def test_follow_up_angka_baru_karangan_kena_guard(monkeypatch):
+    """Follow-up tanpa tool dengan angka BARU yang tak pernah ada di riwayat/tool
+    → guard angka menyala (dikoreksi lalu dianotasi bila membandel)."""
+    def fake(messages, tools, max_tokens=6000):
+        return {"choices": [{"message": {"content": "Kira-kira Rp 9.750.000."},
+                             "finish_reason": "stop"}]}
+    monkeypatch.setattr(ai, "_post_chat", fake)
+    out = ai.chat(USER, [
+        {"role": "user", "content": "harga WG9925520270?"},
+        {"role": "assistant", "content": "Harga WG9925520270 Rp 2.500.000."},
+        {"role": "user", "content": "kalau beli 2 jadi berapa?"},
+    ])
+    assert "tidak terverifikasi" in out["reply"].lower()    # angka karangan tertangkap
