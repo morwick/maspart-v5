@@ -1,12 +1,16 @@
 """Lookup kode kesalahan (DTC) mesin Sinotruk/HOWO — ECU Bosch (MC).
 
-Data diekstrak dari manual PDF ke `fault_codes.json`. Tiap entri:
+Data di-generate oleh `tools/build_fault_codes.py` dari PDF sumber
+`data/manuals/Manual_Sinotruk_MC_BOSCHECU_DH_CHINESE.pdf` ke `fault_codes.json`.
+Tiap entri:
   code     : kode P/U (mis. "P0410")
   english  : label internal Bosch (mis. "DFC_AirCtlGovrDeMilTqLimrMax")
   desc_cn  : deskripsi gangguan (Bahasa China — Asisten AI menerjemahkan)
-  spn      : Suspect Parameter Number (J1939)
-  fmi      : Failure Mode Identifier (J1939)
+  spn      : Suspect Parameter Number (J1939) — bisa null bila tak tercantum
+  fmi      : Failure Mode Identifier (J1939) — bisa null bila tak tercantum
   mil/svs  : status lampu indikator (ON/OFF)
+
+Regenerasi bila PDF diperbarui:  python backend/tools/build_fault_codes.py
 """
 from __future__ import annotations
 
