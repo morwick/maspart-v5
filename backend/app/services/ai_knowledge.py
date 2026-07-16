@@ -186,6 +186,12 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         wiring_n = int(_wr.count() or 0)
     except Exception:
         pass
+    fault_pdf_n = 0
+    try:
+        from . import fault_pdf as _fp
+        fault_pdf_n = int(_fp.count() or 0)
+    except Exception:
+        pass
     # Model Shantui yang PUNYA jadwal perawatan berkala (data/manuals),
     # dikelompokkan per jenis alat (dozer/loader/excavator/grader/roller).
     maintenance_by_jenis: dict[str, list[str]] = {}
@@ -221,7 +227,8 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         "sub_prefix_pn": sub_rows,
         "gudang": gudang,
         "fault_codes": {"jumlah": fault_n, "jumlah_eol": eol_n,
-                        "unit_kontrol_eol": eol_units_n, "wiring": wiring_n},
+                        "unit_kontrol_eol": eol_units_n, "wiring": wiring_n,
+                        "pdf_diagnosa": fault_pdf_n},
         "filter_shantui_units": filter_units,
         "maintenance_shantui": maintenance_by_jenis,
         "gearbox_repairkit": gearbox_models,
@@ -333,10 +340,13 @@ def _render(d: dict, with_gudang: bool) -> str:
                   f"({fcd.get('unit_kontrol_eol') or 0} ECU: mesin/ABS-ESP/transmisi/"
                   "EV/BCM/airbag/radar/SCR) BERBAHASA INDONESIA lengkap penyebab + "
                   "LANGKAH PERBAIKAN" if eol_n else "")
+        pdfn = fcd.get("pdf_diagnosa") or 0
+        pdfx = (f"; plus {pdfn} LEMBAR DIAGNOSA PDF resmi per-pasangan SPN/FMI "
+                "(terlampir otomatis sebagai kartu yang bisa dibuka user)" if pdfn else "")
         lines.append(
             f"• KODE KESALAHAN (DTC): database resmi memuat {fc} entri SPN/FMI/kode P"
-            f"{ekstra} — pertanyaan kode error/fault code WAJIB via cari_kode_kesalahan, "
-            "jangan dari ingatan.")
+            f"{ekstra}{pdfx} — pertanyaan kode error/fault code WAJIB via "
+            "cari_kode_kesalahan, jangan dari ingatan.")
         wr = fcd.get("wiring") or 0
         if wr:
             lines.append(

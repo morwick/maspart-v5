@@ -23,9 +23,9 @@ import requests
 
 from ..core.config import get_settings
 from . import (accurate, ai_chat_log, ai_export, ai_knowledge, ai_sheet, catalog_bom, eol_dtc,
-               epc, epc_bom, epc_weichai, fault_codes, filter_ref, gudang, gudang_config,
-               harga, maintenance_ref, orders, part_index, populasi, repairkit, reservations,
-               search_log, sims, sims_eol, wiring_ref)
+               epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref, gudang,
+               gudang_config, harga, maintenance_ref, orders, part_index, populasi, repairkit,
+               reservations, search_log, sims, sims_eol, wiring_ref)
 
 logger = logging.getLogger("maspart.ai")
 
@@ -3660,6 +3660,28 @@ def _t_daftar_pesanan(args: dict, user: dict) -> dict:
     return {"jumlah": len(rows), "pesanan": rows[:30]}
 
 
+def _fault_pdf_cards(spn: int | None, fmi: int | None, max_cards: int = 4) -> list[dict]:
+    """Kartu PDF lembar diagnosa resmi utk SPN(+FMI) — pasangan persis dulu;
+    tak ada → semua FMI utk SPN itu (maks `max_cards`). Tiap kartu di-stash
+    ai_export (kanal excel_exports) agar tampil & bisa DIBUKA user di chat."""
+    if spn is None:
+        return []
+    try:
+        matches = fault_pdf.find(spn, fmi) or (fault_pdf.find(spn) if fmi is not None else [])
+    except Exception:  # pragma: no cover
+        return []
+    cards: list[dict] = []
+    for m in matches[:max_cards]:
+        data = fault_pdf.pdf_bytes(m["file"])
+        if not data:
+            continue
+        judul = f"Lembar diagnosa SPN {m['spn']} FMI {m['fmi']}"
+        export_id, filename = ai_export.stash_raw(judul, data, m["file"])
+        cards.append({"export_id": export_id, "filename": filename, "judul": judul,
+                      "spn": m["spn"], "fmi": m["fmi"]})
+    return cards
+
+
 def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
     spn = args.get("spn")
     fmi = args.get("fmi")
@@ -3740,6 +3762,9 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
         for r in eol_hits
     ]
 
+    # Lembar diagnosa PDF resmi (data/Fault) — kartu yang bisa DIBUKA user.
+    pdf_cards = _fault_pdf_cards(spn, fmi)
+
     catatan = (
         "'hasil' = tabel mesin Bosch (deskripsi_cn Bahasa China — sajikan "
         "terjemahan Indonesianya; MIL=lampu check engine, SVS=lampu servis). "
@@ -3782,6 +3807,19 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
             f" ⚠️ Ada {len(hits)} KODE BERBEDA untuk pasangan SPN/FMI ini — "
             "tampilkan SEMUANYA, jangan pilih salah satu."
         )
+    if pdf_cards:
+        pasang = ", ".join(f"SPN {c['spn']} FMI {c['fmi']}" for c in pdf_cards)
+        catatan += (
+            f" 📎 LEMBAR DIAGNOSA PDF RESMI terlampir sebagai KARTU di bawah "
+            f"jawabanmu ({pasang}) — beri tahu user bisa MEMBUKANYA langsung dari "
+            "kartu itu (isi: P-code, part terkait, langkah diagnosa). ⛔ JANGAN "
+            "membuat link/URL sendiri."
+        )
+        if flags.get("spn_tak_terdaftar") or not hits:
+            catatan += (
+                " Database teks tidak memuat pasangan ini, TAPI lembar diagnosa "
+                "resminya ADA (terlampir) — dasari jawaban dari keberadaan lembar itu."
+            )
 
     return {
         "total_database": fault_codes.count(),
@@ -3792,6 +3830,7 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
         "hasil": hasil,
         "jumlah_cocok_eol": len(hasil_eol),
         "hasil_eol": hasil_eol,
+        "pdf_diagnosa": pdf_cards,
         "catatan": catatan,
     }
 
@@ -3860,15 +3899,24 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
          "perbaikan menurut manual resmi.")
     eol = sims_eol.tanya(q)
 
+    # Lembar diagnosa PDF resmi (kartu bisa dibuka user) bila SPN diberikan.
+    pdf_cards = _fault_pdf_cards(spn, fmi)
+
     out = {
-        "found": bool(dtc) or bool(eol_rows) or bool(eol.get("found")),
+        "found": bool(dtc) or bool(eol_rows) or bool(eol.get("found")) or bool(pdf_cards),
         "kriteria": {"kode": kode or None, "spn": spn, "fmi": fmi, "keluhan": keluhan or None},
         "kode_kesalahan_lokal": dtc,
         "kode_kesalahan_eol": eol_rows,  # Indonesia: penyebab + langkah perbaikan resmi EOL
+        "pdf_diagnosa": pdf_cards,
         "total_database_dtc": fault_codes.count(),
         "sumber": ("Database DTC lokal (Bosch + EOL CNHTC ber-langkah-perbaikan) + SIMS EOL AI "
                    "(asisten diagnosa resmi Sinotruk: manual perbaikan + kasus kerusakan pabrik)."),
     }
+    if pdf_cards:
+        out["catatan_pdf"] = (
+            "📎 Lembar diagnosa PDF RESMI terlampir sebagai kartu — beri tahu user "
+            "bisa membukanya langsung. ⛔ JANGAN membuat link/URL sendiri."
+        )
     if fmi_fallback:
         out["fmi_diminta_tak_terdaftar"] = fmi
         out["catatan_dtc"] = (
@@ -8152,7 +8200,9 @@ def _system_prompt(user: dict) -> str:
         "WAJIB memanggil cari_kode_kesalahan LAGI di giliran itu — meski "
         "giliran sebelumnya 'tidak ditemukan'; database memuat SPN proprietary "
         "520192–524287; JANGAN PERNAH menjawab kode error dari ingatan atau "
-        "menyimpulkan dari riwayat.\n"
+        "menyimpulkan dari riwayat. Bila hasil memuat 'pdf_diagnosa', LEMBAR "
+        "DIAGNOSA PDF RESMI sudah terlampir sebagai kartu — beri tahu user bisa "
+        "membukanya langsung dari kartu di bawah jawaban.\n"
         "12. FILTER alat berat SHANTUI (excavator, bulldozer, roller, grader): untuk "
         "pertanyaan soal filter unit Shantui — filter oli, solar/bahan bakar, udara, "
         "hidrolik, water separator — WAJIB panggil tool cari_filter_shantui (JANGAN "
@@ -9099,6 +9149,14 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                     "judul": result.get("judul"), "jumlah_baris": result.get("jumlah_baris")}
             if item["id"] and item not in excel_exports:
                 excel_exports.append(item)
+        elif name in ("cari_kode_kesalahan", "diagnosa") and result.get("pdf_diagnosa"):
+            # Lembar diagnosa PDF resmi per-SPN/FMI (data/Fault) → kartu file
+            # yang sama dengan export Excel/PDF penawaran (bisa dibuka user).
+            for c in result["pdf_diagnosa"]:
+                item = {"id": c.get("export_id"), "filename": c.get("filename"),
+                        "judul": c.get("judul"), "jumlah_baris": None}
+                if item["id"] and item not in excel_exports:
+                    excel_exports.append(item)
         elif name in ("gambar_exploded", "gambar_exploded_mesin",
                       "uraikan_mesin", "part_aus_dari_rangka",
                       "diagram_wiring") and result.get("found"):

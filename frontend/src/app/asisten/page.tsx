@@ -905,12 +905,14 @@ function ExcelCardShell({
   busy,
   err,
   onDownload,
+  actionLabel = "Unduh",
 }: {
   fname: string;
   sub: string;
   busy: boolean;
   err: string | null;
   onDownload: () => void;
+  actionLabel?: string;
 }) {
   return (
     <div style={{ marginTop: 8 }}>
@@ -959,7 +961,7 @@ function ExcelCardShell({
         </div>
         <button className="btn btn-secondary btn-sm" onClick={onDownload} disabled={busy} style={{ gap: 5 }}>
           <Icon d={IC.download} size={13} />
-          {busy ? "Menyiapkan…" : "Unduh"}
+          {busy ? "Menyiapkan…" : actionLabel}
         </button>
       </div>
       {err && <div style={{ fontSize: 11.5, color: "var(--danger-600)", marginTop: 4 }}>{err}</div>}
@@ -1003,6 +1005,8 @@ function AiExcelCard({ exp }: { exp: AIExcelExport }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const isPdf = (exp.filename || "").toLowerCase().endsWith(".pdf");
+
   async function download() {
     const token = getToken();
     if (!token) return;
@@ -1010,21 +1014,29 @@ function AiExcelCard({ exp }: { exp: AIExcelExport }) {
     setErr(null);
     try {
       const blob = await exportAiExcel(token, exp.id);
-      downloadBlob(blob, exp.filename || "Data_MASPART.xlsx");
+      if (isPdf) {
+        // PDF (lembar diagnosa SPN/FMI, penawaran, katalog) → BUKA di tab baru
+        // agar langsung terbaca; popup diblokir → fallback unduh.
+        const url = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
+        const w = window.open(url, "_blank", "noopener");
+        if (!w) downloadBlob(blob, exp.filename || "Dokumen_MASPART.pdf");
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      } else {
+        downloadBlob(blob, exp.filename || "Data_MASPART.xlsx");
+      }
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
         setErr("File sudah kedaluwarsa — minta asisten buatkan lagi.");
       } else {
-        setErr(e instanceof Error ? e.message : "Gagal mengunduh file");
+        setErr(e instanceof Error ? e.message : "Gagal membuka file");
       }
     } finally {
       setBusy(false);
     }
   }
 
-  const isPdf = (exp.filename || "").toLowerCase().endsWith(".pdf");
   const sub = isPdf
-    ? "PDF · katalog bergambar siap cetak"
+    ? "PDF · klik untuk membuka"
     : `Spreadsheet · XLSX${exp.jumlah_baris ? ` · ${exp.jumlah_baris} baris` : ""}`;
 
   return (
@@ -1034,6 +1046,7 @@ function AiExcelCard({ exp }: { exp: AIExcelExport }) {
       busy={busy}
       err={err}
       onDownload={download}
+      actionLabel={isPdf ? "Buka" : "Unduh"}
     />
   );
 }

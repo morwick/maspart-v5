@@ -198,10 +198,15 @@ def export_ai_excel(export_id: str, _user: dict = Depends(require_ai)):
         return Response(content=data, media_type=mime_img,
                         headers={"Content-Disposition": f'inline; filename="{fname}"',
                                  "Cache-Control": "private, max-age=86400"})
-    mime = "application/pdf" if fl.endswith(".pdf") else _XLSX_MIME
+    if fl.endswith(".pdf"):
+        # inline → bisa DIBUKA langsung di tab browser (lembar diagnosa SPN/FMI,
+        # PDF penawaran/katalog); frontend pakai blob sehingga tetap bisa unduh.
+        return Response(content=data, media_type="application/pdf",
+                        headers={"Content-Disposition": f'inline; filename="{fname}"',
+                                 "Cache-Control": "private, max-age=86400"})
     return Response(
         content=data,
-        media_type=mime,
+        media_type=_XLSX_MIME,
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
 
