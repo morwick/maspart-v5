@@ -121,6 +121,67 @@ def test_epc_first_jawaban_tanpa_pn_lolos(monkeypatch):
     assert calls["n"] == 1  # tak ada PN → guard tak menyala
 
 
+# ── Guard DTC-first (bukti log 2026-07-16: SPN 520243 FMI 21 dijawab 'tidak
+#    ditemukan' TANPA memanggil tool, padahal datanya ADA) ────────────────────
+def test_dtc_tokens_deteksi():
+    assert ai._dtc_tokens("cek kesalahan SPN 520243 FMI 21") == {"520243"}
+    assert ai._dtc_tokens("apa arti P0100F7?") == {"P0100F7"}
+    assert "B1117" in ai._dtc_tokens("kode error ABS B1117 muncul")
+    assert ai._dtc_tokens("stok filter oli howo?") == set()
+
+
+def test_dtc_first_koreksi_saat_jawab_tanpa_tool(monkeypatch):
+    # Meniru log nyata: setelah satu 'tidak ditemukan' yang sah, model malas —
+    # menjawab SPN berikutnya dari ingatan tanpa tool → wajib dikoreksi sekali.
+    calls = _stub_model(monkeypatch, [
+        "SPN 520243 FMI 21 — Tidak ditemukan di database. Coba cek ulang.",
+        "SPN 520243 FMI 21 = P0088 (tekanan rail melebihi batas maksimum).",
+    ])
+    history = [
+        {"role": "user", "content": "SPN 524045 FMI 5"},
+        {"role": "assistant", "content": "SPN 524045 FMI 5 tidak terdaftar di database."},
+        {"role": "user", "content": "cek kesalahan SPN 520243 FMI 21"},
+    ]
+    out = ai.chat(USER, history)
+    assert calls["n"] == 2  # 1 jawaban malas + 1 ronde koreksi paksa
+    assert "P0088" in out["reply"]
+
+
+def test_dtc_first_tak_menyala_bila_tool_dipanggil(monkeypatch):
+    seq = [
+        {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": "d1", "function": {"name": "cari_kode_kesalahan",
+                                      "arguments": '{"spn":520243,"fmi":21}'}},
+        ]}, "finish_reason": "tool_calls"}]},
+        {"choices": [{"message": {"content": "SPN 520243 FMI 21 = P0088 (rail terlalu tinggi)."},
+                      "finish_reason": "stop"}]},
+    ]
+    calls = _stub_model(monkeypatch, seq)
+    monkeypatch.setattr(ai, "_run_tool", lambda name, args, user, sheet_id="": {
+        "jumlah_cocok": 1, "hasil": [{"kode": "P0088", "spn": 520243, "fmi": 21}]})
+    out = ai.chat(USER, [{"role": "user", "content": "cek kesalahan SPN 520243 FMI 21"}])
+    assert calls["n"] == 2  # ronde tool + jawaban final; TANPA koreksi tambahan
+    assert "P0088" in out["reply"]
+
+
+def test_dtc_first_tak_menyala_tanpa_pola_dtc(monkeypatch):
+    calls = _stub_model(monkeypatch, ["Filter oli HOWO tersedia beberapa pilihan."])
+    ai.chat(USER, [{"role": "user", "content": "filter oli howo ada?"}])
+    assert calls["n"] == 1
+
+
+def test_dtc_first_sekali_saja_bila_membandel(monkeypatch):
+    # Model tetap tak memanggil tool setelah dikoreksi → jawaban tetap keluar
+    # (tak ada loop tak berujung).
+    calls = _stub_model(monkeypatch, [
+        "SPN 520243 FMI 21 tidak ditemukan.",
+        "SPN 520243 FMI 21 tetap tidak saya temukan.",
+    ])
+    out = ai.chat(USER, [{"role": "user", "content": "cek SPN 520243 FMI 21"}])
+    assert calls["n"] == 2
+    assert "520243" in out["reply"]
+
+
 # ── Eksekusi batch tool paralel: urutan hasil deterministik ─────────────────
 def test_batch_tool_paralel_urutan_terjaga(monkeypatch):
     seq = [

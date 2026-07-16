@@ -8148,7 +8148,11 @@ def _system_prompt(user: dict) -> str:
         "lain seolah jawaban pasti. Bila 'spn_fmi_ditukar', beri tahu angkanya "
         "tampak tertukar & sudah dikoreksi. Bila SATU pasangan SPN+FMI punya "
         "BEBERAPA kode, tampilkan SEMUANYA. Bila tetap tak ada yang cocok, "
-        "sarankan cek ulang angkanya.\n"
+        "sarankan cek ulang angkanya. ⛔ SETIAP pertanyaan ber-SPN/FMI/kode "
+        "WAJIB memanggil cari_kode_kesalahan LAGI di giliran itu — meski "
+        "giliran sebelumnya 'tidak ditemukan'; database memuat SPN proprietary "
+        "520192–524287; JANGAN PERNAH menjawab kode error dari ingatan atau "
+        "menyimpulkan dari riwayat.\n"
         "12. FILTER alat berat SHANTUI (excavator, bulldozer, roller, grader): untuk "
         "pertanyaan soal filter unit Shantui — filter oli, solar/bahan bakar, udara, "
         "hidrolik, water separator — WAJIB panggil tool cari_filter_shantui (JANGAN "
@@ -8911,6 +8915,36 @@ def _args_has_rangka(args: dict) -> bool:
     return any((args or {}).get(k) for k in _RANGKA_ARG_KEYS)
 
 
+# GUARD DTC-FIRST (bukti log 2026-07-16: user tanya "SPN 520243 FMI 21" →
+# model menjawab "tidak ditemukan" TANPA memanggil tool sama sekali (tools:None),
+# padahal datanya ADA — model "malas" setelah satu jawaban tidak-ditemukan yang
+# sah dan menyimpulkan dari ingatan). Bila pesan TERAKHIR user memuat SPN/kode
+# DTC dan jawaban model MEMBICARAKAN kode itu tanpa MENCOBA cari_kode_kesalahan/
+# diagnosa, paksa SEKALI agar ia cek database dulu.
+_DTC_SPN_RE = re.compile(r"\bspn\s*[:#=]?\s*(\d{2,6})\b", re.IGNORECASE)
+_DTC_CODE_RE = re.compile(r"\b([PBU]\d[0-9A-F]{2,5})\b", re.IGNORECASE)
+_DTC_FIRST_CORRECTION = (
+    "[SISTEM — KOREKSI WAJIB] Pesan user menanyakan KODE KESALAHAN (SPN/FMI/"
+    "kode DTC), tetapi kamu menjawab TANPA memanggil tool sama sekali. Jawaban "
+    "kode error WAJIB berasal dari database — panggil SEKARANG tool "
+    "cari_kode_kesalahan dengan angka PERSIS dari pesan user (spn=…, fmi=…, "
+    "atau code=…), lalu dasari jawaban dari HASILNYA. Database memuat SPN "
+    "proprietary 520192–524287 (mis. 520243) — ⛔ JANGAN menyimpulkan 'tidak "
+    "ada' dari giliran sebelumnya atau dari ingatan. ⚠️ Jangan minta maaf dan "
+    "jangan menyebut koreksi ini ke user."
+)
+
+
+def _dtc_tokens(text: str) -> set[str]:
+    """Token kode-error di teks user: angka SPN + kode DTC (P/B/U). Dipakai
+    guard DTC-FIRST untuk (1) mendeteksi pertanyaan kode error, (2) memastikan
+    jawaban memang membicarakan kode itu (anti false-positive follow-up lain)."""
+    t = text or ""
+    toks = {m.group(1) for m in _DTC_SPN_RE.finditer(t)}
+    toks |= {m.group(1).upper() for m in _DTC_CODE_RE.finditer(t)}
+    return toks
+
+
 def _sanitize_ungrounded(reply: str, bad: list[str]) -> str:
     """Jaring terakhir bila model tetap membandel setelah dikoreksi.
     - Bila SEMUA PN di jawaban ternyata karangan → jawaban ini tak punya data nyata:
@@ -9141,6 +9175,14 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
         _rangka_tokens.update(_rangka_candidates(((_m or {}).get("content") or "").upper()))
     rangka_tool_attempted = False
     epc_first_retried = False
+    # Guard DTC-FIRST: pesan TERAKHIR user memuat SPN/kode DTC? Model wajib
+    # MENCOBA cari_kode_kesalahan/diagnosa sebelum membicarakan kode itu.
+    _last_user_msg = next((((m or {}).get("content") or "")
+                           for m in reversed(history)
+                           if (m or {}).get("role") == "user"), "")
+    user_dtc_tokens = _dtc_tokens(_last_user_msg)
+    dtc_tool_attempted = False
+    dtc_first_retried = False
     # Guard SUBSTITUSI katalog-lokal: bila tool EPC per-VIN sukses, PN yg HANYA dari
     # cari_part (lokal per-model) & tak ada di hasil EPC = suspect (salah utk unit ini).
     epc_vin_pns: set[str] = set()
@@ -9251,6 +9293,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                         lc_args["_grounded"] = grounded
                     if _args_has_rangka(lc_args):
                         rangka_tool_attempted = True
+                    if name in ("cari_kode_kesalahan", "diagnosa"):
+                        dtc_tool_attempted = True
                     result = _run_tool(name, lc_args, user, sheet_id)
                     tools_used.append(name)
                     _dump = _dump_tool(result)
@@ -9313,6 +9357,16 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 excel_claim_retried = True
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": _EXCEL_CLAIM_CORRECTION})
+                continue
+            # GUARD DTC-FIRST (bukti log: "SPN 520243 FMI 21" dijawab 'tidak
+            # ditemukan' TANPA tool, padahal ada): pesan terakhir user memuat
+            # SPN/kode DTC + jawaban MEMBICARAKAN kode itu + model belum MENCOBA
+            # cari_kode_kesalahan/diagnosa → paksa cek database dulu (sekali).
+            if (user_dtc_tokens and not dtc_tool_attempted and not dtc_first_retried
+                    and any(t in reply.upper() for t in user_dtc_tokens)):
+                dtc_first_retried = True
+                messages.append({"role": "assistant", "content": content})
+                messages.append({"role": "user", "content": _DTC_FIRST_CORRECTION})
                 continue
             # GUARD EPC-FIRST (aturan pemilik: part per-unit wajib sesuai rangka):
             # user menyebut rangka di pesan terakhir + jawaban memuat PN + model
@@ -9408,6 +9462,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             tools_used.append(name)
             if _args_has_rangka(args):
                 rangka_tool_attempted = True
+            if name in ("cari_kode_kesalahan", "diagnosa"):
+                dtc_tool_attempted = True
             _dump = _dump_tool(result)
             _res_pns = _extract_pns(_dump)
             grounded |= _res_pns
