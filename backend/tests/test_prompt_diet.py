@@ -19,7 +19,7 @@ _PENANDA_WAJIB = (
     "ATURAN PALING KERAS",
     "DEPAN ≠ BELAKANG",
     "part_aus_dari_rangka",
-    "uraikan_mesin",
+    "sumber='mesin'",  # Fase 4: uraikan_mesin dilebur → uraikan_assembly(sumber='mesin')
     "AKURASI PER-UNIT",
 )
 

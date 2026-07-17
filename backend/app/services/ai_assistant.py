@@ -787,7 +787,10 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "EPC pabrik (lebih akurat daripada menebak dari nama unit; dua unit "
                     "'sama' bisa beda gearbox). Pakai untuk pertanyaan 'repair kit / perpak "
                     "/ seal kit / paking transmisi', 'apa saja diganti saat overhaul "
-                    "gearbox', dll. Kosongkan 'transmisi' & 'rangka' untuk daftar model."
+                    "gearbox', dll. Kosongkan 'transmisi' & 'rangka' untuk daftar model. "
+                    "Utk REPAIR KIT MESIN Weichai ('repair kit mesin unit X', 'paket servis/"
+                    "overhaul mesin'): isi sumber='mesin' + 'rangka' (hanya unit bermesin "
+                    "Weichai; disilang stok/harga lokal)."
                 ),
                 "parameters": {
                     "type": "object",
@@ -798,12 +801,17 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         },
                         "rangka": {
                             "type": "string",
-                            "description": "Nomor rangka/VIN unit (bila user menyebutnya) — gearbox di-resolve PERSIS dari EPC Sinotruk per-VIN, mengalahkan 'transmisi'.",
+                            "description": "Nomor rangka/VIN unit (bila user menyebutnya) — gearbox di-resolve PERSIS dari EPC Sinotruk per-VIN, mengalahkan 'transmisi'. WAJIB utk sumber='mesin'.",
                         },
                         "tingkat": {
                             "type": "string",
                             "enum": ["seal_kit", "overhaul", "semua"],
                             "description": "'seal_kit' = perpak (seal+gasket+O-ring, default), 'overhaul' = bearing+synchronizer+snap ring, 'semua' = keduanya.",
+                        },
+                        "sumber": {
+                            "type": "string",
+                            "enum": ["transmisi", "mesin"],
+                            "description": "'transmisi' (default) = repair kit gearbox; 'mesin' = repair kit MESIN Weichai per-VIN.",
                         },
                     },
                 },
@@ -1173,42 +1181,25 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "(mis. 'v stay', 'thrust rod', 'tie rod'). Mengembalikan tiap komponen + qty + "
                     "stok/harga lokal. ⛔ JANGAN menjawab pertanyaan komponen-dalam-assembly dengan "
                     "PN assembly-nya sendiri — pakai tool ini untuk mendapat komponen aslinya. "
-                    "Butuh NOMOR RANGKA (per-VIN). HANYA Sinotruk/HOWO/SITRAK."
+                    "Butuh NOMOR RANGKA (per-VIN). "
+                    "DUA SISI dalam satu tool (param 'sumber'): 'atlas' (default) = EPC Parts "
+                    "Atlas Sinotruk/HOWO/SITRAK; 'mesin' = EPC WEICHAI utk PART MESIN unit "
+                    "bermesin Weichai (WP12/WP13): part internal (blok, kruk as, piston, ring, "
+                    "liner, kepala silinder, klep, noken, pompa oli/air, injector) DAN aksesori "
+                    "menempel di mesin (kompresor angin, alternator, starter, turbocharger, pompa "
+                    "injeksi, flywheel) — semua itu TIDAK ADA di EPC Sinotruk. Utk sumber='mesin': "
+                    "isi 'assembly' dgn komponen mesin yg dicari (atau kosongkan utk daftar group "
+                    "mesin). Auto: bila assembly tak ketemu di Atlas, sistem otomatis mencoba sisi "
+                    "mesin Weichai (lihat 'sumber_dipakai')."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number 8 digit."},
-                        "assembly": {"type": "string", "description": "Assembly yang mau diurai — PN assembly (mis. 'AZ000052000229') atau nama/istilah (mis. 'v stay', 'thrust rod', 'tie rod')."},
+                        "assembly": {"type": "string", "description": "Assembly/komponen yang mau diurai — PN assembly (mis. 'AZ000052000229') atau nama/istilah (mis. 'v stay', 'thrust rod'; sumber='mesin': 'piston', 'injector', 'air compressor')."},
+                        "sumber": {"type": "string", "enum": ["atlas", "mesin"], "description": "Sisi EPC: 'atlas' (default, sasis/bodi Sinotruk) atau 'mesin' (EPC Weichai, part internal mesin). Kosongkan = atlas + auto-fallback mesin."},
                     },
                     "required": ["rangka", "assembly"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "uraikan_mesin",
-                "description": (
-                    "PART MESIN dari NOMOR RANGKA/VIN — untuk unit Sinotruk yang MESINNYA "
-                    "WEICHAI (mis. WP12/WP13). Part internal mesin (blok, kruk as/crankshaft, piston, "
-                    "ring, liner/cylinder liner, kepala silinder/cylinder head, klep, noken, pompa "
-                    "oli/air, injector, dll) DAN AKSESORI YANG MENEMPEL DI MESIN (kompresor angin/"
-                    "air compressor, alternator/dinamo ampere, dinamo starter, turbocharger, pompa "
-                    "injeksi, flywheel) TIDAK ADA di EPC Sinotruk — ADA di EPC WEICHAI terpisah. "
-                    "Tool ini mengambilnya OTOMATIS (SSO+BOM). TANPA 'part' → daftar GROUP mesin; "
-                    "DENGAN 'part' → cari komponen itu + stok/harga. ⛔ Untuk part mesin unit "
-                    "bermesin Weichai, JANGAN pakai part_aus_dari_rangka/bom_dari_rangka (itu EPC "
-                    "Sinotruk, berhenti di engine assembly — paling banter menemukan pipa/bracket "
-                    "penghubungnya) — pakai tool INI. HANYA unit mesin Weichai."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number 8 digit."},
-                        "part": {"type": "string", "description": "Opsional. Komponen mesin yang dicari, istilah Indonesia/Inggris (mis. 'piston', 'ring piston', 'cylinder liner/boring', 'crankshaft/kruk as', 'cylinder head', 'klep/valve', 'injector', 'air compressor/kompresor angin', 'alternator', 'starter', 'turbocharger'). Kosongkan untuk daftar semua group mesin."},
-                    },
-                    "required": ["rangka"],
                 },
             },
         },
@@ -1233,26 +1224,6 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "rangka": {"type": "string", "description": "Opsional. Nomor rangka unit (untuk mengaktifkan sesi Weichai bila mengecek part mesin)."},
                     },
                     "required": ["part_number"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "repair_kit_mesin",
-                "description": (
-                    "REPAIR KIT (维修包) MESIN Weichai dari NOMOR RANGKA — paket komponen servis/"
-                    "overhaul mesin (seperti repair kit transmisi, tapi utk mesin). Untuk 'repair kit "
-                    "mesin unit X', 'paket servis mesin', 'komponen overhaul mesin'. Disilang stok/"
-                    "harga lokal. Hanya unit bermesin Weichai (bila mesin tak punya kit terdefinisi, "
-                    "tool balas apa adanya)."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number 8 digit."},
-                    },
-                    "required": ["rangka"],
                 },
             },
         },
@@ -1300,34 +1271,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "kategori": {"type": "string", "description": "Kategori yang mau dikatalogkan (mis. 'kabin', 'rem', 'transmisi', 'gardan belakang', 'kelistrikan', 'ac') — ATAU 'semua' untuk KATALOG LENGKAP seluruh kategori unit. HANYA diisi bila user MENYEBUTNYA; bila user belum menyebut kategori, KOSONGKAN (tool akan menyuruhmu menawarkan pilihan) — JANGAN menebak."},
                         "format": {"type": "string", "enum": ["excel", "pdf"], "description": "Format file hasil: 'excel' (.xlsx) atau 'pdf' (siap cetak). HANYA diisi bila user SUDAH memilih; bila belum, KOSONGKAN (tool akan menyuruhmu menanyakan Excel atau PDF) — JANGAN menebak/mengasumsikan."},
                         "sertakan_stok_harga": {"type": "boolean", "description": "Isi TRUE HANYA bila user (yang seorang ADMIN) secara eksplisit minta stok & harga ikut diisi di katalog. Default kosong/false = kolom Stok/Harga dibiarkan KOSONG. Untuk user non-admin, tetap KOSONG walau diminta (sistem menahannya). JANGAN set true tanpa permintaan eksplisit."},
-                    },
-                    "required": ["rangka"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "katalog_mesin",
-                "description": (
-                    "KATALOG PART BERGAMBAR MESIN (exploded view) untuk unit bermesin WEICHAI, per-VIN "
-                    "— panggil saat user minta 'katalog mesin <rangka>', 'buku part mesin unit X', "
-                    "'katalog blok/piston/bahan bakar mesin', 'catalog engine + gambar'. Menyusun part "
-                    "internal mesin per-KELOMPOK (blok, kepala silinder, kruk as, bahan bakar, pelumas, "
-                    "pendingin, turbo, kompresor, alternator/starter, dll.) LENGKAP dengan gambar "
-                    "exploded view resmi EPC Weichai + nomor balon, menjadi FILE Excel/PDF (kartu "
-                    "unduh otomatis). Kolom Stok & Harga SELALU KOSONG di file (default) — hanya "
-                    "terisi bila ADMIN eksplisit minta. Untuk part INTERNAL MESIN — BEDA dari "
-                    "katalog_kategori (itu bodi/sasis Sinotruk). HANYA unit bermesin Weichai (WP-series; "
-                    "Sinotruk/HOWO/SITRAK bermesin Weichai). Proses ±1-3 menit."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number."},
-                        "kategori": {"type": "string", "description": "Bagian mesin yang mau dikatalogkan (mis. 'blok', 'kepala silinder', 'bahan bakar', 'pelumas', 'pendingin', 'turbo', 'kompresor', 'alternator') — ATAU 'lengkap'/'semua' untuk SELURUH mesin. HANYA diisi bila user MENYEBUTNYA; bila belum, KOSONGKAN (tool akan menyuruhmu menawarkan pilihan) — JANGAN menebak."},
-                        "format": {"type": "string", "enum": ["excel", "pdf"], "description": "Format hasil: 'excel' atau 'pdf'. HANYA diisi bila user SUDAH memilih; bila belum, KOSONGKAN (tool akan menyuruhmu menanyakan) — JANGAN menebak."},
-                        "sertakan_stok_harga": {"type": "boolean", "description": "Isi TRUE HANYA bila user (seorang ADMIN) eksplisit minta stok & harga ikut diisi. Default kosong/false = kolom Stok/Harga KOSONG. User non-admin tetap KOSONG walau minta (ditahan sistem). JANGAN set true tanpa permintaan eksplisit."},
+                        "sumber": {"type": "string", "enum": ["atlas", "mesin"], "description": "'atlas' (default) = katalog bodi/sasis Sinotruk (Parts Atlas). 'mesin' = KATALOG MESIN Weichai per-VIN ('katalog mesin <rangka>', 'buku part mesin'): part internal mesin per-kelompok (blok, kepala silinder, kruk as, bahan bakar, pelumas, pendingin, turbo, kompresor, alternator/starter); kategori diisi kelompok mesin itu atau 'lengkap'. Hanya unit bermesin Weichai."},
                     },
                     "required": ["rangka"],
                 },
@@ -1345,47 +1289,22 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "PN itu + NOMOR BALON-nya, lalu menyajikan gambarnya + daftar balon→part figure "
                     "itu. Gambar hanya muncul saat DIMINTA lewat tool ini (tidak auto-nempel di tiap "
                     "cek part). Butuh "
-                    "NOMOR RANGKA (per-VIN) + PN + KATEGORI (mempersempit pencarian figure). Untuk "
-                    "part BODI/SASIS/GARDAN/REM/KABIN Sinotruk (Parts "
-                    "Atlas). ⛔ Untuk part INTERNAL MESIN (piston, liner, klep, injektor, kruk as, "
-                    "turbo — unit bermesin Weichai) pakai gambar_exploded_mesin. Hanya Sinotruk/HOWO/SITRAK."
+                    "NOMOR RANGKA (per-VIN) + PN + KATEGORI (mempersempit pencarian figure). "
+                    "DUA SISI dalam satu tool (param 'sumber'): 'atlas' (default) = part BODI/"
+                    "SASIS/GARDAN/REM/KABIN Sinotruk (Parts Atlas); 'mesin' = part INTERNAL "
+                    "MESIN unit bermesin Weichai (piston, liner, klep, injektor, kruk as, "
+                    "turbo — figure EPC Weichai, kategori = kelompok mesin: blok/bahan bakar/"
+                    "pelumas/pendingin/turbo, kosong = seluruh mesin). Auto: bila PN tak "
+                    "ketemu di Atlas, sistem otomatis mencoba sisi mesin (lihat 'sumber_dipakai')."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "rangka": {"type": "string", "description": "Nomor rangka/VIN unit (gambar diambil per-VIN)."},
                         "pn": {"type": "string", "description": "Part Number untuk MENEMUKAN figure-nya (part yg sedang dibahas). Gambar figure yang memuat PN ini yang ditampilkan."},
-                        "kategori": {"type": "string", "description": "Kategori figure untuk mempersempit pencarian: tentukan dari JENIS part (bearing/hub/baut roda → 'gardan depan'/'gardan belakang'; kampas/sepatu rem → 'rem'; piston/liner/klep → 'mesin'; sinkromes/garpu → 'transmisi'; part kabin → 'kabin'; kelistrikan → 'kelistrikan'). Bila belum yakin, KOSONGKAN (tool akan meminta ditentukan)."},
+                        "kategori": {"type": "string", "description": "Kategori figure untuk mempersempit pencarian: tentukan dari JENIS part (bearing/hub/baut roda → 'gardan depan'/'gardan belakang'; kampas/sepatu rem → 'rem'; piston/liner/klep → 'mesin'; sinkromes/garpu → 'transmisi'; part kabin → 'kabin'; kelistrikan → 'kelistrikan'). Bila belum yakin, KOSONGKAN (tool akan meminta ditentukan). Utk sumber='mesin' boleh kosong = cari di seluruh kelompok mesin."},
                         "balon": {"type": "integer", "description": "OPSIONAL. Bila user minta menyorot NOMOR BALON tertentu di gambar (mis. 'cek baut no 3', 'balon 5 itu apa'), isi nomornya — sistem menyorot balon itu (kuning) di figure yang memuat 'pn' + melaporkan part di balon itu. KOSONG = sorot balon PN-nya sendiri."},
-                    },
-                    "required": ["rangka", "pn"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "gambar_exploded_mesin",
-                "description": (
-                    "TAMPILKAN GAMBAR EXPLODED VIEW MESIN (Weichai) untuk SATU Part Number — gambar "
-                    "muncul INLINE di jawaban chat (bukan file unduh), SEPERTI gambar_exploded tapi "
-                    "untuk part INTERNAL MESIN unit bermesin Weichai. Panggil saat user minta 'gambar/"
-                    "skema exploded part mesin', 'lihat gambar <PN mesin>', 'part mesin ini balon "
-                    "berapa'. Menemukan FIGURE mesin resmi EPC Weichai (per-VIN) yang memuat PN + "
-                    "NOMOR BALON-nya (orderNo), lalu menyajikan gambarnya + daftar balon→part. Gambar "
-                    "hanya muncul saat DIMINTA lewat tool ini (tidak auto-nempel). Butuh NOMOR RANGKA + PN. "
-                    "'kategori' OPSIONAL (blok/bahan bakar/pelumas/dll) untuk mempercepat; kosong = "
-                    "cari di SELURUH kelompok mesin. Beda dari gambar_exploded (itu Parts Atlas "
-                    "Sinotruk: bodi/sasis/gardan) & katalog_mesin (itu FILE Excel/PDF). Hanya unit "
-                    "bermesin Weichai."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "rangka": {"type": "string", "description": "Nomor rangka/VIN unit (gambar diambil per-VIN)."},
-                        "pn": {"type": "string", "description": "Part Number mesin untuk MENEMUKAN figure-nya (mis. PN assembly/utama yang sedang dibahas, spt turbocharger assembly). Gambar figure yang memuat PN ini yang ditampilkan."},
-                        "kategori": {"type": "string", "description": "OPSIONAL. Kelompok mesin untuk mempersempit (mis. 'blok', 'bahan bakar', 'pelumas', 'pendingin', 'turbo', 'kepala silinder'). KOSONGKAN untuk mencari di seluruh mesin (lebih lama sedikit tapi paling aman)."},
-                        "balon": {"type": "integer", "description": "OPSIONAL. Bila user minta menyorot NOMOR BALON tertentu di gambar (mis. 'cek baut NO 3 di turbo', 'balon 5 itu apa'), isi nomornya di sini — sistem menyorot balon itu (kuning) di figure yang memuat 'pn', dan melaporkan part di balon itu. KOSONG = sorot balon PN-nya sendiri."},
+                        "sumber": {"type": "string", "enum": ["atlas", "mesin"], "description": "Sisi EPC: 'atlas' (default, bodi/sasis Sinotruk) atau 'mesin' (EPC Weichai, part internal mesin unit bermesin Weichai). Kosongkan = atlas + auto-fallback mesin."},
                     },
                     "required": ["rangka", "pn"],
                 },
@@ -4549,7 +4468,7 @@ def _gearbox_from_rangka(rangka: str) -> tuple[str, dict]:
     }
 
 
-def _t_repair_kit_transmisi(args: dict, user: dict) -> dict:
+def _repair_kit_transmisi_impl(args: dict, user: dict) -> dict:
     if not repairkit.available():
         return {"error": "Data repair kit transmisi belum tersedia di server."}
     q = (args.get("transmisi") or "").strip()
@@ -6350,7 +6269,7 @@ def _t_kategori_unit(args: dict, user: dict) -> dict:
 _PN_LIKE_RE = re.compile(r"^(?=[0-9A-Z.\-/]*[A-Z])(?=[0-9A-Z.\-/]*[0-9])[0-9A-Z][0-9A-Z.\-/]{5,}$")
 
 
-def _t_uraikan_assembly(args: dict, user: dict) -> dict:
+def _uraikan_assembly_impl(args: dict, user: dict) -> dict:
     """URAIKAN satu ASSEMBLY (per-VIN) → KOMPONEN DI DALAMNYA (isi/turunan), persis
     view 'Spare Part List' bergambar di EPC. Untuk 'karet/bos/seal/pin/isi dari
     <assembly>'. Match assembly via PN (mis. AZ000052000229) atau nama/istilah
@@ -6434,7 +6353,7 @@ def _t_uraikan_assembly(args: dict, user: dict) -> dict:
     }
 
 
-def _t_uraikan_mesin(args: dict, user: dict) -> dict:
+def _uraikan_mesin_impl(args: dict, user: dict) -> dict:
     """PART INTERNAL MESIN (Weichai) per-VIN — untuk unit Sinotruk yang bermesin
     Weichai (mis. WP12). Otomatis menempuh EPC Weichai (SSO + BOM). Tanpa 'part' →
     daftar GROUP mesin (Engine Block, Crankshaft, Piston, Cylinder Head, dst).
@@ -6683,7 +6602,7 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
     }
 
 
-def _t_repair_kit_mesin(args: dict, user: dict) -> dict:
+def _repair_kit_mesin_impl(args: dict, user: dict) -> dict:
     """REPAIR KIT (维修包) mesin Weichai per-VIN — paket komponen servis/overhaul mesin,
     disilang stok/harga lokal."""
     rangka = (args.get("rangka") or "").strip()
@@ -7072,7 +6991,7 @@ def _t_excel_stok_gudang(args: dict, user: dict) -> dict:
                         "& JANGAN membuat link sendiri.")}
 
 
-def _t_katalog_mesin(args: dict, user: dict) -> dict:
+def _katalog_mesin_impl(args: dict, user: dict) -> dict:
     """KATALOG BERGAMBAR MESIN Weichai per-VIN — tiap GROUP mesin = satu figure
     (gambar exploded view resmi EPC Weichai + part ber-nomor balon). Reuse penuh
     pipeline katalog (epc_weichai.catalog_walk → ai_export builder source=weichai).
@@ -7163,7 +7082,7 @@ def _t_katalog_mesin(args: dict, user: dict) -> dict:
     }
 
 
-def _t_katalog_kategori(args: dict, user: dict) -> dict:
+def _katalog_kategori_impl(args: dict, user: dict) -> dict:
     """KATALOG BERGAMBAR per kategori per-VIN — walk Atlas (epc_bom.catalog_walk,
     di-cache), lalu stash RESEP export; Excel bergambar dibangun saat kartu
     diunduh (ai_export.katalog_excel) agar chat tak menunggu render gambar."""
@@ -7252,7 +7171,7 @@ def _t_katalog_kategori(args: dict, user: dict) -> dict:
     }
 
 
-def _t_gambar_exploded(args: dict, user: dict) -> dict:
+def _gambar_exploded_atlas_impl(args: dict, user: dict) -> dict:
     """GAMBAR EXPLODED VIEW EPC untuk SATU PN (per-VIN): temukan figure yang memuat
     PN + NOMOR BALON-nya, siapkan PNG yang tampil INLINE di chat. Reuse Parts Atlas
     (epc_bom.exploded_figures) + render resvg (ai_export.exploded_png)."""
@@ -7352,9 +7271,9 @@ def _t_gambar_exploded(args: dict, user: dict) -> dict:
     }
 
 
-def _t_gambar_exploded_mesin(args: dict, user: dict) -> dict:
+def _gambar_exploded_mesin_impl(args: dict, user: dict) -> dict:
     """GAMBAR EXPLODED VIEW MESIN Weichai untuk SATU PN (inline di chat) — padanan
-    _t_gambar_exploded untuk part internal mesin. Reuse epc_weichai.exploded_figures
+    sisi Atlas untuk part internal mesin. Reuse epc_weichai.exploded_figures
     (figure=group ber-svgFileId, balon=orderNo) + render via token Weichai."""
     rangka = (args.get("rangka") or "").strip()
     pn = (args.get("pn") or args.get("part_number") or "").strip().upper()
@@ -7440,6 +7359,88 @@ def _t_gambar_exploded_mesin(args: dict, user: dict) -> dict:
         "jumlah_figure_cocok": len(d["figures"]), "gambar": gambar,
         "catatan": catatan,
     }
+
+
+# ══ ROUTER TOOL GABUNGAN Sinotruk↔Weichai (Fase 4 rombakan 2026-07-17) ══
+# 4 pasang tool kembar dilebur: nama sisi Sinotruk dipertahankan + param
+# `sumber` ('atlas'|'mesin'|kosong=auto). Ke-8 implementasi lama TETAP ada
+# (_*_impl); `_t_*_mesin` jadi shim (test lama & leaked tool-call tetap jalan).
+# Auto-fallback silang gambar/uraikan menyerang mode gagal produksi 33%
+# (model salah pilih sisi Atlas vs Weichai).
+def _t_gambar_exploded(args: dict, user: dict) -> dict:
+    sumber = (args.get("sumber") or "").strip().lower()
+    if sumber == "mesin":
+        return _gambar_exploded_mesin_impl(args, user)
+    hasil = _gambar_exploded_atlas_impl(args, user)
+    if sumber == "atlas" or hasil.get("found") or hasil.get("_token_issue"):
+        return hasil
+    # AUTO-FALLBACK: PN tak ketemu di Atlas (bukan isu token/input kosong) →
+    # coba sisi mesin Weichai; pakai hasilnya hanya bila BENAR ketemu.
+    if hasil.get("error") and (args.get("rangka") or "").strip() \
+            and ((args.get("pn") or args.get("part_number") or "").strip()):
+        h2 = _gambar_exploded_mesin_impl(args, user)
+        if h2.get("found"):
+            h2["sumber_dipakai"] = "mesin_weichai"
+            h2["catatan"] = ("PN ini TIDAK ada di Parts Atlas Sinotruk tapi KETEMU di "
+                            "EPC mesin Weichai (otomatis dialihkan). "
+                            + (h2.get("catatan") or ""))
+            return h2
+    return hasil
+
+
+def _t_gambar_exploded_mesin(args: dict, user: dict) -> dict:
+    return _gambar_exploded_mesin_impl(args, user)
+
+
+def _t_uraikan_assembly(args: dict, user: dict) -> dict:
+    sumber = (args.get("sumber") or "").strip().lower()
+    if sumber == "mesin":
+        a2 = dict(args)
+        if not (a2.get("part") or "").strip():
+            a2["part"] = (args.get("assembly") or "").strip()
+        return _uraikan_mesin_impl(a2, user)
+    hasil = _uraikan_assembly_impl(args, user)
+    if sumber == "atlas" or hasil.get("found") or hasil.get("_token_issue"):
+        return hasil
+    # AUTO-FALLBACK: assembly tak ketemu di Atlas → coba urai di mesin Weichai
+    # (payload tiap sisi TETAP bentuk lamanya; hanya ditandai sumber_dipakai).
+    if (args.get("rangka") or "").strip() and (args.get("assembly") or "").strip():
+        a2 = dict(args)
+        a2["part"] = a2.get("assembly") or ""
+        try:
+            h2 = _uraikan_mesin_impl(a2, user)
+        except Exception:
+            h2 = {}
+        if h2.get("found"):
+            h2["sumber_dipakai"] = "mesin_weichai"
+            return h2
+    return hasil
+
+
+def _t_uraikan_mesin(args: dict, user: dict) -> dict:
+    return _uraikan_mesin_impl(args, user)
+
+
+def _t_katalog_kategori(args: dict, user: dict) -> dict:
+    # 'mesin' juga kategori Atlas (02 powertrain) → HANYA sumber eksplisit yang
+    # mengalihkan ke katalog mesin Weichai; tanpa itu perilaku lama dipertahankan.
+    if (args.get("sumber") or "").strip().lower() == "mesin":
+        return _katalog_mesin_impl(args, user)
+    return _katalog_kategori_impl(args, user)
+
+
+def _t_katalog_mesin(args: dict, user: dict) -> dict:
+    return _katalog_mesin_impl(args, user)
+
+
+def _t_repair_kit_transmisi(args: dict, user: dict) -> dict:
+    if (args.get("sumber") or "").strip().lower() == "mesin":
+        return _repair_kit_mesin_impl(args, user)
+    return _repair_kit_transmisi_impl(args, user)
+
+
+def _t_repair_kit_mesin(args: dict, user: dict) -> dict:
+    return _repair_kit_mesin_impl(args, user)
 
 
 _DISPATCH = {
@@ -7536,11 +7537,24 @@ def _run_tool(name: str, args: dict, user: dict, sheet_id: str = "") -> dict:
     return res
 
 
+# Nama tool LAMA sisi Weichai → tool gabungan penggantinya (Fase 4). Spec-nya
+# tak lagi ditawarkan, tapi eksekusinya tetap SAH (shim di _DISPATCH) — model
+# kadang menulis nama lama dari kebiasaan riwayat/leaked tool-call.
+_LEGACY_TOOL_ALIAS = {
+    "gambar_exploded_mesin": "gambar_exploded",
+    "katalog_mesin": "katalog_kategori",
+    "uraikan_mesin": "uraikan_assembly",
+    "repair_kit_mesin": "repair_kit_transmisi",
+}
+
+
 def _allowed_tool_names(user: dict, sheet_id: str = "") -> set[str]:
     """Nama tool yang SAH untuk peran user — sumber kebenaran sama dgn yang
-    ditawarkan ke model (_tool_specs), jadi allow-list eksekusi tak pernah
-    menyimpang dari daftar yang di-expose."""
-    return {f["function"]["name"] for f in _tool_specs(user, sheet_id)}
+    ditawarkan ke model (_tool_specs) + alias legacy tool gabungan (Fase 4),
+    jadi allow-list eksekusi tak pernah menyimpang dari daftar yang di-expose."""
+    names = {f["function"]["name"] for f in _tool_specs(user, sheet_id)}
+    names |= {alias for alias, utama in _LEGACY_TOOL_ALIAS.items() if utama in names}
+    return names
 
 
 _MAX_TOOL_CONTENT = 24000  # batas char JSON hasil tool yg di-append ke messages
@@ -9069,7 +9083,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 if item["id"] and item not in excel_exports:
                     excel_exports.append(item)
         elif name in ("gambar_exploded", "gambar_exploded_mesin",
-                      "uraikan_mesin", "part_aus_dari_rangka",
+                      "uraikan_mesin", "uraikan_assembly", "part_aus_dari_rangka",
                       "diagram_wiring") and result.get("found"):
             # gambar_exploded* = gambar yang diminta eksplisit; uraikan_mesin/
             # part_aus = gambar OTOMATIS part utama yang menyertai cek part;

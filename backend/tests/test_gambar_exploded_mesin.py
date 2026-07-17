@@ -156,4 +156,5 @@ def test_capture_meta_ambil_gambar_dari_uraikan_mesin():
     # cukup pastikan nama tool masuk daftar yang di-handle.
     import inspect
     src = inspect.getsource(ai.chat)
-    assert '"uraikan_mesin", "part_aus_dari_rangka"' in src
+    # Fase 4: uraikan_assembly (tool gabungan) ikut di-handle di tuple gambar.
+    assert '"uraikan_mesin", "uraikan_assembly", "part_aus_dari_rangka"' in src
