@@ -22,8 +22,8 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 from ..core.config import get_settings
-from . import (accurate, ai_chat_log, ai_export, ai_knowledge, ai_sheet, catalog_bom, eol_dtc,
-               epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref, gudang,
+from . import (abs_scr_codes, accurate, ai_chat_log, ai_export, ai_knowledge, ai_sheet, catalog_bom,
+               eol_dtc, epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref, gudang,
                gudang_config, harga, maintenance_ref, orders, part_index, populasi, repairkit,
                reservations, search_log, sims, sims_eol, wiring_ref)
 
@@ -640,7 +640,9 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "LANGKAH PERBAIKAN resmi EOL (Bahasa Indonesia) + part terkait + lampu "
                     "MIL/SVS. Cakupan SEMUA unit kontrol: mesin (EMS), transmisi (TCU/ZF/AMT), "
                     "rem ABS/ESP/EBS, EV (BMS/VCU/MCU), BCM, airbag (ACU), radar/kamera ADAS, "
-                    "SCR/AdBlue, dll — filter dengan 'unit' bila user menyebutnya. ⛔ Untuk "
+                    "SCR/AdBlue, dll — filter dengan 'unit' bila user menyebutnya. Termasuk tabel "
+                    "rem ABS WABCO (SPN/FMI + Blink Code + langkah perbaikan) & SCR gas 国V (kode P) "
+                    "— pakai unit='ABS' atau 'SCR'. ⛔ Untuk "
                     "KELUHAN/GEJALA bebas tanpa kode (mis. 'RPM tidak mau naik', 'asap hitam') "
                     "→ pakai tool `diagnosa` (asisten perbaikan resmi Sinotruk yang menalar)."
                 ),
@@ -651,7 +653,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "fmi": {"type": "integer", "description": "Nomor FMI (Failure Mode Identifier)."},
                         "code": {"type": "string", "description": "Kode DTC, mis. 'P0410', 'B1117', '18FFAAF3'. Kode pendek otomatis cocok keluarga (P0100 → P0100F7)."},
                         "query": {"type": "string", "description": "Kata kunci Indonesia bila kode tak diketahui, mis. 'tekanan rail', 'radar terhalang', 'tegangan sel'."},
-                        "unit": {"type": "string", "description": "Filter unit kontrol (opsional): EMS, TCU, TCUZF, ESP, BMS, VCU, MCU, BCM, ACU, IFC, SCR, dll."},
+                        "unit": {"type": "string", "description": "Filter unit kontrol (opsional): EMS, TCU, TCUZF, ESP, ABS, BMS, VCU, MCU, BCM, ACU, IFC, SCR, dll."},
                     },
                 },
             },
@@ -3838,6 +3840,30 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
         for r in eol_hits
     ]
 
+    # Database ABS (WABCO, ber-SPN/FMI + langkah perbaikan) & SCR gas 国V (kode P).
+    # Bahasa Indonesia; menutup celah yg tak ada di tabel Bosch/EOL.
+    try:
+        abs_scr_hits = abs_scr_codes.search(spn=spn, fmi=fmi, code=code or "",
+                                            query=query or "", unit=unit or "", limit=15)
+    except Exception:  # pragma: no cover
+        abs_scr_hits = []
+    hasil_abs_scr = [
+        {
+            "sistem": r["sistem"],
+            "kode": r["kode"],
+            "spn": r["spn"],
+            "fmi": r["fmi"],
+            "blink": r["blink"],
+            "komponen": r["komponen"],
+            "deskripsi": r["deskripsi"],
+            "penyebab": r["penyebab"],
+            "reaksi": r["reaksi"],
+            "perbaikan": r["perbaikan"],
+            "lampu": r["lampu"],
+        }
+        for r in abs_scr_hits
+    ]
+
     # Lembar diagnosa PDF resmi (data/Fault) — kartu yang bisa DIBUKA user.
     pdf_cards = _fault_pdf_cards(spn, fmi)
 
@@ -3883,18 +3909,31 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
             f" ⚠️ Ada {len(hits)} KODE BERBEDA untuk pasangan SPN/FMI ini — "
             "tampilkan SEMUANYA, jangan pilih salah satu."
         )
-    total_kosong = not hits and not hasil_eol and not pdf_cards
+    total_kosong = not hits and not hasil_eol and not hasil_abs_scr and not pdf_cards
+    if hasil_abs_scr:
+        ada_abs = any(h["sistem"] == "ABS" for h in hasil_abs_scr)
+        ada_scr = any(h["sistem"] == "SCR" for h in hasil_abs_scr)
+        sub = " & ".join(
+            s for s, ada in (("rem ABS (WABCO)", ada_abs), ("SCR gas 国V", ada_scr)) if ada)
+        catatan += (
+            f" 'hasil_abs_scr' = database {sub} (SUDAH Bahasa Indonesia). "
+            "ABS berisi langkah perbaikan ('perbaikan'), reaksi sistem, lampu, "
+            "dan Blink Code; SCR berisi penjelasan + strategi monitoring. Sajikan "
+            "langkah perbaikan APA ADANYA, jangan mengarang. Untuk perbaikan kritis "
+            "ingatkan cek manual resmi."
+        )
     if total_kosong:
         catatan += (
-            " ⚠️ TIDAK ADA yang cocok di SEMUA database (Bosch, EOL, lembar PDF) — "
+            " ⚠️ TIDAK ADA yang cocok di SEMUA database (Bosch, EOL, ABS/SCR, lembar PDF) — "
             "sampaikan jujur ke user; minta cek ulang angka/kode di scan-tool, atau "
             "tanyakan GEJALA-nya lalu pakai tool diagnosa."
         )
-    if any((h.get("part_terkait") or "").strip() for h in hasil_eol) or any(
-            (h.get("perbaikan_eol", {}) or {}).get("part_terkait") for h in hasil):
+    if (any((h.get("part_terkait") or "").strip() for h in hasil_eol)
+            or any((h.get("perbaikan_eol", {}) or {}).get("part_terkait") for h in hasil)
+            or any((h.get("komponen") or "").strip() for h in hasil_abs_scr)):
         catatan += (
-            " Ada 'part_terkait' (komponen tersangka) — TAWARKAN ke user: cek "
-            "ketersediaan & harga part itu via cari_part (sebut nama komponennya)."
+            " Ada komponen tersangka ('part_terkait'/'komponen') — TAWARKAN ke user: "
+            "cek ketersediaan & harga part itu via cari_part (sebut nama komponennya)."
         )
     if pdf_cards:
         pasang = ", ".join(f"SPN {c['spn']} FMI {c['fmi']}" for c in pdf_cards)
@@ -3920,6 +3959,9 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
         "hasil": hasil,
         "jumlah_cocok_eol": len(hasil_eol),
         "hasil_eol": hasil_eol,
+        "total_database_abs_scr": abs_scr_codes.count(),
+        "jumlah_cocok_abs_scr": len(hasil_abs_scr),
+        "hasil_abs_scr": hasil_abs_scr,
         "pdf_diagnosa": pdf_cards,
         "catatan": catatan,
     }
@@ -3975,6 +4017,18 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
     except Exception:
         logger.exception("eol_dtc.search gagal (dilewati)")
 
+    # 1c) Kode rem ABS (WABCO, SPN/FMI + langkah perbaikan) & SCR gas 国V (kode P).
+    abs_scr_rows: list[dict] = []
+    try:
+        for r in abs_scr_codes.search(spn=spn, fmi=fmi, code=kode, query=keluhan, limit=5):
+            abs_scr_rows.append({"sistem": r["sistem"], "kode": r["kode"], "spn": r["spn"],
+                                 "fmi": r["fmi"], "blink": r["blink"], "komponen": r["komponen"],
+                                 "deskripsi": r["deskripsi"], "penyebab": r["penyebab"],
+                                 "reaksi": r["reaksi"], "perbaikan": r["perbaikan"],
+                                 "lampu": r["lampu"]})
+    except Exception:
+        logger.exception("abs_scr_codes.search gagal (dilewati)")
+
     # 2) SIMS EOL AI — pertanyaan DIPERTEGAS agar tak salah-tafsir istilah
     #    (evaluasi: 'rem angin' pernah ditafsir 'damper AC').
     bagian = []
@@ -3993,10 +4047,12 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
     pdf_cards = _fault_pdf_cards(spn, fmi)
 
     out = {
-        "found": bool(dtc) or bool(eol_rows) or bool(eol.get("found")) or bool(pdf_cards),
+        "found": (bool(dtc) or bool(eol_rows) or bool(abs_scr_rows)
+                  or bool(eol.get("found")) or bool(pdf_cards)),
         "kriteria": {"kode": kode or None, "spn": spn, "fmi": fmi, "keluhan": keluhan or None},
         "kode_kesalahan_lokal": dtc,
         "kode_kesalahan_eol": eol_rows,  # Indonesia: penyebab + langkah perbaikan resmi EOL
+        "kode_kesalahan_abs_scr": abs_scr_rows,  # ABS WABCO (SPN/FMI) + SCR gas 国V (Indonesia)
         "pdf_diagnosa": pdf_cards,
         "total_database_dtc": fault_codes.count(),
         "sumber": ("Database DTC lokal (Bosch + EOL CNHTC ber-langkah-perbaikan) + SIMS EOL AI "
