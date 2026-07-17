@@ -4,7 +4,7 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-07-15** (oleh inspeksi langsung repo lokal + SSH ke server).
+> Terakhir diverifikasi: **2026-07-16** (oleh inspeksi langsung repo lokal + SSH ke server).
 > Ditambah **§3.5 — Cara Kerja Aplikasi (deep-dive fungsional)** pada 2026-06-25 agar AI/dev
 > langsung paham domain, alur data, logika pencarian + sinonim, AI tools, API & frontend.
 > Update **2026-06-27**: tambah fitur **Repair Kit Transmisi** (data + tool AI + endpoint +
@@ -1682,4 +1682,14 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       start bila secret default/kosong, dan APP_ENV tak dikenal diperlakukan produksi (§3.5.12).
 - [ ] Rahasia (`backend/.env`, `.streamlit/secrets.toml`) jangan sampai ter-commit — lihat
       butir KRITIS di atas (`1be5c53` di `main`).
+- [~] **PROGRAM ROMBAK ASISTEN AI** — dimulai 2026-07-17 (fase 0→1→2→2.5→3→4→5; plan file
+      di `~/.claude/plans/`). **Baseline metrik produksi 2026-07-17** (ai_chat_log Supabase,
+      163 giliran) sebagai pembanding sesudah rombakan:
+      - Tool gagal: 19,6% giliran. Tersering: `pengganti_part` 45% (9/20), `uraikan_mesin` 33%,
+        `gambar_exploded` 33%, `cari_kode_kesalahan` 24%, `part_aus_dari_rangka` 18,8%.
+      - Token input rata-rata: **118rb/giliran** (19,25 jt utk 163 giliran); cache hit 88,4%;
+        output rata-rata 834. Prompt admin 86.769 chars; 56 tool spec.
+      - Latensi p50 11,5 dtk / p90 31,6 dtk. Outcome: ok 155, empty 5, sanitized 2, not_found 1.
+      - Fase 0 (2026-07-17): data mati dihapus — `data/part_image_index_rows.csv.bak-20260708`
+        (316,5 MB) + `data/embeddings.parquet` (80 MB); keduanya tak direferensikan kode.
 ```
