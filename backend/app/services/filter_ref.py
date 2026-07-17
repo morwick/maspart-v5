@@ -1,28 +1,22 @@
 """
-Referensi filter SHANTUI (alat berat) — dibaca dari
-`data/manuals/PART FILTER SHANTUI.xlsx`.
+Referensi filter SHANTUI (alat berat).
 
-Layout file: 4 sheet = jenis alat (EXCAVATOR, BULDOZER, ROLLER, GRADER). Tiap
-sheet dibagi 2 blok BERDAMPINGAN: HYDRAULIC FILTER (kiri) & ENGINE FILTER (kanan).
-Tiap blok dikelompokkan per MODEL unit (mis. SD22, SE215, DH08, SR10, SG15-B6),
-dengan kolom No / Part Name / Part Number + beberapa kolom cross-reference merek
-lain (Fleetguard, Donaldson, Weichai, HIFI, Sakura, Baldwin, Cummins, dll).
+Sejak rombakan 2026-07-17 modul ini LOADER TIPIS atas store kanonik
+`filter_shantui.json.gz` (di-generate `tools/build_filter_ref.py` dari
+data/manuals/PART FILTER SHANTUI.xlsx — parser blok HYDRAULIC/ENGINE pensiun
+dari runtime; fail-loud saat build). Ganti Excel = jalankan builder + deploy.
 
-Di-cache di memori berdasarkan mtime file → bila admin mengganti Excel-nya,
-otomatis dibaca ulang tanpa restart.
+Baris: {alat, jenis, model, part_name, part_number, cross_reference[]}
+(cross-reference merek: Fleetguard, Donaldson, Weichai, HIFI, Sakura, dll).
 """
 from __future__ import annotations
 
 import re
-import threading
 from pathlib import Path
 
-from ..core.config import get_settings
+from .knowledge_util import load_json
 
-_FILE_NAME = "PART FILTER SHANTUI.xlsx"
-
-_lock = threading.Lock()
-_cache: dict = {"mtime": None, "rows": []}
+_DATA = Path(__file__).parent / "filter_shantui.json.gz"
 
 # Istilah lapangan Indonesia → kata kunci nama filter (Inggris) di katalog.
 _FILTER_SYN = {
@@ -36,97 +30,8 @@ _FILTER_SYN = {
 }
 
 
-def _file() -> Path | None:
-    p = get_settings().data_path / "manuals" / _FILE_NAME
-    try:
-        return p if p.is_file() else None
-    except OSError:
-        return None
-
-
-def _cell(df, r: int, c: int) -> str:
-    import pandas as pd
-    try:
-        v = df.iat[r, c]
-        return "" if pd.isna(v) else str(v).strip()
-    except Exception:
-        return ""
-
-
-def _parse(path: Path) -> list[dict]:
-    """Ekstrak semua baris filter → list dict {alat, jenis, model, part_name,
-    part_number, cross_reference[]}."""
-    import pandas as pd
-
-    xls = pd.ExcelFile(path, engine="openpyxl")
-    rows: list[dict] = []
-    for sheet in xls.sheet_names:
-        df = pd.read_excel(xls, sheet_name=sheet, header=None, dtype=str)
-        nrow, ncol = df.shape
-        # Kolom awal blok ENGINE (pemisah kiri-hidrolik / kanan-mesin).
-        eng_col = next((c for c in range(ncol) if "ENGINE" in _cell(df, 0, c).upper()), None)
-        blocks = [("hydraulic", 0, eng_col if eng_col is not None else ncol)]
-        if eng_col is not None:
-            blocks.append(("engine", eng_col, ncol))
-        for ftype, c0, c1 in blocks:
-            current_model = ""
-            name_c = pn_c = None
-            cross_cs: list[int] = []
-            mode = None
-            for r in range(nrow):
-                first = _cell(df, r, c0)
-                up = first.upper()
-                if up in ("HYDRAULIC FILTER", "ENGINE FILTER", ""):
-                    continue
-                if up == "NO":  # header sub-tabel
-                    name_c, pn_c = c0 + 1, c0 + 2
-                    cross_cs = [
-                        c for c in range(c0 + 3, c1)
-                        if any(_cell(df, rr, c) for rr in range(r + 1, min(r + 12, nrow)))
-                    ]
-                    mode = "data"
-                    continue
-                if re.fullmatch(r"\d+", first):  # baris data (No = angka)
-                    if mode != "data":
-                        continue
-                    name = _cell(df, r, name_c)
-                    pn = _cell(df, r, pn_c)
-                    if not (name or pn):
-                        continue
-                    cross = [_cell(df, r, c) for c in cross_cs if _cell(df, r, c)]
-                    rows.append({
-                        "alat": sheet,
-                        "jenis": ftype,
-                        "model": current_model,
-                        "part_name": name,
-                        "part_number": pn,
-                        "cross_reference": cross,
-                    })
-                elif up not in ("PART NAME", "PART NUMBER"):
-                    current_model = first  # label model unit
-                    mode = "expect"
-    return rows
-
-
 def _load() -> list[dict]:
-    f = _file()
-    if not f:
-        return []
-    try:
-        mt = f.stat().st_mtime
-    except OSError:
-        return []
-    with _lock:
-        if _cache["mtime"] == mt and _cache["rows"]:
-            return _cache["rows"]
-    try:
-        rows = _parse(f)
-    except Exception:
-        rows = []
-    with _lock:
-        _cache["mtime"] = mt
-        _cache["rows"] = rows
-    return rows
+    return load_json(_DATA)
 
 
 def available() -> bool:
@@ -158,6 +63,7 @@ def search(unit: str = "", query: str = "") -> list[dict]:
         if terms:
             hay = " ".join([
                 r["part_name"], r["jenis"], r["part_number"], " ".join(r["cross_reference"]),
+                r.get("part_name_asli") or "",
             ]).lower()
             if not any(t in hay for t in terms):
                 continue

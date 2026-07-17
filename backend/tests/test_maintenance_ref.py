@@ -1,17 +1,25 @@
-"""Test maintenance_ref — jadwal perawatan berkala Shantui dari BANYAK xlsx.
+"""Test jadwal perawatan berkala Shantui — parser 3-template (kini di BUILDER
+tools/build_maintenance.py, rombakan 2026-07-17) + service maintenance_ref
+(loader tipis atas store kanonik jadwal_perawatan.json.gz).
 
-Fokus: (1) ingest multi-file (pindai data/manuals), (2) 3 TEMPLATE sheet berbeda
-(Spanyol X / Inggris √ dgn jam di baris berikutnya / Excavator kolom bergeser +
-'Part Name' + label '2,250h'), (3) kolom terdeteksi DINAMIS (jangkar N/P SHANTUI),
-(4) `_is_mark` — sel catatan panjang TAK dihitung sebagai tanda ganti, (5) jenis
-alat + varian (Euro II/III, kode mesin) dipisah, (6) dedup baris & sheet '中英文',
-(7) filter model/jenis/jam/kata-kunci + sinonim lintas-bahasa & batas kata,
-(8) file hilang → kosong tanpa error.
+Fokus: (1) ingest multi-file, (2) 3 TEMPLATE sheet berbeda (Spanyol X / Inggris
+√ dgn jam di baris berikutnya / Excavator kolom bergeser + 'Part Name' +
+'2,250h'), (3) kolom terdeteksi DINAMIS (jangkar N/P SHANTUI), (4) `_is_mark` —
+sel catatan panjang TAK dihitung tanda ganti, (5) jenis alat + varian dipisah,
+(6) dedup baris & sheet '中英文', (7) filter model/jenis/jam/kata-kunci +
+sinonim lintas-bahasa & batas kata, (8) store hilang → kosong tanpa error.
 """
+import sys
+from pathlib import Path
+
 import pytest
 from openpyxl import Workbook
 
 from app.services import maintenance_ref
+from app.services.knowledge_util import write_json_gz
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import build_maintenance  # noqa: E402
 
 
 def _book_dozer_loader(path):
@@ -123,11 +131,11 @@ def dunia(tmp_path, monkeypatch):
     # File LAIN yang harus DIABAIKAN (bukan maintenance).
     (manuals / "PART FILTER SHANTUI.xlsx").write_bytes(b"dummy")
 
-    class _S:
-        data_path = tmp_path
-
-    monkeypatch.setattr(maintenance_ref, "get_settings", lambda: _S())
-    monkeypatch.setattr(maintenance_ref, "_cache", {"key": None, "rows": []})
+    # Alur produksi: BUILDER parse xlsx → store kanonik; service = loader tipis.
+    rows = build_maintenance.build_rows(manuals)
+    store = tmp_path / "jadwal_perawatan.json.gz"
+    write_json_gz(store, rows)
+    monkeypatch.setattr(maintenance_ref, "_DATA", store)
     return tmp_path
 
 
@@ -200,11 +208,21 @@ def test_part_filter_diabaikan(dunia):
 
 
 def test_file_hilang_kosong(tmp_path, monkeypatch):
-    class _S:
-        data_path = tmp_path  # tanpa subfolder manuals
-
-    monkeypatch.setattr(maintenance_ref, "get_settings", lambda: _S())
-    monkeypatch.setattr(maintenance_ref, "_cache", {"key": None, "rows": []})
+    # Store belum dibangun/hilang → service kosong tanpa error.
+    monkeypatch.setattr(maintenance_ref, "_DATA", tmp_path / "tidak_ada.json.gz")
     assert maintenance_ref.available() is False
     assert maintenance_ref.models() == []
     assert maintenance_ref.search("SD99") == []
+
+
+def test_builder_fail_loud_bila_anchor_hilang(tmp_path):
+    # File maintenance TANPA sel 'N/P SHANTUI' → build_rows harus SystemExit
+    # (kesalahan parsing ketahuan saat build, bukan diam-diam di produksi).
+    manuals = tmp_path / "manuals"
+    manuals.mkdir()
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Tabel tanpa anchor"])
+    wb.save(manuals / "rusak maintenance periodic table.xlsx")
+    with pytest.raises(SystemExit):
+        build_maintenance.build_rows(manuals)
