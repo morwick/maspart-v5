@@ -51,6 +51,16 @@ _SYN: dict[str, list[str]] = {
     "gas buang": ["gas buang", "ets"], "exhaust": ["gas buang", "ets"],
     "solenoid": ["solenoid", "eso"], "mati mesin": ["solenoid", "eso"],
     "ac": ["a/c", "acr"],
+    # kurasi K4 2026-07-17 (label ambigu didekode):
+    "injector": ["pyq", "injector", "injektor"],
+    "injektor": ["pyq", "injector"],
+    "crankshaft": ["mss", "crankshaft"],
+    "kruk as": ["mss", "crankshaft"],
+    "putaran mesin": ["mss", "putaran"],
+    "remote": ["yctb", "remote"],
+    "katalis": ["katalis", "cts"],
+    "tangki urea": ["tangki urea", "ratts", "rathv"],
+    "pompa urea": ["pompa urea", "rapc", "rapps"],
 }
 
 

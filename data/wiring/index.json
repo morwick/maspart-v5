@@ -1,0 +1,277 @@
+[
+ {
+  "file": "accp.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Pedal gas (APP)"
+ },
+ {
+  "file": "acr.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Relay A/C"
+ },
+ {
+  "file": "apts.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor tekanan udara masuk (boost)"
+ },
+ {
+  "file": "can.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Jaringan CAN"
+ },
+ {
+  "file": "can1.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Jaringan CAN (2)"
+ },
+ {
+  "file": "cs.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor camshaft"
+ },
+ {
+  "file": "cslamp.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Lampu MIL / check engine"
+ },
+ {
+  "file": "cts.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor suhu coolant"
+ },
+ {
+  "file": "dg6.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Modul DG6"
+ },
+ {
+  "file": "dilamp.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Lampu indikator"
+ },
+ {
+  "file": "dps.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor tekanan diferensial DPF"
+ },
+ {
+  "file": "dv.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Katup dosis"
+ },
+ {
+  "file": "EDC17CV_SCR_DNOx2.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "Sistem SCR / AdBlue — skema keseluruhan (EDC17CV DNOx2)"
+ },
+ {
+  "file": "ef.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Kipas elektrik"
+ },
+ {
+  "file": "egrv.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Katup EGR"
+ },
+ {
+  "file": "eso.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Solenoid mati mesin"
+ },
+ {
+  "file": "ets.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor suhu gas buang"
+ },
+ {
+  "file": "evp.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Katup EGR (posisi)"
+ },
+ {
+  "file": "fan.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Kipas radiator"
+ },
+ {
+  "file": "fandio.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Kipas radiator (dioda)"
+ },
+ {
+  "file": "fanss.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Kipas radiator (kecepatan)"
+ },
+ {
+  "file": "fgr.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Relay pemanas bahan bakar"
+ },
+ {
+  "file": "fhr.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Relay pemanas"
+ },
+ {
+  "file": "fts.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor suhu bahan bakar"
+ },
+ {
+  "file": "hfm.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor massa udara (MAF/HFM)"
+ },
+ {
+  "file": "jhr.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Relay pemanas grid"
+ },
+ {
+  "file": "meterunit.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Panel instrumen"
+ },
+ {
+  "file": "mss.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor putaran mesin / crankshaft (MSS)"
+ },
+ {
+  "file": "obd.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Konektor OBD"
+ },
+ {
+  "file": "opts.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor tekanan & suhu oli"
+ },
+ {
+  "file": "pyq.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Injector / wiring injektor (喷油器)"
+ },
+ {
+  "file": "rps.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor tekanan rail (common rail)"
+ },
+ {
+  "file": "SCR_cts.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — sensor suhu katalis (hulu)"
+ },
+ {
+  "file": "SCR_cts2.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — sensor suhu katalis (hilir)"
+ },
+ {
+  "file": "SCR_radv.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — katup dosis urea (dosing valve)"
+ },
+ {
+  "file": "SCR_rapc.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — kontrol pompa urea"
+ },
+ {
+  "file": "SCR_raphh.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — pemanas selang tekanan urea"
+ },
+ {
+  "file": "SCR_rapps.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — sensor tekanan pompa urea"
+ },
+ {
+  "file": "SCR_rarv.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — katup pembalik urea (reverting valve)"
+ },
+ {
+  "file": "SCR_rashh.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — pemanas selang isap urea"
+ },
+ {
+  "file": "SCR_rasmh.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — pemanas supply module urea"
+ },
+ {
+  "file": "SCR_rat.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — sensor suhu urea"
+ },
+ {
+  "file": "SCR_rathh.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — pemanas selang balik urea"
+ },
+ {
+  "file": "SCR_rathv.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — katup pemanas tangki urea"
+ },
+ {
+  "file": "SCR_ratts.jpg",
+  "grp": "SCR / AdBlue",
+  "label": "SCR — sensor suhu tangki urea"
+ },
+ {
+  "file": "scs.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "scs"
+ },
+ {
+  "file": "sr.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Relay starter"
+ },
+ {
+  "file": "t50s.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor T50"
+ },
+ {
+  "file": "tc.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Turbocharger"
+ },
+ {
+  "file": "tvact.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Aktuator throttle"
+ },
+ {
+  "file": "twv.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "twv"
+ },
+ {
+  "file": "vss.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor kecepatan kendaraan (VSS)"
+ },
+ {
+  "file": "wifs.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Sensor air dalam bahan bakar"
+ },
+ {
+  "file": "xunhang.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Cruise control"
+ },
+ {
+  "file": "yctb.jpg",
+  "grp": "Sensor & Wiring Mesin",
+  "label": "Pedal gas remote (远程油门踏板)"
+ }
+]

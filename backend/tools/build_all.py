@@ -28,7 +28,7 @@ TOOLS = Path(__file__).resolve().parent
 
 _URUTAN = [
     "build_fault_codes", "build_abs_scr", "build_fault_cards", "build_dtc_store",
-    "build_maintenance", "build_filter_ref", "build_repairkit",
+    "build_maintenance", "build_filter_ref", "build_repairkit", "build_pin_ecu",
 ]
 _OPSIONAL = ["build_catalog_bom"]
 _TERAKHIR = "build_ai_knowledge"

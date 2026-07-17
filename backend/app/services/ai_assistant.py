@@ -25,7 +25,7 @@ import requests
 from ..core.config import get_settings
 from . import (abs_scr_codes, accurate, ai_chat_log, ai_export, ai_knowledge, ai_sheet, catalog_bom,
                dtc_diagnosa, eol_dtc, epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref,
-               gudang, gudang_config, harga, maintenance_ref, orders, part_index, populasi,
+               gudang, gudang_config, harga, maintenance_ref, orders, part_index, pin_ecu, populasi,
                repairkit, reservations, search_log, sims, sims_eol, sinonim, wiring_ref)
 
 logger = logging.getLogger("maspart.ai")
@@ -4196,16 +4196,35 @@ def _t_diagram_wiring(args: dict, user: dict) -> dict:
             "error": "Sebutkan komponen/sensornya.",
             "diagram_tersedia": wiring_ref.labels(),
         }
+
+    # Definisi PIN ECU (pin_ecu — K4 2026-07-17): 'pin K54 untuk apa', 'sensor X
+    # di pin berapa' — fan-out tanpa tool baru; ikut walau diagram tak ketemu.
+    pin_rows: list[dict] = []
+    try:
+        pin_rows = pin_ecu.search(komponen, limit=10)
+    except Exception:  # pragma: no cover
+        pin_rows = []
+    pin_payload = [{"pin": r["pin"], "sinyal": r["sinyal"],
+                    "deskripsi": r["deskripsi"], "nilai_uji": r["nilai_uji"]}
+                   for r in pin_rows]
+
     rows = wiring_ref.search(komponen, limit=6)
     if not rows:
         logger.info("MISS diagram_wiring q=%r user=%s", komponen,
                     user.get("username") or "?")
-        return {
-            "found": False,
+        out = {
+            "found": bool(pin_payload),
             "jumlah": 0,
             "catatan": (f"Tidak ada diagram wiring cocok untuk '{komponen}'. "
                         "Diagram yang tersedia: " + "; ".join(wiring_ref.labels())),
         }
+        if pin_payload:
+            out["pin_ecu"] = pin_payload
+            out["catatan"] += (
+                " NAMUN definisi PIN ECU yang cocok ADA di 'pin_ecu' (tabel "
+                "konektor resmi manual Bosch MC): sebutkan pin, sinyal, dan "
+                "nilai ujinya — terjemahkan deskripsi China bila perlu.")
+        return out
     gambar = []
     for r in rows:
         data = wiring_ref.image_bytes(r["file"])
@@ -4219,7 +4238,7 @@ def _t_diagram_wiring(args: dict, user: dict) -> dict:
                        "kategori": r.get("grp") or "Wiring"})
     if not gambar:
         return {"error": "File diagram tidak terbaca di server."}
-    return {
+    out = {
         "found": True,
         "jumlah": len(gambar),
         "diagram": [{"label": g["pn"], "grup": g["kategori"]} for g in gambar],
@@ -4231,6 +4250,12 @@ def _t_diagram_wiring(args: dict, user: dict) -> dict:
             "gambar sudah tampil sendiri — ⛔ JANGAN buat link/gambar/URL sendiri."
         ),
     }
+    if pin_payload:
+        out["pin_ecu"] = pin_payload
+        out["catatan"] += (
+            " 'pin_ecu' = definisi pin konektor ECU resmi (manual Bosch MC) yang "
+            "cocok query — sebutkan pin/sinyal/nilai uji bila relevan.")
+    return out
 
 
 def _t_jadwal_perawatan(args: dict, user: dict) -> dict:
