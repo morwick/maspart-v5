@@ -3805,7 +3805,8 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
             "spn": r["spn"],
             "fmi": r["fmi"],
             "label": r["english"],
-            "deskripsi_cn": r["desc_cn"],  # Bahasa China — terjemahkan ke Indonesia
+            "deskripsi": r.get("deskripsi") or "",  # Indonesia (kamus statik)
+            "deskripsi_cn": r["desc_cn"],  # teks asli China — fallback
             "lampu_mil": r["mil"],
             "lampu_svs": r["svs"],
         }
@@ -3868,8 +3869,9 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
     pdf_cards = _fault_pdf_cards(spn, fmi)
 
     catatan = (
-        "'hasil' = tabel mesin Bosch (deskripsi_cn Bahasa China — sajikan "
-        "terjemahan Indonesianya; MIL=lampu check engine, SVS=lampu servis). "
+        "'hasil' = tabel mesin Bosch. Pakai kolom 'deskripsi' (SUDAH Bahasa "
+        "Indonesia); 'deskripsi_cn' hanya fallback bila 'deskripsi' kosong — "
+        "baru terjemahkan sendiri. MIL=lampu check engine, SVS=lampu servis. "
         "'hasil_eol' & 'perbaikan_eol' = database EOL CNHTC resmi SEMUA unit "
         "kontrol (mesin, ABS/ESP, transmisi, BMS/VCU EV, BCM, airbag, radar, "
         "SCR) — SUDAH Bahasa Indonesia, berisi penyebab + LANGKAH PERBAIKAN + "
@@ -3994,14 +3996,18 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
         for r in fault_codes.search(spn=spn, fmi=fmi, code=kode or None,
                                     query=keluhan or None, limit=5):
             dtc.append({"kode": r["code"], "spn": r["spn"], "fmi": r["fmi"],
-                        "label": r["english"], "deskripsi_cn": r["desc_cn"],
+                        "label": r["english"],
+                        "deskripsi": r.get("deskripsi") or "",
+                        "deskripsi_cn": r["desc_cn"],
                         "lampu_mil": r["mil"], "lampu_svs": r["svs"]})
         # Pasangan SPN+FMI persis tak terdaftar → jangan kehilangan jangkar:
         # tampilkan FMI lain untuk SPN yang sama (ditandai jujur).
         if not dtc and spn is not None and fmi is not None:
             for r in fault_codes.search(spn=spn, limit=5):
                 dtc.append({"kode": r["code"], "spn": r["spn"], "fmi": r["fmi"],
-                            "label": r["english"], "deskripsi_cn": r["desc_cn"],
+                            "label": r["english"],
+                            "deskripsi": r.get("deskripsi") or "",
+                            "deskripsi_cn": r["desc_cn"],
                             "lampu_mil": r["mil"], "lampu_svs": r["svs"]})
             fmi_fallback = bool(dtc)
     except Exception:

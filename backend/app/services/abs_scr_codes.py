@@ -18,33 +18,17 @@ Pelengkap `fault_codes.py` (tabel Bosch mesin, ber-SPN/FMI) & `eol_dtc.py`
 (EOL CNHTC, ber-kode P). Modul ini menutup ABS (SPN/FMI + langkah perbaikan)
 yang tak muat di keduanya, dan tabel SCR gas 国V spesifik.
 Regenerasi: python backend/tools/build_abs_scr.py
+(lalu python backend/tools/build_dtc_store.py — sejak rombakan 2026-07-17 modul
+ini SHIM atas store kanonik `dtc_codes.json.gz`; abs_scr_codes.json.gz tinggal
+tabel antara.)
 """
 from __future__ import annotations
 
-import gzip
-import json
-from pathlib import Path
-
-_DATA = Path(__file__).parent / "abs_scr_codes.json.gz"
-
-_CACHE: dict = {"mtime": None, "data": []}
+from . import dtc_codes
 
 
 def _load() -> list[dict]:
-    try:
-        mt = _DATA.stat().st_mtime if _DATA.exists() else None
-    except OSError:
-        mt = None
-    if mt != _CACHE["mtime"]:
-        data: list[dict] = []
-        try:
-            if mt is not None:
-                with gzip.open(_DATA, "rt", encoding="utf-8") as f:
-                    data = json.load(f) or []
-        except Exception:
-            data = []
-        _CACHE.update(mtime=mt, data=data)
-    return _CACHE["data"]
+    return dtc_codes.legacy_abs_scr()
 
 
 def available() -> bool:

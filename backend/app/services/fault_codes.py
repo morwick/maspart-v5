@@ -11,23 +11,20 @@ Tiap entri:
   mil/svs  : status lampu indikator (ON/OFF)
 
 Regenerasi bila PDF diperbarui:  python backend/tools/build_fault_codes.py
+(lalu python backend/tools/build_dtc_store.py — sejak rombakan 2026-07-17 modul
+ini SHIM atas store kanonik `dtc_codes.json.gz`; fault_codes.json tinggal tabel
+antara. Baris kini juga membawa `deskripsi` (Indonesia, kamus statik) di samping
+`desc_cn`.)
 """
 from __future__ import annotations
 
-import json
 import re
-from functools import lru_cache
-from pathlib import Path
 
-_DATA = Path(__file__).parent / "fault_codes.json"
+from . import dtc_codes
 
 
-@lru_cache(maxsize=1)
 def _load() -> list[dict]:
-    try:
-        return json.loads(_DATA.read_text(encoding="utf-8"))
-    except Exception:
-        return []
+    return dtc_codes.legacy_bosch()
 
 
 def count() -> int:
