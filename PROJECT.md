@@ -4,7 +4,8 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-07-16** (oleh inspeksi langsung repo lokal + SSH ke server).
+> Terakhir diverifikasi: **2026-07-17** (rombakan besar asisten AI fase 0→5 — lihat §9;
+> struktur kode asisten kini `backend/app/services/ai_parts/` + loader `ai_assistant.py`).
 > Ditambah **§3.5 — Cara Kerja Aplikasi (deep-dive fungsional)** pada 2026-06-25 agar AI/dev
 > langsung paham domain, alur data, logika pencarian + sinonim, AI tools, API & frontend.
 > Update **2026-06-27**: tambah fitur **Repair Kit Transmisi** (data + tool AI + endpoint +
@@ -1682,8 +1683,39 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       start bila secret default/kosong, dan APP_ENV tak dikenal diperlakukan produksi (§3.5.12).
 - [ ] Rahasia (`backend/.env`, `.streamlit/secrets.toml`) jangan sampai ter-commit — lihat
       butir KRITIS di atas (`1be5c53` di `main`).
-- [~] **PROGRAM ROMBAK ASISTEN AI** — dimulai 2026-07-17 (fase 0→1→2→2.5→3→4→5; plan file
-      di `~/.claude/plans/`). **Baseline metrik produksi 2026-07-17** (ai_chat_log Supabase,
+- [x] **PROGRAM ROMBAK ASISTEN AI — SELESAI SEMUA FASE (0→5)** 2026-07-17, 13 commit
+      `ee1b726..78765c2` @ snapshot-clean, DEPLOYED 2026-07-17. Ringkasan:
+      - **Fase 1**: 3 kamus DTC → 1 store kanonik `services/dtc_codes.json.gz` (7.778 baris,
+        union bertanda sumber bosch/eol/abs/scr/kartu); 2.276 deskripsi Bosch China →
+        INDONESIA via kamus statik `tools/i18n/fault_codes_i18n.json`; service lama
+        (fault_codes/eol_dtc/abs_scr_codes) jadi SHIM proyeksi; util bersama
+        `services/knowledge_util.py` (norm_pn, loader mtime auto-gz, writer gz byte-stable,
+        apply_i18n/dump_strings).
+      - **Fase 2**: `pengganti_part` pakai indeks persamaan in-memory (bukan query SIMS live
+        rentan timeout — dulu gagal 45% giliran); lookup sinonim TERPUSAT di
+        `services/sinonim.py`; `ai_knowledge` + peta VIN→model+sasis+mesin (40 unit).
+      - **Fase 2.5**: isi 216 kartu PDF diagnosa DIEKSTRAK terstruktur →
+        `dtc_diagnosa.json.gz` (model kini MEMBACA penyebab+langkah; +32 pasangan SPN/FMI
+        baru); Excel maintenance/filter pindah ke BUILDER kanonik (`jadwal_perawatan.json.gz`,
+        `filter_shantui.json.gz`) — parser runtime pensiun, **ganti Excel = jalankan builder +
+        deploy, BUKAN hot-reload**; `build_repairkit.py` = validator transmisi.json.
+      - **Fase 3**: domain_block → `services/ai_domain.md` (mtime-stable) lalu dipangkas
+        28,5rb→10,6rb chars; KAMUS sinonim keluar dari prompt statik → subset per giliran di
+        pesan system ekor; **prompt admin 86,8rb → 50,5rb chars (−42%)**, prompt-cache utuh;
+        gating 3 tool internal dari pembeli; `tools/build_all.py` = satu pintu regenerasi
+        (ai_knowledge selalu terakhir, trigger rebuild = mtime SEMUA store input);
+        `pin_ecu.json.gz` 302 pin ECU Bosch (disajikan via diagram_wiring); kurasi 17 label
+        wiring ambigu.
+      - **Fase 4**: 4 pasang tool kembar Sinotruk↔Weichai dilebur (gambar_exploded/
+        katalog_kategori/uraikan_assembly/repair_kit_transmisi + param `sumber`
+        atlas|mesin|auto) dengan AUTO-FALLBACK silang Atlas→Weichai; shim nama lama tetap
+        sah (alias di allow-list); spec 48→44 tool admin.
+      - **Fase 5**: `ai_assistant.py` = loader 32 baris; implementasi di
+        `services/ai_parts/p1..p9` (satu namespace via exec berurutan — monkeypatch test
+        `ai.<attr>` tetap tembus). **Edit kode asisten kini di ai_parts/pN_*.py**; file baru
+        wajib didaftarkan di `_PARTS`.
+      - Test: 851 → **887 hijau** (⛔ evals tak disentuh, perintah pemilik).
+      **Baseline metrik produksi PRA-rombakan 2026-07-17** (ai_chat_log Supabase,
       163 giliran) sebagai pembanding sesudah rombakan:
       - Tool gagal: 19,6% giliran. Tersering: `pengganti_part` 45% (9/20), `uraikan_mesin` 33%,
         `gambar_exploded` 33%, `cari_kode_kesalahan` 24%, `part_aus_dari_rangka` 18,8%.
