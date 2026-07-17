@@ -1723,6 +1723,33 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
         diagram_wiring: 3 skema pneumatik ABS 6x4, skema kelistrikan HOHAN N/HOWO N MC
         A12, manual pelatihan TFT NanoBCU BAHASA INDONESIA 72 hal) — ⚠️ folder skema/
         di-scp ke server (data/), PDF pin hanya input build. Test → 892.
+- [x] **GAMBAR dari sumber PDF/Excel jadi pengetahuan (`manual_media`)** — SELESAI +
+      LIVE 2026-07-18 (commit `3bdef7e`): sumber mentah `data/manuals` selama ini hanya
+      diambil TABEL-nya; kini GAMBAR di dalamnya diekstrak & dijadikan pengetahuan yang
+      tampil INLINE di chat.
+      - Builder `tools/build_manual_media.py` (lib yang sudah ada — TANPA pymupdf):
+        `pypdfium2` ekstrak objek gambar raster + render halaman VEKTOR @200 DPI;
+        `openpyxl` foto embedded Excel. Filter ukuran (≥150px) + dedup SHA1 (buang logo
+        berulang) + downscale ≤1800px. **223 PNG** dari: 5 PDF pin/ECU (Bosch MC National
+        V/NBCU/NanoBCU/ZF-AMT + manual Bosch CN), 3 skema pneumatik ABS + 18 hal skema
+        kelistrikan HOHAN/HOWO N (render vektor), 16 foto unit Shantui (dozer/loader/
+        excavator/grader) dari Excel.
+      - **50 gambar TERKURASI** (`dicari=True`) via pass AI-VISION (4 subagent Opus baca
+        tiap PNG → label+deskripsi+sinonim Indonesia; cover page/logo dibuang otomatis).
+        163 gambar naratif (manual Bosch CN + TFT) `dicari=False` — diekstrak & di-server,
+        ditautkan per-halaman utk pemakaian kontekstual (tool teks `cari_manual` MENYUSUL).
+      - Serving: tool **`diagram_wiring` diperluas** ikut mencari `manual_media` (loader
+        tipis pola `wiring_ref`: cache mtime + guard path) dengan **PERINGKAT RELEVANSI**
+        (label/sinonim > deskripsi; kode model 'sd16'/'se210w'/'nbcu' berbobot ×3) — bukan
+        OR-alfabetis. Contoh live: "skema kelistrikan ecu bosch mc national v" → skema
+        konektor A/K; "foto unit SD16" → foto bulldozer; "skema rem angin wabco" → skema
+        pneumatik ABS WABCO; "pinout nbcu" → pinout NBCU. Gambar tampil inline (kanal
+        `exploded_images`).
+      - Deploy: PNG **scp-only** (`data/manual_media/*.png` di-gitignore, pola `data/wiring`);
+        `index.json` + `ai_knowledge.json` ikut git & di-scp (volume). `build_all --with-media`.
+        **896 test hijau** (⛔ evals tak disentuh). ⚠️ SISA (fase C, belum): store teks/tabel
+        naratif manual Bosch CN + TFT (`manual_teks`) + tool `cari_manual`; kurasi 163 gambar
+        naratif; i18n bertahap.
       **Baseline metrik produksi PRA-rombakan 2026-07-17** (ai_chat_log Supabase,
       163 giliran) sebagai pembanding sesudah rombakan:
       - Tool gagal: 19,6% giliran. Tersering: `pengganti_part` 45% (9/20), `uraikan_mesin` 33%,
