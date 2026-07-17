@@ -101,6 +101,37 @@ def test_equivalents_index(monkeypatch):
     assert sims.equivalents_for("TAKADA") == {}
 
 
+# ── fix produksi 2026-07-17: tool pakai INDEKS hangat, bukan query live ─────
+def test_pengganti_pakai_indeks_bukan_live(monkeypatch):
+    # indeks siap → query live TIDAK boleh dipanggil (rentan timeout = gagal 45%)
+    monkeypatch.setattr(ai.sims, "equivalents_count", lambda: 17000)
+    monkeypatch.setattr(ai.sims, "equivalents_for", lambda pn: {
+        "digantikan_oleh": [{"pn": "NEWIDX", "nama": "Baru"}], "menggantikan": []})
+
+    def _boom(pn):
+        raise AssertionError("query live tidak boleh dipanggil saat indeks siap")
+
+    monkeypatch.setattr(ai.sims, "get_part_equivalents", _boom)
+    monkeypatch.setattr(ai.epc_weichai, "replace_part", lambda pn, rangka: {"found": False})
+    monkeypatch.setattr(ai.part_index, "rows_for_pns", lambda pns: {})
+    r = ai._t_pengganti_part({"part_number": "OLD1"}, ADMIN)
+    assert r["found"]
+    assert [x["part_number"] for x in r["digantikan_oleh"]] == ["NEWIDX"]
+
+
+def test_pengganti_kosong_tetap_beri_info_pn(monkeypatch):
+    # tak ada supersession TAPI PN dikenal katalog → sertakan info (bukan buntu).
+    monkeypatch.setattr(ai.sims, "equivalents_count", lambda: 17000)
+    monkeypatch.setattr(ai.sims, "equivalents_for", lambda pn: {})
+    monkeypatch.setattr(ai.epc_weichai, "replace_part", lambda pn, rangka: {"found": False})
+    monkeypatch.setattr(ai.part_index, "rows_for_pns", lambda pns: {
+        "WG9100443050": {"part_name": "Brake Disc", "stok": "3", "harga": "Rp 1.000"}})
+    r = ai._t_pengganti_part({"part_number": "WG9100443050"}, ADMIN)
+    assert r["found"] is False
+    assert r["info_part_ditanya"]["stok_total"] == "3"
+    assert "aktif" in r["info_part_ditanya"]["catatan"]
+
+
 # ── cari_part menyisipkan 'pengganti' dari indeks ───────────────────────────
 def test_cari_part_sisip_pengganti(monkeypatch):
     ROW = {"part_number": "OLDPN", "part_name": "Brake Pedal", "file": "NX360", "path": "Sinotruk/NX360"}

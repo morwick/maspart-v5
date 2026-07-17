@@ -64,15 +64,11 @@ def test_load_file_hilang_atau_korup(_tmp_file):
 
 def test_asisten_langsung_pakai_entri_baru(tmp_path, monkeypatch):
     """Inti fitur: admin tambah 'tapak shoe' → _expand_query asisten langsung
-    mengembalikan 'track plate' TANPA restart (reload per-mtime)."""
-    # Asisten & service sinonim membaca FILE YANG SAMA: <data>/sinonim/sinonim.json.
-    class _S:
-        data_path = tmp_path
-
+    mengembalikan 'track plate' TANPA restart (reload per-mtime).
+    Sejak rombakan 2026-07-17 lookup terpusat di services/sinonim (cache mtime
+    per-path di knowledge_util) — asisten & CRUD tetap membaca FILE YANG SAMA."""
     real = tmp_path / "sinonim" / "sinonim.json"
     monkeypatch.setattr(sinonim, "_file", lambda: real)
-    monkeypatch.setattr(ai, "get_settings", lambda: _S())
-    ai._SINONIM_CACHE["mtime"] = None  # mulai bersih
 
     # Sebelum ditambah: tak ada ekspansi.
     terms, matched = ai._expand_query("harga tapak shoe SD16")

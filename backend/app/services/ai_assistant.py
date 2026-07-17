@@ -25,7 +25,7 @@ from ..core.config import get_settings
 from . import (abs_scr_codes, accurate, ai_chat_log, ai_export, ai_knowledge, ai_sheet, catalog_bom,
                eol_dtc, epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref, gudang,
                gudang_config, harga, maintenance_ref, orders, part_index, populasi, repairkit,
-               reservations, search_log, sims, sims_eol, wiring_ref)
+               reservations, search_log, sims, sims_eol, sinonim, wiring_ref)
 
 logger = logging.getLogger("maspart.ai")
 
@@ -211,107 +211,34 @@ def _hide_gudang_for_buyer(result: dict, user: dict) -> dict:
     return result
 
 
-_SINONIM_CACHE: dict = {"mtime": None, "data": []}
+# Lookup sinonim TERPUSAT di services/sinonim.py (rombakan 2026-07-17).
+# Wrapper tipis di bawah mempertahankan nama lama — puluhan test monkeypatch
+# `ai._load_sinonim_entries` / `ai._expand_query` / `ai._umbrella_keywords`,
+# dan wrapper meneruskan provider entries SAAT CALL-TIME supaya patch tembus.
+_UMBRELLA_KATEGORI = sinonim.UMBRELLA_KATEGORI
 
 
 def _load_sinonim_entries() -> list:
-    """Baca data/sinonim/sinonim.json. Di-cache per mtime file: editan tetap
-    langsung terpakai (mtime berubah), tapi tak parse ulang di tiap panggilan
-    tool. Format: [{"grup","triggers":[id...],"keywords":[en...]}]."""
-    try:
-        p = get_settings().data_path / "sinonim" / "sinonim.json"
-        if not p.exists():
-            return []
-        mt = p.stat().st_mtime
-        if _SINONIM_CACHE["mtime"] != mt:
-            _SINONIM_CACHE["data"] = json.loads(p.read_text(encoding="utf-8")) or []
-            _SINONIM_CACHE["mtime"] = mt
-        return _SINONIM_CACHE["data"]
-    except Exception:
-        return []
+    """Entri data/sinonim/sinonim.json (cache per-mtime — editan admin langsung
+    terpakai tanpa restart). Delegasi ke sinonim.entries()."""
+    return sinonim.entries()
 
 
 def _sinonim_block() -> str:
     """Kamus istilah lapangan (Indonesia → kata kunci nama part Inggris) untuk prompt."""
-    lines: list[str] = []
-    for e in _load_sinonim_entries():
-        trig = ", ".join(dict.fromkeys(t for t in (e.get("triggers") or []) if t))
-        kw = ", ".join(dict.fromkeys(k for k in (e.get("keywords") or []) if k))
-        if trig and kw:
-            lines.append(f"- {trig} → {kw}")
-    return "\n".join(lines)
+    return sinonim.block(_load_sinonim_entries)
 
 
 def _expand_query(q: str) -> tuple[list[str], list[str]]:
     """Perluas query dgn keyword sinonim bila mengandung istilah lapangan.
     Return (daftar istilah cari [termasuk q asli], daftar trigger yang cocok)."""
-    ql = (q or "").lower()
-    terms: list[str] = [q]
-    matched: list[str] = []
-
-    def _hit(trig: str) -> bool:
-        # cocok sbg KATA/FRASA utuh, bukan substring di tengah kata
-        # (mis. trigger 'per' TIDAK boleh cocok di dalam 'persneling').
-        return re.search(r"(?<!\w)" + re.escape(trig.lower()) + r"(?!\w)", ql) is not None
-
-    for e in _load_sinonim_entries():
-        hit = next((t for t in (e.get("triggers") or []) if t and _hit(t)), None)
-        if hit:
-            matched.append(hit)
-            for kw in (e.get("keywords") or []):
-                if kw and kw not in terms:
-                    terms.append(kw)
-    return terms, matched
-
-
-# Kata KATEGORI "payung": kata polos Indonesia (+ padanan Inggris) yang mewakili
-# SELURUH keluarga sub-part. _expand_query tak mengekspansi kata polos spt 'kopling'
-# (trigger sinonim semuanya frasa: 'kampas kopling', 'matahari kopling', dst) → jadi
-# 'kopling' saja melewatkan hampir semua sub-part. _umbrella_keywords menambal ini.
-_UMBRELLA_KATEGORI = {
-    "kopling": ["kopling", "clutch"],
-    "clutch": ["kopling", "clutch"],
-    "rem": ["rem", "brake"],
-    "brake": ["rem", "brake"],
-    "gardan": ["gardan", "differential"],
-    "transmisi": ["transmisi", "transmission", "gearbox", "persneling"],
-    "kabin": ["kabin", "cabin"],
-    "mesin": ["mesin", "engine"],
-    "kelistrikan": ["kelistrikan", "electric"],
-    "filter": ["filter", "saringan"],
-    "saringan": ["filter", "saringan"],
-    "suspensi": ["suspensi", "suspension"],
-}
+    return sinonim.expand_query(q, _load_sinonim_entries)
 
 
 def _umbrella_keywords(kata_kunci: str) -> list[str]:
-    """Bila `kata_kunci` memuat kata KATEGORI payung (mis. 'kopling', 'rem'),
-    kumpulkan keyword katalog dari SEMUA grup sinonim terkait (token payung muncul
-    di nama grup / trigger / keyword). Menjaring sub-part yang takkan muncul dari
-    pencarian nama polos: 'kopling' → driven disc, pressure plate, release bearing,
-    clutch housing, master/booster, garpu kopling. [] bila bukan kategori payung."""
-    ql = (kata_kunci or "").lower()
-
-    def _word(tok: str, text: str) -> bool:
-        return re.search(r"(?<!\w)" + re.escape(tok) + r"(?!\w)", (text or "").lower()) is not None
-
-    tokens: list[str] = []
-    for w, toks in _UMBRELLA_KATEGORI.items():
-        if _word(w, ql):
-            for t in toks:
-                if t not in tokens:
-                    tokens.append(t)
-    if not tokens:
-        return []
-    kws: list[str] = []
-    for e in _load_sinonim_entries():
-        hay = " ".join([e.get("grup") or "", *(e.get("triggers") or []),
-                        *(e.get("keywords") or [])])
-        if any(_word(tok, hay) for tok in tokens):
-            for kw in (e.get("keywords") or []):
-                if kw and kw not in kws:
-                    kws.append(kw)
-    return kws
+    """Keyword payung kategori ('kopling' → seluruh keluarga sub-part kopling).
+    Delegasi ke sinonim.umbrella_keywords()."""
+    return sinonim.umbrella_keywords(kata_kunci, _load_sinonim_entries)
 
 
 def _norm_gudang(nama: str) -> str:
@@ -6518,9 +6445,15 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
         seen.add(k)
         dst.append({"pn": pn_, "nama": nama, **extra})
 
-    # 1) SIMS (Sinotruk/HOWO sasis) — global by PN, tanpa rangka.
+    # 1) SIMS (Sinotruk/HOWO sasis) — INDEKS in-memory dulu (instan, tabel penuh
+    #    17rb baris, pemaaf PN dasar); query live per-PN hanya FALLBACK saat
+    #    indeks belum siap. (Fix produksi 2026-07-17: query live rentan
+    #    timeout/sesi kedaluwarsa → tool tercatat gagal 45% giliran.)
     try:
-        sres = sims.get_part_equivalents(pn)
+        if sims.equivalents_count() > 0:
+            sres = sims.equivalents_for(pn) or {}
+        else:
+            sres = sims.get_part_equivalents(pn)
     except Exception:
         sres = {}
     for x in (sres.get("digantikan_oleh") or []):
@@ -6544,8 +6477,22 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
             search_log.record_miss(pn, "pn", "pengganti_part")
         except Exception:
             pass
-        return {"found": False, "part_number": pn,
-                "error": "Tidak ada data persamaan/pengganti untuk PN ini (dicek SIMS Sinotruk & EPC Weichai)."}
+        out = {"found": False, "part_number": pn,
+               "error": "Tidak ada data persamaan/pengganti untuk PN ini (dicek SIMS Sinotruk & EPC Weichai)."}
+        # Tetap beri info PN yang DITANYA (katalog/stok) supaya jawaban berguna:
+        # "tak ada supersession" ≠ "part tak dikenal" — sering PN-nya masih aktif.
+        try:
+            lr = part_index.rows_for_pns([pn]).get(pn.upper())
+            if lr:
+                out["info_part_ditanya"] = {
+                    "nama": " ".join((lr.get("part_name") or "").split()) or None,
+                    "stok_total": lr.get("stok"), "harga_lokal": lr.get("harga"),
+                    "catatan": ("PN ini ADA di katalog/stok lokal — kemungkinan masih "
+                                "aktif dipakai (tidak ada catatan penggantian resmi)."),
+                }
+        except Exception:
+            pass
+        return out
 
     # Silang PN pengganti/lama ke katalog lokal — PEMAAF varian suffix/pemisah
     # (dulu search_exact_pns → pengganti ready bisa tercap 'belum ada di katalog').

@@ -256,12 +256,13 @@ def _match_q(products: list[dict], q: str) -> list[tuple[dict, int]]:
     if hits:
         return [(p, 0) for p in hits]
 
-    # Istilah lapangan (kamus yang sama dgn asisten): 'kampas rem' → friction
-    # plate / brake lining / brake pad, 'spion' → mirror, dst.
+    # Istilah lapangan (kamus TERPUSAT yang sama dgn asisten — services/sinonim,
+    # rombakan 2026-07-17: tak lagi impor dari ai_assistant): 'kampas rem' →
+    # friction plate / brake lining / brake pad, 'spion' → mirror, dst.
     try:
-        from .ai_assistant import _expand_query, _umbrella_keywords
-        terms, _matched = _expand_query(q)
-        sinonim = terms[1:]                     # tanpa query asli (sudah dicoba di atas)
+        from . import sinonim as _sin
+        terms, _matched = _sin.expand_query(q)
+        kw_sinonim = terms[1:]                  # tanpa query asli (sudah dicoba di atas)
     except Exception:
         return []
 
@@ -270,11 +271,11 @@ def _match_q(products: list[dict], q: str) -> list[tuple[dict, int]]:
     # pembeli minta kampasnya, bukan seisi kategori. Dipakai juga sebagai upaya
     # terakhir bila sinonim tak menghasilkan apa pun.
     try:
-        payung = [k for k in _umbrella_keywords(q) if k not in terms]
+        payung = [k for k in _sin.umbrella_keywords(q) if k not in terms]
     except Exception:
         payung = []
     kategori_polos = len(tokens) == 1        # 'rem' → ya; 'kampas rem' → tidak
-    urut = sinonim + (payung if kategori_polos else [])
+    urut = kw_sinonim + (payung if kategori_polos else [])
 
     out = _cocok_bertingkat(products, urut)
     if not out and payung:

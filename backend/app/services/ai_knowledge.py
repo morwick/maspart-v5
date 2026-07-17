@@ -144,6 +144,44 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
             "kata_nama_top": [w for w, _ in sub_words[sub].most_common(top_words)],
         })
 
+    # ── Peta model ↔ awalan rangka (VIN) + keluarga mesin per unit ──
+    # Ditambang dari NAMA unit katalog ('HOWO MAX 480 6X4 (LZZ1CLWB)' → awalan
+    # VIN di kurung), path file ('ZZ4257V344KF1_…' → kode sasis), dan prefix PN
+    # dominan kategori 02 Mesin/Powertrain (MQ→MC MAN; VG→WD615/D10/D12;
+    # 61…→Weichai WD/WP). Nilai: asisten mengenali model+jenis mesin dari rangka
+    # → routing tool Sinotruk vs Weichai lebih akurat (mode gagal produksi 33%).
+    _ENG_FAMILY = (
+        ("MQ", "mesin MC (Sinotruk-MAN, MC11/MC13)"),
+        ("202V", "mesin MC (Sinotruk-MAN)"),
+        ("080V", "mesin MC (Sinotruk-MAN)"),
+        ("VG", "mesin Sinotruk WD615/D10/D12"),
+        ("61", "mesin Weichai WD/WP"),
+        ("1000", "mesin Weichai WP seri baru"),
+    )
+    unit_vin: list[dict] = []
+    for uname, u in (bom.get("units") or {}).items():
+        mvin = re.search(r"\(([A-Z0-9]{6,10})\)\s*$", uname or "")
+        msas = re.search(r"(ZZ[A-Z0-9]{6,})", u.get("file") or "")
+        eng_cnt: Counter[str] = Counter()
+        for p in ((u.get("kategori") or {}).get("02") or {}).get("parts") or []:
+            pnu = (p.get("pn") or "").strip().upper()
+            for pref, _lbl in _ENG_FAMILY:
+                if pnu.startswith(pref):
+                    eng_cnt[pref] += 1
+                    break
+        mesin = ""
+        if eng_cnt:
+            pref, n = eng_cnt.most_common(1)[0]
+            if n >= 5:  # sinyal cukup — banyak unit hanya 1-2 part di kategori 02
+                mesin = dict(_ENG_FAMILY)[pref]
+        unit_vin.append({
+            "model": re.sub(r"\s*\([A-Z0-9]{6,10}\)\s*$", "", uname or "").strip(),
+            "vin_prefix": mvin.group(1) if mvin else "",
+            "sasis": msas.group(1) if msas else "",
+            "mesin": mesin,
+        })
+    unit_vin.sort(key=lambda r: (r["model"], r["vin_prefix"]))
+
     # Gudang kanonik dari konfigurasi (sumber yang sama dengan gudang_config
     # .coords_map(): kunci 'coords' = nama gudang 'NN.Nama') — bukan tebakan.
     gudang: list[str] = []
@@ -225,6 +263,7 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         },
         "prefix_pn": prefixes,
         "sub_prefix_pn": sub_rows,
+        "unit_vin": unit_vin,
         "gudang": gudang,
         "fault_codes": {"jumlah": fault_n, "jumlah_eol": eol_n,
                         "unit_kontrol_eol": eol_units_n, "wiring": wiring_n,
@@ -327,6 +366,16 @@ def _render(d: dict, with_gudang: bool) -> str:
             kw = ", ".join((r.get("kata_nama_top") or [])[:3])
             lines.append(f"  - {r['prefix']}… → {r['kategori_dominan']}"
                          + (f" ({kw})" if kw else ""))
+    uv = [r for r in (d.get("unit_vin") or []) if r.get("vin_prefix")]
+    if uv:
+        lines.append(
+            "• PETA MODEL ↔ AWALAN RANGKA (VIN) — kenali model & jenis mesin dari "
+            "awalan nomor rangka user; part per-unit TETAP WAJIB via tool EPC "
+            "ber-rangka (jangan menebak dari peta ini):")
+        for r in uv:
+            ekstra = "; ".join(x for x in (r.get("sasis"), r.get("mesin")) if x)
+            lines.append(f"  - {r['vin_prefix']} → {r['model']}"
+                         + (f" ({ekstra})" if ekstra else ""))
     if with_gudang and (d.get("gudang") or []):
         lines.append(
             "• GUDANG/CABANG RESMI (untuk memahami sebutan user spt 'jkt', "

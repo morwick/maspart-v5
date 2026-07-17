@@ -1,10 +1,13 @@
 """
-Kamus sinonim istilah lapangan — CRUD untuk data/sinonim/sinonim.json.
+Kamus sinonim istilah lapangan — CRUD + LOOKUP TERPUSAT untuk
+data/sinonim/sinonim.json.
 
-File JSON ini SATU-SATUNYA sumber kamus. Asisten AI membacanya per-mtime
-(ai_assistant._load_sinonim_entries) sehingga perubahan dari halaman admin
-langsung terpakai TANPA restart: ekspansi query cari_part & kamus istilah di
-prompt ikut segar pada permintaan berikutnya.
+File JSON ini SATU-SATUNYA sumber kamus. Sejak rombakan 2026-07-17 modul ini
+juga memuat fungsi lookup terpusat (dulu di ai_assistant): `entries()`
+(per-mtime — editan admin langsung terpakai tanpa restart), `expand_query()`,
+`umbrella_keywords()`, `block()`. ai_assistant memakai wrapper tipis
+(_load_sinonim_entries/_expand_query/dst — nama dipertahankan utk test);
+buyer_catalog memakai modul ini langsung.
 
 Format entri: {"grup": str, "triggers": [istilah lapangan/Indonesia...],
 "keywords": [kata kunci nama part katalog/Inggris...]}.
@@ -16,10 +19,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from pathlib import Path
 
 from ..core.config import get_settings
+from .knowledge_util import load_json
 
 _lock = threading.Lock()
 
@@ -63,6 +68,91 @@ def load() -> list[dict]:
     except Exception:
         return []
     return [e for e in data if isinstance(e, dict)]
+
+
+# ── LOOKUP TERPUSAT (dipakai ai_assistant + buyer_catalog) ───────────
+def entries() -> list[dict]:
+    """Entri kamus dgn cache per-mtime (knowledge_util.load_json) — murah
+    dipanggil per-query, editan admin tetap langsung terpakai."""
+    data = load_json(_file())
+    return [e for e in data if isinstance(e, dict)] if isinstance(data, list) else []
+
+
+def hit(trigger: str, text: str) -> bool:
+    """Trigger cocok sbg KATA/FRASA utuh, bukan substring di tengah kata
+    (mis. trigger 'per' TIDAK boleh cocok di dalam 'persneling')."""
+    return re.search(r"(?<!\w)" + re.escape((trigger or "").lower()) + r"(?!\w)",
+                     (text or "").lower()) is not None
+
+
+def expand_query(q: str, entries_fn=None) -> tuple[list[str], list[str]]:
+    """Perluas query dgn keyword sinonim bila mengandung istilah lapangan.
+    Return (daftar istilah cari [termasuk q asli], daftar trigger yang cocok)."""
+    terms: list[str] = [q]
+    matched: list[str] = []
+    for e in (entries_fn or entries)():
+        h = next((t for t in (e.get("triggers") or []) if t and hit(t, q)), None)
+        if h:
+            matched.append(h)
+            for kw in (e.get("keywords") or []):
+                if kw and kw not in terms:
+                    terms.append(kw)
+    return terms, matched
+
+
+# Kata KATEGORI "payung": kata polos Indonesia (+ padanan Inggris) yang mewakili
+# SELURUH keluarga sub-part. expand_query tak mengekspansi kata polos spt 'kopling'
+# (trigger sinonim semuanya frasa: 'kampas kopling', 'matahari kopling', dst) → jadi
+# 'kopling' saja melewatkan hampir semua sub-part. umbrella_keywords menambal ini.
+UMBRELLA_KATEGORI = {
+    "kopling": ["kopling", "clutch"],
+    "clutch": ["kopling", "clutch"],
+    "rem": ["rem", "brake"],
+    "brake": ["rem", "brake"],
+    "gardan": ["gardan", "differential"],
+    "transmisi": ["transmisi", "transmission", "gearbox", "persneling"],
+    "kabin": ["kabin", "cabin"],
+    "mesin": ["mesin", "engine"],
+    "kelistrikan": ["kelistrikan", "electric"],
+    "filter": ["filter", "saringan"],
+    "saringan": ["filter", "saringan"],
+    "suspensi": ["suspensi", "suspension"],
+}
+
+
+def umbrella_keywords(kata_kunci: str, entries_fn=None) -> list[str]:
+    """Bila `kata_kunci` memuat kata KATEGORI payung (mis. 'kopling', 'rem'),
+    kumpulkan keyword katalog dari SEMUA grup sinonim terkait (token payung muncul
+    di nama grup / trigger / keyword). [] bila bukan kategori payung."""
+    ql = (kata_kunci or "").lower()
+    tokens: list[str] = []
+    for w, toks in UMBRELLA_KATEGORI.items():
+        if hit(w, ql):
+            for t in toks:
+                if t not in tokens:
+                    tokens.append(t)
+    if not tokens:
+        return []
+    kws: list[str] = []
+    for e in (entries_fn or entries)():
+        hay = " ".join([e.get("grup") or "", *(e.get("triggers") or []),
+                        *(e.get("keywords") or [])])
+        if any(hit(tok, hay) for tok in tokens):
+            for kw in (e.get("keywords") or []):
+                if kw and kw not in kws:
+                    kws.append(kw)
+    return kws
+
+
+def block(entries_fn=None) -> str:
+    """Kamus istilah lapangan (Indonesia → kata kunci Inggris) sbg blok teks."""
+    lines: list[str] = []
+    for e in (entries_fn or entries)():
+        trig = ", ".join(dict.fromkeys(t for t in (e.get("triggers") or []) if t))
+        kw = ", ".join(dict.fromkeys(k for k in (e.get("keywords") or []) if k))
+        if trig and kw:
+            lines.append(f"- {trig} → {kw}")
+    return "\n".join(lines)
 
 
 def _save(entries: list[dict]) -> None:

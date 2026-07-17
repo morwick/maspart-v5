@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-07-16T15:50:00+00:00",
+ "generated_at": "2026-07-17T08:46:18+00:00",
  "sumber": [
   "catalog_bom.json (EPC Sinotruk per-model)",
   "gudang_config.json",
@@ -590,6 +590,248 @@
    ]
   }
  ],
+ "unit_vin": [
+  {
+   "model": "HOMAN 150HP 4X4",
+   "vin_prefix": "LEZAD1ED",
+   "sasis": "ZZ1168G17FB1",
+   "mesin": ""
+  },
+  {
+   "model": "HOMAN 150HP 4X4",
+   "vin_prefix": "LEZDD2CC",
+   "sasis": "ZZ1168F4225C1R",
+   "mesin": ""
+  },
+  {
+   "model": "HOMAN 4X2 190HP",
+   "vin_prefix": "LEZAB1D",
+   "sasis": "ZZ3128G17FB1",
+   "mesin": ""
+  },
+  {
+   "model": "HOWO MAX 480 6X4",
+   "vin_prefix": "LZZ1CLWB",
+   "sasis": "ZZ4257V344KF1",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "HOWO-371 6X4",
+   "vin_prefix": "LZZ5ELSD",
+   "sasis": "ZZ3257N3847B2R",
+   "mesin": "mesin Sinotruk WD615/D10/D12"
+  },
+  {
+   "model": "HOWO-380 6X4",
+   "vin_prefix": "LZZ1ELSF",
+   "sasis": "ZZ3257V464JB1",
+   "mesin": ""
+  },
+  {
+   "model": "HOWO-380 6X4",
+   "vin_prefix": "LZZ5DLSD",
+   "sasis": "ZZ3257V3847B2R",
+   "mesin": ""
+  },
+  {
+   "model": "HOWO-380 6X4",
+   "vin_prefix": "LZZ5DMSD",
+   "sasis": "ZZ3257V3847B2R",
+   "mesin": ""
+  },
+  {
+   "model": "HOWO-380 6X4",
+   "vin_prefix": "LZZ5ELSD",
+   "sasis": "ZZ3257V3847B2R",
+   "mesin": ""
+  },
+  {
+   "model": "HOWO-7 400 8X4",
+   "vin_prefix": "LZZ5BXSG",
+   "sasis": "ZZ1317N5167B1R",
+   "mesin": ""
+  },
+  {
+   "model": "HOWO-7 440 6X4",
+   "vin_prefix": "LZZ1BLVJ",
+   "sasis": "ZZ1257V5847F1",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "HOWO-7 440 6X6",
+   "vin_prefix": "LJVA8PDK",
+   "sasis": "ZZ1254N5747F11",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "HOWO-7 440 6X6",
+   "vin_prefix": "LJVA8PDL",
+   "sasis": "ZZ2252V4357F1",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "HOWO400 8X4",
+   "vin_prefix": "LZZ5EXSF",
+   "sasis": "ZZ3317V4667B1R",
+   "mesin": ""
+  },
+  {
+   "model": "N7B-371",
+   "vin_prefix": "LZZ5DLSF",
+   "sasis": "ZZ3257V384JB1R",
+   "mesin": "mesin Sinotruk WD615/D10/D12"
+  },
+  {
+   "model": "NX280 4X2 AMT",
+   "vin_prefix": "LZZ1CCSD",
+   "sasis": "ZZ4187V391JF1",
+   "mesin": "mesin MC (Sinotruk-MAN)"
+  },
+  {
+   "model": "NX280 4X2 MT",
+   "vin_prefix": "LZZ1CCSD",
+   "sasis": "ZZ4187V391JF1",
+   "mesin": "mesin MC (Sinotruk-MAN)"
+  },
+  {
+   "model": "NX280 6X2",
+   "vin_prefix": "LZZ1BG3H",
+   "sasis": "ZZ1257N56CJF1L",
+   "mesin": "mesin MC (Sinotruk-MAN)"
+  },
+  {
+   "model": "NX280 6X4",
+   "vin_prefix": "LZZ1BLMJ",
+   "sasis": "ZZ1257V584JF1",
+   "mesin": "mesin MC (Sinotruk-MAN)"
+  },
+  {
+   "model": "NX280 6X4",
+   "vin_prefix": "LZZ1BLVF",
+   "sasis": "ZZ1257V524KF1",
+   "mesin": "mesin MC (Sinotruk-MAN)"
+  },
+  {
+   "model": "NX280TH 6X2",
+   "vin_prefix": "LZZ1CCSD",
+   "sasis": "ZZ4187V391JF1",
+   "mesin": "mesin MC (Sinotruk-MAN)"
+  },
+  {
+   "model": "NX350 8X4",
+   "vin_prefix": "LZZPBXSF",
+   "sasis": "ZZ1315N4666E1",
+   "mesin": "mesin MC (Sinotruk-MAN)"
+  },
+  {
+   "model": "NX360 6X4",
+   "vin_prefix": "LZZ1BLSG",
+   "sasis": "ZZ1257V464JF1",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "NX360 6X4",
+   "vin_prefix": "LZZ1BLSJ",
+   "sasis": "ZZ1257V584JF1",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "NX360 DUMP 6X4",
+   "vin_prefix": "LZZ1ELSE",
+   "sasis": "ZZ3257V404JF1",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "NX360TH 6X4",
+   "vin_prefix": "LZZPCLSC",
+   "sasis": "ZZ4255N3446E1X",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "NX371 6X4",
+   "vin_prefix": "LZZ1ELSF",
+   "sasis": "ZZ3257V464JB1R",
+   "mesin": "mesin Sinotruk WD615/D10/D12"
+  },
+  {
+   "model": "NX371 6X4",
+   "vin_prefix": "LZZ5DLSF",
+   "sasis": "ZZ3257V434JB1R",
+   "mesin": "mesin Sinotruk WD615/D10/D12"
+  },
+  {
+   "model": "NX371 6X4",
+   "vin_prefix": "LZZDDLSD",
+   "sasis": "ZZ3252V3847B1R",
+   "mesin": "mesin Sinotruk WD615/D10/D12"
+  },
+  {
+   "model": "NX380 6X4",
+   "vin_prefix": "LZZ1ELSF",
+   "sasis": "ZZ3257V464JB1R",
+   "mesin": ""
+  },
+  {
+   "model": "NX400 6X4",
+   "vin_prefix": "LZZ5EXSF",
+   "sasis": "ZZ3317V486JB1R",
+   "mesin": ""
+  },
+  {
+   "model": "NX430 8X4",
+   "vin_prefix": "LZZ5EXSF",
+   "sasis": "ZZ3317V486JB1R",
+   "mesin": ""
+  },
+  {
+   "model": "NX440TH 4X2",
+   "vin_prefix": "LZZ1CCND",
+   "sasis": "ZZ4187N391JF1",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "NX440TH 6X4",
+   "vin_prefix": "LZZ1CLVB",
+   "sasis": "ZZ4257V344JF1",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "SITRAK 480 6X6",
+   "vin_prefix": "LZZ8CUWD",
+   "sasis": "ZZ4256V395MF1",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "SITRAK 480 6X6",
+   "vin_prefix": "LZZ8CVWD",
+   "sasis": "ZZ4256V395MF1",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "SITRAK 540 6X4",
+   "vin_prefix": "LZZ7CLXB",
+   "sasis": "ZZ4256V324HF1B",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  },
+  {
+   "model": "V7X400 8X4",
+   "vin_prefix": "LZZ1EXSF",
+   "sasis": "ZZ3312V4667B1R",
+   "mesin": ""
+  },
+  {
+   "model": "V7X400 8X4",
+   "vin_prefix": "LZZ1EXSG",
+   "sasis": "ZZ3312V4967B1R",
+   "mesin": ""
+  },
+  {
+   "model": "V7X440 8X4",
+   "vin_prefix": "LZZ5BXVH",
+   "sasis": "ZZ1312V5967F1",
+   "mesin": "mesin MC (Sinotruk-MAN, MC11/MC13)"
+  }
+ ],
  "gudang": [
   "01.Jakarta",
   "02.Pekanbaru",
@@ -612,7 +854,8 @@
   "jumlah": 2276,
   "jumlah_eol": 5254,
   "unit_kontrol_eol": 52,
-  "wiring": 55
+  "wiring": 55,
+  "pdf_diagnosa": 216
  },
  "filter_shantui_units": [
   "SE60W1 DAN SE75W1",
