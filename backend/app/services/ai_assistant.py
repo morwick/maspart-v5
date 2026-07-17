@@ -2016,6 +2016,14 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         })
 
+    # ── Gating pembeli (rombakan 3b 2026-07-17): tool INTERNAL tidak
+    # ditawarkan ke akun pembeli — hemat token spec + model tak tergoda
+    # memanggil tool yang handler-nya toh menolak/di luar kebutuhan pembeli.
+    # (_DISPATCH tetap utuh; ini hanya penawaran spec.)
+    if role == "pembeli":
+        _GATED_PEMBELI = {"excel_stok_gudang", "banding_rangka_massal", "banding_rangka"}
+        specs = [s for s in specs if s["function"]["name"] not in _GATED_PEMBELI]
+
     return specs
 
 
@@ -8048,8 +8056,11 @@ def _system_prompt(user: dict) -> str:
         "kontrol (mesin, transmisi, ABS/ESP, EV BMS/VCU, BCM, airbag, radar, SCR). "
         "Hasil 'hasil_eol'/'perbaikan_eol'/'kode_kesalahan_eol' SUDAH Bahasa Indonesia "
         "dan memuat PENYEBAB + LANGKAH PERBAIKAN resmi EOL + part terkait — sajikan "
-        "langkahnya apa adanya (jangan menambah langkah karangan); 'deskripsi_cn' "
-        "berbahasa China — sajikan terjemahan Indonesianya. Sebutkan SPN/FMI/kode & "
+        "langkahnya apa adanya (jangan menambah langkah karangan). Tabel Bosch: pakai "
+        "kolom 'deskripsi' (SUDAH Indonesia); 'deskripsi_cn' hanya fallback bila "
+        "'deskripsi' kosong. Bila ada 'diagnosa_rinci' (isi lembar diagnosa resmi: "
+        "penyebab bernomor + langkah troubleshooting), sajikan langkahnya apa adanya "
+        "(terjemahkan ke Indonesia bila English). Sebutkan SPN/FMI/kode & "
         "lampu MIL/SVS bila ada. KEJUJURAN SPN/FMI: bila hasil menandai "
         "'fmi_diminta_tak_terdaftar' atau 'spn_tak_terdaftar', katakan TEGAS bahwa "
         "pasangan/angka yang diminta TIDAK ADA di database, lalu sajikan "

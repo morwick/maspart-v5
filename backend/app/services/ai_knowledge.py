@@ -23,7 +23,6 @@ import re
 import threading
 import time
 from collections import Counter
-from datetime import datetime, timezone
 from pathlib import Path
 
 from ..core.config import get_settings
@@ -252,7 +251,8 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         pass
 
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        # (K4 2026-07-17) TANPA timestamp di payload — build byte-stable:
+        # regenerasi tanpa perubahan data = file identik (aman diff & cache).
         "sumber": ["catalog_bom.json (EPC Sinotruk per-model)", "gudang_config.json",
                    "fault_codes.json (DTC resmi)", "filter Shantui (data/manuals)",
                    "jadwal perawatan Shantui (data/manuals)",
@@ -297,17 +297,33 @@ _REBUILD: dict = {"on": False, "last": 0.0}
 _REBUILD_COOLDOWN_SEC = 30.0
 
 
-def _catalog_bom_mtime() -> float:
-    try:
-        return (get_settings().data_path / "catalog_bom.json").stat().st_mtime
-    except OSError:
-        return 0.0
+def _input_mtime() -> float:
+    """mtime TERBARU dari SEMUA sumber ai_knowledge (rombakan K4 2026-07-17 —
+    dulu hanya catalog_bom.json; kini store DTC/diagnosa/filter/jadwal ikut
+    memicu rebuild agar blok cakupan tak basi saat dataset lain diperbarui)."""
+    svc = Path(__file__).parent
+    kandidat = [
+        get_settings().data_path / "catalog_bom.json",
+        svc / "dtc_codes.json.gz",
+        svc / "dtc_diagnosa.json.gz",
+        svc / "filter_shantui.json.gz",
+        svc / "jadwal_perawatan.json.gz",
+        get_settings().data_path / "repairkit" / "transmisi.json",
+    ]
+    mt = 0.0
+    for p in kandidat:
+        try:
+            mt = max(mt, p.stat().st_mtime)
+        except OSError:
+            continue
+    return mt
 
 
 def _maybe_rebuild_async(knowledge_mtime: float) -> None:
-    """Picu rebuild latar bila catalog_bom.json > ai_knowledge.json (deterministik,
-    offline). No-op bila belum berubah / rebuild sedang jalan / masih cooldown."""
-    bom_mt = _catalog_bom_mtime()
+    """Picu rebuild latar bila salah satu sumber > ai_knowledge.json
+    (deterministik, offline). No-op bila belum berubah / rebuild sedang
+    jalan / masih cooldown."""
+    bom_mt = _input_mtime()
     if not bom_mt or bom_mt <= knowledge_mtime:
         return
     with _REBUILD_LOCK:
