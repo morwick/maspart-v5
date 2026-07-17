@@ -10,16 +10,25 @@ from app.services import ai_assistant as A
 
 ADMIN = {"username": "admin", "role": "admin"}
 
-# sha256 literal domain_block lama (28.510 chars, diekstrak via AST saat 3a) —
-# menjamin externalize TIDAK mengubah satu byte pun. Boleh di-update saat fase
-# 3b (pangkas isi) dgn sengaja.
-_SNAPSHOT_SHA = "f4b631cd1d2f24ec722227717052285a0bde6d5d3036c5582963e6fae963fbf6"
+# Fase 3b: isi ai_domain.md DIPANGKAS dgn sengaja (28.510 → ±11rb chars) —
+# snapshot byte-identik 3a (sha f4b631cd…) pensiun; kini yang dijaga: aturan
+# keras inti tetap ada & ukuran terkendali.
+_PENANDA_WAJIB = (
+    "PENGETAHUAN DOMAIN — TRANSMISI / GEARBOX",
+    "LARANGAN MUTLAK MENGARANG PART NUMBER",
+    "ATURAN PALING KERAS",
+    "DEPAN ≠ BELAKANG",
+    "part_aus_dari_rangka",
+    "uraikan_mesin",
+    "AKURASI PER-UNIT",
+)
 
 
-def test_domain_block_byte_identik_dgn_literal_lama():
+def test_domain_block_terpangkas_tapi_aturan_inti_utuh():
     blok = A._domain_block()
-    assert len(blok) == 28510
-    assert hashlib.sha256(blok.encode("utf-8")).hexdigest() == _SNAPSHOT_SHA
+    assert 8_000 < len(blok) < 16_000  # terpangkas dari 28.510, tak menciut ekstrem
+    for p in _PENANDA_WAJIB:
+        assert p in blok, p
 
 
 def test_domain_block_stabil_antar_panggilan():
