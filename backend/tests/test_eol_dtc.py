@@ -92,7 +92,8 @@ def test_tool_diagram_wiring_stash_inline():
 
 
 def test_tool_diagram_wiring_miss_daftar():
-    r = ai._t_diagram_wiring({"komponen": "komponen tak dikenal xyz"}, USER)
+    # query yang tak cocok wiring MAUPUN manual_media (skema/pinout/foto unit)
+    r = ai._t_diagram_wiring({"komponen": "zxqwvnonexist"}, USER)
     assert r.get("jumlah") == 0 and "Diagram yang tersedia" in r["catatan"]
 
 

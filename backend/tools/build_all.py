@@ -31,6 +31,7 @@ _URUTAN = [
     "build_maintenance", "build_filter_ref", "build_repairkit", "build_pin_ecu",
 ]
 _OPSIONAL = ["build_catalog_bom"]
+_MEDIA = ["build_manual_media"]  # berat (ekstrak ~38MB PNG) — hanya --with-media
 _TERAKHIR = "build_ai_knowledge"
 
 
@@ -48,11 +49,14 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--with-bom", action="store_true",
                     help="ikutkan build_catalog_bom (lama; hanya bila katalog xlsx berubah)")
+    ap.add_argument("--with-media", action="store_true",
+                    help="ikutkan build_manual_media (ekstrak gambar PDF/Excel; hanya bila sumber berubah)")
     ap.add_argument("--only", default="",
                     help="daftar builder dipisah koma (ai_knowledge selalu ikut terakhir)")
     args = ap.parse_args()
 
-    urutan = list(_URUTAN) + (_OPSIONAL if args.with_bom else [])
+    urutan = (list(_URUTAN) + (_OPSIONAL if args.with_bom else [])
+              + (_MEDIA if args.with_media else []))
     if args.only:
         pilih = {x.strip() for x in args.only.split(",") if x.strip()}
         urutan = [n for n in urutan if n in pilih]

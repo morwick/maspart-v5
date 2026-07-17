@@ -160,7 +160,12 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "rangkaian/kabel'). Contoh komponen: pedal gas (APP), sensor tekanan "
                     "rail, sensor suhu coolant, MAF/HFM, boost, turbo, EGR, DPF, kipas "
                     "radiator, katup dosis AdBlue/SCR, konektor OBD, jaringan CAN, "
-                    "sensor kecepatan (VSS), camshaft, relay starter, cruise control."
+                    "sensor kecepatan (VSS), camshaft, relay starter, cruise control. "
+                    "JUGA menampilkan (dari manual pabrikan): SKEMA/PINOUT ECU Bosch "
+                    "(MC National V, NBCU, NanoBCU, ZF-AMT — konektor & letak pin), "
+                    "SKEMA PNEUMATIK REM ABS (traktor/rigid, WABCO), SKEMA KELISTRIKAN "
+                    "HOHAN/HOWO N, dan FOTO UNIT alat berat Shantui per-model "
+                    "(bulldozer/loader/excavator/grader, mis. 'foto SD16', 'gambar unit DH17')."
                 ),
                 "parameters": {
                     "type": "object",

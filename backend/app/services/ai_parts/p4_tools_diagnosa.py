@@ -437,7 +437,7 @@ def _t_cari_filter_shantui(args: dict, user: dict) -> dict:
 
 
 def _t_diagram_wiring(args: dict, user: dict) -> dict:
-    if not wiring_ref.available():
+    if not (wiring_ref.available() or manual_media.available()):
         return {"error": "Data diagram wiring belum tersedia di server."}
     komponen = (args.get("komponen") or args.get("query") or "").strip()
     if not komponen:
@@ -476,13 +476,44 @@ def _t_diagram_wiring(args: dict, user: dict) -> dict:
         skema_cards = []
 
     rows = wiring_ref.search(komponen, limit=6)
-    if not rows:
+    # Perpustakaan GAMBAR manual (manual_media — 2026-07-18): skema/pinout ECU
+    # (Bosch MC/NBCU/NanoBCU/ZF-AMT), skema pneumatik ABS, skema kelistrikan,
+    # FOTO UNIT (Shantui dozer/loader/excavator/grader) — diekstrak dari PDF/Excel
+    # sumber. Ikut ditampilkan INLINE bersama diagram wiring EOL.
+    media_rows: list[dict] = []
+    try:
+        media_rows = manual_media.search(komponen, limit=6)
+    except Exception:  # pragma: no cover
+        media_rows = []
+
+    gambar = []
+    for r in rows:
+        data = wiring_ref.image_bytes(r["file"])
+        if not data:
+            continue
+        label = r.get("label") or r["file"]
+        image_id, filename = ai_export.stash_raw(
+            f"Diagram wiring — {label}", data, f"wiring_{r['file']}")
+        gambar.append({"image_id": image_id, "filename": filename,
+                       "pn": label, "nama_figure": label,
+                       "kategori": r.get("grp") or "Wiring"})
+    for r in media_rows:
+        data = manual_media.image_bytes(r["file"])
+        if not data:
+            continue
+        label = r.get("label") or r["file"]
+        image_id, filename = ai_export.stash_raw(label, data, f"media_{r['file']}")
+        gambar.append({"image_id": image_id, "filename": filename,
+                       "pn": label, "nama_figure": label,
+                       "kategori": r.get("tipe") or "Manual"})
+
+    if not gambar:
         logger.info("MISS diagram_wiring q=%r user=%s", komponen,
                     user.get("username") or "?")
         out = {
             "found": bool(pin_payload or skema_cards),
             "jumlah": 0,
-            "catatan": (f"Tidak ada diagram wiring cocok untuk '{komponen}'. "
+            "catatan": (f"Tidak ada diagram/gambar cocok untuk '{komponen}'. "
                         "Diagram yang tersedia: " + "; ".join(wiring_ref.labels())),
         }
         if pin_payload:
@@ -499,19 +530,6 @@ def _t_diagram_wiring(args: dict, user: dict) -> dict:
                 "KARTU yang bisa DIBUKA user ('pdf_skema'): sebutkan judulnya & "
                 "beri tahu user bisa membukanya dari kartu. ⛔ JANGAN buat link sendiri.")
         return out
-    gambar = []
-    for r in rows:
-        data = wiring_ref.image_bytes(r["file"])
-        if not data:
-            continue
-        label = r.get("label") or r["file"]
-        image_id, filename = ai_export.stash_raw(
-            f"Diagram wiring — {label}", data, f"wiring_{r['file']}")
-        gambar.append({"image_id": image_id, "filename": filename,
-                       "pn": label, "nama_figure": label,
-                       "kategori": r.get("grp") or "Wiring"})
-    if not gambar:
-        return {"error": "File diagram tidak terbaca di server."}
     out = {
         "found": True,
         "jumlah": len(gambar),

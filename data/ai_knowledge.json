@@ -854,6 +854,7 @@
   "jumlah_eol": 5254,
   "unit_kontrol_eol": 52,
   "wiring": 55,
+  "media_manual": 50,
   "pdf_diagnosa": 216
  },
  "filter_shantui_units": [

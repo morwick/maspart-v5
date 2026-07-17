@@ -20,6 +20,10 @@ data/embeddings.parquet
 data/manuals/
 *MC_BOSCHECU*.pdf
 
+# Gambar hasil ekstrak manual (PNG, ~38MB) — aset scp-only (pola data/wiring);
+# hanya index.json yang di-track git (metadata pencarian).
+data/manual_media/*.png
+
 # Token sesi EPC Sinotruk (kredensial, kedaluwarsa berkala — JANGAN di-commit)
 data/epc_token.txt
 

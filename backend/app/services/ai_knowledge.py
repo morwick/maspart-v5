@@ -223,6 +223,12 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         wiring_n = int(_wr.count() or 0)
     except Exception:
         pass
+    media_n = 0
+    try:
+        from . import manual_media as _mm
+        media_n = int(_mm.count_dicari() or 0)
+    except Exception:
+        pass
     fault_pdf_n = 0
     try:
         from . import fault_pdf as _fp
@@ -267,7 +273,7 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         "gudang": gudang,
         "fault_codes": {"jumlah": fault_n, "jumlah_eol": eol_n,
                         "unit_kontrol_eol": eol_units_n, "wiring": wiring_n,
-                        "pdf_diagnosa": fault_pdf_n},
+                        "media_manual": media_n, "pdf_diagnosa": fault_pdf_n},
         "filter_shantui_units": filter_units,
         "maintenance_shantui": maintenance_by_jenis,
         "gearbox_repairkit": gearbox_models,
@@ -413,10 +419,16 @@ def _render(d: dict, with_gudang: bool) -> str:
             f"{ekstra}{pdfx} — pertanyaan kode error/fault code WAJIB via "
             "cari_kode_kesalahan, jangan dari ingatan.")
         wr = fcd.get("wiring") or 0
-        if wr:
+        mm = fcd.get("media_manual") or 0
+        if wr or mm:
+            extra_mm = (f" PLUS {mm} gambar dari manual pabrikan: skema/pinout ECU "
+                        "(Bosch MC National V, NBCU, NanoBCU, ZF-AMT), skema pneumatik "
+                        "rem ABS, skema kelistrikan HOHAN/HOWO N, dan FOTO UNIT alat "
+                        "berat Shantui per-model (dozer/loader/excavator/grader)."
+                        if mm else "")
             lines.append(
-                f"• DIAGRAM WIRING: {wr} diagram pin/kabel sensor-aktuator mesin Bosch & "
-                "SCR/AdBlue tersedia — permintaan skema kabel/pin/konektor WAJIB via "
+                f"• DIAGRAM & GAMBAR: {wr} diagram pin/kabel sensor-aktuator mesin Bosch & "
+                f"SCR/AdBlue.{extra_mm} Permintaan skema/pinout/konektor/foto unit WAJIB via "
                 "diagram_wiring (gambar tampil inline).")
     fu = d.get("filter_shantui_units") or []
     if fu:
