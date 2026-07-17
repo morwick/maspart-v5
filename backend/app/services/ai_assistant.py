@@ -23,9 +23,9 @@ import requests
 
 from ..core.config import get_settings
 from . import (abs_scr_codes, accurate, ai_chat_log, ai_export, ai_knowledge, ai_sheet, catalog_bom,
-               eol_dtc, epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref, gudang,
-               gudang_config, harga, maintenance_ref, orders, part_index, populasi, repairkit,
-               reservations, search_log, sims, sims_eol, sinonim, wiring_ref)
+               dtc_diagnosa, eol_dtc, epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref,
+               gudang, gudang_config, harga, maintenance_ref, orders, part_index, populasi,
+               repairkit, reservations, search_log, sims, sims_eol, sinonim, wiring_ref)
 
 logger = logging.getLogger("maspart.ai")
 
@@ -3795,6 +3795,18 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
     # Lembar diagnosa PDF resmi (data/Fault) — kartu yang bisa DIBUKA user.
     pdf_cards = _fault_pdf_cards(spn, fmi)
 
+    # Isi TERSTRUKTUR lembar diagnosa (dtc_diagnosa, rombakan 2026-07-17) —
+    # model kini ikut MEMBACA judul/penyebab/langkah kartu, bukan cuma melampirkannya.
+    diagnosa_rinci: list[dict] = []
+    try:
+        if spn is not None:
+            diagnosa_rinci = dtc_diagnosa.for_pair(spn, fmi)
+        elif code:
+            diagnosa_rinci = dtc_diagnosa.for_code(code)
+        diagnosa_rinci = diagnosa_rinci[:2]  # kartu varian bisa >1; cap hemat token
+    except Exception:  # pragma: no cover
+        diagnosa_rinci = []
+
     catatan = (
         "'hasil' = tabel mesin Bosch. Pakai kolom 'deskripsi' (SUDAH Bahasa "
         "Indonesia); 'deskripsi_cn' hanya fallback bila 'deskripsi' kosong — "
@@ -3838,7 +3850,8 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
             f" ⚠️ Ada {len(hits)} KODE BERBEDA untuk pasangan SPN/FMI ini — "
             "tampilkan SEMUANYA, jangan pilih salah satu."
         )
-    total_kosong = not hits and not hasil_eol and not hasil_abs_scr and not pdf_cards
+    total_kosong = (not hits and not hasil_eol and not hasil_abs_scr
+                    and not pdf_cards and not diagnosa_rinci)
     if hasil_abs_scr:
         ada_abs = any(h["sistem"] == "ABS" for h in hasil_abs_scr)
         ada_scr = any(h["sistem"] == "SCR" for h in hasil_abs_scr)
@@ -3877,6 +3890,13 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
                 " Database teks tidak memuat pasangan ini, TAPI lembar diagnosa "
                 "resminya ADA (terlampir) — dasari jawaban dari keberadaan lembar itu."
             )
+    if diagnosa_rinci:
+        catatan += (
+            " 'diagnosa_rinci' = ISI lembar diagnosa resmi (judul, part terkait, "
+            "kondisi trigger, reaksi, penyebab bernomor, langkah troubleshooting) — "
+            "sajikan langkahnya APA ADANYA (terjemahkan ke Indonesia bila English), "
+            "jangan menambah langkah karangan."
+        )
 
     return {
         "total_database": fault_codes.count(),
@@ -3891,6 +3911,7 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
         "total_database_abs_scr": abs_scr_codes.count(),
         "jumlah_cocok_abs_scr": len(hasil_abs_scr),
         "hasil_abs_scr": hasil_abs_scr,
+        "diagnosa_rinci": diagnosa_rinci,
         "pdf_diagnosa": pdf_cards,
         "catatan": catatan,
     }
@@ -3979,13 +4000,24 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
     # Lembar diagnosa PDF resmi (kartu bisa dibuka user) bila SPN diberikan.
     pdf_cards = _fault_pdf_cards(spn, fmi)
 
+    # Isi TERSTRUKTUR lembar diagnosa (dtc_diagnosa, rombakan 2026-07-17).
+    rinci: list[dict] = []
+    try:
+        if spn is not None:
+            rinci = dtc_diagnosa.for_pair(spn, fmi)[:2]
+        elif kode:
+            rinci = dtc_diagnosa.for_code(kode)[:2]
+    except Exception:  # pragma: no cover
+        rinci = []
+
     out = {
         "found": (bool(dtc) or bool(eol_rows) or bool(abs_scr_rows)
-                  or bool(eol.get("found")) or bool(pdf_cards)),
+                  or bool(eol.get("found")) or bool(pdf_cards) or bool(rinci)),
         "kriteria": {"kode": kode or None, "spn": spn, "fmi": fmi, "keluhan": keluhan or None},
         "kode_kesalahan_lokal": dtc,
         "kode_kesalahan_eol": eol_rows,  # Indonesia: penyebab + langkah perbaikan resmi EOL
         "kode_kesalahan_abs_scr": abs_scr_rows,  # ABS WABCO (SPN/FMI) + SCR gas 国V (Indonesia)
+        "diagnosa_rinci": rinci,  # isi kartu: judul/part/trigger/penyebab[]/langkah[]
         "pdf_diagnosa": pdf_cards,
         "total_database_dtc": fault_codes.count(),
         "sumber": ("Database DTC lokal (Bosch + EOL CNHTC ber-langkah-perbaikan) + SIMS EOL AI "
@@ -3995,6 +4027,12 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
         out["catatan_pdf"] = (
             "📎 Lembar diagnosa PDF RESMI terlampir sebagai kartu — beri tahu user "
             "bisa membukanya langsung. ⛔ JANGAN membuat link/URL sendiri."
+        )
+    if rinci:
+        out["catatan_rinci"] = (
+            "'diagnosa_rinci' = ISI lembar diagnosa resmi (penyebab bernomor + "
+            "langkah troubleshooting) — sajikan APA ADANYA (terjemahkan ke "
+            "Indonesia bila English), jangan menambah langkah karangan."
         )
     if fmi_fallback:
         out["fmi_diminta_tak_terdaftar"] = fmi

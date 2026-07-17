@@ -52,15 +52,16 @@ def test_apply_i18n_string_dan_list():
 # ── store kanonik ─────────────────────────────────────────────────────
 def test_union_jumlah_per_sumber():
     assert dtc_codes.available()
-    assert dtc_codes.count() == 7746
+    assert dtc_codes.count() == 7778
     assert dtc_codes.count("bosch") == 2276
     assert dtc_codes.count("eol") == 5254
     assert dtc_codes.count("abs") + dtc_codes.count("scr") == 216
+    assert dtc_codes.count("kartu") == 32  # pasangan PDF-only (K2)
 
 
 def test_semua_baris_punya_sumber_dan_unit():
     for r in dtc_codes.rows():
-        assert r["sumber"] in ("bosch", "eol", "abs", "scr")
+        assert r["sumber"] in ("bosch", "eol", "abs", "scr", "kartu")
         assert r["unit"]
 
 

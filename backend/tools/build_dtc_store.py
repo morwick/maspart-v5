@@ -53,14 +53,16 @@ def _read_json(p: Path):
 
 
 def _baris(**kw) -> dict:
-    """Baris kanonik lengkap — kolom tak berlaku diisi ""/None (deterministik)."""
+    """Baris kanonik lengkap — kolom tak berlaku diisi ""/None (deterministik).
+    `kartu` True = ada lembar diagnosa PDF utk (spn,fmi) ini (detail terstruktur
+    di dtc_diagnosa.json.gz — build_fault_cards.py)."""
     b = {
         "sumber": "", "unit": "", "kode": "",
         "spn": None, "fmi": None,
         "label": "", "deskripsi": "", "deskripsi_cn": "",
         "penyebab": "", "perbaikan": "", "part": "",
         "reaksi": "", "lampu": "", "mil": "", "svs": "",
-        "blink": "", "sid": None,
+        "blink": "", "sid": None, "kartu": False,
     }
     b.update(kw)
     return b
@@ -139,7 +141,40 @@ def main() -> int:
     bosch, miss = dari_bosch(bosch_src, tr)
     eol = dari_eol(eol_src)
     abs_scr = dari_abs_scr(abs_scr_src)
-    rows = sorted(bosch + eol + abs_scr, key=_sort_key)
+
+    # ── Lembar diagnosa PDF (dtc_diagnosa.json.gz, build_fault_cards.py) ──
+    # Tandai baris ber-(spn,fmi) yang punya kartu; pasangan PDF-ONLY (tak ada
+    # di tabel Bosch — 32 pasangan) ditambahkan sbg baris sumber="kartu" agar
+    # terjangkau pencarian SPN/FMI.
+    kartu_rows: list[dict] = []
+    dp = SVC / "dtc_diagnosa.json.gz"
+    if dp.exists():
+        cards = _read_json(dp)
+        pdf_pairs = {(c["spn"], c["fmi"]) for c in cards}
+        ada = set()
+        for r in bosch + abs_scr:
+            if (r["spn"], r["fmi"]) in pdf_pairs:
+                r["kartu"] = True
+                ada.add((r["spn"], r["fmi"]))
+        seen_new: set = set()
+        for c in sorted(cards, key=lambda c: (c["spn"], c["fmi"], c.get("varian") or "")):
+            pair = (c["spn"], c["fmi"])
+            if pair in ada or pair in seen_new:
+                continue
+            seen_new.add(pair)
+            kartu_rows.append(_baris(
+                sumber="kartu", unit="EMS",
+                kode=(c.get("kode") or "").upper(),
+                spn=c["spn"], fmi=c["fmi"],
+                deskripsi=c.get("judul") or "",
+                part=c.get("part_terkait") or "",
+                reaksi=c.get("reaksi") or "",
+                kartu=True,
+            ))
+        print(f"   kartu PDF: {len(pdf_pairs)} pasangan; flag pada tabel: {len(ada)}; "
+              f"baris baru sumber='kartu': {len(kartu_rows)}")
+
+    rows = sorted(bosch + eol + abs_scr + kartu_rows, key=_sort_key)
 
     # ── validasi ──
     if len(bosch) != len(bosch_src) or len(eol) != len(eol_src) \
