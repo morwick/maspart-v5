@@ -885,6 +885,20 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                         "judul": c.get("judul"), "jumlah_baris": None}
                 if item["id"] and item not in excel_exports:
                     excel_exports.append(item)
+        elif name == "diagram_wiring" and result.get("pdf_skema"):
+            # Kartu skema/manual PDF (skema_ref, 2026-07-18) → kanal kartu file;
+            # gambar wiring (bila ada) ikut ditangkap di sini juga.
+            for c in result["pdf_skema"]:
+                item = {"id": c.get("export_id"), "filename": c.get("filename"),
+                        "judul": c.get("judul"), "jumlah_baris": None}
+                if item["id"] and item not in excel_exports:
+                    excel_exports.append(item)
+            for g in (result.get("gambar") or []):
+                item = {"id": g.get("image_id"), "pn": g.get("pn"),
+                        "balon": g.get("balon"), "nama_figure": g.get("nama_figure"),
+                        "kategori": g.get("kategori")}
+                if item["id"] and item not in exploded_images:
+                    exploded_images.append(item)
         elif name in ("gambar_exploded", "gambar_exploded_mesin",
                       "uraikan_mesin", "uraikan_assembly", "part_aus_dari_rangka",
                       "diagram_wiring") and result.get("found"):

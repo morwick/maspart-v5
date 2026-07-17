@@ -1715,6 +1715,14 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
         `ai.<attr>` tetap tembus). **Edit kode asisten kini di ai_parts/pN_*.py**; file baru
         wajib didaftarkan di `_PARTS`.
       - Test: 851 → **887 hijau** (⛔ evals tak disentuh, perintah pemilik).
+      - **Pengetahuan baru 2026-07-18** (9 PDF dari pemilik): (a) `pin_ecu` kini MULTI-ECU
+        — 515 pin dari 5 sumber (manual Bosch CN 302 + PDF English: MC National V 99,
+        NanoBCU 31, NBCU 59 [tabel multi-arsitektur X1.1…], ZF-AMT 24; kolom
+        ecu/konektor/warna_kabel; parser teks x_tolerance=1.5 + parser tabel); (b) service
+        baru `skema_ref` + `data/manuals/skema/` (5 kartu PDF bisa dibuka via
+        diagram_wiring: 3 skema pneumatik ABS 6x4, skema kelistrikan HOHAN N/HOWO N MC
+        A12, manual pelatihan TFT NanoBCU BAHASA INDONESIA 72 hal) — ⚠️ folder skema/
+        di-scp ke server (data/), PDF pin hanya input build. Test → 892.
       **Baseline metrik produksi PRA-rombakan 2026-07-17** (ai_chat_log Supabase,
       163 giliran) sebagai pembanding sesudah rombakan:
       - Tool gagal: 19,6% giliran. Tersering: `pengganti_part` 45% (9/20), `uraikan_mesin` 33%,

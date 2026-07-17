@@ -32,7 +32,7 @@ from ..core.config import get_settings
 from . import (abs_scr_codes, accurate, ai_chat_log, ai_export, ai_knowledge, ai_sheet, catalog_bom,
                dtc_diagnosa, eol_dtc, epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref,
                gudang, gudang_config, harga, maintenance_ref, orders, part_index, pin_ecu, populasi,
-               repairkit, reservations, search_log, sims, sims_eol, sinonim, wiring_ref)
+               repairkit, reservations, search_log, sims, sims_eol, sinonim, skema_ref, wiring_ref)
 
 logger = logging.getLogger("maspart.ai")
 

@@ -453,16 +453,34 @@ def _t_diagram_wiring(args: dict, user: dict) -> dict:
         pin_rows = pin_ecu.search(komponen, limit=10)
     except Exception:  # pragma: no cover
         pin_rows = []
-    pin_payload = [{"pin": r["pin"], "sinyal": r["sinyal"],
-                    "deskripsi": r["deskripsi"], "nilai_uji": r["nilai_uji"]}
+    pin_payload = [{"ecu": r.get("ecu") or "", "konektor": r.get("konektor") or "",
+                    "pin": r["pin"], "sinyal": r["sinyal"],
+                    "deskripsi": r["deskripsi"], "nilai_uji": r["nilai_uji"],
+                    "warna_kabel": r.get("warna_kabel") or ""}
                    for r in pin_rows]
+
+    # Kartu SKEMA/MANUAL PDF (skema_ref — 2026-07-18): skema pneumatik ABS 6x4,
+    # skema kelistrikan HOHAN N/HOWO N MC, manual pelatihan TFT NanoBCU (ID).
+    # Di-stash sbg kartu yang bisa DIBUKA user (pola _fault_pdf_cards).
+    skema_cards: list[dict] = []
+    try:
+        for s in skema_ref.search(komponen, limit=3):
+            data = skema_ref.pdf_bytes(s["file"])
+            if not data:
+                continue
+            export_id, filename = ai_export.stash_raw(s["label"], data, s["file"])
+            skema_cards.append({"export_id": export_id, "filename": filename,
+                                "judul": s["label"],
+                                "deskripsi": s.get("deskripsi") or ""})
+    except Exception:  # pragma: no cover
+        skema_cards = []
 
     rows = wiring_ref.search(komponen, limit=6)
     if not rows:
         logger.info("MISS diagram_wiring q=%r user=%s", komponen,
                     user.get("username") or "?")
         out = {
-            "found": bool(pin_payload),
+            "found": bool(pin_payload or skema_cards),
             "jumlah": 0,
             "catatan": (f"Tidak ada diagram wiring cocok untuk '{komponen}'. "
                         "Diagram yang tersedia: " + "; ".join(wiring_ref.labels())),
@@ -471,8 +489,15 @@ def _t_diagram_wiring(args: dict, user: dict) -> dict:
             out["pin_ecu"] = pin_payload
             out["catatan"] += (
                 " NAMUN definisi PIN ECU yang cocok ADA di 'pin_ecu' (tabel "
-                "konektor resmi manual Bosch MC): sebutkan pin, sinyal, dan "
-                "nilai ujinya — terjemahkan deskripsi China bila perlu.")
+                "konektor resmi — kolom 'ecu' menyebut unitnya: MC/NanoBCU/NBCU/"
+                "ZF-AMT): sebutkan pin, sinyal/deskripsi, warna kabel, dan nilai "
+                "ujinya — terjemahkan deskripsi China bila perlu.")
+        if skema_cards:
+            out["pdf_skema"] = skema_cards
+            out["catatan"] += (
+                " 📎 Ada SKEMA/MANUAL PDF resmi yang cocok — terlampir sebagai "
+                "KARTU yang bisa DIBUKA user ('pdf_skema'): sebutkan judulnya & "
+                "beri tahu user bisa membukanya dari kartu. ⛔ JANGAN buat link sendiri.")
         return out
     gambar = []
     for r in rows:
@@ -502,8 +527,14 @@ def _t_diagram_wiring(args: dict, user: dict) -> dict:
     if pin_payload:
         out["pin_ecu"] = pin_payload
         out["catatan"] += (
-            " 'pin_ecu' = definisi pin konektor ECU resmi (manual Bosch MC) yang "
-            "cocok query — sebutkan pin/sinyal/nilai uji bila relevan.")
+            " 'pin_ecu' = definisi pin konektor ECU resmi yang cocok query "
+            "(kolom 'ecu': MC/NanoBCU/NBCU/ZF-AMT) — sebutkan pin/sinyal/warna "
+            "kabel/nilai uji bila relevan.")
+    if skema_cards:
+        out["pdf_skema"] = skema_cards
+        out["catatan"] += (
+            " 📎 'pdf_skema' = SKEMA/MANUAL PDF resmi terkait, terlampir sebagai "
+            "KARTU yang bisa DIBUKA user — sebutkan judulnya. ⛔ JANGAN buat link sendiri.")
     return out
 
 
