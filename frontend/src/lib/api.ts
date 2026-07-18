@@ -844,8 +844,9 @@ export async function getMyPermissions(token: string): Promise<MyPermissions> {
   return res.json();
 }
 
-/** 'sesi' bukan izin melainkan PEMBATASAN (mis. hanya 1 perangkat). */
-export type PermKind = "menu" | "column" | "harga" | "sesi";
+/** 'sesi' bukan izin melainkan PEMBATASAN (mis. hanya 1 perangkat);
+ *  'asisten' = kemampuan Asisten AI elevated (default kosong, centang MEMBERI). */
+export type PermKind = "menu" | "column" | "harga" | "sesi" | "asisten";
 
 export type PermOverview = {
   kind: string;

@@ -1068,15 +1068,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         })
 
     # Stok TERTAHAN reservasi: menjelaskan SELISIH stok Accurate vs yang bisa dibeli.
-    # HANYA admin — membuka kode pesanan & identitas penahan LINTAS CABANG (aturan
-    # pemilik; samakan dgn buat_penawaran/harga SIMS). Cabang pun tidak diberi.
-    if _is_admin(user):
+    # Admin selalu; staf lain bila diberi centang 'ai_stok_admin' (Menu Control tab
+    # Asisten AI) — membuka kode pesanan & identitas penahan LINTAS CABANG.
+    if _can_stok_admin(user):
         specs.append({
             "type": "function",
             "function": {
                 "name": "stok_tertahan",
                 "description": (
-                    "HANYA ADMIN. MENJELASKAN SELISIH antara stok Accurate dan stok yang bisa dibeli: "
+                    "AKSES TERBATAS (diberikan admin lewat Menu Control). MENJELASKAN SELISIH antara stok Accurate dan stok yang bisa dibeli: "
                     "berapa yang sedang DITAHAN reservasi pesanan aktif, di gudang mana, "
                     "dan oleh PESANAN MANA (kode + status pesanan). Panggil untuk pola "
                     "'kenapa stok <PN> tinggal 1 padahal Accurate 3', 'stok ini ditahan "
@@ -1098,15 +1098,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         })
 
-    # Pemeriksaan operasional pesanan — HANYA admin (menyangkut uang, pembukuan, &
-    # pesanan lintas cabang).
-    if _is_admin(user):
+    # Pemeriksaan operasional pesanan (uang, pembukuan, lintas cabang) — admin
+    # selalu; staf lain bila diberi centang 'ai_pesanan_bermasalah'.
+    if _can_pesanan_bermasalah(user):
         specs.append({
             "type": "function",
             "function": {
                 "name": "pesanan_bermasalah",
                 "description": (
-                    "HANYA ADMIN. PEMERIKSAAN PESANAN yang butuh perhatian, dikelompokkan: "
+                    "AKSES TERBATAS (diberikan admin lewat Menu Control). PEMERIKSAAN PESANAN yang butuh perhatian, dikelompokkan: "
                     "(1) uang_perlu_dicek = dibayar setelah pesanan batal / nominal tak cocok "
                     "→ UANG NYATA yang menunggu REFUND atau konfirmasi; (2) penawaran_gagal = "
                     "pesanan lunas tapi Penawaran Accurate gagal dibuat → tak masuk pembukuan; "
@@ -1125,12 +1125,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 },
             },
         })
+    # Dipisah dari blok pesanan_bermasalah: kemampuannya beda key (ai_stok_admin,
+    # satu paket dengan stok_tertahan — sama-sama data reservasi stok).
+    if _can_stok_admin(user):
         specs.append({
             "type": "function",
             "function": {
                 "name": "alternatif_ready",
                 "description": (
-                    "HANYA ADMIN. PART HABIS → CARIKAN GANTINYA YANG SIAP KIRIM. Ambil PN "
+                    "AKSES TERBATAS (diberikan admin lewat Menu Control). PART HABIS → CARIKAN GANTINYA YANG SIAP KIRIM. Ambil PN "
                     "persamaan/pengganti resmi (SIMS Sinotruk utk sasis + EPC Weichai utk "
                     "mesin), lalu SARING hanya yang stoknya BENAR-BENAR ready (stok Accurate − "
                     "reservasi aktif > 0, di gudang yang bisa mengirim) & sebut gudangnya. "
@@ -1217,9 +1220,9 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         })
 
-    # Penawaran Penjualan Accurate — HANYA admin (memuat harga jual & mengikat
-    # perusahaan; samakan dgn harga SIMS). Nomor WAJIB manual.
-    if _is_admin(user):
+    # Penawaran Penjualan Accurate — admin selalu; staf lain bila diberi centang
+    # 'ai_penawaran' (memuat harga jual & mengikat perusahaan). Nomor WAJIB manual.
+    if _can_penawaran(user):
         specs.append({
             "type": "function",
             "function": {
@@ -1227,7 +1230,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "description": (
                     "Buat Penawaran Penjualan (Sales Quotation) di Accurate untuk seorang "
                     "pelanggan berisi daftar barang, lalu hasilkan PDF resmi Accurate yang "
-                    "bisa diunduh/dikirim. HANYA admin.\n"
+                    "bisa diunduh/dikirim. AKSES TERBATAS (diberikan admin lewat Menu Control).\n"
                     "⛔ NOMOR dibuat OTOMATIS oleh sistem = 'MASPART-01', 'MASPART-02', dst. "
                     "JANGAN minta/menetapkan nomor ke user; penomoran otomatis Accurate TIDAK "
                     "PERNAH dipakai.\n"
@@ -1415,14 +1418,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 },
             },
         })
-        if _is_admin(user):
+        if _can_penawaran(user):
             specs.append({
                 "type": "function",
                 "function": {
                     "name": "sheet_jadi_penawaran",
                     "description": (
                         "Jadikan Excel unggahan (kolom Part Number + Qty) → PENAWARAN "
-                        "Penjualan Accurate resmi + PDF (kartu unduh). ADMIN saja. PN & Qty "
+                        "Penjualan Accurate resmi + PDF (kartu unduh). AKSES TERBATAS "
+                        "(diberikan admin lewat Menu Control). PN & Qty "
                         "dibaca dari file; harga = harga jual Accurate apa adanya; nomor = "
                         "MASPART-NN. ⛔ PN yang tak ada di Accurate → penawaran DIBATALKAN + "
                         "daftar PN (JANGAN pakai saran/pengganti untuk penawaran). Butuh nama "

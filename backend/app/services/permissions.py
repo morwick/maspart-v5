@@ -69,6 +69,17 @@ HARGA_SUBTABS: dict[str, str] = {
 SESI_KEYS: dict[str, str] = {
     "single_device": "Hanya 1 perangkat",
 }
+# Kemampuan Asisten AI yang dulu HARDCODED admin-only (atau admin+'mas') —
+# kini bisa DIBERIKAN per akun lewat Menu Control tab "Asisten AI".
+# pesanan_bermasalah dipisah dari stok_admin: data uang/refund/pembukuan
+# beda kelas sensitivitas dari data reservasi stok.
+ASISTEN_KEYS: dict[str, str] = {
+    "ai_harga_sims": "Harga SIMS (modal)",
+    "ai_populasi": "Populasi Unit",
+    "ai_penawaran": "Buat Penawaran",
+    "ai_stok_admin": "Stok Tertahan & Alternatif",
+    "ai_pesanan_bermasalah": "Pesanan Bermasalah",
+}
 
 # kind → (perm_type, semua key+label, key yang selalu aktif)
 #
@@ -88,6 +99,12 @@ KINDS: dict[str, dict] = {
     "harga": {"perm_type": "harga_subtab", "all": HARGA_SUBTABS, "always": set()},
     "sesi": {"perm_type": "session_policy", "all": SESI_KEYS, "always": set(),
              "default_off": True},
+    # `grant_off`: IZIN ELEVATED (kemampuan yang dulu admin-only). Tanpa baris =
+    # KOSONG untuk staf (mencegah eskalasi massal saat fitur ini deploy — beda
+    # dari aturan umum "tanpa baris → semua aktif"), tapi ADMIN tetap dapat
+    # SEMUA (beda dari default_off yang = PEMBATASAN sehingga admin dapat []).
+    "asisten": {"perm_type": "ai_ability", "all": ASISTEN_KEYS, "always": set(),
+                "grant_off": True},
 }
 
 
@@ -109,7 +126,7 @@ def effective(kind: str, username: str, role: str) -> list[str]:
     elif "__default__" in data:
         allowed = set(data["__default__"])
     else:
-        allowed = set() if off else set(all_keys)
+        allowed = set() if (off or cfg.get("grant_off")) else set(all_keys)
     allowed |= cfg["always"]
     return [k for k in all_keys if k in allowed]
 
@@ -133,8 +150,8 @@ def overview(kind: str) -> dict:
     cfg = KINDS[kind]
     data = perms_load(cfg["perm_type"])
     all_keys = list(cfg["all"].keys())
-    # default_off → baris "Default (user baru)" mulai TIDAK tercentang.
-    bawaan = [] if cfg.get("default_off") else all_keys
+    # default_off/grant_off → baris "Default (user baru)" mulai TIDAK tercentang.
+    bawaan = [] if (cfg.get("default_off") or cfg.get("grant_off")) else all_keys
     return {
         "kind": kind,
         "all_keys": cfg["all"],
@@ -207,6 +224,25 @@ def boleh_stok(user: dict) -> bool:
         return True
     try:
         return "col_stok" in effective("column", user.get("username", ""), role)
+    except Exception:
+        return False
+
+
+def boleh_ai(user: dict, key: str) -> bool:
+    """Kemampuan Asisten AI ELEVATED (dulu admin-only) — fail-CLOSED.
+
+    Admin selalu True; pembeli selalu False (kemampuan internal, tak pernah
+    bisa diberi); staf HANYA bila key-nya dicentang admin di Menu Control tab
+    Asisten AI. Supabase mati → perms_load {} → grant_off → set() → False;
+    exception apa pun → False. Sengaja BEDA dari boleh_harga/boleh_stok yang
+    fail-open — memberi kemampuan elevated tak boleh terjadi karena error."""
+    role = (user.get("role") or "").lower()
+    if role == "admin":
+        return True
+    if role == "pembeli":
+        return False
+    try:
+        return key in effective("asisten", user.get("username", ""), role)
     except Exception:
         return False
 

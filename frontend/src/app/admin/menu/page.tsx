@@ -18,108 +18,31 @@ const KINDS: [PermKind, string][] = [
   ["column", "Kolom"],
   ["harga", "Sub-tab Harga"],
   ["sesi", "Sesi"],
+  ["asisten", "Asisten AI"],
 ];
 
 // Tab 'sesi' berbeda sifatnya: centang = MEMBATASI, bukan memberi akses.
+// Tab 'asisten': centang = MEMBERI kemampuan yang biasanya khusus admin.
 const KETERANGAN: Partial<Record<PermKind, string>> = {
   sesi:
     "Centang “Hanya 1 perangkat” agar akun tidak bisa dipakai bersamaan di dua tempat. " +
     "Saat orang lain login dengan akun itu, perangkat yang lama otomatis keluar. " +
     "Admin tidak pernah dibatasi.",
+  asisten:
+    "Centang = MEMBERI kemampuan Asisten AI yang biasanya khusus admin. " +
+    "Admin & akun “mas” selalu punya Harga SIMS & Populasi — centang tidak pernah " +
+    "mencabut dari mereka. Akun pembeli tidak bisa diberi kemampuan ini. " +
+    "Stok Tertahan & Alternatif juga butuh centang “Kolom Stok”; hasil berharga " +
+    "butuh “Kolom Harga” (blok pertama di bawah).",
 };
 
 export default function AdminMenuPage() {
   const router = useRouter();
   const [kind, setKind] = useState<PermKind>("menu");
-  const [data, setData] = useState<PermOverview | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [edits, setEdits] = useState<Record<string, Set<string>>>({});
-  const [savingRow, setSavingRow] = useState<string | null>(null);
-
-  const load = useCallback(
-    async (k: PermKind) => {
-      const token = getToken();
-      if (!token) return router.replace("/login");
-      setData(null);
-      setError(null);
-      setMsg(null);
-      try {
-        const d = await getPermOverview(token, k);
-        setData(d);
-        const init: Record<string, Set<string>> = { __default__: new Set(d.default) };
-        for (const u of d.users) {
-          if (u.role === "admin") continue;
-          init[u.username] = new Set(d.permissions[u.username] ?? d.default);
-        }
-        setEdits(init);
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 401) {
-          clearSession();
-          return router.replace("/login");
-        }
-        if (err instanceof ApiError && err.status === 403) return router.replace("/search");
-        setError(err instanceof Error ? err.message : "Gagal memuat");
-      }
-    },
-    [router],
-  );
 
   useEffect(() => {
-    if (getUser()?.role !== "admin") {
-      router.replace("/search");
-      return;
-    }
-    load(kind);
-  }, [router, load, kind]);
-
-  function toggle(username: string, key: string) {
-    setEdits((prev) => {
-      const next = { ...prev };
-      const s = new Set(next[username] ?? []);
-      if (s.has(key)) s.delete(key);
-      else s.add(key);
-      next[username] = s;
-      return next;
-    });
-  }
-
-  async function save(username: string) {
-    const token = getToken();
-    if (!token || !data) return;
-    setSavingRow(username);
-    setMsg(null);
-    setError(null);
-    try {
-      const keys = Object.keys(data.all_keys).filter((k) => edits[username]?.has(k));
-      await setPerm(token, kind, username, keys);
-      setMsg(`Tersimpan: ${username}`);
-      await load(kind);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        clearSession();
-        return router.replace("/login");
-      }
-      setError(err instanceof Error ? err.message : "Gagal menyimpan");
-    } finally {
-      setSavingRow(null);
-    }
-  }
-
-  async function reset(username: string) {
-    const token = getToken();
-    if (!token) return;
-    setSavingRow(username);
-    try {
-      await resetPerm(token, kind, username);
-      setMsg(`Direset ke default: ${username}`);
-      await load(kind);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal reset");
-    } finally {
-      setSavingRow(null);
-    }
-  }
+    if (getUser()?.role !== "admin") router.replace("/search");
+  }, [router]);
 
   return (
     <AppShell active="/admin/menu" title="Menu Control" sub="Atur akses menu, kolom, sub-tab per user">
@@ -151,31 +74,135 @@ export default function AdminMenuPage() {
           </p>
         )}
 
-        {error && (
-          <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-            {error}
-          </p>
-        )}
-        {msg && (
-          <p className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700 ring-1 ring-green-100">
-            {msg}
-          </p>
-        )}
-
-        {!data ? (
-          <p className="text-sm text-zinc-500">Memuat…</p>
+        {kind === "asisten" ? (
+          // Dua blok, SATU sumber izin masing-masing: blok kolom = kind "column"
+          // yang sama dengan tab Kolom (centang di sini = centang di sana),
+          // blok kemampuan = kind "asisten".
+          <>
+            <KindSection kind="column" title="Kolom Harga & Stok (sumber sama dengan tab Kolom)" />
+            <KindSection kind="asisten" title="Kemampuan Asisten AI" />
+          </>
         ) : (
-          <Matrix
-            data={data}
-            edits={edits}
-            savingRow={savingRow}
-            onToggle={toggle}
-            onSave={save}
-            onReset={reset}
-          />
+          <KindSection kind={kind} />
         )}
       </div>
     </AppShell>
+  );
+}
+
+function KindSection({ kind, title }: { kind: PermKind; title?: string }) {
+  const router = useRouter();
+  const [data, setData] = useState<PermOverview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [edits, setEdits] = useState<Record<string, Set<string>>>({});
+  const [savingRow, setSavingRow] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const token = getToken();
+    if (!token) return router.replace("/login");
+    setData(null);
+    setError(null);
+    setMsg(null);
+    try {
+      const d = await getPermOverview(token, kind);
+      setData(d);
+      const init: Record<string, Set<string>> = { __default__: new Set(d.default) };
+      for (const u of d.users) {
+        if (u.role === "admin") continue;
+        init[u.username] = new Set(d.permissions[u.username] ?? d.default);
+      }
+      setEdits(init);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearSession();
+        return router.replace("/login");
+      }
+      if (err instanceof ApiError && err.status === 403) return router.replace("/search");
+      setError(err instanceof Error ? err.message : "Gagal memuat");
+    }
+  }, [router, kind]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  function toggle(username: string, key: string) {
+    setEdits((prev) => {
+      const next = { ...prev };
+      const s = new Set(next[username] ?? []);
+      if (s.has(key)) s.delete(key);
+      else s.add(key);
+      next[username] = s;
+      return next;
+    });
+  }
+
+  async function save(username: string) {
+    const token = getToken();
+    if (!token || !data) return;
+    setSavingRow(username);
+    setMsg(null);
+    setError(null);
+    try {
+      const keys = Object.keys(data.all_keys).filter((k) => edits[username]?.has(k));
+      await setPerm(token, kind, username, keys);
+      setMsg(`Tersimpan: ${username}`);
+      await load();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearSession();
+        return router.replace("/login");
+      }
+      setError(err instanceof Error ? err.message : "Gagal menyimpan");
+    } finally {
+      setSavingRow(null);
+    }
+  }
+
+  async function reset(username: string) {
+    const token = getToken();
+    if (!token) return;
+    setSavingRow(username);
+    try {
+      await resetPerm(token, kind, username);
+      setMsg(`Direset ke default: ${username}`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal reset");
+    } finally {
+      setSavingRow(null);
+    }
+  }
+
+  return (
+    <div className="mb-6">
+      {title && <h3 className="mb-2 text-sm font-semibold text-zinc-700">{title}</h3>}
+
+      {error && (
+        <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+          {error}
+        </p>
+      )}
+      {msg && (
+        <p className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700 ring-1 ring-green-100">
+          {msg}
+        </p>
+      )}
+
+      {!data ? (
+        <p className="text-sm text-zinc-500">Memuat…</p>
+      ) : (
+        <Matrix
+          data={data}
+          edits={edits}
+          savingRow={savingRow}
+          onToggle={toggle}
+          onSave={save}
+          onReset={reset}
+        />
+      )}
+    </div>
   );
 }
 

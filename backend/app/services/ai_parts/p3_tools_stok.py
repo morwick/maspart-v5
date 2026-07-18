@@ -679,9 +679,10 @@ def _t_stok_tertahan(args: dict, user: dict) -> dict:
     karena hasilnya membuka kode pesanan & penahan stok LINTAS CABANG — pembeli maupun
     akun cabang tidak boleh melihatnya.
     """
-    if not _is_admin(user):
+    if not _can_stok_admin(user):
         return {"denied": True,
-                "error": "Rincian reservasi/stok tertahan (kode pesanan penahan) hanya untuk admin."}
+                "error": "Rincian reservasi/stok tertahan (kode pesanan penahan) hanya untuk "
+                         "admin / akun yang diberi izin di Menu Control."}
     pn = (args.get("part_number") or "").strip().upper()
     gud_in = (args.get("gudang") or "").strip()
     if gud_in and not _resolve_gudang(gud_in):
@@ -776,9 +777,10 @@ def _t_stok_tertahan(args: dict, user: dict) -> dict:
 
 def _t_pesanan_bermasalah(args: dict, user: dict) -> dict:
     """Pesanan yang butuh tindakan admin: uang perlu refund/cek, Penawaran Accurate
-    gagal, lunas belum dikirim, bayar macet. ADMIN-ONLY (3 lapis)."""
-    if not _is_admin(user):
-        return {"denied": True, "error": "Pemeriksaan pesanan bermasalah hanya untuk admin."}
+    gagal, lunas belum dikirim, bayar macet. Admin / grant ai_pesanan_bermasalah (3 lapis)."""
+    if not _can_pesanan_bermasalah(user):
+        return {"denied": True, "error": "Pemeriksaan pesanan bermasalah hanya untuk admin / "
+                                         "akun yang diberi izin di Menu Control."}
     try:
         hari = int(args.get("hari_macet") or 3)
     except (TypeError, ValueError):
@@ -827,9 +829,10 @@ def _t_alternatif_ready(args: dict, user: dict) -> dict:
     """PART HABIS → PENGGANTI YANG SIAP KIRIM. Menggabungkan pengganti resmi (SIMS
     sasis + Weichai mesin) dengan stok SIAP KIRIM, jadi jawabannya bukan 'PN pengganti
     ada' melainkan 'PN pengganti ini bisa dikirim hari ini dari gudang X'.
-    ADMIN-ONLY (3 lapis) — mengungkap stok & gudang lintas cabang."""
-    if not _is_admin(user):
-        return {"denied": True, "error": "Pencarian alternatif siap-kirim hanya untuk admin."}
+    Admin / grant ai_stok_admin (3 lapis) — mengungkap stok & gudang lintas cabang."""
+    if not _can_stok_admin(user):
+        return {"denied": True, "error": "Pencarian alternatif siap-kirim hanya untuk admin / "
+                                         "akun yang diberi izin di Menu Control."}
     pn = (args.get("part_number") or args.get("pn") or "").strip().upper()
     if not pn:
         return {"error": "Sebutkan Part Number yang habis/ditanyakan."}
@@ -1117,10 +1120,11 @@ def _penawaran_core(nama_pel: str, barang: list, tanggal: str = "",
 
 
 def _t_buat_penawaran(args: dict, user: dict) -> dict:
-    """Buat Penawaran Penjualan Accurate + PDF resmi. Admin-only (dijaga 3 lapis:
-    tool spec + guard di sini + allow-list terpusat)."""
-    if not _is_admin(user):
-        return {"denied": True, "error": "Buat penawaran hanya untuk admin."}
+    """Buat Penawaran Penjualan Accurate + PDF resmi. Admin / grant ai_penawaran
+    (dijaga 3 lapis: tool spec + guard di sini + allow-list terpusat)."""
+    if not _can_penawaran(user):
+        return {"denied": True, "error": "Buat penawaran hanya untuk admin / "
+                                         "akun yang diberi izin di Menu Control."}
     return _penawaran_core((args.get("pelanggan") or "").strip(),
                            args.get("barang") or [],
                            (args.get("tanggal") or "").strip(),
@@ -1128,11 +1132,12 @@ def _t_buat_penawaran(args: dict, user: dict) -> dict:
 
 
 def _t_sheet_jadi_penawaran(args: dict, user: dict) -> dict:
-    """Jadikan Excel unggahan (PN + Qty) → Penawaran Accurate + PDF. Admin-only.
-    ⛔ PN tak ada di Accurate = BATAL (tak pakai 'mungkin maksud'). Qty bermasalah:
-    'batal' (default) atau 'lewati'."""
-    if not _is_admin(user):
-        return {"denied": True, "error": "Buat penawaran hanya untuk admin."}
+    """Jadikan Excel unggahan (PN + Qty) → Penawaran Accurate + PDF. Admin / grant
+    ai_penawaran. ⛔ PN tak ada di Accurate = BATAL (tak pakai 'mungkin maksud').
+    Qty bermasalah: 'batal' (default) atau 'lewati'."""
+    if not _can_penawaran(user):
+        return {"denied": True, "error": "Buat penawaran hanya untuk admin / "
+                                         "akun yang diberi izin di Menu Control."}
     parsed = ai_sheet.get_sheet(args.get("_sheet_id", ""), user.get("username", ""))
     if not parsed:
         return {"found": False, "error": "Tidak ada file Excel terlampir (atau kedaluwarsa). "

@@ -72,15 +72,24 @@ class AINotConfigured(RuntimeError):
 #  DEFINISI TOOLS (skema OpenAI function-calling)
 # ═══════════════════════════════════════════════════════════════════════
 def _can_sims(user: dict) -> bool:
-    """Hanya admin & akun SEE_ALL (mis. 'mas') yang boleh lihat harga SIMS/modal."""
+    """Harga SIMS/modal: admin & akun SEE_ALL ('mas') SELALU; staf lain bila
+    diberi centang 'ai_harga_sims' di Menu Control tab Asisten AI (grant = OR,
+    centang MEMBERI dan tak pernah mencabut dari admin/'mas')."""
     role = (user.get("role") or "").lower()
     uname = (user.get("username") or "").strip().lower()
-    return role == "admin" or uname in gudang.SEE_ALL_ACCOUNTS
+    if role == "admin" or uname in gudang.SEE_ALL_ACCOUNTS:
+        return True
+    return _boleh_ai(user, "ai_harga_sims")
 
 
 def _can_populasi(user: dict) -> bool:
-    """Akses data Populasi Unit di asisten — HANYA admin & akun 'mas' (SEE_ALL)."""
-    return _can_sims(user)
+    """Data Populasi Unit: admin & 'mas' selalu; staf lain bila diberi centang
+    'ai_populasi' (tak lagi alias _can_sims — grant-nya key terpisah)."""
+    role = (user.get("role") or "").lower()
+    uname = (user.get("username") or "").strip().lower()
+    if role == "admin" or uname in gudang.SEE_ALL_ACCOUNTS:
+        return True
+    return _boleh_ai(user, "ai_populasi")
 
 
 def _can_orders(user: dict) -> bool:
@@ -99,6 +108,7 @@ def _is_pembeli(user: dict) -> bool:
 # Alias underscore dipertahankan agar pemakai internal (p2/p3/p5/p6/p7/p9) dan
 # test lama tetap bekerja tanpa disentuh.
 from .permissions import (HARGA_KEYS as _HARGA_KEYS, STOK_KEYS as _STOK_KEYS,
+                          boleh_ai as _boleh_ai,
                           boleh_harga as _boleh_harga, boleh_stok as _boleh_stok,
                           strip_harga as _strip_harga, strip_stok as _strip_stok)
 
@@ -113,6 +123,20 @@ def _rp(n) -> str:
 
 def _is_admin(user: dict) -> bool:
     return (user.get("role") or "").lower() == "admin"
+
+
+# Kemampuan elevated per akun (Menu Control tab Asisten AI) — pola OR:
+# admin selalu; staf lain bila key-nya dicentang. Fail-closed via _boleh_ai.
+def _can_penawaran(user: dict) -> bool:
+    return _is_admin(user) or _boleh_ai(user, "ai_penawaran")
+
+
+def _can_stok_admin(user: dict) -> bool:
+    return _is_admin(user) or _boleh_ai(user, "ai_stok_admin")
+
+
+def _can_pesanan_bermasalah(user: dict) -> bool:
+    return _is_admin(user) or _boleh_ai(user, "ai_pesanan_bermasalah")
 
 
 def _boleh_isi_stok_harga(args: dict, user: dict) -> bool:

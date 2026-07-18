@@ -85,7 +85,8 @@ def test_tool_stok_tak_ditawarkan_tanpa_izin(perms):
     for t in ("stok_accurate", "stok_gudang", "stok_tertahan", "alternatif_ready"):
         assert t not in nama_wawan
     # staf ber-izin dapat tool stok umum; 'stok_tertahan' & 'alternatif_ready'
-    # tetap admin-only (gerbang peran lama, tak diubah oleh gerbang stok ini).
+    # butuh grant 'ai_stok_admin' (Menu Control tab Asisten AI) — fixture perms
+    # di sini tak memberikannya, jadi tetap admin-only.
     for t in ("stok_accurate", "stok_gudang"):
         assert t in nama_agus
     for t in ("stok_tertahan", "alternatif_ready"):
