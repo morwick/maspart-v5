@@ -50,3 +50,43 @@ def test_csv_multisheet_absen(katalog):
     # CSV tak punya konsep sheet lain.
     p = ai_sheet.parse_upload(b"Part Number,Qty\nWG9925520270,1\n", "a.csv")
     assert p["ok"] and p["sheet_lain"] == []
+
+
+# ── Fase 5: impor Google Sheets (anti-SSRF) ──────────────────────────────────
+
+class _FakeResp:
+    def __init__(self, code, ctype, body=b""):
+        self.status_code = code
+        self.headers = {"Content-Type": ctype}
+        self._body = body
+
+    def iter_content(self, n):
+        yield self._body
+
+
+def test_gsheet_url_tak_dikenal():
+    data, err = ai_sheet.import_gsheet("https://contoh.com/bukan-sheet")
+    assert data is None and "Google Sheets" in err
+
+
+def test_gsheet_sukses(monkeypatch):
+    captured = {}
+
+    def _get(url, **kw):
+        captured["url"] = url
+        return _FakeResp(200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", b"XLSXBYTES")
+
+    monkeypatch.setattr("requests.get", _get)
+    url = "https://docs.google.com/spreadsheets/d/ABCDEFGHIJ1234567890xyz/edit#gid=0"
+    data, err = ai_sheet.import_gsheet(url)
+    assert data == b"XLSXBYTES" and not err
+    # anti-SSRF: HANYA fetch docs.google.com dgn id terekstrak (bukan URL mentah)
+    assert captured["url"] == ("https://docs.google.com/spreadsheets/d/"
+                               "ABCDEFGHIJ1234567890xyz/export?format=xlsx")
+
+
+def test_gsheet_privat_ditolak(monkeypatch):
+    monkeypatch.setattr("requests.get", lambda url, **kw: _FakeResp(200, "text/html", b"<html>login</html>"))
+    data, err = ai_sheet.import_gsheet(
+        "https://docs.google.com/spreadsheets/d/ABCDEFGHIJ1234567890xyz/edit")
+    assert data is None and "berbagi" in err.lower()

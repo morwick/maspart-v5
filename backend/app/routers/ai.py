@@ -265,7 +265,8 @@ async def ai_chat_image(
 @router.post("/chat-sheet", dependencies=[Depends(limit("ai_sheet", 10, 60))])
 async def ai_chat_sheet(
     messages: str = Form("[]", description="Riwayat chat (JSON list {role, content})."),
-    file: UploadFile = File(..., description="File Excel (.xlsx/.xlsm) atau CSV (.csv) yang diunggah user."),
+    file: UploadFile | None = File(None, description="File Excel (.xlsx/.xlsm) atau CSV (.csv) yang diunggah user."),
+    gsheet_url: str = Form("", description="Alternatif file: link berbagi Google Sheets."),
     user: dict = Depends(require_ai),
 ):
     """Chat dengan LAMPIRAN EXCEL. File dibaca di server (kolom dikenali otomatis),
@@ -284,17 +285,28 @@ async def ai_chat_sheet(
         if isinstance(m, dict) and m.get("role")
     ]
 
-    # Baca BERTAHAP dgn plafon — .xlsx itu ZIP, file kecil bisa mengembang ratusan MB.
-    buf = bytearray()
-    while chunk := await file.read(1024 * 1024):
-        buf.extend(chunk)
-        if len(buf) > ai_sheet.MAX_BYTES:
-            raise HTTPException(
-                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                f"File maksimal {ai_sheet.MAX_BYTES // 1024 // 1024} MB.",
-            )
+    # Sumber: file unggahan ATAU link Google Sheets (impor aman docs.google.com).
+    if file is not None:
+        # Baca BERTAHAP dgn plafon — .xlsx itu ZIP, file kecil bisa mengembang ratusan MB.
+        buf = bytearray()
+        while chunk := await file.read(1024 * 1024):
+            buf.extend(chunk)
+            if len(buf) > ai_sheet.MAX_BYTES:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    f"File maksimal {ai_sheet.MAX_BYTES // 1024 // 1024} MB.",
+                )
+        data, fname = bytes(buf), (file.filename or "")
+    elif gsheet_url.strip():
+        data, err = ai_sheet.import_gsheet(gsheet_url.strip())
+        if data is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, err)
+        fname = "google_sheet.xlsx"
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Lampirkan file Excel/CSV atau berikan link Google Sheets.")
 
-    parsed = ai_sheet.parse_upload(bytes(buf), file.filename or "")
+    parsed = ai_sheet.parse_upload(data, fname)
     if not parsed.get("ok"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, parsed.get("error") or "File tidak terbaca.")
 

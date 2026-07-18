@@ -258,6 +258,38 @@ def parse_upload(data: bytes, filename: str = "", pilih_sheet: str = "") -> dict
                          sheet_lain_ringkas, sheet_names, data, kolom_terpotong)
 
 
+_GSHEET_ID_RE = re.compile(r"/spreadsheets/d/([A-Za-z0-9_-]{20,})")
+
+
+def import_gsheet(url: str) -> tuple[bytes | None, str]:
+    """Impor Google Sheets dari link BAGIKAN → bytes .xlsx. Anti-SSRF: HANYA
+    mengambil dari docs.google.com dgn spreadsheet-id yang diekstrak (bukan URL
+    mentah user). Return (bytes, "") atau (None, pesan_error)."""
+    m = _GSHEET_ID_RE.search(url or "")
+    if not m:
+        return None, ("Link Google Sheets tak dikenali. Pakai link berbagi sheet "
+                      "(docs.google.com/spreadsheets/d/...).")
+    sid = m.group(1)
+    export_url = f"https://docs.google.com/spreadsheets/d/{sid}/export?format=xlsx"
+    try:
+        import requests
+        r = requests.get(export_url, timeout=20, stream=True,
+                         allow_redirects=True)
+    except Exception:
+        return None, "Gagal menghubungi Google Sheets. Coba lagi."
+    # Login-redirect / privat → Google balas HTML, bukan xlsx.
+    ctype = (r.headers.get("Content-Type") or "").lower()
+    if r.status_code != 200 or "spreadsheet" not in ctype and "officedocument" not in ctype:
+        return None, ("Sheet tak bisa diakses. Set berbagi ke 'Siapa saja dengan link "
+                      "(Viewer)' lalu coba lagi.")
+    buf = bytearray()
+    for chunk in r.iter_content(1024 * 1024):
+        buf.extend(chunk)
+        if len(buf) > MAX_BYTES:
+            return None, f"Sheet terlalu besar (maksimum {MAX_BYTES // 1024 // 1024} MB)."
+    return bytes(buf), ""
+
+
 def _read_csv(data: bytes) -> list[list] | None:
     """Decode CSV (utf-8-sig → cp1252) + tebak delimiter (Sniffer, fallback ,/;) →
     list-of-rows (dipotong MAX_COLS/MAX_ROWS). None bila tak terbaca."""
