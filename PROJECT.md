@@ -1769,6 +1769,27 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
         panel TFT; "nilai sensor tekanan oli"→tabel konversi. `build_all --with-media`.
       - **900 test hijau** (⛔ evals tak disentuh). ⚠️ SISA: pra-terjemah bertahap (i18n)
         manual_teks & pin_ecu; kurasi 163 gambar naratif manual_media ke `dicari=True`.
+- [x] **Upgrade OLAH-EXCEL unggahan — 9 perbaikan** (Fase 1-5) SELESAI 2026-07-18
+      (commit `3bdef7e`? tidak — seri Excel: builder sheet_status → `8c2df69`): olah-Excel
+      berubah dari "isi kolom" jadi "tutup penjualan" + hasil dipercaya + input tahan-banting.
+      Plan Fable 5, eksekusi Opus 4.8.
+      - **Builder `sheet_status`** (`ai_export.py`): Excel BERWARNA baris (hijau ready/merah
+        kosong-kurang/kuning tak-ketemu/ada-pengganti) + blok RINGKASAN; byte-stable
+        (`_save_stable` pin properties). Status dwi-encode (warna + kolom teks).
+      - **`sheet_isi_kolom` diperluas** (`ai_sheet.fill_columns`): enum isi baru `pengganti`
+        (supersession SIMS), `cross_ref` (Fleetguard/Donaldson), `berat`, `dimensi`,
+        `rencana_pemenuhan` (gudang mana bisa penuhi qty − reservasi, scoped) + opsi
+        `tandai_status` (warna+flag+"mungkin maksud" difflib) & `rekap` (subtotal+PPN
+        [gate `boleh_harga` di FILE], berat, ongkir). Nol Accurate live; deterministik.
+      - **Tool baru `sheet_jadi_penawaran`** (admin 3-lapis): Excel PN+Qty → Penawaran
+        Accurate + PDF (extract `_penawaran_core` dari buat_penawaran; PN tak ada = BATAL,
+        qty bermasalah batal/lewati, PN duplikat dijumlah). **`template_excel_part`** (semua
+        peran, tanpa lampiran).
+      - **Ketahanan input**: terima **CSV** (delimiter Sniffer/BOM/cp1252; `_finish_parse`
+        refactor) + **impor Google Sheets link** (anti-SSRF: docs.google.com + id terekstrak).
+      - **932 test hijau** (+ test_ai_export_status/periksa/penawaran/csv). ⛔ evals tak disentuh.
+      - ⚠️ DITUNDA (2 dari 11): header Excel 2-baris merged (ambigu → risiko akurasi, dibuang);
+        OCR foto daftar tulis-tangan (DeepSeek tanpa endpoint vision + risiko karang PN).
       **Baseline metrik produksi PRA-rombakan 2026-07-17** (ai_chat_log Supabase,
       163 giliran) sebagai pembanding sesudah rombakan:
       - Tool gagal: 19,6% giliran. Tersering: `pengganti_part` 45% (9/20), `uraikan_mesin` 33%,
