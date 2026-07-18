@@ -26,6 +26,21 @@ def _jangan_tulis_observabilitas_prod(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _bersihkan_cache_izin():
+    """permissions menyimpan hasil perms_load di cache modul ber-TTL 30 dtk.
+    Antar-test cache itu BOCOR: test yang me-monkeypatch perms_load justru
+    membaca centang milik test sebelumnya. Buang sebelum & sesudah tiap test."""
+    try:
+        from app.services import permissions
+    except Exception:
+        yield
+        return
+    permissions.invalidate_cache()
+    yield
+    permissions.invalidate_cache()
+
+
+@pytest.fixture(autouse=True)
 def _jangan_bangun_indeks_epc_nyata(monkeypatch):
     """Indeks item EPC per-unit: warm_items_index menembak RATUSAN panggilan EPC
     nyata di thread latar & menulis cache disk — tak boleh terjadi dari test.

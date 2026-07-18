@@ -1260,6 +1260,7 @@ def _t_sheet_isi_kolom(args: dict, user: dict) -> dict:
         qty_kolom=(args.get("qty_kolom") or "").strip(),
         kode_pos_tujuan=(args.get("kode_pos_tujuan") or "").strip(),
         boleh_harga=_boleh_harga(user),   # gate Subtotal/PPN di FILE (bukan cuma hasil model)
+        boleh_stok=_boleh_stok(user),     # gate kolom Stok/pemenuhan/warna status di FILE
     )
 
 

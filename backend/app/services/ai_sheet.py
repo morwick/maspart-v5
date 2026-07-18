@@ -919,6 +919,7 @@ def fill_columns(
     qty_kolom: str = "",
     kode_pos_tujuan: str = "",
     boleh_harga: bool = True,
+    boleh_stok: bool = True,
 ) -> dict:
     """Isi BEBERAPA kolom sekaligus ke SATU file (satu kartu unduh). `permintaan` =
     daftar spesifikasi kolom, tiap elemen menghasilkan SATU kolom:
@@ -932,6 +933,20 @@ def fill_columns(
       rekap → blok RINGKASAN (jumlah, qty, subtotal+PPN [gate harga], berat, ongkir);
       qty_kolom → kolom Qty untuk 'kurang'/pemenuhan/total; kode_pos_tujuan → estimasi ongkir.
     Data di-lookup SEKALI lalu dipakai semua kolom (deterministik; nol Accurate live)."""
+    # Gerbang STOK (Menu Control 'Kolom Stok') — ditegakkan di FILE, bukan cuma di
+    # hasil model, dan DULUAN sebelum apa pun: izin tak bergantung ada/tidaknya
+    # lampiran. Selain kolom stok, 'rencana_pemenuhan' (gudang mana bisa penuhi
+    # qty) & tandai_status (warna READY/STOK KOSONG) sama-sama mengungkap stok.
+    if not boleh_stok:
+        diminta = {(s.get("isi") or "").strip()
+                   for s in (permintaan or []) if isinstance(s, dict)}
+        if diminta & {ISI_STOK, ISI_PEMENUHAN} or tandai_status:
+            return {"denied": True,
+                    "error": "Kolom stok (termasuk rencana pemenuhan & penanda status "
+                             "ready/kosong) tidak tersedia untuk user ini. Sampaikan apa "
+                             "adanya — jangan mengisi, memperkirakan, atau mewarnai baris "
+                             "berdasarkan stok."}
+
     parsed = get_sheet(sheet_id, user.get("username", ""))
     if not parsed:
         return {"found": False, "error": "Belum ada file Excel yang diunggah di percakapan ini "

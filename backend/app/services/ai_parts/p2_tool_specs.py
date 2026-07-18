@@ -1565,6 +1565,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         _GATED_PEMBELI = {"excel_stok_gudang", "banding_rangka_massal", "banding_rangka"}
         specs = [s for s in specs if s["function"]["name"] not in _GATED_PEMBELI]
 
+    # ── Gating STOK (Menu Control 'Kolom Stok'): tool yang SELURUH gunanya
+    # adalah stok tak ditawarkan ke staf yang izinnya dimatikan — sia-sia
+    # dipanggil karena _strip_stok di _run_tool akan mengosongkan hasilnya,
+    # dan _allowed_tool_names ikut menolak eksekusinya (diturunkan dari sini).
+    if not _boleh_stok(user):
+        _GATED_STOK = {"stok_accurate", "stok_gudang", "stok_tertahan",
+                       "alternatif_ready", "excel_stok_gudang"}
+        specs = [s for s in specs if s["function"]["name"] not in _GATED_STOK]
+
     return specs
 
 

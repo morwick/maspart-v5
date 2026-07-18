@@ -176,6 +176,12 @@ def _run_tool(name: str, args: dict, user: dict, sheet_id: str = "") -> dict:
     # kini menguasai asisten sama seperti halaman Cari Part/detail.
     if isinstance(res, dict) and not _boleh_harga(user):
         _strip_harga(res)
+    # PENJAGA STOK TERPUSAT — kembaran penjaga harga di atas. Menu Control 'Kolom
+    # Stok' (col_stok) dulu hanya ditulis & tak pernah dibaca server, jadi angka
+    # stok bocor ke staf yang centangnya dimatikan lewat SEMUA tool ber-EPC
+    # (part_aus_dari_rangka, bom_dari_rangka, cari_part_di_unit, …).
+    if isinstance(res, dict) and not _boleh_stok(user):
+        _strip_stok(res)
     return res
 
 

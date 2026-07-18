@@ -11,8 +11,40 @@ Aturan umum: admin → semua; user dgn baris → keys baris; tanpa baris →
 """
 from __future__ import annotations
 
+import threading
+import time
+
 from . import gudang
 from .supabase_client import list_users, perms_delete, perms_load, perms_save
+
+# ── Cache ber-TTL untuk pembacaan izin ───────────────────────────────
+# `perms_load` = satu request HTTP ke Supabase. Tanpa cache, tiap gerbang
+# (_boleh_harga & _boleh_stok di asisten) memukul Supabase SEKALI PER TOOL CALL —
+# satu giliran chat bisa 10+ round-trip hanya untuk membaca dua boolean yang sama.
+# Pola & TTL disamakan dengan services/session_policy.py; admin.py memanggil
+# invalidate_cache() saat centang disimpan/direset supaya perubahan berlaku
+# seketika, bukan setelah TTL.
+_CACHE_TTL = 30.0
+_cache_lock = threading.Lock()
+_cache: dict[str, tuple[float, dict]] = {}      # perm_type → (at, data)
+
+
+def _perms_load_cached(perm_type: str) -> dict:
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _cache.get(perm_type)
+        if hit and (now - hit[0]) < _CACHE_TTL:
+            return hit[1]
+    data = perms_load(perm_type)                # {} bila Supabase mati → fail-open
+    with _cache_lock:
+        _cache[perm_type] = (time.monotonic(), data)
+    return data
+
+
+def invalidate_cache() -> None:
+    """Buang cache izin — dipanggil admin.py setelah set_perm/reset_perm."""
+    with _cache_lock:
+        _cache.clear()
 
 # ── Definisi tiap "kind" ─────────────────────────────────────────────
 MENU_TABS: dict[str, str] = {
@@ -71,7 +103,7 @@ def effective(kind: str, username: str, role: str) -> list[str]:
         # Admin punya semua IZIN, tapi tak pernah kena PEMBATASAN (default_off).
         # Tanpa ini, mencentang 'sesi' berisiko mengunci admin dari sistemnya sendiri.
         return [] if off else all_keys
-    data = perms_load(cfg["perm_type"])
+    data = _perms_load_cached(cfg["perm_type"])
     if username in data:
         allowed = set(data[username])
     elif "__default__" in data:

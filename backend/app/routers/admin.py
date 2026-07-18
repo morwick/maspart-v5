@@ -79,6 +79,7 @@ def perms_set(kind: str, body: SetPermRequest, _admin: dict = Depends(require_ad
     ok = permissions.set_perm(kind, body.username.strip().lower(), body.keys)
     if not ok:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Gagal menyimpan ke Supabase")
+    permissions.invalidate_cache()      # centang kolom/menu berlaku seketika
     session_policy.invalidate_cache()   # centang 'sesi' berlaku seketika
     return {"ok": True}
 
@@ -87,6 +88,7 @@ def perms_set(kind: str, body: SetPermRequest, _admin: dict = Depends(require_ad
 def perms_reset(kind: str, username: str, _admin: dict = Depends(require_admin)):
     _check_kind(kind)
     permissions.reset_perm(kind, username.strip().lower())
+    permissions.invalidate_cache()
     session_policy.invalidate_cache()
     return {"ok": True}
 

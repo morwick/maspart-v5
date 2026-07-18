@@ -163,11 +163,13 @@ _EXCEL_SERVER_MAX = 4000   # plafon baris export server-side (BOM terbesar ~2rb)
 
 def _excel_stok_harga_cols(user: dict, dengan_stok: bool, dengan_harga: bool) -> tuple[bool, bool]:
     """Gerbang peran kolom Excel: pembeli tak boleh melihat rincian stok gudang
-    (aturan audit hardening) & harga di asisten HANYA admin/akun 'mas'."""
+    (aturan audit hardening); harga & stok mengikuti izin kolom Menu Control."""
     if _is_pembeli(user):
         return False, False
     if dengan_harga and not _boleh_harga(user):
         dengan_harga = False
+    if dengan_stok and not _boleh_stok(user):
+        dengan_stok = False
     return dengan_stok, dengan_harga
 
 

@@ -222,6 +222,15 @@ def _user_context_line(user: dict) -> str:
     if branch:
         line += (f" Akun ini adalah CABANG gudang: {branch}. Data pesanan/penjualan "
                  "otomatis hanya untuk gudang ini.")
+    if not _boleh_stok(user):
+        # Server sudah membuang semua field stok dari hasil tool (_strip_stok di
+        # _run_tool). Baris ini mencegah model MENGARANG/menyimpulkan angka stok
+        # dari ingatan atau riwayat, dan mencegah ia menjanjikan cek stok.
+        line += (" ⛔ User ini TIDAK berhak melihat STOK. Hasil tool memang tidak "
+                 "memuat angka stok — jangan menyebut, memperkirakan, atau membuat "
+                 "kolom Stok, dan jangan menawarkan cek stok/ketersediaan. Bila "
+                 "ditanya stok, katakan terus terang akses stok tidak aktif untuk "
+                 "akunnya dan minta hubungi admin.")
     return line
 
 
