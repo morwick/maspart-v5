@@ -30,7 +30,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from openpyxl import load_workbook
 
-from . import ai_export, harga, part_index, sims
+from . import (accurate, ai_export, filter_ref, gudang, harga, orders,
+               part_index, reservations, sims)
 
 # ── Plafon (server RAM 3,8 GB; lihat memory server-kapasitas-ram) ──
 MAX_BYTES = 10 * 1024 * 1024   # 10 MB per unggahan chat
@@ -59,7 +60,13 @@ ISI_STOK = "stok"
 ISI_NAMA = "nama_part"
 ISI_HARGA_LOKAL = "harga_lokal"
 ISI_HARGA_SIMS = "harga_sims"
-ISI_PILIHAN = (ISI_STOK, ISI_NAMA, ISI_HARGA_LOKAL, ISI_HARGA_SIMS)
+ISI_PENGGANTI = "pengganti"          # PN pengganti (supersession SIMS)
+ISI_CROSS_REF = "cross_ref"          # cross-reference merek filter
+ISI_BERAT = "berat"                  # berat tertagih (kg)
+ISI_DIMENSI = "dimensi"              # dimensi P×L×T (cm) SIMS
+ISI_PEMENUHAN = "rencana_pemenuhan"  # gudang mana bisa penuhi qty
+ISI_PILIHAN = (ISI_STOK, ISI_NAMA, ISI_HARGA_LOKAL, ISI_HARGA_SIMS,
+               ISI_PENGGANTI, ISI_CROSS_REF, ISI_BERAT, ISI_DIMENSI, ISI_PEMENUHAN)
 
 # ── Deteksi peran kolom ──
 _HEAD_PN = re.compile(r"\b(part\s*number|part\s*no|part\s*num|pn|no\.?\s*part|nomor\s*part|kode\s*part|item\s*code)\b", re.I)
@@ -737,8 +744,74 @@ _ISI_LABEL = {
     ISI_NAMA: "Nama Part",
     ISI_HARGA_LOKAL: "Harga",
     ISI_HARGA_SIMS: "Harga SIMS (IDR)",
+    ISI_PENGGANTI: "PN Pengganti",
+    ISI_CROSS_REF: "Cross Ref (Fleetguard/Donaldson/dll)",
+    ISI_BERAT: "Berat (kg)",
+    ISI_DIMENSI: "Dimensi P×L×T (cm)",
+    ISI_PEMENUHAN: "Rencana Pemenuhan",
 }
 _ISI_KEY = {ISI_STOK: "stok", ISI_NAMA: "part_name", ISI_HARGA_LOKAL: "harga"}
+_MAX_DIM_SIMS = 150   # plafon call live SIMS get_part_spec (dimensi)
+
+
+def _qty_int(v) -> int | None:
+    """Parse qty sel → int (ambil digit pertama). None bila tak ada angka."""
+    m = re.search(r"\d[\d.,]*", str(v or ""))
+    if not m:
+        return None
+    try:
+        return int(float(m.group(0).replace(".", "").replace(",", "")))
+    except ValueError:
+        return None
+
+
+def _int_or_none(v) -> int | None:
+    """Stok/angka string → int; None bila tak jelas (N/A, kosong, non-angka)."""
+    s = str(v or "").strip()
+    if not s or s.upper() in ("N/A", "—", "-"):
+        return None
+    m = re.search(r"-?\d[\d.,]*", s)
+    if not m:
+        return None
+    try:
+        return int(float(m.group(0).replace(".", "").replace(",", "")))
+    except ValueError:
+        return None
+
+
+def _stok_total(d: dict) -> int | None:
+    """Total stok dari baris part_index (kolom 'stok' → int)."""
+    return _int_or_none((d or {}).get("stok"))
+
+
+def _pengganti_pn(pn: str) -> str:
+    """PN pengganti terbaru (supersession) dari indeks SIMS — instant, deterministik.
+    Kosong bila tak ada. (Weichai mesin: pakai tool pengganti_part khusus, live.)"""
+    try:
+        if sims.equivalents_count() <= 0:
+            return ""
+        rows = (sims.equivalents_for(pn) or {}).get("digantikan_oleh") or []
+        return (rows[0].get("pn") or "").strip() if rows else ""
+    except Exception:
+        return ""
+
+
+def _saran_pn(pn: str, fmap: dict) -> str:
+    """'Mungkin maksud' untuk PN tak ketemu: kandidat difflib terdekat (ratio≥0.9)
+    dari peta flat PN katalog. Deterministik (1 terbaik, tie → alfabet). Kosong bila
+    tak ada yang cukup mirip."""
+    import difflib
+    flat = part_index._pn_flat(pn)
+    if len(flat) < 5:
+        return ""
+    pref = flat[:5]
+    kand = [f for f in fmap if f.startswith(pref) and f != flat]
+    best, best_r = "", 0.0
+    for f in kand:
+        r = difflib.SequenceMatcher(None, flat, f).ratio()
+        if r > best_r or (r == best_r and (fmap[f][0] < best)):
+            best_r, best = r, fmap[f][0]
+    return best if best_r >= 0.9 else ""
 
 
 def _stash_sheet_out(judul: str, headers: list[str], body: list[list],
@@ -762,14 +835,24 @@ def fill_columns(
     permintaan: list[dict],
     can_sims: bool = False,
     kolom_pn: str = "",
+    tandai_status: bool = False,
+    rekap: bool = False,
+    qty_kolom: str = "",
+    kode_pos_tujuan: str = "",
+    boleh_harga: bool = True,
 ) -> dict:
     """Isi BEBERAPA kolom sekaligus ke SATU file (satu kartu unduh). `permintaan` =
     daftar spesifikasi kolom, tiap elemen menghasilkan SATU kolom:
-      {"isi": "stok"|"nama_part"|"harga_lokal"|"harga_sims",
+      {"isi": stok|nama_part|harga_lokal|harga_sims|pengganti|cross_ref|berat|
+              dimensi|rencana_pemenuhan,
        "gudang": <opsional, khusus stok → kolom stok gudang itu>,
        "kolom_tujuan": <opsional nama/huruf kolom, default nama otomatis>}
-    Semua kolom ditaruh dalam file yang sama sehingga user tak menerima banyak file.
-    Data di-lookup sekali (indeks lokal + SIMS batch) lalu dipakai semua kolom."""
+    Opsi lintas-kolom:
+      tandai_status → tambah kolom Status+Keterangan & WARNA baris (hijau ready /
+        merah kosong-kurang / kuning tak-ketemu-atau-ada-pengganti);
+      rekap → blok RINGKASAN (jumlah, qty, subtotal+PPN [gate harga], berat, ongkir);
+      qty_kolom → kolom Qty untuk 'kurang'/pemenuhan/total; kode_pos_tujuan → estimasi ongkir.
+    Data di-lookup SEKALI lalu dipakai semua kolom (deterministik; nol Accurate live)."""
     parsed = get_sheet(sheet_id, user.get("username", ""))
     if not parsed:
         return {"found": False, "error": "Belum ada file Excel yang diunggah di percakapan ini "
@@ -786,7 +869,7 @@ def fill_columns(
         specs.append({"isi": isi,
                       "gudang": (s.get("gudang") or "").strip(),
                       "kolom_tujuan": (s.get("kolom_tujuan") or "").strip()})
-    if not specs:
+    if not specs and not (tandai_status or rekap):
         return {"found": False, "error": "Tidak ada kolom yang diminta untuk diisi."}
     for s in specs:
         if s["isi"] not in ISI_PILIHAN:
@@ -810,9 +893,19 @@ def fill_columns(
     pns = [(r[pn_i] or "").strip().upper() for r in body]
     unik = [p for p in dict.fromkeys(pns) if p]
 
+    isis = {s["isi"] for s in specs}
+    # Kolom Qty (untuk 'kurang'/pemenuhan/total): user-sebut atau peran terdeteksi.
+    qty_i = _cari_kolom(headers, qty_kolom) if qty_kolom else None
+    if qty_i is None and "qty" in parsed["roles"]:
+        qty_i = parsed["roles"].index("qty")
+    qtys = [(_qty_int(r[qty_i]) if qty_i is not None and qty_i < len(r) else None)
+            for r in body]
+
     # Lookup SEKALI, dipakai semua kolom.
+    _perlu_lokal = (bool(isis & {ISI_STOK, ISI_NAMA, ISI_HARGA_LOKAL, ISI_PEMENUHAN})
+                    or tandai_status or rekap)
     peta_lokal: dict[str, dict] = {}
-    if any(s["isi"] in (ISI_STOK, ISI_NAMA, ISI_HARGA_LOKAL) for s in specs):
+    if _perlu_lokal:
         try:
             # PEMAAF suffix varian: PN sheet 'WG9525160004/2' cocok ke baris PN
             # dasar 'WG9525160004' (& sebaliknya) — kunci hasil = PN sheet apa
@@ -833,6 +926,73 @@ def fill_columns(
         sumber_sims = f"SIMS live (kurs CNY→IDR {res['rate']:.0f})"
     tersedia_gudang = part_index.gudang_names()
 
+    # ── Lookup fitur baru (batch 1× per sheet, deterministik) ──
+    peta_pengganti: dict[str, str] = {}
+    if ISI_PENGGANTI in isis or tandai_status:
+        peta_pengganti = {p: _pengganti_pn(p) for p in unik}
+    peta_cross: dict[str, dict | None] = {}
+    if ISI_CROSS_REF in isis:
+        peta_cross = {p: filter_ref.by_pn(p) for p in unik}
+    peta_berat: dict[str, int] = {}
+    if ISI_BERAT in isis or rekap:
+        peta_berat = {p: (harga.shipping_weight_for(p, allow_remote=False) or 0)
+                      for p in unik}
+    peta_dim: dict[str, str] = {}
+    if ISI_DIMENSI in isis:
+        sel = unik[:_MAX_DIM_SIMS]
+
+        def _spec_dim(p):
+            try:
+                return (sims.get_part_spec(p) or {}).get("dimensi_cm") or ""
+            except Exception:
+                return ""
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            for p, dim in zip(sel, ex.map(_spec_dim, sel)):
+                peta_dim[p] = dim
+    peta_pemenuhan: dict[str, dict] = {}
+    if ISI_PEMENUHAN in isis:
+        _is_buyer = (user.get("role") or "").lower() in ("buyer", "pembeli")
+        all_names = accurate.warehouse_names()
+        for p in unik:
+            bd = accurate.gudang_breakdown(p) or {}
+            avail = {}
+            for g, q in bd.items():
+                try:
+                    avail[g] = max(0, int(q) - int(reservations.reserved_for(p, g) or 0))
+                except Exception:
+                    avail[g] = 0
+            if _is_buyer:
+                avail = gudang.shippable(avail)
+            avail = gudang.scope_breakdown(avail, user.get("username", ""),
+                                           user.get("role", ""), all_names, fallback=True)
+            peta_pemenuhan[p] = {"bd": bd, "avail": avail}
+
+    def _pemenuhan_str(p: str, qty: int | None) -> str:
+        info = peta_pemenuhan.get(p)
+        if not info:
+            return ""
+        avail = info["avail"]
+        n = qty or 1
+        penuh = sorted([g for g, q in avail.items() if q >= n],
+                       key=lambda g: (-avail[g], g))
+        if penuh:
+            return f"SEMUA dari {gudang.gudang_label(penuh[0])}"
+        tot = sum(avail.values())
+        if tot >= n:
+            parts, rem = [], n
+            for g in sorted(avail, key=lambda g: (-avail[g], g)):
+                if rem <= 0:
+                    break
+                take = min(avail[g], rem)
+                if take > 0:
+                    parts.append(f"{gudang.gudang_label(g)}({take})")
+                    rem -= take
+            return "SPLIT: " + " + ".join(parts)
+        tot_bd = sum(_int_or_none(q) or 0 for q in info["bd"].values())
+        if tot_bd >= n:
+            return f"READY SETELAH RESERVASI DILEPAS (tertahan {tot_bd - tot})"
+        return f"KURANG (butuh {n}, ada {tot})"
+
     def _nilai_fn(isi: str, gud_canon: str | None):
         """Fungsi nilai per-PN untuk satu kolom (menutup peta lookup)."""
         if isi == ISI_STOK and gud_canon:
@@ -845,6 +1005,20 @@ def fill_columns(
                 d = peta_sims.get(p)
                 return _fmt_rp(d["idr"]) if d and d.get("idr") is not None else ""
             return f
+        if isi == ISI_PENGGANTI:
+            return lambda p: peta_pengganti.get(p) or ""
+        if isi == ISI_CROSS_REF:
+            def f(p):
+                cr = peta_cross.get(p)
+                return ", ".join(cr.get("cross_reference") or []) if cr else ""
+            return f
+        if isi == ISI_BERAT:
+            def f(p):
+                g = peta_berat.get(p) or 0
+                return f"{g / 1000:.2f}".replace(".", ",") if g > 0 else ""
+            return f
+        if isi == ISI_DIMENSI:
+            return lambda p: peta_dim.get(p) or ""
         key = _ISI_KEY[isi]
 
         def f(p):
@@ -888,23 +1062,123 @@ def fill_columns(
             for r in body:
                 r.append("")
 
-        fn = _nilai_fn(isi, gud_canon)
         terisi = 0
-        for r, p in zip(body, pns):
-            r[tgt] = fn(p)
-            if r[tgt] != "":
-                terisi += 1
+        if isi == ISI_PEMENUHAN:
+            for idx, (r, p) in enumerate(zip(body, pns)):
+                r[tgt] = _pemenuhan_str(p, qtys[idx]) if p else ""
+                if r[tgt] != "":
+                    terisi += 1
+        else:
+            fn = _nilai_fn(isi, gud_canon)
+            for r, p in zip(body, pns):
+                r[tgt] = fn(p)
+                if r[tgt] != "":
+                    terisi += 1
         hasil.append({"kolom": headers[tgt], "isi": isi,
                       "gudang": gud_canon, "baris_terisi": terisi})
 
-    if not hasil:
+    if not hasil and not (tandai_status or rekap):
         return {"found": False,
                 "error": (f"Tak ada kolom yang bisa diisi. Gudang tak dikenal: {gudang_tak_dikenal}. "
                           f"Pilihan gudang: {tersedia_gudang}.")}
 
+    # ── tandai_status (#3+#4+#5): kolom Status+Keterangan + WARNA baris ──
+    row_status: list[str] = []
+    mungkin_maksud: list[dict] = []
+    pn_diganti: list[dict] = []
+    status_ringkas = {"hijau": 0, "merah": 0, "kuning": 0}
+    if tandai_status:
+        fmap = part_index._pn_flat_map()
+        saran = {p: _saran_pn(p, fmap) for p in pn_tidak_ditemukan}
+        st_i = _cari_kolom(headers, "Status")
+        if st_i is None:
+            headers.append("Status"); st_i = len(headers) - 1
+            for r in body:
+                r.append("")
+        ket_i = _cari_kolom(headers, "Keterangan")
+        if ket_i is None:
+            headers.append("Keterangan"); ket_i = len(headers) - 1
+            for r in body:
+                r.append("")
+        for idx, (r, p) in enumerate(zip(body, pns)):
+            warna, stat, ket = "", "", ""
+            if p:
+                d = peta_lokal.get(p)
+                if not d:
+                    pg = peta_pengganti.get(p) or ""
+                    if pg:
+                        warna, stat = "kuning", f"ADA PENGGANTI: {pg}"
+                        pn_diganti.append({"pn": p, "pengganti": pg})
+                    else:
+                        warna, stat = "kuning", "PN TAK DITEMUKAN"
+                        sg = saran.get(p) or ""
+                        if sg:
+                            ket = f"mungkin maksud: {sg} (belum dipastikan)"
+                            mungkin_maksud.append({"pn": p, "saran": sg})
+                else:
+                    stok = _stok_total(d)
+                    q = qtys[idx]
+                    if stok is not None and stok <= 0:
+                        warna, stat = "merah", "STOK KOSONG"
+                    elif stok is not None and q and stok < q:
+                        warna, stat = "merah", f"KURANG (butuh {q}, ada {stok})"
+                    else:
+                        warna, stat = "hijau", "READY"
+            # jangan timpa keterangan user bila sudah terisi
+            if not str(r[ket_i] or "").strip():
+                r[ket_i] = ket
+            r[st_i] = stat
+            row_status.append(warna)
+            if warna:
+                status_ringkas[warna] += 1
+
+    # ── rekap (#2): blok RINGKASAN ──
+    ringkasan: list = []
+    if rekap:
+        pn_ada = [p for p in pns if p]
+        ringkasan.append(("Jumlah item (baris ber-PN)", str(len(pn_ada)), ""))
+        tot_qty = sum(q for q in qtys if q)
+        if any(q for q in qtys):
+            ringkasan.append(("Total qty", str(tot_qty), ""))
+        if boleh_harga:
+            subtotal = 0
+            for p, q in zip(pns, qtys):
+                d = peta_lokal.get(p)
+                hv = _int_or_none((d or {}).get("harga"))
+                if hv and q:
+                    subtotal += hv * q
+            if subtotal:
+                ringkasan.append(("Subtotal (qty × harga)", _fmt_rp(subtotal), ""))
+                ringkasan.append(("PPN 12% (sudah termasuk)",
+                                  _fmt_rp(orders.ppn_included(subtotal)), "hijau"))
+        if peta_berat:
+            tot_g = sum((peta_berat.get(p) or 0) * (q or 1)
+                        for p, q in zip(pns, qtys) if p)
+            tanpa = sum(1 for p in set(pns) if p and not peta_berat.get(p))
+            note = f"{tot_g / 1000:.1f} kg".replace(".", ",")
+            if tanpa:
+                note += f" (± {tanpa} part tanpa data berat)"
+            ringkasan.append(("Berat tertagih total", note, ""))
+            if kode_pos_tujuan and tot_g > 0:
+                try:
+                    from . import shipping
+                    if shipping.available():
+                        rates, _err = shipping.get_rates(
+                            user.get("username", ""), tot_g, 0, dest_postal=kode_pos_tujuan)
+                        for rt in (rates or [])[:3]:
+                            ringkasan.append((
+                                f"Ongkir {rt.get('courier_name') or rt.get('courier')} "
+                                f"{rt.get('service')} (indikatif)",
+                                _fmt_rp(rt.get('price')) + f" · {rt.get('etd') or '?'} hari", ""))
+                except Exception:  # pragma: no cover
+                    pass
+
     judul = f"{parsed['filename'].rsplit('.', 1)[0]} + Data"
-    export_id, filename = _stash_sheet_out(judul, headers, body)
-    return {
+    export_id, filename = _stash_sheet_out(
+        judul, headers, body,
+        status=row_status if tandai_status else None,
+        ringkasan=ringkasan or None)
+    out = {
         "found": True,
         "export_id": export_id,
         "filename": filename,
@@ -924,8 +1198,20 @@ def fill_columns(
             "KOSONG = PN tak ada di sumber. "
             + (f"⚠️ Gudang tak dikenal: {gudang_tak_dikenal}. " if gudang_tak_dikenal else "")
             + (f"⚠️ {len(pn_tidak_ditemukan)} PN tak ketemu di sumber (lihat "
-               "'pn_tidak_ditemukan' — sebut beberapa ke user & sarankan cek varian "
-               "suffix/salah ketik). " if pn_tidak_ditemukan else "")
+               "'pn_tidak_ditemukan'). " if pn_tidak_ditemukan else "")
+            + ("Baris DIWARNAI: hijau=ready, merah=kosong/kurang, kuning=tak-ketemu/ada-pengganti. "
+               if tandai_status else "")
+            + ("⚠️ 'mungkin_maksud' = saran PN mirip yang BELUM DIPASTIKAN — sampaikan sebagai "
+               "kemungkinan, ⛔ JANGAN sajikan sebagai PN pasti. " if mungkin_maksud else "")
             + "⛔ JANGAN mengarang nilai untuk baris kosong."
         ),
     }
+    if tandai_status:
+        out["status_ringkas"] = status_ringkas
+        if mungkin_maksud:
+            out["mungkin_maksud"] = mungkin_maksud[:20]
+        if pn_diganti:
+            out["pn_diganti"] = pn_diganti[:20]
+    if rekap:
+        out["rekap"] = [{"label": a, "nilai": b} for a, b, _c in ringkasan]
+    return out

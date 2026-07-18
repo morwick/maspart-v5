@@ -1188,6 +1188,11 @@ def _t_sheet_isi_kolom(args: dict, user: dict) -> dict:
         permintaan=norm,
         can_sims=_can_sims(user),   # lapis kedua; lapis pertama = tool spec
         kolom_pn=(args.get("kolom_pn") or "").strip(),
+        tandai_status=bool(args.get("tandai_status")),
+        rekap=bool(args.get("rekap")),
+        qty_kolom=(args.get("qty_kolom") or "").strip(),
+        kode_pos_tujuan=(args.get("kode_pos_tujuan") or "").strip(),
+        boleh_harga=_boleh_harga(user),   # gate Subtotal/PPN di FILE (bukan cuma hasil model)
     )
 
 

@@ -71,6 +71,24 @@ def search(unit: str = "", query: str = "") -> list[dict]:
     return out
 
 
+_BY_PN_CACHE: dict = {"n": -1, "map": {}}
+
+
+def by_pn(pn: str) -> dict | None:
+    """Cari 1 baris filter yang PN-nya = `pn` ATAU `pn` ada di cross_reference-nya
+    (normalisasi PN). Untuk mengisi kolom cross-reference Excel. None bila tak ada."""
+    rows = _load()
+    if _BY_PN_CACHE["n"] != len(rows):
+        m: dict[str, dict] = {}
+        for r in rows:
+            for key in [r.get("part_number", "")] + list(r.get("cross_reference") or []):
+                k = _norm(key)
+                if k and k not in m:
+                    m[k] = r
+        _BY_PN_CACHE.update(n=len(rows), map=m)
+    return _BY_PN_CACHE["map"].get(_norm(pn))
+
+
 def units() -> list[str]:
     """Daftar model unit yang punya data filter (untuk konteks/awareness)."""
     seen, res = set(), []

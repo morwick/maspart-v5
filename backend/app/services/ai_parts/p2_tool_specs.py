@@ -1332,11 +1332,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         })
         # Pilihan isi kolom: harga_sims HANYA ditawarkan ke admin/SEE_ALL.
-        pilihan = [ai_sheet.ISI_STOK, ai_sheet.ISI_NAMA, ai_sheet.ISI_HARGA_LOKAL]
-        ket_sims = ""
+        pilihan = [ai_sheet.ISI_STOK, ai_sheet.ISI_NAMA, ai_sheet.ISI_HARGA_LOKAL,
+                   ai_sheet.ISI_PENGGANTI, ai_sheet.ISI_CROSS_REF, ai_sheet.ISI_BERAT,
+                   ai_sheet.ISI_DIMENSI, ai_sheet.ISI_PEMENUHAN]
+        ket_sims = (" 'pengganti'=PN pengganti (supersession); 'cross_ref'=cross-reference "
+                    "merek filter (Fleetguard/Donaldson/dll); 'berat'=berat tertagih kg; "
+                    "'dimensi'=ukuran P×L×T cm; 'rencana_pemenuhan'=gudang mana bisa penuhi qty.")
         if _can_sims(user):
             pilihan.append(ai_sheet.ISI_HARGA_SIMS)
-            ket_sims = " 'harga_sims' = harga modal SIMS live (khusus admin)."
+            ket_sims += " 'harga_sims'=harga modal SIMS live (khusus admin)."
         specs.append({
             "type": "function",
             "function": {
@@ -1345,11 +1349,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "Isi SATU ATAU BEBERAPA kolom pada Excel unggahan user memakai data MASPART, "
                     "lalu hasilkan SATU file Excel yang bisa diunduh. Dipakai saat user minta "
                     "'tambahkan stok', 'isikan nama & harga', 'stok gudang Jakarta dan Pekanbaru', "
-                    "dsb. ⛔ PENTING: bila user minta beberapa data/gudang sekaligus, masukkan "
-                    "SEMUANYA sebagai elemen 'kolom' dalam SATU panggilan → hasilnya SATU file "
-                    "dengan kolom-kolom bersebelahan. JANGAN memanggil tool ini berkali-kali "
-                    "(itu membuat banyak file terpisah) kecuali user memang minta file terpisah. "
-                    "Baris yang Part Number-nya tak ditemukan dibiarkan KOSONG." + ket_sims
+                    "'lengkapi PN pengganti', 'tambah cross reference filter', 'isi berat/dimensi', "
+                    "'gudang mana bisa penuhi'. ⛔ PENTING: bila user minta beberapa data/gudang "
+                    "sekaligus, masukkan SEMUANYA sebagai elemen 'kolom' dalam SATU panggilan → "
+                    "hasilnya SATU file dengan kolom-kolom bersebelahan. JANGAN memanggil tool ini "
+                    "berkali-kali. Baris yang Part Number-nya tak ditemukan dibiarkan KOSONG. "
+                    "Set 'tandai_status'=true untuk kolom Status + WARNA baris (hijau ready/merah "
+                    "kosong-kurang/kuning tak-ketemu-atau-ada-pengganti) + saran 'mungkin maksud'; "
+                    "'rekap'=true untuk blok RINGKASAN (jumlah, subtotal, PPN, berat, ongkir). "
+                    "Boleh dipanggil HANYA dengan tandai_status/rekap (tanpa 'kolom')." + ket_sims
                 ),
                 "parameters": {
                     "type": "object",
@@ -1384,8 +1392,26 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                             "description": ("Kolom sumber Part Number. Kosongkan bila sudah "
                                             "terdeteksi otomatis (lihat sheet_ringkasan)."),
                         },
+                        "tandai_status": {
+                            "type": "boolean",
+                            "description": ("Tambah kolom Status + WARNAI baris (ready/kosong/"
+                                            "tak-ketemu) + saran 'mungkin maksud' PN mirip."),
+                        },
+                        "rekap": {
+                            "type": "boolean",
+                            "description": ("Tambah blok RINGKASAN di bawah tabel (jumlah item, "
+                                            "total qty, subtotal+PPN [harga hanya admin], berat, ongkir)."),
+                        },
+                        "qty_kolom": {
+                            "type": "string",
+                            "description": ("Kolom Qty (untuk status 'kurang', rencana pemenuhan, "
+                                            "total & subtotal). Kosong = deteksi otomatis."),
+                        },
+                        "kode_pos_tujuan": {
+                            "type": "string",
+                            "description": ("Kode pos tujuan (opsional, utk estimasi ongkir di rekap)."),
+                        },
                     },
-                    "required": ["kolom"],
                 },
             },
         })
