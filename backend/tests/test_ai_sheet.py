@@ -154,7 +154,7 @@ def test_kolom_tidak_terpotong_bila_dalam_batas(katalog):
 
 def test_tolak_format_dan_file_rusak():
     assert ai_sheet.parse_upload(b"", "a.xlsx")["error"] == "File kosong."
-    assert "xlsx" in ai_sheet.parse_upload(b"x", "a.csv")["error"]
+    assert "Format" in ai_sheet.parse_upload(b"x", "a.xls")["error"]   # .xls tetap ditolak
     assert "valid" in ai_sheet.parse_upload(b"bukan-excel", "a.xlsx")["error"]
 
 

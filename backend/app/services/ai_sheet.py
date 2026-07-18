@@ -221,8 +221,16 @@ def parse_upload(data: bytes, filename: str = "", pilih_sheet: str = "") -> dict
     if len(data) > MAX_BYTES:
         return {"ok": False, "error": f"File terlalu besar (maksimum {MAX_BYTES // 1024 // 1024} MB)."}
     fl = (filename or "").lower()
-    if not fl.endswith((".xlsx", ".xlsm")):
-        return {"ok": False, "error": "Format harus .xlsx atau .xlsm (bukan .xls/.csv)."}
+    if not fl.endswith((".xlsx", ".xlsm", ".csv")):
+        return {"ok": False, "error": "Format harus .xlsx/.xlsm/.csv (bukan .xls)."}
+
+    # ── CSV: baca jadi `raw` lalu lewati ke _finish_parse (tanpa multi-sheet) ──
+    if fl.endswith(".csv"):
+        raw = _read_csv(data)
+        if raw is None:
+            return {"ok": False, "error": "File CSV tak terbaca (encoding/format tak dikenal)."}
+        return _finish_parse(raw, filename or "unggahan.csv", "(csv)", [], [],
+                             ["(csv)"], data, False)
 
     import io
     try:
@@ -233,7 +241,7 @@ def parse_upload(data: bytes, filename: str = "", pilih_sheet: str = "") -> dict
         sheet_names = list(wb.sheetnames)
         target = pilih_sheet if pilih_sheet in sheet_names else sheet_names[0]
         ws = wb[target]
-        raw: list[list] = []
+        raw = []
         kolom_terpotong = False
         for r in ws.iter_rows(values_only=True):
             if len(r) > MAX_COLS:             # kolom di luar batas → dibuang (jangan senyap)
@@ -246,6 +254,45 @@ def parse_upload(data: bytes, filename: str = "", pilih_sheet: str = "") -> dict
     finally:
         wb.close()
 
+    return _finish_parse(raw, filename or "unggahan.xlsx", target, lain,
+                         sheet_lain_ringkas, sheet_names, data, kolom_terpotong)
+
+
+def _read_csv(data: bytes) -> list[list] | None:
+    """Decode CSV (utf-8-sig → cp1252) + tebak delimiter (Sniffer, fallback ,/;) →
+    list-of-rows (dipotong MAX_COLS/MAX_ROWS). None bila tak terbaca."""
+    import csv
+    import io as _io
+    text = None
+    for enc in ("utf-8-sig", "cp1252"):
+        try:
+            text = data.decode(enc)
+            break
+        except Exception:
+            text = None
+    if text is None:
+        return None
+    sample = text[:4096]
+    try:
+        delim = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+    except Exception:
+        delim = ";" if sample.count(";") > sample.count(",") else ","
+    rows: list[list] = []
+    try:
+        for r in csv.reader(_io.StringIO(text), delimiter=delim):
+            rows.append([c for c in r[:MAX_COLS]])
+            if len(rows) > MAX_ROWS + 12:
+                break
+    except Exception:
+        return None
+    return rows
+
+
+def _finish_parse(raw: list, filename: str, target: str, lain: list,
+                  sheet_lain_ringkas: list, sheet_names: list, data: bytes,
+                  kolom_terpotong: bool) -> dict:
+    """Bagian bersama xlsx/csv: deteksi header (termasuk header 2-baris), peran
+    kolom, bangun body, dan rakit dict parsed."""
     if not raw:
         return {"ok": False, "error": "Sheet kosong."}
 

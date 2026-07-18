@@ -265,7 +265,7 @@ async def ai_chat_image(
 @router.post("/chat-sheet", dependencies=[Depends(limit("ai_sheet", 10, 60))])
 async def ai_chat_sheet(
     messages: str = Form("[]", description="Riwayat chat (JSON list {role, content})."),
-    file: UploadFile = File(..., description="File Excel (.xlsx/.xlsm) yang diunggah user."),
+    file: UploadFile = File(..., description="File Excel (.xlsx/.xlsm) atau CSV (.csv) yang diunggah user."),
     user: dict = Depends(require_ai),
 ):
     """Chat dengan LAMPIRAN EXCEL. File dibaca di server (kolom dikenali otomatis),
