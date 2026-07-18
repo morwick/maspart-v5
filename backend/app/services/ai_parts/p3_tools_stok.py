@@ -1120,6 +1120,30 @@ def _t_buat_penawaran(args: dict, user: dict) -> dict:
                 pass
 
 
+def _t_template_excel(args: dict, user: dict) -> dict:
+    """Template Excel KOSONG utk permintaan/daftar part — user isi lalu unggah lagi.
+    Tak butuh file terlampir; semua peran boleh. Kolom siap diolah tool sheet_*."""
+    dengan_contoh = bool(args.get("dengan_contoh", True))
+    kolom = ["No", "Part Number", "Nama Part", "Qty", "Keterangan"]
+    baris: list[list[str]] = []
+    if dengan_contoh:
+        baris.append(["1", "WG9925520270", "(nama part opsional)", "2",
+                      "contoh — isi Part Number & Qty tiap baris"])
+    for i in range(len(baris) + 1, 16):  # baris kosong bernomor siap diisi
+        baris.append([str(i), "", "", "", ""])
+    judul = "Template Permintaan Part MASPART"
+    export_id, filename = ai_export.stash_export(judul, kolom, baris)
+    return {
+        "found": True, "export_id": export_id, "filename": filename, "judul": judul,
+        "jumlah_baris": len(baris),
+        "catatan": (
+            "📎 Kartu unduh TEMPLATE Excel muncul otomatis di bawah — beri tahu user: isi "
+            "kolom Part Number & Qty tiap baris, lalu unggah lagi ke chat untuk diproses "
+            "(isi stok/harga/status, atau jadikan penawaran). Kolom Nama Part & Keterangan opsional."
+        ),
+    }
+
+
 def _t_sheet_ringkasan(args: dict, user: dict) -> dict:
     parsed = ai_sheet.get_sheet(args.get("_sheet_id", ""), user.get("username", ""))
     if not parsed:

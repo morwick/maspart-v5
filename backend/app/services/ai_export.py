@@ -31,6 +31,11 @@ _HEAD_FILL = PatternFill("solid", fgColor=_BRAND)
 _SUB1_FILL = PatternFill("solid", fgColor="EAF6EC")   # hijau muda
 _SUB2_FILL = PatternFill("solid", fgColor="FFF3E2")   # oranye muda (sisi 2)
 _ZEBRA = PatternFill("solid", fgColor="F8F9F7")
+# Warna STATUS baris (builder sheet_status): hijau=ready, merah=kosong, kuning=perlu perhatian.
+_ROW_HIJAU = PatternFill("solid", fgColor="EAF6EC")
+_ROW_MERAH = PatternFill("solid", fgColor="FDECEA")
+_ROW_KUNING = PatternFill("solid", fgColor="FFF6DC")
+_STATUS_FILL = {"hijau": _ROW_HIJAU, "merah": _ROW_MERAH, "kuning": _ROW_KUNING}
 _WHITE = Font(color="FFFFFF", bold=True, size=11)
 _TITLE_FONT = Font(color="FFFFFF", bold=True, size=15)
 _BOLD = Font(bold=True, color="1B211D")
@@ -167,6 +172,22 @@ def _title(ws, text: str, sub: str, ncol: int) -> int:
     s.font = Font(color="535B56", size=10, italic=True)
     s.alignment = Alignment(horizontal="left", vertical="center", indent=1)
     return 4  # baris mulai konten
+
+
+def _save_stable(wb) -> bytes:
+    """Simpan workbook → bytes DETERMINISTIK. openpyxl cap created/modified dgn
+    datetime.now() → dua build data sama menghasilkan bytes berbeda; pin ke tanggal
+    tetap supaya byte-stable (aman cache & diff)."""
+    from datetime import datetime
+    fixed = datetime(2000, 1, 1)
+    try:
+        wb.properties.created = fixed
+        wb.properties.modified = fixed
+    except Exception:  # pragma: no cover
+        pass
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 def banding_rangka_excel(rangka_1: str, rangka_2: str, kategori: str = "") -> tuple[bytes | None, str]:
@@ -394,6 +415,15 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
                 with _stash_lock:
                     d["_path"] = str(p)
             return data, d["filename"]
+        if b.get("kind") == "sheet_status":
+            data, err = sheet_status_excel(b)
+            if data is None:
+                return None, err
+            p = _cache_write(export_id, data)
+            if p:
+                with _stash_lock:
+                    d["_path"] = str(p)
+            return data, d["filename"]
         if b.get("kind") == "exploded":
             if b.get("source") == "weichai":
                 data = exploded_png_weichai(b.get("svg", ""), b.get("rangka", ""), b.get("balon"))
@@ -444,9 +474,80 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
         r += 1
     ws.freeze_panes = ws.cell(row=start + 1, column=1)
 
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue(), d["filename"]
+    return _save_stable(wb), d["filename"]
+
+
+def sheet_status_excel(b: dict) -> tuple[bytes | None, str]:
+    """Builder Excel BERWARNA STATUS + blok RINGKASAN (rekap) untuk hasil olah
+    Excel unggahan (sheet_isi_kolom `tandai_status`/`rekap`). Payload:
+      {kind:"sheet_status", judul, sub?, kolom:[...], baris:[[...]],
+       status:[per-baris ""|"hijau"|"merah"|"kuning"],
+       ringkasan:[(label, nilai, warna)]}
+    Warna sel MENYERTAI kolom teks 'Status' (dwi-encode) — warna bukan satu-satunya
+    sinyal. Byte-stable via _save_stable."""
+    kolom: list[str] = b.get("kolom") or []
+    baris: list[list] = b.get("baris") or []
+    status: list[str] = b.get("status") or []
+    ringkasan: list = b.get("ringkasan") or []
+    if not kolom:
+        return None, "Payload sheet_status kosong."
+    judul = b.get("judul") or "Data MASPART"
+    sub = b.get("sub") or f"{len(baris)} baris · MASPART Asisten AI"
+    mono_cols = {j for j, h in enumerate(kolom, start=1) if _MONO_HEAD_RE.search(h or "")}
+    widths = []
+    for j, h in enumerate(kolom):
+        w = max([len(h or "")] + [len(str(r[j])) for r in baris if j < len(r)] or [0])
+        widths.append(max(8, min(60, w + 4)))
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.sheet_view.showGridLines = False
+    start = _title(ws, _safe(judul), sub, max(2, len(kolom)))
+    for j, (h, w) in enumerate(zip(kolom, widths), start=1):
+        c = ws.cell(row=start, column=j, value=_safe(h))
+        c.fill = _HEAD_FILL
+        c.font = _WHITE
+        c.alignment = _CENTER
+        c.border = _BORDER
+        ws.column_dimensions[get_column_letter(j)].width = w
+    r = start + 1
+    for i, row in enumerate(baris):
+        fill = _STATUS_FILL.get(status[i] if i < len(status) else "")
+        for j in range(1, len(kolom) + 1):
+            val = row[j - 1] if j - 1 < len(row) else ""
+            c = ws.cell(row=r, column=j, value=_safe(val))
+            c.border = _BORDER
+            c.alignment = _CENTER if j == 1 or j in mono_cols else _LEFT
+            c.font = _MONO if j in mono_cols else _INK
+            if fill:
+                c.fill = fill
+            elif i % 2:
+                c.fill = _ZEBRA
+        r += 1
+    ws.freeze_panes = ws.cell(row=start + 1, column=1)
+
+    # Blok RINGKASAN (rekap) di bawah tabel.
+    if ringkasan:
+        r += 1
+        hc = ws.cell(row=r, column=1, value="RINGKASAN")
+        hc.font = Font(bold=True, color=_BRAND_DK, size=12)
+        r += 1
+        for item in ringkasan:
+            label, nilai = item[0], item[1]
+            warna = item[2] if len(item) > 2 else ""
+            lc = ws.cell(row=r, column=1, value=_safe(str(label)))
+            lc.font = _BOLD
+            lc.fill = _STATUS_FILL.get(warna, _SUB1_FILL)
+            lc.border = _BORDER
+            lc.alignment = _LEFT
+            vc = ws.cell(row=r, column=2, value=_safe(nilai))
+            vc.font = _INK
+            vc.border = _BORDER
+            vc.alignment = _LEFT
+            r += 1
+
+    return _save_stable(wb), ""
 
 
 # ── Excel UNGGAHAN USER + FOTO part (tool `sheet_isi_foto`) ─────────────────

@@ -741,6 +741,21 @@ _ISI_LABEL = {
 _ISI_KEY = {ISI_STOK: "stok", ISI_NAMA: "part_name", ISI_HARGA_LOKAL: "harga"}
 
 
+def _stash_sheet_out(judul: str, headers: list[str], body: list[list],
+                     status: list[str] | None = None,
+                     ringkasan: list | None = None, sub: str = ""):
+    """Stash hasil olah-Excel → (export_id, filename). TANPA status & ringkasan →
+    `stash_export` (bytes identik perilaku lama, dipakai fitur fill biasa). DENGAN
+    status/ringkasan → builder `sheet_status` (baris berwarna + blok rekap)."""
+    if not status and not ringkasan:
+        return ai_export.stash_export(judul, headers, body)
+    payload = {"kind": "sheet_status", "judul": judul, "kolom": headers,
+               "baris": body, "status": status or [], "ringkasan": ringkasan or []}
+    if sub:
+        payload["sub"] = sub
+    return ai_export.stash_builder(judul, payload)
+
+
 def fill_columns(
     sheet_id: str,
     user: dict,
@@ -888,7 +903,7 @@ def fill_columns(
                           f"Pilihan gudang: {tersedia_gudang}.")}
 
     judul = f"{parsed['filename'].rsplit('.', 1)[0]} + Data"
-    export_id, filename = ai_export.stash_export(judul, headers, body)
+    export_id, filename = _stash_sheet_out(judul, headers, body)
     return {
         "found": True,
         "export_id": export_id,

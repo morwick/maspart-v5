@@ -121,6 +121,7 @@ _DISPATCH = {
     "jadwal_perawatan": _t_jadwal_perawatan,
     "diagram_wiring": _t_diagram_wiring,
     "cari_manual": _t_cari_manual,
+    "template_excel_part": _t_template_excel,
     "pesanan_saya": _t_pesanan_saya,
     "detail_pesanan": _t_detail_pesanan,
     "rekap_penjualan": _t_rekap_penjualan,

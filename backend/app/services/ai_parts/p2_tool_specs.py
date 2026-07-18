@@ -1265,6 +1265,29 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         })
 
+    # Template Excel kosong — TANPA lampiran (semua peran). User isi PN+Qty lalu
+    # unggah lagi untuk diolah/dijadikan penawaran.
+    specs.append({
+        "type": "function",
+        "function": {
+            "name": "template_excel_part",
+            "description": (
+                "Buat TEMPLATE Excel KOSONG untuk daftar/permintaan part (kolom: No, "
+                "Part Number, Nama Part, Qty, Keterangan). Pakai saat user minta 'kasih "
+                "template', 'format excel buat pesan part', 'contoh file daftar part', atau "
+                "belum punya file dan mau menyusun permintaan. User isi PN & Qty lalu unggah "
+                "lagi untuk diproses (isi stok/harga/status, atau jadikan penawaran)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dengan_contoh": {"type": "boolean",
+                                      "description": "Sertakan 1 baris contoh (default true)."},
+                },
+            },
+        },
+    })
+
     # Excel unggahan user — tool ini HANYA ada bila ada file terlampir di
     # percakapan ini. Tanpa lampiran, model tak melihatnya sama sekali.
     if sheet_id:
