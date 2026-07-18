@@ -6,8 +6,11 @@ import type { UserOut } from "./api";
 const TOKEN_KEY = "maspart_token";
 const USER_KEY = "maspart_user";
 // Cache per-sesi yang harus dibersihkan saat ganti user (login/logout).
+// Kunci izin ditulis literal (bukan impor dari perms.ts — circular): samakan
+// dengan SS_KEY di lib/perms.ts setiap kali versinya naik.
 const SESSION_CACHE_KEYS = [
   "maspart_perms",
+  "maspart_perms_v4",
   "maspart_image_search",
   "maspart_image_return",
   "maspart_allowed_menus",

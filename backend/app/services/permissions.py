@@ -156,3 +156,88 @@ def set_perm(kind: str, username: str, keys: list[str]) -> bool:
 
 def reset_perm(kind: str, username: str) -> bool:
     return perms_delete(KINDS[kind]["perm_type"], username)
+
+
+# ── Gerbang kolom Harga & Stok (server-side) ─────────────────────────
+# Dulu hidup di ai_parts/p1_dasar.py dan hanya menjaga jalur Asisten AI;
+# dipindah ke sini agar router non-AI (/api/parts, /api/harga, /api/stok)
+# memakai gerbang yang SAMA — penyembunyian kolom di React saja tidak
+# menutup akses lewat network tab / curl.
+
+# Field harga di hasil tool/endpoint (semua nama yang mungkin dipancarkan).
+HARGA_KEYS = ("harga", "harga_lokal", "harga_sims", "harga_jual", "harga_cny",
+              "harga_idr", "harga_display", "harga_daftar")
+
+# Field STOK di hasil tool/endpoint. 'gudang' sengaja TIDAK di sini: di banyak
+# hasil ia string NAMA gudang, bukan kuantitas — ditangani khusus di strip_stok
+# (dibuang hanya bila dict qty).
+STOK_KEYS = ("stok", "stok_total", "stok_per_gudang", "stok_di_gudang",
+             "stok_accurate", "stok_dapat_dijual", "stok_lokal_tambahan",
+             "tertahan", "tersedia", "ada_di_inventori", "jumlah_part_ready")
+
+# Key tambahan khusus respons router (JANGAN dicampur ke set di atas: di hasil
+# tool asisten 'quantity' = qty BOM per-unit, bukan stok — mencampurnya bikin
+# asisten over-strip).
+ROUTER_STOK_EXTRA = ("Stok", "available_to_sell", "quantity", "per_gudang")
+
+
+def boleh_harga(user: dict) -> bool:
+    """Boleh melihat HARGA — SATU sumber kebenaran, mengikuti Menu Control.
+
+    Admin selalu; pembeli boleh (harga jual = yang ia bayar, tampil juga di
+    /toko); staf mengikuti izin kolom 'col_harga'. Dipakai asisten AI dan
+    router non-AI supaya konsisten."""
+    role = (user.get("role") or "").lower()
+    if role in ("admin", "pembeli"):
+        return True
+    try:
+        return "col_harga" in effective("column", user.get("username", ""), role)
+    except Exception:
+        return False
+
+
+def boleh_stok(user: dict) -> bool:
+    """Boleh melihat STOK — kembaran boleh_harga, kunci 'col_stok'.
+
+    Admin selalu; pembeli boleh (wajib tahu ketersediaan untuk membeli di
+    /toko — rincian antar-gudang tetap disembunyikan di jalurnya masing-masing);
+    staf mengikuti izin kolom 'col_stok'."""
+    role = (user.get("role") or "").lower()
+    if role in ("admin", "pembeli"):
+        return True
+    try:
+        return "col_stok" in effective("column", user.get("username", ""), role)
+    except Exception:
+        return False
+
+
+def strip_harga(obj, extra: tuple = ()):
+    """Buang SEMUA field harga (rekursif: dict & list). Penjaga TERPUSAT —
+    dipasang di _run_tool asisten & endpoint router, jadi tak bergantung tiap
+    handler ingat mengecek izin. `extra` = key tambahan khusus pemanggil."""
+    if isinstance(obj, dict):
+        for k in list(obj.keys()):
+            if k in HARGA_KEYS or k in extra:
+                obj.pop(k, None)
+            else:
+                strip_harga(obj[k], extra)
+    elif isinstance(obj, list):
+        for it in obj:
+            strip_harga(it, extra)
+    return obj
+
+
+def strip_stok(obj, extra: tuple = ()):
+    """Buang SEMUA field stok (rekursif: dict & list) — kembaran strip_harga."""
+    if isinstance(obj, dict):
+        for k in list(obj.keys()):
+            # 'gudang' bernilai dict = peta {nama gudang: qty} → itu data stok.
+            # Bila string, ia cuma label gudang (mis. filter query) → biarkan.
+            if k in STOK_KEYS or k in extra or (k == "gudang" and isinstance(obj[k], dict)):
+                obj.pop(k, None)
+            else:
+                strip_stok(obj[k], extra)
+    elif isinstance(obj, list):
+        for it in obj:
+            strip_stok(it, extra)
+    return obj

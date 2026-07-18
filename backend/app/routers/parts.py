@@ -28,7 +28,7 @@ from ..schemas import (
     PartPhotos,
     SearchResponse,
 )
-from ..services import accurate, catalog, compare, gudang, image_search, part_index, reservations, search_log, sims
+from ..services import accurate, catalog, compare, gudang, image_search, part_index, permissions, reservations, search_log, sims
 from ..services.supabase_client import fetch_part_photos, get_user_gudang
 
 _MAX_IMAGE_BYTES = 15 * 1024 * 1024  # 15 MB
@@ -134,6 +134,19 @@ def _overlay_accurate(results: list[dict]) -> list[dict]:
     return results
 
 
+def _gate_kolom(results: list[dict], user: dict) -> list[dict]:
+    """Menu Control server-side: mask harga/stok untuk staf yang centang kolomnya
+    dimatikan. Skema PartResult mewajibkan str → MASK '—' (frontend sudah
+    merendernya), bukan pop. `quantity` TIDAK disentuh — itu qty BOM, bukan stok."""
+    if not permissions.boleh_harga(user):
+        for r in results:
+            r["harga"] = "—"
+    if not permissions.boleh_stok(user):
+        for r in results:
+            r["stok"], r["gudang"] = "—", {}
+    return results
+
+
 @router.get("/search", response_model=SearchResponse)
 def search(
     q: str = Query(..., min_length=1, description="Part number (cocok substring, uppercase)"),
@@ -162,8 +175,8 @@ def search(
         saran = (part_index.suggest_pns(q) + part_index.suggest_names(q, limit=6))[:6]
         if page == 1:
             search_log.record_miss(q, "pn", "search")
-    return _paginate(q, _overlay_accurate(_scope_gudang(results, user)), page, page_size,
-                     saran=saran)
+    return _paginate(q, _gate_kolom(_overlay_accurate(_scope_gudang(results, user)), user),
+                     page, page_size, saran=saran)
 
 
 @router.get("/search-name", response_model=SearchResponse)
@@ -198,8 +211,8 @@ def search_name(
         saran = part_index.suggest_names(q, limit=6)
         if page == 1:
             search_log.record_miss(q, "name", "search")
-    return _paginate(q, _overlay_accurate(_scope_gudang(results, user)), page, page_size,
-                     saran=saran)
+    return _paginate(q, _gate_kolom(_overlay_accurate(_scope_gudang(results, user)), user),
+                     page, page_size, saran=saran)
 
 
 @router.get("/accurate-stock")
@@ -220,7 +233,7 @@ def accurate_stock(
         return {"configured": True, "error": True}
     if not hit:
         return {"configured": True, "found": False}
-    return {
+    resp = {
         "configured": True,
         "found": True,
         "stock": {
@@ -234,6 +247,12 @@ def accurate_stock(
             "per_gudang": hit.get("per_gudang") or [],
         },
     }
+    # Menu Control server-side: dict bebas → STRIP key (pola gerbang asisten).
+    if not permissions.boleh_harga(user):
+        permissions.strip_harga(resp)
+    if not permissions.boleh_stok(user):
+        permissions.strip_stok(resp, extra=permissions.ROUTER_STOK_EXTRA)
+    return resp
 
 
 @router.get("/batch-template")
@@ -289,6 +308,9 @@ async def batch_catalog(
     # Akun lain: diam-diam di-strip agar tak bisa mengekspor harga via batch.
     if not gudang.can_see_price(user.get("username", ""), user.get("role", "")):
         col_list = [c for c in col_list if c not in catalog.PRICE_COLUMNS]
+    # Menu Control: kolom stok ikut centang col_stok (harga sudah lebih ketat di atas).
+    if not permissions.boleh_stok(user):
+        col_list = [c for c in col_list if c != "stok"]
     try:
         xls = catalog.build_catalog_excel(part_numbers, columns=col_list)
     except Exception as e:
@@ -341,7 +363,7 @@ async def search_image(
     top_k: int = Query(12, ge=1, le=50),
     threshold: float = Query(0.30, ge=0.0, le=1.0),
     use_tta: bool = Query(True, description="Mode akurat (TTA multi-varian, sedikit lebih lambat)"),
-    _user: dict = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
     if not image_search.torch_available():
         raise HTTPException(
@@ -360,6 +382,13 @@ async def search_image(
     except Exception as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Gagal memproses foto: {e}")
     _overlay_stok_harga_image(results)
+    # Menu Control server-side (skema ImageSearchResponse → mask, bukan pop).
+    if not permissions.boleh_harga(user):
+        for r in results:
+            r["harga"] = "—"
+    if not permissions.boleh_stok(user):
+        for r in results:
+            r["stok"], r["tersedia"] = "—", False
     stats = image_search.index_stats()
     pesan = None
     if not results:

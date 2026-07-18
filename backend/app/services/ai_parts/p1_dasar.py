@@ -94,27 +94,13 @@ def _is_pembeli(user: dict) -> bool:
     return (user.get("role") or "").lower() == "pembeli"
 
 
-# Field harga di HASIL TOOL (semua nama yang mungkin dipancarkan handler).
-_HARGA_KEYS = ("harga", "harga_lokal", "harga_sims", "harga_jual", "harga_cny",
-               "harga_idr", "harga_display", "harga_daftar")
-
-
-def _boleh_harga(user: dict) -> bool:
-    """Boleh melihat HARGA di asisten — SATU sumber kebenaran, mengikuti Menu Control.
-
-    Dulu asisten memakai gudang.can_see_price (admin/'mas' saja) & hanya dicek 2-3
-    tool → sisanya membocorkan harga lintas-peran. Kini: admin selalu; pembeli boleh
-    (harga jual = yang ia bayar, tampil juga di /toko); staf mengikuti izin kolom
-    'col_harga' dari Menu Control (halaman Cari Part/detail sudah pakai izin yang
-    SAMA — jadi asisten & halaman konsisten)."""
-    role = (user.get("role") or "").lower()
-    if role in ("admin", "pembeli"):
-        return True
-    try:
-        from . import permissions
-        return "col_harga" in permissions.effective("column", user.get("username", ""), role)
-    except Exception:
-        return False
+# Gerbang & strip Harga/Stok kini hidup di services/permissions.py (dipakai juga
+# router non-AI /api/parts, /api/harga, /api/stok — gerbang SATU untuk semua).
+# Alias underscore dipertahankan agar pemakai internal (p2/p3/p5/p6/p7/p9) dan
+# test lama tetap bekerja tanpa disentuh.
+from .permissions import (HARGA_KEYS as _HARGA_KEYS, STOK_KEYS as _STOK_KEYS,
+                          boleh_harga as _boleh_harga, boleh_stok as _boleh_stok,
+                          strip_harga as _strip_harga, strip_stok as _strip_stok)
 
 
 def _rp(n) -> str:
@@ -123,69 +109,6 @@ def _rp(n) -> str:
         return "Rp " + f"{int(n):,}".replace(",", ".")
     except (TypeError, ValueError):
         return "—"
-
-
-def _strip_harga(obj):
-    """Buang SEMUA field harga dari hasil tool (rekursif: dict & list). Penjaga
-    TERPUSAT — dijalankan di _run_tool bila user tak berhak, jadi tak bergantung
-    tiap handler ingat mengecek izin."""
-    if isinstance(obj, dict):
-        for k in list(obj.keys()):
-            if k in _HARGA_KEYS:
-                obj.pop(k, None)
-            else:
-                _strip_harga(obj[k])
-    elif isinstance(obj, list):
-        for it in obj:
-            _strip_harga(it)
-    return obj
-
-
-# Field STOK di HASIL TOOL (semua nama yang mungkin dipancarkan handler).
-# 'gudang' sengaja TIDAK di sini: di banyak hasil ia string NAMA gudang, bukan
-# kuantitas — ditangani khusus di _strip_stok (dibuang hanya bila dict qty).
-_STOK_KEYS = ("stok", "stok_total", "stok_per_gudang", "stok_di_gudang",
-              "stok_accurate", "stok_dapat_dijual", "stok_lokal_tambahan",
-              "tertahan", "tersedia", "ada_di_inventori", "jumlah_part_ready")
-
-
-def _boleh_stok(user: dict) -> bool:
-    """Boleh melihat STOK di asisten — SATU sumber kebenaran, mengikuti Menu Control.
-
-    Dulu TIDAK ADA gerbang stok sama sekali: kunci 'col_stok' ditulis admin di Menu
-    Control tapi tak pernah dibaca server, dan penyaringan stok satu-satunya adalah
-    _hide_gudang_for_buyer (hanya membuang rincian per-gudang untuk pembeli). Akibatnya
-    staf yang centang Kolom Stok-nya dimatikan tetap melihat angka stok di asisten
-    (halaman Cari Part menyembunyikannya, asisten tidak). Kini bentuknya persis seperti
-    _boleh_harga: admin selalu; pembeli boleh (wajib tahu ketersediaan untuk membeli di
-    /toko — rincian antar-gudang tetap disembunyikan _hide_gudang_for_buyer); staf
-    mengikuti izin kolom 'col_stok'."""
-    role = (user.get("role") or "").lower()
-    if role in ("admin", "pembeli"):
-        return True
-    try:
-        from . import permissions
-        return "col_stok" in permissions.effective("column", user.get("username", ""), role)
-    except Exception:
-        return False
-
-
-def _strip_stok(obj):
-    """Buang SEMUA field stok dari hasil tool (rekursif: dict & list). Penjaga
-    TERPUSAT — dijalankan di _run_tool bila user tak berhak, jadi tak bergantung
-    tiap handler ingat mengecek izin."""
-    if isinstance(obj, dict):
-        for k in list(obj.keys()):
-            # 'gudang' bernilai dict = peta {nama gudang: qty} → itu data stok.
-            # Bila string, ia cuma label gudang (mis. filter query) → biarkan.
-            if k in _STOK_KEYS or (k == "gudang" and isinstance(obj[k], dict)):
-                obj.pop(k, None)
-            else:
-                _strip_stok(obj[k])
-    elif isinstance(obj, list):
-        for it in obj:
-            _strip_stok(it)
-    return obj
 
 
 def _is_admin(user: dict) -> bool:

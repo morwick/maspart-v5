@@ -6,11 +6,12 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from ..deps import get_current_user, require_admin
-from ..services import harga
+from ..services import harga, permissions
 
 router = APIRouter(prefix="/api/harga", tags=["harga"])
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _MAX_BATCH = 300
+_HARGA_OFF_MSG = "Kolom Harga dimatikan untuk akun ini."
 
 
 # ── List Harga ───────────────────────────────────────────────────────
@@ -28,13 +29,18 @@ def list_harga(
     page = min(max(1, page), total_pages)
     start = (page - 1) * page_size
     disp = harga.display_frame(df.iloc[start : start + page_size])
+    rows = disp.to_dict(orient="records")
+    # Menu Control server-side: mask (bentuk respons stabil — halaman tak error).
+    if not permissions.boleh_harga(_user):
+        for row in rows:
+            row["Harga (Rp)"] = "—"
     return {
         "total": harga.total_count(),
         "total_filtered": total_filtered,
         "page": page,
         "page_size": page_size,
         "total_pages": total_pages,
-        "rows": disp.to_dict(orient="records"),
+        "rows": rows,
     }
 
 
@@ -44,6 +50,9 @@ def list_export(
     sort: str = Query("pn"),
     _user: dict = Depends(get_current_user),
 ):
+    # Export = seluruh isinya harga → 403 (file tanpa harga menyesatkan).
+    if not permissions.boleh_harga(_user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, _HARGA_OFF_MSG)
     df = harga.list_harga(q, sort)
     data = harga.to_excel_bytes(harga.display_frame(df))
     return Response(
@@ -67,7 +76,10 @@ def cari(
     refresh: bool = Query(False),
     _user: dict = Depends(get_current_user),
 ):
-    return harga.cari_harga(pn.strip().upper(), force_refresh=refresh)
+    res = harga.cari_harga(pn.strip().upper(), force_refresh=refresh)
+    if not permissions.boleh_harga(_user):
+        res["cny"] = res["idr"] = None
+    return res
 
 
 # ── Batch Cari Harga (SIMS) ──────────────────────────────────────────
@@ -103,11 +115,19 @@ def batch(body: BatchHargaRequest, _user: dict = Depends(get_current_user)):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"Maksimum {_MAX_BATCH} PN per batch."
         )
-    return harga.batch_harga(pns)
+    res = harga.batch_harga(pns)
+    if not permissions.boleh_harga(_user):
+        for r in res.get("results", []):
+            r["cny"] = r["idr"] = None
+    return res
 
 
 @router.post("/batch/export")
 def batch_export(body: BatchExportRequest, _user: dict = Depends(get_current_user)):
+    # Rows memang kiriman klien, tapi endpoint ini jangan jadi jalur legitimasi
+    # file harga untuk akun yang kolomnya dimatikan.
+    if not permissions.boleh_harga(_user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, _HARGA_OFF_MSG)
     data = harga.batch_to_excel(body.rate, body.rows)
     return Response(
         content=data,

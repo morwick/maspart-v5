@@ -6,11 +6,11 @@ agar frontend bisa menampilkan pesan seadanya — pola sama dengan endpoint
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 
 from ..deps import get_current_user, require_admin
-from ..services import accurate, stok
+from ..services import accurate, permissions, stok
 
 router = APIRouter(prefix="/api/stok", tags=["stok"])
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -51,6 +51,10 @@ def list_stok(
     page = min(max(1, page), total_pages)
     start = (page - 1) * page_size
     disp = stok.display_rows(rows[start : start + page_size])
+    # Menu Control server-side: mask (bentuk respons stabil — halaman tak error).
+    if not permissions.boleh_stok(_user):
+        for row in disp:
+            row["Stok"] = "—"
     return {
         "configured": True,
         "total": total,
@@ -68,6 +72,10 @@ def list_export(
     sort: str = Query("pn"),
     _user: dict = Depends(get_current_user),
 ):
+    # Export = seluruh isinya stok → 403 (Excel berisi 0 semua menyesatkan).
+    if not permissions.boleh_stok(_user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Kolom Stok dimatikan untuk akun ini.")
     rows = stok.stock_rows(q, sort) if accurate.available() else []
     data = stok.to_excel_bytes(rows)
     return Response(

@@ -184,6 +184,11 @@ def test_dtc_first_sekali_saja_bila_membandel(monkeypatch):
 
 # ── Eksekusi batch tool paralel: urutan hasil deterministik ─────────────────
 def test_batch_tool_paralel_urutan_terjaga(monkeypatch):
+    # Test ini mengukur WALL-CLOCK — semua jalur network wajib distub. Tanpa ini,
+    # laptop ber-.env Supabase live memuat izin dingin (~2 dtk round-trip) di
+    # dalam chat() dan menembus anggaran 1,5 dtk (flaky lama, akar bukan CPU).
+    monkeypatch.setattr("app.services.permissions.effective",
+                        lambda kind, u, r: ["col_stok", "col_harga"])
     seq = [
         {"choices": [{"message": {"content": "", "tool_calls": [
             {"id": "t1", "function": {"name": "detail_part", "arguments": '{"part_number":"AAA111222"}'}},
