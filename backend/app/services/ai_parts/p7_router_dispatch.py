@@ -120,6 +120,7 @@ _DISPATCH = {
     "cari_filter_shantui": _t_cari_filter_shantui,
     "jadwal_perawatan": _t_jadwal_perawatan,
     "diagram_wiring": _t_diagram_wiring,
+    "cari_manual": _t_cari_manual,
     "pesanan_saya": _t_pesanan_saya,
     "detail_pesanan": _t_detail_pesanan,
     "rekap_penjualan": _t_rekap_penjualan,

@@ -182,6 +182,38 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "cari_manual",
+                "description": (
+                    "Cari ISI MANUAL teknik resmi (prosa & tabel) — untuk pertanyaan "
+                    "'CARA/BAGAIMANA', arti indikator, nilai/kalibrasi, atau LANGKAH "
+                    "troubleshooting sebuah GEJALA (bukan kode error). Dua sumber: "
+                    "(1) manual servis ECU Bosch mesin MC — kartu gangguan per-gejala "
+                    "(kondisi pemicu, kemungkinan penyebab, langkah pemeriksaan kabel/"
+                    "konektor, tes setelah perbaikan); (2) manual instrumen TFT NanoBCU "
+                    "— panel/dashboard, arti lampu indikator, tabel nilai sensor (rpm/"
+                    "suhu air/tekanan oli), kalibrasi, kasus gangguan panel. Jawaban = "
+                    "isi manual (⚠️ teks aslinya BAHASA CHINA — TERJEMAHKAN ke Indonesia "
+                    "saat menjawab; jangan ubah angka/kode/pin) + gambar halaman tampil "
+                    "INLINE + kartu PDF sumber. Pakai utk 'cara servis panel tft', 'arti "
+                    "lampu X di dashboard', 'nilai sensor tekanan oli', 'cara cek gejala "
+                    "cruise control macet'. Untuk KODE error SPN/FMI/P pakai cari_kode_kesalahan; "
+                    "utk diagram/pin pakai diagram_wiring."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "topik": {
+                            "type": "string",
+                            "description": "Topik/gejala dalam Bahasa Indonesia, mis. 'lampu indikator panel tft', 'nilai sensor tekanan oli', 'cruise control tombol macet', 'kalibrasi jarum rpm'.",
+                        },
+                    },
+                    "required": ["topik"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "diagnosa",
                 "description": (
                     "⭐ DIAGNOSA KERUSAKAN — pakai untuk 'kenapa …', 'apa penyebab kode X', "

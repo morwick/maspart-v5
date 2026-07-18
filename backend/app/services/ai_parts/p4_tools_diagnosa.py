@@ -556,6 +556,91 @@ def _t_diagram_wiring(args: dict, user: dict) -> dict:
     return out
 
 
+def _t_cari_manual(args: dict, user: dict) -> dict:
+    """Cari ISI MANUAL teknik (manual_teks — Fase C 2026-07-18): naratif
+    troubleshooting per-gejala (ECU Bosch) + panel instrumen TFT NanoBCU. Teks
+    aslinya CHINA — model menerjemahkan runtime. Gambar halaman tampil inline;
+    manual TFT juga dilampirkan sebagai kartu PDF (skema_ref)."""
+    if not manual_teks.available():
+        return {"error": "Data isi manual teknik belum tersedia di server."}
+    topik = (args.get("topik") or args.get("query") or args.get("komponen") or "").strip()
+    if not topik:
+        return {"error": "Sebutkan topik/gejalanya."}
+
+    rows = manual_teks.search(topik, limit=4)
+    if not rows:
+        logger.info("MISS cari_manual q=%r user=%s", topik, user.get("username") or "?")
+        return {
+            "found": False, "jumlah": 0,
+            "catatan": (f"Tidak ada isi manual yang cocok untuk '{topik}'. Untuk KODE "
+                        "error SPN/FMI/P pakai cari_kode_kesalahan; untuk diagram/pin "
+                        "pakai diagram_wiring."),
+        }
+
+    hasil: list[dict] = []
+    gambar: list[dict] = []
+    ada_tft = False
+    for r in rows:
+        if (r.get("sumber") or "").startswith("manual_tft"):
+            ada_tft = True
+        item = {
+            "sumber": r.get("sumber"), "halaman": r.get("halaman"),
+            "judul": r.get("judul_id") or r.get("judul"),
+            # teks China APA ADANYA — model WAJIB terjemahkan ke Indonesia.
+            "teks_china": (r.get("teks") or "")[:1300],
+        }
+        if r.get("blok"):
+            item["blok_china"] = r["blok"]
+        if r.get("tabel"):
+            item["tabel"] = r["tabel"][:6]
+        if r.get("kode"):
+            item["kode"] = r["kode"]
+        hasil.append(item)
+        for f in (r.get("gambar_ref") or [])[:3]:
+            data = manual_media.image_bytes(f)
+            if not data:
+                continue
+            label = r.get("judul_id") or r.get("judul") or f
+            image_id, filename = ai_export.stash_raw(label, data, f"media_{f}")
+            gambar.append({"image_id": image_id, "filename": filename,
+                           "pn": label, "nama_figure": label, "kategori": "Manual"})
+            if len(gambar) >= 8:
+                break
+
+    out = {
+        "found": True,
+        "jumlah": len(hasil),
+        "hasil": hasil,
+        "catatan": (
+            "Isi MANUAL teknik resmi yang cocok. ⚠️ Field 'teks_china'/'blok_china'/"
+            "'tabel' aslinya BAHASA CHINA — WAJIB kamu TERJEMAHKAN ke Bahasa Indonesia "
+            "saat menjawab (jangan tampilkan China mentah; JANGAN ubah angka/kode/pin/"
+            "satuan). Jawab runtut: sebut topik, lalu (bila kartu gangguan) kemungkinan "
+            "penyebab & langkah pemeriksaan; sebut halaman/sumbernya. ⛔ JANGAN mengarang "
+            "di luar isi manual."
+        ),
+    }
+    if gambar:
+        out["gambar"] = gambar
+        out["catatan"] += (" Gambar halaman manual terlampir & tampil OTOMATIS (inline) "
+                           "di bawah jawabanmu — ⛔ JANGAN buat link/gambar sendiri.")
+    # Kartu PDF manual TFT (ada di skema_ref) supaya user bisa buka aslinya.
+    if ada_tft:
+        try:
+            data = skema_ref.pdf_bytes("manual_tft_nanobcu.pdf")
+            if data:
+                export_id, filename = ai_export.stash_raw(
+                    "Manual servis instrumen TFT NanoBCU", data, "manual_tft_nanobcu.pdf")
+                out["pdf_skema"] = [{"export_id": export_id, "filename": filename,
+                                     "judul": "Manual servis instrumen TFT NanoBCU",
+                                     "deskripsi": "Manual pelatihan panel instrumen TFT NanoBCU (sumber)"}]
+                out["catatan"] += (" 📎 'pdf_skema' = manual TFT PDF sumber, terlampir sbg "
+                                   "KARTU yang bisa DIBUKA user.")
+        except Exception:  # pragma: no cover
+            pass
+    return out
+
+
 def _t_jadwal_perawatan(args: dict, user: dict) -> dict:
     if not maintenance_ref.available():
         return {"error": "Data jadwal perawatan Shantui belum tersedia di server."}

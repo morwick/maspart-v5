@@ -31,7 +31,7 @@ _URUTAN = [
     "build_maintenance", "build_filter_ref", "build_repairkit", "build_pin_ecu",
 ]
 _OPSIONAL = ["build_catalog_bom"]
-_MEDIA = ["build_manual_media"]  # berat (ekstrak ~38MB PNG) — hanya --with-media
+_MEDIA = ["build_manual_media", "build_manual_teks"]  # baca PDF sumber — hanya --with-media
 _TERAKHIR = "build_ai_knowledge"
 
 

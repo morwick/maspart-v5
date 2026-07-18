@@ -885,9 +885,9 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                         "judul": c.get("judul"), "jumlah_baris": None}
                 if item["id"] and item not in excel_exports:
                     excel_exports.append(item)
-        elif name == "diagram_wiring" and result.get("pdf_skema"):
+        elif name in ("diagram_wiring", "cari_manual") and result.get("pdf_skema"):
             # Kartu skema/manual PDF (skema_ref, 2026-07-18) → kanal kartu file;
-            # gambar wiring (bila ada) ikut ditangkap di sini juga.
+            # gambar (bila ada) ikut ditangkap di sini juga.
             for c in result["pdf_skema"]:
                 item = {"id": c.get("export_id"), "filename": c.get("filename"),
                         "judul": c.get("judul"), "jumlah_baris": None}
@@ -901,7 +901,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                     exploded_images.append(item)
         elif name in ("gambar_exploded", "gambar_exploded_mesin",
                       "uraikan_mesin", "uraikan_assembly", "part_aus_dari_rangka",
-                      "diagram_wiring") and result.get("found"):
+                      "diagram_wiring", "cari_manual") and result.get("found"):
             # gambar_exploded* = gambar yang diminta eksplisit; uraikan_mesin/
             # part_aus = gambar OTOMATIS part utama yang menyertai cek part;
             # diagram_wiring = diagram pin/kabel EOL (jpg dari data/wiring).

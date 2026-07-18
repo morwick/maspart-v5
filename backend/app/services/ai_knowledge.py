@@ -229,6 +229,12 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         media_n = int(_mm.count_dicari() or 0)
     except Exception:
         pass
+    teks_n = 0
+    try:
+        from . import manual_teks as _mt
+        teks_n = int(_mt.count_dicari() or 0)
+    except Exception:
+        pass
     fault_pdf_n = 0
     try:
         from . import fault_pdf as _fp
@@ -273,7 +279,8 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         "gudang": gudang,
         "fault_codes": {"jumlah": fault_n, "jumlah_eol": eol_n,
                         "unit_kontrol_eol": eol_units_n, "wiring": wiring_n,
-                        "media_manual": media_n, "pdf_diagnosa": fault_pdf_n},
+                        "media_manual": media_n, "teks_manual": teks_n,
+                        "pdf_diagnosa": fault_pdf_n},
         "filter_shantui_units": filter_units,
         "maintenance_shantui": maintenance_by_jenis,
         "gearbox_repairkit": gearbox_models,
@@ -430,6 +437,14 @@ def _render(d: dict, with_gudang: bool) -> str:
                 f"• DIAGRAM & GAMBAR: {wr} diagram pin/kabel sensor-aktuator mesin Bosch & "
                 f"SCR/AdBlue.{extra_mm} Permintaan skema/pinout/konektor/foto unit WAJIB via "
                 "diagram_wiring (gambar tampil inline).")
+        tm = fcd.get("teks_manual") or 0
+        if tm:
+            lines.append(
+                f"• ISI MANUAL TEKNIK: {tm} halaman manual resmi bisa dicari (kartu "
+                "gangguan troubleshooting ECU Bosch per-gejala + panel instrumen TFT "
+                "NanoBCU: arti indikator, nilai sensor, kalibrasi). Pertanyaan CARA/"
+                "gejala/langkah servis (BUKAN kode error) WAJIB via cari_manual — teks "
+                "aslinya China, TERJEMAHKAN saat menjawab; gambar halaman tampil inline.")
     fu = d.get("filter_shantui_units") or []
     if fu:
         lines.append(
