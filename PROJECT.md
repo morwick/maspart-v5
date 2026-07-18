@@ -1747,9 +1747,28 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
         `exploded_images`).
       - Deploy: PNG **scp-only** (`data/manual_media/*.png` di-gitignore, pola `data/wiring`);
         `index.json` + `ai_knowledge.json` ikut git & di-scp (volume). `build_all --with-media`.
-        **896 test hijau** (⛔ evals tak disentuh). ⚠️ SISA (fase C, belum): store teks/tabel
-        naratif manual Bosch CN + TFT (`manual_teks`) + tool `cari_manual`; kurasi 163 gambar
-        naratif; i18n bertahap.
+        **896 test hijau** (⛔ evals tak disentuh).
+- [x] **Fase C — ISI TEKS & TABEL manual jadi pengetahuan (`manual_teks` + `cari_manual`)** —
+      SELESAI + LIVE 2026-07-18 (commit `beb617e`): naratif troubleshooting manual Bosch
+      ECU China (yg SELAMA INI DITUNDA) + manual instrumen TFT NanoBCU kini bisa DICARI &
+      DIJAWAB (bukan cuma kartu PDF).
+      - Builder `build_manual_teks.py`: `pdfplumber` per-halaman → teks + tabel; deteksi
+        anchor kartu gangguan (`故障触发条件/可能原因/排查建议/...`) → `blok` terstruktur
+        (kondisi_trigger/reaksi/penyebab/langkah/tes_setelah); tautkan gambar halaman dari
+        `manual_media` (`for_page`). **319 record** (66 kartu gangguan Bosch + 64 hal TFT +
+        tabel DTC).
+      - Store `manual_teks.json.gz` + loader `manual_teks.py` (search berperingkat). Teks
+        aslinya **CHINA** disimpan apa adanya; **130 record TERKURASI** dgn `judul_id`+
+        `kata_kunci` **INDONESIA** (6 subagent Opus) supaya bisa dicari pakai istilah
+        Indonesia; **model MENERJEMAHKAN teks China saat menjawab** (pola `pin_ecu`, fallback
+        aman — ⛔ tak pra-terjemah 256 hal).
+      - Tool baru **`cari_manual(topik)`**: teks/`blok`/tabel + gambar halaman **INLINE** +
+        kartu PDF TFT (`skema_ref`). Spec p2 + handler p4 + dispatch p7 + capture p9 + import
+        p1 + `ai_knowledge` (`teks_manual` count + baris prompt). Live: "cruise control tombol
+        macet"→kartu gangguan hal 181 (penyebab+langkah)+gambar; "arti lampu indikator tft"→
+        panel TFT; "nilai sensor tekanan oli"→tabel konversi. `build_all --with-media`.
+      - **900 test hijau** (⛔ evals tak disentuh). ⚠️ SISA: pra-terjemah bertahap (i18n)
+        manual_teks & pin_ecu; kurasi 163 gambar naratif manual_media ke `dicari=True`.
       **Baseline metrik produksi PRA-rombakan 2026-07-17** (ai_chat_log Supabase,
       163 giliran) sebagai pembanding sesudah rombakan:
       - Tool gagal: 19,6% giliran. Tersering: `pengganti_part` 45% (9/20), `uraikan_mesin` 33%,
