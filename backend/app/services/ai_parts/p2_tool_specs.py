@@ -1415,6 +1415,42 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 },
             },
         })
+        if _is_admin(user):
+            specs.append({
+                "type": "function",
+                "function": {
+                    "name": "sheet_jadi_penawaran",
+                    "description": (
+                        "Jadikan Excel unggahan (kolom Part Number + Qty) → PENAWARAN "
+                        "Penjualan Accurate resmi + PDF (kartu unduh). ADMIN saja. PN & Qty "
+                        "dibaca dari file; harga = harga jual Accurate apa adanya; nomor = "
+                        "MASPART-NN. ⛔ PN yang tak ada di Accurate → penawaran DIBATALKAN + "
+                        "daftar PN (JANGAN pakai saran/pengganti untuk penawaran). Butuh nama "
+                        "pelanggan (>1 cocok → minta user pilih). Pakai saat user minta 'buatkan "
+                        "penawaran dari file ini', 'jadikan quotation', 'SQ dari daftar ini'."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "pelanggan": {"type": "string",
+                                          "description": "Nama pelanggan (dicocokkan di Accurate)."},
+                            "kolom_pn": {"type": "string",
+                                         "description": "Kolom Part Number (opsional; default deteksi)."},
+                            "kolom_qty": {"type": "string",
+                                          "description": "Kolom Qty (opsional; default deteksi)."},
+                            "baris_bermasalah": {
+                                "type": "string", "enum": ["batal", "lewati"],
+                                "description": ("Baris qty kosong/tak valid: 'batal' (default, "
+                                                "penawaran dibatalkan + daftar) atau 'lewati'."),
+                            },
+                            "tanggal": {"type": "string",
+                                        "description": "Tanggal dd/mm/yyyy (opsional; default hari ini)."},
+                            "catatan": {"type": "string", "description": "Keterangan (opsional)."},
+                        },
+                        "required": ["pelanggan"],
+                    },
+                },
+            })
         specs.append({
             "type": "function",
             "function": {

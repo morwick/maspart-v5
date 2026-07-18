@@ -993,21 +993,17 @@ def _t_harga_sims(args: dict, user: dict) -> dict:
         return {"error": "gagal ambil harga SIMS (gangguan internal/jaringan)"}
 
 
-def _t_buat_penawaran(args: dict, user: dict) -> dict:
-    """Buat Penawaran Penjualan Accurate + PDF resmi. Admin-only (dijaga 2 lapis:
-    tool spec + guard di sini + allow-list terpusat).
+def _penawaran_core(nama_pel: str, barang: list, tanggal: str = "",
+                    catatan: str = "") -> dict:
+    """INTI pembuatan Penawaran Accurate + PDF resmi (dipakai buat_penawaran &
+    sheet_jadi_penawaran). `barang` = [{part_number, qty}]. Return dict hasil
+    (found / error / perlu_klarifikasi). Pemanggil WAJIB sudah cek admin.
 
-    ⛔ RUANG LINGKUP TERKUNCI (aturan keras pemilik): tool ini HANYA MEMBUAT
-    penawaran & mengatur KUANTITAS part. TIDAK mengubah/menghapus apa pun di
-    Accurate (tak ada delete/update). NOMOR = MASPART-NN otomatis (penomoran
-    otomatis Accurate tak dipakai). HARGA = harga jual Accurate apa adanya."""
-    if not _is_admin(user):
-        return {"denied": True, "error": "Buat penawaran hanya untuk admin."}
+    ⛔ RUANG LINGKUP TERKUNCI: HANYA membuat penawaran & atur KUANTITAS. TIDAK
+    mengubah/menghapus di Accurate. NOMOR = MASPART-NN. HARGA = harga jual Accurate
+    apa adanya (⛔ tak menawar/mengarang)."""
     if not accurate.available():
         return {"error": "Accurate belum terkonfigurasi/aktif."}
-
-    nama_pel = (args.get("pelanggan") or "").strip()
-    barang = args.get("barang") or []
     if not nama_pel:
         return {"error": "Nama pelanggan wajib."}
     if not isinstance(barang, list) or not barang:
@@ -1076,10 +1072,10 @@ def _t_buat_penawaran(args: dict, user: dict) -> dict:
         # 3) buat penawaran. NOMOR dibuat sistem = MASPART-NN. Penomoran otomatis
         #    Accurate TIDAK PERNAH dipakai (aturan keras pemilik).
         nomor = accurate.next_quotation_number()
-        tanggal = (args.get("tanggal") or "").strip() or time.strftime("%d/%m/%Y")
+        tgl = (tanggal or "").strip() or time.strftime("%d/%m/%Y")
         res = accurate.create_sales_quotation(
-            number=nomor, customer_id=pel["id"], lines=lines, transdate=tanggal,
-            description=(args.get("catatan") or ""))
+            number=nomor, customer_id=pel["id"], lines=lines, transdate=tgl,
+            description=(catatan or ""))
         qid = res.get("id")
         if not qid:
             return {"found": False, "error": "Penawaran gagal dibuat (tak ada id)."}
@@ -1118,6 +1114,77 @@ def _t_buat_penawaran(args: dict, user: dict) -> dict:
                 accurate.suppress_autologin()
             except Exception:  # pragma: no cover
                 pass
+
+
+def _t_buat_penawaran(args: dict, user: dict) -> dict:
+    """Buat Penawaran Penjualan Accurate + PDF resmi. Admin-only (dijaga 3 lapis:
+    tool spec + guard di sini + allow-list terpusat)."""
+    if not _is_admin(user):
+        return {"denied": True, "error": "Buat penawaran hanya untuk admin."}
+    return _penawaran_core((args.get("pelanggan") or "").strip(),
+                           args.get("barang") or [],
+                           (args.get("tanggal") or "").strip(),
+                           args.get("catatan") or "")
+
+
+def _t_sheet_jadi_penawaran(args: dict, user: dict) -> dict:
+    """Jadikan Excel unggahan (PN + Qty) → Penawaran Accurate + PDF. Admin-only.
+    ⛔ PN tak ada di Accurate = BATAL (tak pakai 'mungkin maksud'). Qty bermasalah:
+    'batal' (default) atau 'lewati'."""
+    if not _is_admin(user):
+        return {"denied": True, "error": "Buat penawaran hanya untuk admin."}
+    parsed = ai_sheet.get_sheet(args.get("_sheet_id", ""), user.get("username", ""))
+    if not parsed:
+        return {"found": False, "error": "Tidak ada file Excel terlampir (atau kedaluwarsa). "
+                                         "Minta user mengunggahnya."}
+    headers = list(parsed["headers"])
+    body = [list(r) for r in parsed["_body"]]
+    roles = parsed["roles"]
+
+    pn_i = ai_sheet._cari_kolom(headers, (args.get("kolom_pn") or "").strip())
+    if pn_i is None:
+        pn_i = roles.index("part_number") if "part_number" in roles else None
+    qty_i = ai_sheet._cari_kolom(headers, (args.get("kolom_qty") or "").strip())
+    if qty_i is None and "qty" in roles:
+        qty_i = roles.index("qty")
+    if pn_i is None:
+        return {"found": False, "error": "Kolom Part Number tak terdeteksi — minta user sebut kolomnya."}
+    if qty_i is None:
+        return {"found": False, "error": "Kolom Qty tak terdeteksi — minta user sebut kolom qty-nya "
+                                         "(penawaran butuh jumlah tiap part)."}
+
+    mode = (args.get("baris_bermasalah") or "batal").strip().lower()
+    agg: dict[str, float] = {}          # PN → total qty (dijumlah first-seen)
+    urut: list[str] = []
+    bermasalah: list[dict] = []
+    for r in body:
+        pn = str(r[pn_i] if pn_i < len(r) else "").strip()
+        if not pn:
+            continue
+        q = _qty_int(r[qty_i] if qty_i < len(r) else "")
+        if not q or q <= 0:
+            bermasalah.append({"pn": pn, "qty_mentah": str(r[qty_i] if qty_i < len(r) else "")})
+            if mode == "batal":
+                continue
+            continue  # 'lewati' → sama-sama tak dimasukkan; beda hanya di bawah
+        if pn not in agg:
+            agg[pn] = 0.0
+            urut.append(pn)
+        agg[pn] += q
+    if bermasalah and mode == "batal":
+        return {"found": False, "baris_bermasalah": bermasalah[:20],
+                "error": (f"{len(bermasalah)} baris qty kosong/tak valid. Penawaran DIBATALKAN "
+                          "(default). Perbaiki qty, ATAU minta lagi dengan baris_bermasalah='lewati' "
+                          "untuk mengabaikan baris itu.")}
+    if not urut:
+        return {"found": False, "error": "Tak ada baris PN+Qty valid untuk dijadikan penawaran."}
+
+    barang = [{"part_number": pn, "qty": agg[pn]} for pn in urut]
+    hasil = _penawaran_core((args.get("pelanggan") or "").strip(), barang,
+                            (args.get("tanggal") or "").strip(), args.get("catatan") or "")
+    if bermasalah and mode != "batal" and isinstance(hasil, dict):
+        hasil["baris_dilewati"] = len(bermasalah)
+    return hasil
 
 
 def _t_template_excel(args: dict, user: dict) -> dict:
