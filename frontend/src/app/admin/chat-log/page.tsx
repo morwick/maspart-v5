@@ -185,14 +185,23 @@ export default function ChatLogPage() {
               {(summary.tool_gagal_tersering ?? []).length > 0 && (
                 <div className="surface" style={{ padding: 14, flex: 1, minWidth: 240 }}>
                   <div className="stat-label" style={{ marginBottom: 8 }}>Tool paling sering gagal</div>
-                  {(summary.tool_gagal_tersering ?? []).map(([t, n, pct]) => (
+                  {(summary.tool_gagal_tersering ?? []).map(([t, n, pct, nf, err]) => (
                     <div key={t} className="flex items-center justify-between" style={{ fontSize: 12.5, padding: "2px 0" }}>
                       <span className="mono">{t}</span>
-                      <span style={{ color: "var(--ink-500)" }} title={`${n} gagal · ${pct}% dari pemakaian`}>
-                        {n} <span style={{ fontSize: 11 }}>({pct}%)</span>
+                      <span
+                        style={{ color: "var(--ink-500)" }}
+                        title={`${n} gagal · ${pct}% dari pemakaian · ${nf ?? 0} tak ketemu · ${err ?? 0} error`}
+                      >
+                        {n} <span style={{ fontSize: 11 }}>({pct}%{nf || err ? ` · ${nf ?? 0}✕/${err ?? 0}⚠` : ""})</span>
                       </span>
                     </div>
                   ))}
+                  {summary.tool_gagal_rincian && (
+                    <div style={{ fontSize: 11, color: "var(--ink-500)", marginTop: 6 }}>
+                      ✕ tak ketemu: {summary.tool_gagal_rincian.nf ?? 0} · ⚠ error: {summary.tool_gagal_rincian.err ?? 0}
+                      {(summary.tool_gagal_rincian.legacy ?? 0) > 0 && ` · lama: ${summary.tool_gagal_rincian.legacy}`}
+                    </div>
+                  )}
                 </div>
               )}
               <div className="surface" style={{ padding: 14, flex: 1, minWidth: 240 }}>
@@ -340,7 +349,10 @@ export default function ChatLogPage() {
                         </div>
                         {r.tools_failed && (
                           <div style={{ fontSize: 12, color: "var(--danger-600, #c0392b)", marginBottom: 10 }}>
-                            <b>Tool gagal:</b> <span className="mono">{r.tools_failed}</span>
+                            <b>Tool gagal:</b>{" "}
+                            <span className="mono">
+                              {r.tools_failed.replaceAll(":nf", " (tak ketemu)").replaceAll(":err", " (error)")}
+                            </span>
                           </div>
                         )}
                         <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-500)", marginBottom: 3 }}>

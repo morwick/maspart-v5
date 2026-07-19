@@ -288,19 +288,51 @@ def _trim_old_tool_messages(messages: list[dict], tool_msg_idx: list[dict],
         e["stubbed"] = True
 
 
+# Marker string error yang menandakan gangguan INFRA (bukan lookup nihil jujur).
+# Sengaja sempit: banyak hasil not-found sah membawa `error` penjelas — kehadiran
+# `error` saja BUKAN bukti infra rusak.
+_FAIL_INFRA_MARKERS = ("jaringan", "gangguan internal")
+
+
+def _tool_fail_kind(result) -> str:
+    """Klasifikasi kegagalan hasil tool untuk telemetri:
+    ""    → sukses;
+    "nf"  → lookup jujur nihil (found/ditemukan/tersedia == False) — data memang
+            tidak ada, bukan sistem rusak;
+    "err" → error/ditolak/infra (exception, denied, token EPC, jaringan).
+    Statistik lama menyatukan keduanya → tool not-found jujur tampak "rusak"."""
+    if not isinstance(result, dict):
+        return ""
+    if result.get("denied") or result.get("_token_issue"):
+        return "err"
+    for k in ("found", "ditemukan", "tersedia"):
+        if result.get(k) is False:
+            err = str(result.get("error") or "").lower()
+            if any(m in err for m in _FAIL_INFRA_MARKERS):
+                return "err"
+            return "nf"
+    if result.get("error"):
+        return "err"
+    return ""
+
+
 def _tool_failed(result: dict) -> bool:
     """True bila hasil tool = kegagalan/kekosongan lookup (error, ditolak, atau
     'tidak ditemukan'). Dipakai untuk mengingatkan model agar TIDAK mengarang
     stok/harga saat data sebenarnya gagal diambil (guard PN tak menangkap angka)."""
-    if not isinstance(result, dict):
-        return False
-    if result.get("error") or result.get("denied"):
-        return True
-    # found/ditemukan/tersedia == False → lookup nihil (bedakan dari absennya key).
-    for k in ("found", "ditemukan", "tersedia"):
-        if result.get(k) is False:
-            return True
-    return False
+    return bool(_tool_fail_kind(result))
+
+
+def _catat_tool_gagal(daftar: list[str], name: str, kind: str) -> None:
+    """Catat entri `nama:kind` ke daftar tools_failed giliran ini — dedupe per
+    NAMA; nf lalu err di giliran sama → upgrade ke err (sinyal lebih kuat)."""
+    for i, e in enumerate(daftar):
+        n, _, k = e.partition(":")
+        if n == name:
+            if k == "nf" and kind == "err":
+                daftar[i] = f"{name}:{kind}"
+            return
+    daftar.append(f"{name}:{kind}")
 
 
 _LOOKUP_GAGAL_NOTE = (

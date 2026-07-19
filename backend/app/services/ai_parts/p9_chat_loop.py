@@ -1130,10 +1130,10 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                         ),
                     })
                     _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
-                    if _tool_failed(result):
+                    _kind = _tool_fail_kind(result)
+                    if _kind:
                         tool_gagal_pernah = True
-                        if name not in tools_failed:
-                            tools_failed.append(name)
+                        _catat_tool_gagal(tools_failed, name, _kind)
                         if not lookup_gagal:
                             lookup_gagal = True
                             messages.append({"role": "user", "content": _LOOKUP_GAGAL_NOTE})
@@ -1294,11 +1294,11 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 "content": _cap_tool_content(_dump),
             })
             _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
-            if _tool_failed(result):
+            _kind = _tool_fail_kind(result)
+            if _kind:
                 lookup_gagal = True
                 tool_gagal_pernah = True
-                if name not in tools_failed:
-                    tools_failed.append(name)
+                _catat_tool_gagal(tools_failed, name, _kind)
         if lookup_gagal:
             # Ingatkan SEKALI per turn (setelah batch tool) agar model tak mengarang
             # angka utk lookup yang gagal. Reset flag agar tak menumpuk tiap ronde.

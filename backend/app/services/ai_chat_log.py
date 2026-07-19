@@ -226,23 +226,38 @@ def summary() -> dict:
     failed = sum(1 for r in rows if r.get("tool_failed"))
     tool_freq: dict[str, int] = {}
     tool_gagal_freq: dict[str, int] = {}
+    tool_gagal_nf: dict[str, int] = {}
+    tool_gagal_err: dict[str, int] = {}
+    gagal_rincian = {"nf": 0, "err": 0, "legacy": 0}
     outcome_freq: dict[str, int] = {}
     for r in rows:
         for t in (r.get("tools") or "").split(", "):
             t = t.strip()
             if t:
                 tool_freq[t] = tool_freq.get(t, 0) + 1
+        # Entri tools_failed bisa bersuffix jenis: "nama:nf" (lookup jujur nihil)
+        # / "nama:err" (error/infra); baris lama tanpa suffix = "legacy".
         for t in (r.get("tools_failed") or "").split(", "):
             t = t.strip()
-            if t:
-                tool_gagal_freq[t] = tool_gagal_freq.get(t, 0) + 1
+            if not t:
+                continue
+            nama, _, kind = t.partition(":")
+            tool_gagal_freq[nama] = tool_gagal_freq.get(nama, 0) + 1
+            if kind == "nf":
+                tool_gagal_nf[nama] = tool_gagal_nf.get(nama, 0) + 1
+            elif kind == "err":
+                tool_gagal_err[nama] = tool_gagal_err.get(nama, 0) + 1
+            gagal_rincian["nf" if kind == "nf" else
+                          "err" if kind == "err" else "legacy"] += 1
         o = (r.get("outcome") or "?").strip()
         outcome_freq[o] = outcome_freq.get(o, 0) + 1
 
     # Tool paling sering GAGAL + rasio gagal/pakai (tool bergantung server eksternal
-    # — EPC/SIMS/Accurate — paling rawan). [nama, jml_gagal, rasio_persen].
+    # — EPC/SIMS/Accurate — paling rawan). [nama, jml_gagal, rasio_persen, jml_nf,
+    # jml_err] — nf ≠ rusak (data memang tak ada); destructuring 3-elemen lama aman.
     tool_gagal_tersering = [
-        [t, c, round(100 * c / tool_freq[t], 1) if tool_freq.get(t) else 0.0]
+        [t, c, round(100 * c / tool_freq[t], 1) if tool_freq.get(t) else 0.0,
+         tool_gagal_nf.get(t, 0), tool_gagal_err.get(t, 0)]
         for t, c in sorted(tool_gagal_freq.items(), key=lambda kv: -kv[1])[:10]
     ]
 
@@ -273,6 +288,7 @@ def summary() -> dict:
         "tool_gagal_rasio_persen": round(100 * failed / n, 1),
         "tool_tersering": sorted(tool_freq.items(), key=lambda kv: -kv[1])[:10],
         "tool_gagal_tersering": tool_gagal_tersering,
+        "tool_gagal_rincian": gagal_rincian,
         "outcome": outcome_freq,
         "token": token,
     }
