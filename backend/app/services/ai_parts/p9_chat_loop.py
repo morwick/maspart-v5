@@ -1110,7 +1110,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                         dtc_tool_attempted = True
                     result = _run_tool(name, lc_args, user, sheet_id)
                     tools_used.append(name)
-                    _dump = _dump_tool(result)
+                    _dump = _dump_tool(result, name)
                     _res_pns = _extract_pns(_dump)
                     grounded |= _res_pns
                     grounded_nums |= _extract_nums(_dump)
@@ -1282,7 +1282,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 rangka_tool_attempted = True
             if name in ("cari_kode_kesalahan", "diagnosa"):
                 dtc_tool_attempted = True
-            _dump = _dump_tool(result)
+            _dump = _dump_tool(result, name)
             _res_pns = _extract_pns(_dump)
             grounded |= _res_pns
             grounded_nums |= _extract_nums(_dump)

@@ -213,7 +213,7 @@ _TOOL_CAP_TAIL = 3000   # sisakan EKOR: builder menaruh catatan/jawaban_wajib di
 
 def _cap_tool_content(s: str) -> str:
     """Batasi panjang JSON hasil tool yang dimasukkan ke riwayat percakapan.
-    Hasil raksasa (banding_rangka_massal, katalog_mesin) bila di-append penuh
+    Hasil raksasa (banding_rangka_massal, bom_dari_rangka) bila di-append penuh
     tiap ronde membuat token membengkak & bisa menembus limit konteks model
     (→ API 400 → 502). Tool tetap mengembalikan data lengkap ke frontend lewat
     metadata; yang dipotong hanya salinan untuk konsumsi model.
@@ -251,13 +251,61 @@ def _compact_result(v):
     return v
 
 
-def _dump_tool(result) -> str:
-    """Serialisasi hasil tool untuk konsumsi model: dikompakkan (buang field
-    kosong) + separator rapat (tanpa spasi). Dipakai SEKALI lalu string yang sama
-    dipakai ekstraksi PN & konten yang di-append — guard PN melihat persis yang
-    dilihat model."""
-    return json.dumps(_compact_result(result), ensure_ascii=False,
-                      separators=(",", ":"), default=str)
+# ── Proyeksi per-tool SALINAN MODEL (bukan side-state) ──────────────────────
+# Field yang model TAK butuh untuk menjawab dibuang dari salinan yang
+# diserialisasi ke messages; hasil UTUH tetap mengalir ke _capture_meta
+# (kartu unduh Excel / gambar inline dibangun dari side-state, bukan dari
+# teks pesan tool). INVARIAN: hanya BUANG key — JANGAN rename, JANGAN buang
+# baris ber-PN, JANGAN ubah urutan (catatan/jawaban_wajib wajib tetap di
+# EKOR dict utk _cap_tool_content potong kepala+ekor). Hasil GAGAL
+# (_tool_fail_kind != "") lolos utuh agar steering error tak terpangkas.
+
+def _proj_drop(result: dict, keys: tuple[str, ...]) -> dict:
+    return {k: v for k, v in result.items() if k not in keys}
+
+
+def _proj_gambar_tanpa_image_id(result: dict) -> dict:
+    """Baris gambar[]: buang image_id (opaque; gambar inline dibangun dari
+    side-state exploded_images) — pn/balon/nama_figure/kategori tetap."""
+    out = dict(result)
+    if isinstance(out.get("gambar"), list):
+        out["gambar"] = [
+            {k: v for k, v in g.items() if k != "image_id"}
+            if isinstance(g, dict) else g
+            for g in out["gambar"]
+        ]
+    return out
+
+
+_PROJECTIONS = {
+    # ringkasan_kategori = duplikat persis kategori_beda + kategori_seragam
+    # (mode semua_kategori); export_id = id kartu unduh (side-state).
+    "banding_rangka_massal": lambda r: _proj_drop(r, ("ringkasan_kategori",
+                                                      "export_id")),
+    "katalog_kategori": lambda r: _proj_drop(r, ("export_id",)),
+    "katalog_mesin": lambda r: _proj_drop(r, ("export_id",)),
+    "gambar_exploded": _proj_gambar_tanpa_image_id,
+    "gambar_exploded_mesin": _proj_gambar_tanpa_image_id,
+    "uraikan_assembly": _proj_gambar_tanpa_image_id,
+    "uraikan_mesin": _proj_gambar_tanpa_image_id,
+    "part_aus_dari_rangka": _proj_gambar_tanpa_image_id,
+}
+
+
+def _project_for_model(name: str, result):
+    if not isinstance(result, dict) or _tool_fail_kind(result):
+        return result
+    fn = _PROJECTIONS.get(name)
+    return fn(result) if fn else result
+
+
+def _dump_tool(result, name: str = "") -> str:
+    """Serialisasi hasil tool untuk konsumsi model: proyeksi per-tool (buang
+    field yang model tak butuh) + dikompakkan (buang field kosong) + separator
+    rapat (tanpa spasi). Dipakai SEKALI lalu string yang sama dipakai ekstraksi
+    PN & konten yang di-append — guard PN melihat persis yang dilihat model."""
+    return json.dumps(_compact_result(_project_for_model(name, result)),
+                      ensure_ascii=False, separators=(",", ":"), default=str)
 
 
 _TOOL_TRIM_KEEP_LAST = 2   # ronde tool TERAKHIR yang isinya dibiarkan UTUH

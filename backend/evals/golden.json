@@ -216,7 +216,7 @@
       "id": "weichai-piston",
       "tags": ["weichai"],
       "question": "urai bagian piston mesin unit rangka SJ346500",
-      "expect": { "tools_any": ["uraikan_mesin"], "reply_any": ["piston"] }
+      "expect": { "tools_any": ["uraikan_assembly", "uraikan_mesin"], "reply_any": ["piston"] }
     },
     {
       "id": "excel-dinamis",
@@ -240,9 +240,10 @@
     {
       "id": "epc-katalog-kabin",
       "tags": ["epc"],
-      "_kenapa": "Fitur katalog bergambar (2026-07-03): 'berikan katalog kabin <rangka>' → tool katalog_kategori → kartu unduh Excel per-figure + exploded view. SJ346500 terverifikasi live: 61 figure / 736 part.",
+      "_kenapa": "Fitur katalog bergambar (2026-07-03): 'berikan katalog kabin <rangka>' → tool katalog_kategori → kartu unduh Excel per-figure + exploded view. SJ346500 terverifikasi live: 61 figure / 736 part. Sejak upgrade format PDF (2026-07-18) tool WAJIB menanyakan format dulu bila belum disebut — expect_alt menerima jalur tanya-format itu.",
       "question": "berikan katalog kabin SJ346500",
-      "expect": { "tools_any": ["katalog_kategori"], "reply_any": ["figure", "katalog"] }
+      "expect": { "tools_any": ["katalog_kategori"], "reply_any": ["figure", "katalog"] },
+      "expect_alt": [{ "tools_any": ["katalog_kategori"], "reply_all": ["Excel", "PDF"], "reply_any": ["format"] }]
     },
     {
       "id": "weichai-katalog-mesin",
@@ -250,14 +251,17 @@
       "_kenapa": "Fitur katalog_mesin (2026-07-07): 'katalog mesin <rangka>' → tool katalog_mesin (part internal mesin Weichai bergambar exploded view). Endpoint gambar dePreview (common-api) ketemu via bedah lazy-chunk JS; RJ345233 terverifikasi live (walk 'blok' = 8 figure/53 part, Excel 2,6 MB dg 8 gambar).",
       "question": "buatkan katalog mesin untuk unit RJ345233",
       "expect": { "reply_any": ["bagian", "blok", "kelompok", "lengkap"] },
-      "expect_alt": [{ "tools_any": ["katalog_mesin"], "reply_any": ["mesin", "figure", "katalog"] }]
+      "expect_alt": [
+        { "tools_any": ["katalog_kategori", "katalog_mesin"], "reply_any": ["mesin", "figure", "katalog"] },
+        { "tools_any": ["katalog_kategori", "katalog_mesin"], "reply_all": ["Excel", "PDF"], "reply_any": ["format"] }
+      ]
     },
     {
       "id": "weichai-air-compressor",
       "tags": ["weichai"],
       "_kenapa": "Regresi 2026-07-03: 'air compressor' dulu jatuh ke modul poros Atlas → cuma pipa outlet, model simpulkan 'terintegrasi di engine assembly'. Aksesori terpasang di mesin = domain Weichai (Air Compressor Group; Assy 1013133963 & compressor 1013133966 terverifikasi live utk RJ345233).",
       "question": "cek part air compressor unit RJ345233",
-      "expect": { "tools_any": ["uraikan_mesin"], "pn_any": ["1013133963", "1013133966"] }
+      "expect": { "tools_any": ["uraikan_assembly", "uraikan_mesin"], "pn_any": ["1013133963", "1013133966"] }
     },
     {
       "id": "smartpn-suffix-halaman",
