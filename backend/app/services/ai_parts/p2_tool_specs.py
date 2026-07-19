@@ -1566,7 +1566,10 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
     # memanggil tool yang handler-nya toh menolak/di luar kebutuhan pembeli.
     # (_DISPATCH tetap utuh; ini hanya penawaran spec.)
     if role == "pembeli":
-        _GATED_PEMBELI = {"excel_stok_gudang", "banding_rangka_massal", "banding_rangka"}
+        _GATED_PEMBELI = {"excel_stok_gudang", "banding_rangka_massal", "banding_rangka",
+                          # sensus/banding internal utk staf — pembeli tetap punya jalur
+                          # per-VIN (bom_dari_rangka/part_aus/cari_part_di_unit, EPC-first)
+                          "daftar_transmisi_assy", "banding_assy", "banding_kategori"}
         specs = [s for s in specs if s["function"]["name"] not in _GATED_PEMBELI]
 
     # ── Gating STOK (Menu Control 'Kolom Stok'): tool yang SELURUH gunanya
