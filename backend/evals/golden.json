@@ -138,6 +138,12 @@
       "expect": { "tools_any": ["cari_kode_kesalahan"] }
     },
     {
+      "id": "fault-card-i18n-id",
+      "tags": ["lokal"],
+      "question": "SPN 29 FMI 3 itu masalah apa dan bagaimana cara periksanya?",
+      "expect": { "tools_any": ["cari_kode_kesalahan", "diagnosa"], "reply_any": ["pedal akselerator", "pedal gas"] }
+    },
+    {
       "id": "info-aplikasi",
       "tags": ["lokal"],
       "question": "berapa banyak part dan unit yang terindeks di aplikasi ini?",
