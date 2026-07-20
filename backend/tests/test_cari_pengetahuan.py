@@ -119,6 +119,49 @@ def test_dokumen_disertakan_saat_beda():
     assert res["hasil"][0]["dokumen"] == "Kebijakan Gudang"
 
 
+def test_gambar_label_manusiawi_dan_tanpa_balon(_tmp_store):
+    """UI merender '{pn} · {nama_figure}' — `balon` terisi akan mencetak
+    'Balon …' yang menyesatkan untuk dokumen pengetahuan."""
+    media = _tmp_store / "media"
+    media.mkdir(parents=True, exist_ok=True)
+    (media / "aa_000.png").write_bytes(b"PNG")
+    _isi([_chunk(gambar_ref=["aa_000.png"], judul_id="Cara mengajukan retur",
+                 sumber="kebijakan.pdf", halaman=3)])
+    g = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)["gambar"][0]
+    assert g["pn"] == "Cara mengajukan retur"
+    assert g["nama_figure"] == "kebijakan.pdf · hal 3"     # provenance, bukan judul ulang
+    assert not g.get("balon")
+    assert g["kategori"] == "Pengetahuan"
+
+
+def test_caption_dipakai_sebagai_label_bila_ada(_tmp_store):
+    media = _tmp_store / "media"
+    media.mkdir(parents=True, exist_ok=True)
+    (media / "aa_000.png").write_bytes(b"PNG")
+    _isi([_chunk(gambar_ref=["aa_000.png"],
+                 gambar_info=[{"file": "aa_000.png",
+                               "caption": "Gambar 2: alur pengajuan retur",
+                               "halaman": 3}])])
+    g = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)["gambar"][0]
+    assert g["nama_figure"] == "Gambar 2: alur pengajuan retur"
+
+
+def test_cap_gambar_tiga(_tmp_store):
+    """Batas nyata 6/giliran diakumulasi lintas SEMUA tool — alat penemuan
+    tidak boleh menelan jatah tool lain."""
+    media = _tmp_store / "media"
+    media.mkdir(parents=True, exist_ok=True)
+    refs = []
+    for i in range(9):
+        f = f"aa_{i:03d}.png"
+        (media / f).write_bytes(b"PNG")
+        refs.append(f)
+    _isi([_chunk(id=f"aa#{i:04d}", judul_id=f"Prosedur retur bagian {i}",
+                 gambar_ref=refs[i * 3:i * 3 + 3]) for i in range(3)])
+    res = ai._t_cari_pengetahuan({"topik": "prosedur retur"}, ADMIN)
+    assert len(res["gambar"]) <= 3
+
+
 def test_image_id_dibuang_dari_salinan_model(_tmp_store):
     """image_id opaque — gambar inline dibangun dari side-state, bukan teks."""
     media = _tmp_store / "media"
@@ -130,6 +173,34 @@ def test_image_id_dibuang_dari_salinan_model(_tmp_store):
     dump = ai._dump_tool(res, "cari_pengetahuan")
     assert "image_id" not in dump                       # salinan model tidak
     assert dump.rstrip("}").endswith('"')               # catatan tetap di ekor
+
+
+def test_instruksi_terjemah_hanya_saat_ada_isi_asing():
+    """Dokumen Indonesia (mayoritas) tak boleh membayar token untuk instruksi
+    terjemah yang tak relevan."""
+    _isi([_chunk(bahasa="")])
+    res = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)
+    assert "TERJEMAHKAN" not in res["catatan"]
+    assert "bahasa" not in res["hasil"][0]
+
+    _isi([_chunk(bahasa="zh", teks="退货流程")])
+    res = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)
+    assert "TERJEMAHKAN" in res["catatan"]
+    assert res["hasil"][0]["bahasa"] == "zh"
+    assert list(res)[-1] == "catatan"
+
+
+def test_tabel_terpotong_diberitahukan_ke_model():
+    _isi([_chunk(tabel=[["a", "b"], ["1", "2"]], baris_total=40)])
+    res = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)
+    assert res["hasil"][0]["tabel_dipotong"] == "8 dari 40 baris"
+    assert "buka_pengetahuan" in res["catatan"]
+
+
+def test_breadcrumb_disertakan_bila_ada():
+    _isi([_chunk(jalur=["3 Retur", "3.2 Syarat"])])
+    res = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)
+    assert res["hasil"][0]["bagian_dari"] == "3 Retur › 3.2 Syarat"
 
 
 def test_peringatan_tabel_pdf_rekonstruksi():

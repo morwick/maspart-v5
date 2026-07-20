@@ -641,6 +641,24 @@ def _t_cari_manual(args: dict, user: dict) -> dict:
     return out
 
 
+# Batas gambar tool penemuan. Frontend hanya merender 6 gambar per giliran
+# (akumulasi lintas semua tool), jadi alat penemuan mengambil sedikit saja —
+# yang ingin melihat lengkap memakai buka_pengetahuan.
+_MAX_GAMBAR_PENGETAHUAN = 3
+
+
+def _label_gambar(r: dict, fname: str) -> str:
+    """Keterangan gambar yang dilihat USER di bawah jawaban. Pakai caption hasil
+    ekstraksi bila ada; kalau tidak, provenance (berkas + halaman) yang tetap
+    berguna untuk menelusuri sumbernya."""
+    for g in (r.get("gambar_info") or []):
+        if g.get("file") == fname and (g.get("caption") or "").strip():
+            return g["caption"].strip()[:120]
+    sumber = r.get("sumber") or "dokumen"
+    hal = r.get("halaman") or 0
+    return f"{sumber} · hal {hal}" if hal else str(sumber)
+
+
 def _t_cari_pengetahuan(args: dict, user: dict) -> dict:
     """Cari PENGETAHUAN INTERNAL yang ditulis/diunggah admin (store `pengetahuan`).
 
@@ -670,6 +688,8 @@ def _t_cari_pengetahuan(args: dict, user: dict) -> dict:
     hasil: list[dict] = []
     gambar: list[dict] = []
     ada_tabel_pdf = False
+    ada_asing = False
+    ada_tabel_potong = False
     for r in rows:
         if is_pembeli and not r.get("untuk_pembeli"):
             continue  # lapis kedua — jangan pernah percaya satu filter saja
@@ -689,23 +709,40 @@ def _t_cari_pengetahuan(args: dict, user: dict) -> dict:
         # itu string kembar yang dibayar dua kali.
         if r.get("judul") and r.get("judul") != judul:
             item["dokumen"] = r.get("judul")
+        if r.get("bahasa") in ("zh", "ja", "en"):
+            item["bahasa"] = r["bahasa"]
+            ada_asing = True
+        if r.get("jalur"):
+            item["bagian_dari"] = " › ".join(r["jalur"][-2:])
         if r.get("tabel"):
             item["tabel"] = r["tabel"][:8]
+            if r.get("baris_total") and r["baris_total"] > 8:
+                item["tabel_dipotong"] = f"8 dari {r['baris_total']} baris"
+                ada_tabel_potong = True
             if (r.get("tipe") or "") == "pdf":
                 ada_tabel_pdf = True
         if r.get("kode"):
             item["kode"] = r["kode"]
         hasil.append(item)
-        for f in (r.get("gambar_ref") or [])[:3]:
-            if len(gambar) >= 8:
+        # Anggaran gambar KETAT: batas nyata 6 per giliran ditegakkan frontend
+        # dan diakumulasi lintas SEMUA tool, jadi alat penemuan seperti ini tak
+        # boleh menelan jatah tool lain. Hasil teratas 2 gambar, sisanya 1.
+        jatah = 2 if len(hasil) == 1 else 1
+        for f in (r.get("gambar_ref") or [])[:jatah]:
+            if len(gambar) >= _MAX_GAMBAR_PENGETAHUAN:
                 break
             data = pengetahuan.image_bytes(f)
             if not data:
                 continue
-            label = r.get("judul_id") or r.get("judul") or f
-            image_id, filename = ai_export.stash_raw(label, data, f"pengetahuan_{f}")
-            gambar.append({"image_id": image_id, "filename": filename,
-                           "pn": label, "nama_figure": label, "kategori": "Pengetahuan"})
+            image_id, filename = ai_export.stash_raw(judul, data, f"pengetahuan_{f}")
+            gambar.append({
+                "image_id": image_id, "filename": filename,
+                # UI merender "{pn} · {nama_figure}"; `balon` SENGAJA tak diisi
+                # karena kalau ada, UI mencetak "Balon …" yang menyesatkan.
+                "pn": (judul or f)[:60],
+                "nama_figure": _label_gambar(r, f),
+                "kategori": "Pengetahuan",
+            })
 
     if not hasil:
         return {"found": False, "jumlah": 0,
@@ -721,6 +758,15 @@ def _t_cari_pengetahuan(args: dict, user: dict) -> dict:
     if ada_tabel_pdf:
         catatan += (" ⚠️ Field 'tabel' dari sumber PDF adalah REKONSTRUKSI tata letak "
                     "— jangan klaim presisi kolomnya, sebut angka apa adanya.")
+    # Instruksi terjemah HANYA bila memang ada isi asing — dokumen Indonesia
+    # (mayoritas) tak membayar token untuk kalimat ini.
+    if ada_asing:
+        catatan += (" ⚠️ Bagian ber-field 'bahasa' BUKAN Bahasa Indonesia — WAJIB kamu "
+                    "TERJEMAHKAN isinya ke Bahasa Indonesia saat menjawab (jangan "
+                    "tampilkan teks asing mentah; JANGAN ubah angka/kode/PN/satuan).")
+    if ada_tabel_potong:
+        catatan += (" Tabel dipotong (lihat 'tabel_dipotong') — butuh SELURUH barisnya "
+                    "panggil buka_pengetahuan(dokumen, bagian).")
     out = {"found": True, "jumlah": len(hasil), "hasil": hasil}
     if gambar:
         out["gambar"] = gambar

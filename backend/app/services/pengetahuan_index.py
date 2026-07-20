@@ -41,6 +41,55 @@ _STOPWORD = {
     "adalah", "tidak", "bisa", "juga", "agar", "oleh", "sebagai", "ini", "itu",
     "the", "and", "for", "with", "from", "that", "this", "are", "was", "will",
 }
+# Partikel Mandarin paling umum — tanpa ini bigram sampah seperti "的货"
+# mendominasi daftar kata kunci.
+_STOP_CJK = set("的了在是和与及或也都很就还把被为对")
+
+_HAN_RE = re.compile(r"[㐀-䶿一-鿿豈-﫿]")
+_KANA_RE = re.compile(r"[぀-ヿ]")
+_CJK_RUN_RE = re.compile(r"[㐀-䶿一-鿿豈-﫿぀-ヿ]+")
+
+_STOP_ID = {"yang", "dan", "untuk", "dari", "dengan", "pada", "tidak", "adalah",
+            "akan", "atau", "ini", "itu", "harus", "dapat"}
+_STOP_EN = {"the", "and", "for", "with", "from", "that", "this", "shall", "must",
+            "will", "are", "was", "have", "been"}
+
+
+def deteksi_bahasa(teks: str) -> str:
+    """Bahasa dominan sebuah potongan: "zh" | "ja" | "en" | "id" | "".
+
+    Dipakai HANYA untuk memutuskan apakah asisten perlu diperintahkan
+    menerjemahkan. Ragu → "" (dianggap Indonesia) supaya tak ada token
+    instruksi yang terbuang untuk dokumen Indonesia — mayoritas kasus.
+    """
+    t = (teks or "").strip()
+    if len(t) < 12:
+        return ""
+    n = len(t)
+    if len(_KANA_RE.findall(t)) / n > 0.05:
+        return "ja"
+    if len(_HAN_RE.findall(t)) / n > 0.15:
+        return "zh"
+    kata = set(re.findall(r"[a-z]+", t.lower()))
+    id_n, en_n = len(kata & _STOP_ID), len(kata & _STOP_EN)
+    if id_n >= 2 and id_n > en_n:
+        return "id"
+    if en_n >= 2 and en_n > id_n:
+        return "en"
+    return ""
+
+
+def _bigram_cjk(teks: str, batas: int = 8) -> list[str]:
+    """Bigram CJK paling sering muncul — kata kunci cadangan untuk dokumen
+    non-Latin, yang kalau tidak begini kata kuncinya keluar KOSONG."""
+    hitung: dict[str, int] = {}
+    for run in _CJK_RUN_RE.findall(teks or ""):
+        for i in range(len(run) - 1):
+            bg = run[i:i + 2]
+            if bg[0] in _STOP_CJK or bg[1] in _STOP_CJK:
+                continue
+            hitung[bg] = hitung.get(bg, 0) + 1
+    return sorted(hitung, key=lambda b: (-hitung[b], b))[:batas]
 
 
 # ── bangun chunk ─────────────────────────────────────────────────────
@@ -65,16 +114,26 @@ def _judul_fallback(bagian: dict, dok: dict) -> str:
 
 
 def _kata_kunci_fallback(bagian: dict, dok: dict) -> list[str]:
-    """Token paling sering muncul + judul dokumen + tag admin."""
+    """Token paling sering muncul + judul dokumen + tag admin.
+
+    Untuk teks non-Latin, pola huruf Latin menghasilkan NOL kata kunci sehingga
+    dokumennya tak pernah bisa ditemukan; bigram CJK menambal itu.
+    """
     tabel = " ".join(" ".join(str(c) for c in (b or [])) for b in (bagian.get("tabel") or []))
-    teks = f"{bagian.get('teks','')} {tabel}".lower()
+    mentah = f"{bagian.get('teks','')} {tabel}"
+    teks = mentah.lower()
     hitung: dict[str, int] = {}
     for w in re.findall(r"[a-z][a-z0-9\-]{3,}", teks):
         if w in _STOPWORD:
             continue
         hitung[w] = hitung.get(w, 0) + 1
     top = sorted(hitung, key=lambda w: (-hitung[w], w))[:8]
-    return pengetahuan.clean_list([*(dok.get("tag") or []), *top], 8)
+    # Sinyal terstruktur ikut jadi kata kunci: nama kolom tabel & breadcrumb bab
+    # sering justru istilah yang dipakai orang saat bertanya.
+    ekstra = [*(bagian.get("kolom") or [])[:4], *(bagian.get("jalur") or [])[-2:]]
+    if len(top) < 4:
+        top.extend(_bigram_cjk(mentah, 8 - len(top)))
+    return pengetahuan.clean_list([*(dok.get("tag") or []), *ekstra, *top], 8)
 
 
 def _ringkas_fallback(bagian: dict) -> str:
@@ -108,6 +167,8 @@ def bangun_chunks(dok: dict, bagian: list[dict], sumber: str,
         out.append({
             "id": pengetahuan.chunk_id(dok["id"], seq),
             "dok_id": dok["id"],
+            "skema": 2,
+            "bahasa": deteksi_bahasa(teks),
             "judul": dok.get("judul") or "",
             "judul_id": _judul_fallback(b, dok),
             "kata_kunci": _kata_kunci_fallback(b, dok),
@@ -198,6 +259,11 @@ def perkaya(chunks: list[dict], lapor=None) -> str:
     s = get_settings()
     if not getattr(s, "ai_configured", False):
         return "fallback"
+    # Chunk yang sudah dikurasi admin TIDAK dikirim ke LLM: hemat token, dan
+    # keputusan manusia tak boleh ditimpa tebakan model.
+    chunks = [c for c in chunks if not c.get("kurasi")]
+    if not chunks:
+        return "fallback"
     batches = [chunks[i:i + _BATCH_LLM] for i in range(0, len(chunks), _BATCH_LLM)]
     batches = batches[:_MAX_LLM_CALLS]
     kena = 0
@@ -251,6 +317,8 @@ def proses(dok_id: str) -> None:
     if not dok:
         return
     pengetahuan.set_status(dok_id, "proses", _progres("Menyiapkan"), error="")
+    # Kurasi manual admin diselamatkan SEBELUM chunk lama ditimpa.
+    kurasi = pengetahuan.snapshot_kurasi(dok_id)
     counter = {"n": 0}
     simpan = _simpan_gambar_factory(dok_id, counter)
     semua: list[dict] = []
@@ -322,8 +390,22 @@ def proses(dok_id: str) -> None:
             error="; ".join(catatan) or "Tidak ada isi yang bisa diindeks.")
         return
 
-    # 3) pengayaan
+    # 3) pulihkan kurasi manual, lalu pengayaan (LLM tak menimpa kurasi)
+    hilang = pengetahuan.terapkan_kurasi(semua, kurasi)
+    if hilang:
+        catatan.append(f"{hilang} kurasi manual tidak bisa dipulihkan karena isi "
+                       "bagiannya berubah — periksa ulang judul & kata kuncinya.")
+
     pakai_ai = bool(dok.get("pakai_ai", True))
+    # Dokumen asing tanpa pengayaan AI = terindeks tapi tak akan pernah ketemu
+    # lewat pertanyaan Bahasa Indonesia. Beri tahu admin, jangan diam saja.
+    asing = sum(1 for c in semua if c.get("bahasa") in ("zh", "ja", "en"))
+    if not pakai_ai and asing > len(semua) / 2:
+        catatan.append(
+            "Isi dokumen ini bukan Bahasa Indonesia. Nyalakan 'Perkaya dengan AI' "
+            "lalu indeks ulang, atau isi kata kunci Indonesia manual — kalau tidak, "
+            "asisten sulit menemukannya dari pertanyaan berbahasa Indonesia.")
+
     pengayaan = "fallback"
     if pakai_ai:
         pengetahuan.set_status(dok_id, "proses", _progres("Memperkaya dengan AI"))

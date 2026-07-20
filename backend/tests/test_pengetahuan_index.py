@@ -197,6 +197,54 @@ def test_batas_chunk_per_dokumen_dilaporkan(monkeypatch):
     assert "batas" in d["error"].lower()
 
 
+def test_reindex_mempertahankan_kurasi_admin():
+    """Tanpa ini, tiap re-index menghapus pekerjaan manual admin."""
+    dok = pengetahuan.add_dokumen("Kebijakan", teks_admin="retur barang tujuh hari")
+    idx.proses(dok["id"])
+    knowledge_util._LOAD_CACHE.clear()
+    c = pengetahuan.chunks_dokumen(dok["id"])[0]
+    pengetahuan.update_chunk(c["id"], judul_id="Cara retur (kurasi admin)",
+                             kata_kunci=["balikin barang"], dicari=True)
+    knowledge_util._LOAD_CACHE.clear()
+
+    idx.proses(dok["id"])            # re-index
+    knowledge_util._LOAD_CACHE.clear()
+    baru = pengetahuan.chunks_dokumen(dok["id"])[0]
+    assert baru["judul_id"] == "Cara retur (kurasi admin)"
+    assert baru["kata_kunci"] == ["balikin barang"]
+    assert baru["kurasi"] is True
+    assert pengetahuan.search("balikin barang")      # tetap bisa dicari
+
+
+def test_kurasi_hilang_dilaporkan_ke_admin():
+    dok = pengetahuan.add_dokumen("Kebijakan", teks_admin="retur barang tujuh hari")
+    idx.proses(dok["id"])
+    knowledge_util._LOAD_CACHE.clear()
+    c = pengetahuan.chunks_dokumen(dok["id"])[0]
+    pengetahuan.update_chunk(c["id"], judul_id="Kurasi lama")
+    # isi diganti total → kunci kurasi tak lagi cocok
+    pengetahuan.update_dokumen(dok["id"], teks_admin="isi yang sama sekali berbeda")
+    knowledge_util._LOAD_CACHE.clear()
+    idx.proses(dok["id"])
+    d = pengetahuan.get_dokumen(dok["id"])
+    assert d["status"] == "selesai_sebagian"
+    assert "kurasi manual" in d["error"]
+
+
+def test_pengayaan_tidak_menimpa_chunk_terkurasi(monkeypatch):
+    _aktifkan_llm(monkeypatch)
+    dipanggil = {"n": 0}
+
+    def fake_post(url, **kw):
+        dipanggil["n"] += 1
+        return _Resp({"chunk": []})
+    monkeypatch.setattr(idx.requests, "post", fake_post)
+    chunks = [{"id": "aa#0001", "teks": "x", "kurasi": True, "judul_id": "Manusia"}]
+    assert idx.perkaya(chunks) == "fallback"
+    assert dipanggil["n"] == 0                    # LLM tak dipanggil sama sekali
+    assert chunks[0]["judul_id"] == "Manusia"
+
+
 def test_reindex_mengganti_bukan_menumpuk():
     dok = pengetahuan.add_dokumen("Ulang", teks_admin="retur barang tujuh hari")
     idx.proses(dok["id"])
@@ -239,6 +287,55 @@ def test_job_serial_lewat_antrian():
     knowledge_util._LOAD_CACHE.clear()
     assert pengetahuan.get_dokumen(a["id"])["status"] == "selesai"
     assert pengetahuan.get_dokumen(b["id"])["status"] == "selesai"
+
+
+# ── multibahasa ──────────────────────────────────────────────────────
+def test_deteksi_bahasa():
+    assert idx.deteksi_bahasa("退货流程：货物必须在收到后七天内提出退货申请。") == "zh"
+    assert idx.deteksi_bahasa("これはテストの文章です、返品の手順について。") == "ja"
+    assert idx.deteksi_bahasa("Retur barang yang tidak sesuai dengan pesanan") == "id"
+    assert idx.deteksi_bahasa("The goods that have been received from the seller") == "en"
+    assert idx.deteksi_bahasa("hmm") == ""            # terlalu pendek → ragu
+
+
+def test_kata_kunci_fallback_mandarin_menghasilkan_bigram():
+    """Tanpa ini, dokumen Mandarin keluar dengan kata kunci KOSONG."""
+    bagian = {"teks": "退货流程：货物必须在收到后七天内提出退货申请。", "tabel": []}
+    kk = idx._kata_kunci_fallback(bagian, {"judul": "Kebijakan", "tag": []})
+    assert kk, "kata kunci tidak boleh kosong untuk teks Mandarin"
+    assert any(len(k) == 2 and "一" <= k[0] <= "鿿" for k in kk)
+
+
+def test_dokumen_mandarin_terindeks_dan_bisa_dicari_dengan_kueri_mandarin():
+    dok = pengetahuan.add_dokumen(
+        "Dokumen Mandarin", pakai_ai=False,
+        teks_admin="退货流程：货物必须在收到后七天内提出退货申请。零件号 WG9100。")
+    idx.proses(dok["id"])
+    knowledge_util._LOAD_CACHE.clear()
+    pengetahuan._HAY_CACHE.update(mtime=None, rows=None)
+    c = pengetahuan.chunks_dokumen(dok["id"])[0]
+    assert c["bahasa"] == "zh" and c["skema"] == 2
+    assert pengetahuan.search("退货")
+    assert pengetahuan.search("WG9100")
+
+
+def test_dokumen_asing_tanpa_ai_diberi_peringatan_ke_admin():
+    dok = pengetahuan.add_dokumen(
+        "Mandarin Tanpa AI", pakai_ai=False,
+        teks_admin="退货流程：货物必须在收到后七天内提出退货申请。")
+    idx.proses(dok["id"])
+    d = pengetahuan.get_dokumen(dok["id"])
+    assert d["status"] == "selesai_sebagian"
+    assert "bukan Bahasa Indonesia" in d["error"]
+
+
+def test_dokumen_indonesia_tidak_kena_peringatan_asing():
+    dok = pengetahuan.add_dokumen(
+        "Indonesia", pakai_ai=False,
+        teks_admin="Retur barang yang tidak sesuai dengan pesanan wajib difoto.")
+    idx.proses(dok["id"])
+    d = pengetahuan.get_dokumen(dok["id"])
+    assert d["status"] == "selesai"
 
 
 # ── pengayaan LLM ────────────────────────────────────────────────────

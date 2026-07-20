@@ -152,9 +152,8 @@ def test_uraikan_mesin_tanpa_kartu_gambar(monkeypatch):
 
 def test_capture_meta_ambil_gambar_dari_uraikan_mesin():
     # _capture_meta harus menangkap 'gambar' dari uraikan_mesin & part_aus (bukan
-    # hanya gambar_exploded*). Diuji via alur chat singkat lebih berat; di sini
-    # cukup pastikan nama tool masuk daftar yang di-handle.
-    import inspect
-    src = inspect.getsource(ai.chat)
-    # Fase 4: uraikan_assembly (tool gabungan) ikut di-handle di tuple gambar.
-    assert '"uraikan_mesin", "uraikan_assembly", "part_aus_dari_rangka"' in src
+    # hanya gambar_exploded*). Dulu diuji lewat pencocokan teks sumber `chat()`;
+    # sejak daftarnya diangkat jadi konstanta modul (_TOOLS_GAMBAR_INLINE), uji
+    # daftarnya langsung — lebih tahan refactor & lebih jelas maksudnya.
+    for nama in ("uraikan_mesin", "uraikan_assembly", "part_aus_dari_rangka"):
+        assert nama in ai._TOOLS_GAMBAR_INLINE, nama

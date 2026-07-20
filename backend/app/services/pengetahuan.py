@@ -303,7 +303,11 @@ def replace_chunks(dok_id: str, baru: list[dict]) -> int:
 
 def update_chunk(cid: str, judul_id=None, kata_kunci=None, dicari=None) -> dict:
     """Kurasi manual per-chunk oleh admin — jalur perbaikan kualitas utama
-    ketika pengayaan LLM meleset atau tidak dipakai."""
+    ketika pengayaan LLM meleset atau tidak dipakai.
+
+    Menandai `kurasi=True` supaya re-index memulihkannya kembali dan pengayaan
+    LLM tidak menimpanya (keputusan manusia menang atas tebakan model).
+    """
     with _lock:
         rows = load_chunks()
         i = next((n for n, c in enumerate(rows) if c.get("id") == cid), -1)
@@ -315,29 +319,150 @@ def update_chunk(cid: str, judul_id=None, kata_kunci=None, dicari=None) -> dict:
             rows[i]["kata_kunci"] = clean_list(kata_kunci, 8)
         if dicari is not None:
             rows[i]["dicari"] = bool(dicari)
+        rows[i]["kurasi"] = True
         _save_chunks(rows)
         return rows[i]
 
 
+def kunci_kurasi(c: dict) -> str:
+    """Kunci pencocokan chunk lama ↔ baru saat re-index.
+
+    SENGAJA bukan `id`: `dok#seq` bergeser begitu jumlah bagian berubah (mis.
+    V2 mengekstrak gambar sehingga bagian bertambah), sehingga kurasi akan
+    nyasar ke bagian yang salah. Kombinasi sumber+halaman+awal teks jauh lebih
+    stabil terhadap perubahan cara ekstraksi.
+    """
+    teks = re.sub(r"\s+", " ", (c.get("teks") or "")).strip().lower()[:80]
+    return f"{c.get('sumber') or ''}|{c.get('halaman') or 0}|{teks}"
+
+
+def snapshot_kurasi(dok_id: str) -> dict[str, dict]:
+    """Kurasi manual dokumen ini, siap dipulihkan setelah re-index."""
+    out: dict[str, dict] = {}
+    for c in chunks_dokumen(dok_id):
+        if not c.get("kurasi"):
+            continue
+        out[kunci_kurasi(c)] = {
+            "judul_id": c.get("judul_id") or "",
+            "kata_kunci": list(c.get("kata_kunci") or []),
+            "dicari": bool(c.get("dicari", True)),
+        }
+    return out
+
+
+def terapkan_kurasi(baru: list[dict], simpan: dict[str, dict]) -> int:
+    """Pulihkan kurasi ke chunk hasil ekstraksi ulang. Return jumlah kurasi
+    yang TIDAK bisa dipulihkan (isi berkasnya berubah) — pemanggil wajib
+    melaporkannya ke admin, jangan hilang diam-diam."""
+    if not simpan:
+        return 0
+    kena: set[str] = set()
+    for c in baru:
+        k = kunci_kurasi(c)
+        sim = simpan.get(k)
+        if not sim:
+            continue
+        c["judul_id"] = sim["judul_id"] or c.get("judul_id") or ""
+        if sim["kata_kunci"]:
+            c["kata_kunci"] = list(sim["kata_kunci"])
+        c["dicari"] = sim["dicari"]
+        c["kurasi"] = True
+        kena.add(k)
+    return len(set(simpan) - kena)
+
+
 # ── pencarian ────────────────────────────────────────────────────────
+# Aksara CJK (Han + kana). Ditangani terpisah karena TIDAK berspasi: pemecah
+# kata Latin menghasilkan nol token untuk kueri Mandarin, dan batas-kata regex
+# tak punya arti di sana.
+_CJK_RE = re.compile(r"[㐀-䶿一-鿿豈-﫿぀-ヿ]+")
+_MAX_TERM_CJK = 12
+
+
+# Pola batas-kata per term, dikompilasi SEKALI. `search()` memanggil _hit
+# ~(jumlah chunk × 5 ladang × jumlah kata) kali; merakit ulang string pola di
+# tiap panggilan adalah biaya dominan pencarian (terukur: 368 ms → 34 ms untuk
+# kueri 3 kata atas 5.000 chunk).
+_PAT_CACHE: dict[str, re.Pattern] = {}
+
+
+def _pola(term: str) -> re.Pattern:
+    p = _PAT_CACHE.get(term)
+    if p is None:
+        if len(_PAT_CACHE) > 4000:      # pagar memori; kueri unik tak terbatas
+            _PAT_CACHE.clear()
+        p = re.compile(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])")
+        _PAT_CACHE[term] = p
+    return p
+
+
 def _hit(term: str, hay: str) -> bool:
-    return bool(re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", hay))
+    # CJK: substring polos SUDAH benar (tak ada batas kata) dan lebih murah.
+    # Perilaku term Latin sengaja tidak diubah sedikit pun.
+    if _CJK_RE.search(term):
+        return term in hay
+    # Gerbang murah: cocok batas-kata MUSTAHIL tanpa cocok substring, jadi
+    # menolak di sini identik hasilnya tapi menghindari mesin regex.
+    if term not in hay:
+        return False
+    return _pola(term).search(hay) is not None
 
 
-def _score(r: dict, ql: str, words: list[str]) -> float:
-    """Peringkat: judul_id/kata_kunci (kurasi Indonesia) > judul dokumen > kode >
-    ringkasan > teks/tabel. Token ber-ANGKA (PN, kode error) ×3 karena paling
-    diskriminatif; frasa penuh cocok → bonus besar. Pola manual_teks._score."""
+def _hay(r: dict) -> tuple[str, str, str, str, str, str]:
+    """Lima ladang jerami siap-cocok untuk satu chunk (semuanya lowercase).
+
+    Dihitung SEKALI per penulisan store lewat `_hay_semua`, bukan per kueri:
+    dulu `_score` merakit ulang gabungan tabel + beberapa .lower() untuk tiap
+    chunk × tiap varian sinonim — puluhan ribu pembangunan string per kueri.
+    """
     idn = (f"{r.get('judul_id','')} {' '.join(r.get('kata_kunci') or [])}").lower()
     judul = (r.get("judul") or "").lower()
-    ringkas = (r.get("ringkasan") or "").lower()
+    # Caption gambar & nama kolom tabel = sinyal padat → setara ringkasan, tapi
+    # sengaja TIDAK setara judul_id supaya kurasi manusia tetap menang.
+    ringkas = (f"{r.get('ringkasan','')} {r.get('gambar_teks','')} "
+               f"{' '.join(r.get('kolom') or [])}").lower()
     kode = " ".join(r.get("kode") or []).lower()
     tabel = " ".join(" ".join(str(c) for c in (baris or []))
                      for baris in (r.get("tabel") or []))
-    teks = f"{r.get('teks','')} {tabel}".lower()
+    teks = f"{r.get('teks','')} {tabel} {' '.join(r.get('jalur') or [])}".lower()
+    # Elemen terakhir = gabungan semua ladang, dipakai HANYA sebagai penyaring
+    # murah: `in` (level-C) jauh lebih cepat dari regex, dan kecocokan
+    # batas-kata selalu mensyaratkan kecocokan substring — jadi tak ada hasil
+    # yang hilang, hanya chunk yang mustahil cocok yang dilewati lebih awal.
+    return idn, judul, ringkas, kode, teks, f"{idn} {judul} {ringkas} {kode} {teks}"
+
+
+_HAY_CACHE: dict = {"mtime": None, "rows": None}
+
+
+def _hay_semua(rows: list[dict]) -> list[tuple]:
+    """Haystack seluruh store, di-cache dengan sinyal mtime yang sama dengan
+    `knowledge_util.load_json` sehingga otomatis basi saat store ditulis."""
+    p = _chunk_file()
+    try:
+        mt = p.stat().st_mtime if p.exists() else None
+    except OSError:
+        mt = None
+    ent = _HAY_CACHE
+    if ent["mtime"] != mt or ent["rows"] is None or len(ent["rows"]) != len(rows):
+        ent["rows"] = [_hay(r) for r in rows]
+        ent["mtime"] = mt
+    return ent["rows"]
+
+
+def _score_hay(hay: tuple, ql: str, words: list[str], frasa_ok: bool) -> float:
+    """Peringkat: judul_id/kata_kunci (kurasi Indonesia) > judul dokumen > kode >
+    ringkasan > teks/tabel. Token ber-ANGKA (PN, kode error) ×3 karena paling
+    diskriminatif; frasa penuh cocok → bonus besar. Pola manual_teks._score."""
+    idn, judul, ringkas, kode, teks = hay[:5]
     s = 0.0
     if ql and (_hit(ql, idn) or _hit(ql, judul)):
         s += 50
+    elif ql and frasa_ok and (_hit(ql, ringkas) or _hit(ql, teks)):
+        # Frasa utuh yang muncul di BADAN teks — inilah yang membuat dokumen
+        # berbahasa asing tetap bisa dicari setelah judulnya dikurasi ke
+        # Indonesia. `elif` menjaga hierarki: kurasi judul selalu di atas ini.
+        s += 20
     for w in words:
         spec = 3 if any(c.isdigit() for c in w) else 1
         if _hit(w, idn):
@@ -353,8 +478,41 @@ def _score(r: dict, ql: str, words: list[str]) -> float:
     return s
 
 
+def _score(r: dict, ql: str, words: list[str]) -> float:
+    """Skor satu chunk mentah — dipertahankan untuk test & pemakaian ad-hoc."""
+    return _score_hay(_hay(r), ql, words, _frasa_layak(ql))
+
+
 def _words(ql: str) -> list[str]:
-    return [w for w in re.findall(r"[a-z0-9]+", ql) if len(w) >= 2]
+    """Token pencarian. Jalur Latin SENGAJA tak diubah (nol regresi peringkat).
+
+    Tambahan CJK: tiap runtun aksara dipecah jadi BIGRAM bertumpang-tindih
+    (`退货流程` → 退货, 货流, 流程). Bigram, bukan unigram: satu aksara Han
+    terlalu ambigu dan akan mencocoki hampir semua dokumen sehingga ambang
+    relatif jadi tak berguna.
+    """
+    out = [w for w in re.findall(r"[a-z0-9]+", ql) if len(w) >= 2]
+    for run in _CJK_RE.findall(ql):
+        if len(run) == 1:
+            out.append(run)
+        else:
+            out.extend(run[i:i + 2] for i in range(len(run) - 1))
+        if len(out) >= _MAX_TERM_CJK:
+            break
+    return out[:_MAX_TERM_CJK] if len(out) > _MAX_TERM_CJK else out
+
+
+def _frasa_layak(ql: str) -> bool:
+    """Bonus frasa-di-badan-teks hanya untuk kueri yang cukup spesifik.
+
+    Kueri SATU kata Latin sengaja dikecualikan: kecocokannya di `teks` sudah
+    dihitung +1 di loop kata, dan memberinya +20 akan mengacak peringkat lama
+    (chunk yang menyebut kata itu sekali bisa melompati chunk yang judulnya
+    memang tepat). Dengan pagar ini kueri satu-kata berperilaku identik V1.
+    """
+    if len(re.findall(r"[a-z0-9]+", ql)) >= 2:
+        return True
+    return sum(len(r) for r in _CJK_RE.findall(ql)) >= 2
 
 
 # Skor istilah hasil ekspansi sinonim diredam supaya sinonim tidak pernah
@@ -393,18 +551,32 @@ def search(topik: str = "", limit: int = 5, untuk_pembeli: bool = False) -> list
         terms, _ = sinonim.expand_query(ql)
     except Exception:
         terms = [ql]
-    varian = [(t.strip().lower(), 1.0 if i == 0 else _BOBOT_SINONIM)
+    # Token & kelayakan-frasa dihitung SEKALI per varian, bukan per chunk.
+    varian = [(t.strip().lower(), _words(t.strip().lower()),
+               _frasa_layak(t.strip().lower()), 1.0 if i == 0 else _BOBOT_SINONIM)
               for i, t in enumerate(terms) if (t or "").strip()]
     mati = {d.get("id") for d in dokumen() if not d.get("aktif", True)}
+    rows = chunks()
+    hays = _hay_semua(rows)
     scored: list[tuple[float, int, dict]] = []
-    for i, r in enumerate(chunks()):
+    for i, r in enumerate(rows):
         if not r.get("dicari", True):
             continue
         if r.get("dok_id") in mati:
             continue
         if untuk_pembeli and not r.get("untuk_pembeli"):
             continue
-        sc = max(_score(r, t, _words(t)) * b for t, b in varian)
+        hay = hays[i]
+        gabung = hay[5]
+        sc = 0.0
+        for t, w, f, b in varian:
+            # Tolak murah dulu: chunk yang tak memuat satu pun kata kueri
+            # sebagai substring mustahil lolos pencocokan batas-kata.
+            if w and not any(x in gabung for x in w):
+                continue
+            v = _score_hay(hay, t, w, f) * b
+            if v > sc:
+                sc = v
         if sc > 0:
             scored.append((sc, i, r))  # i = tie-break stabil
     if not scored:

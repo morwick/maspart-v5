@@ -17,8 +17,10 @@ def _tmp_store(tmp_path, monkeypatch):
     # kamus sinonim kosong → ekspansi tak mencemari asersi peringkat
     monkeypatch.setattr(sinonim, "entries", lambda: [])
     knowledge_util._LOAD_CACHE.clear()
+    pengetahuan._HAY_CACHE.update(mtime=None, rows=None)
     yield tmp_path
     knowledge_util._LOAD_CACHE.clear()
+    pengetahuan._HAY_CACHE.update(mtime=None, rows=None)
 
 
 def _chunk(**kw):
@@ -35,6 +37,7 @@ def _chunk(**kw):
 def _tulis(rows):
     pengetahuan._save_chunks(rows)
     knowledge_util._LOAD_CACHE.clear()
+    pengetahuan._HAY_CACHE.update(mtime=None, rows=None)
 
 
 # ── CRUD dokumen ─────────────────────────────────────────────────────
@@ -228,6 +231,93 @@ def test_chunk_berbeda_tidak_ikut_terbuang():
         _chunk(id="aa#0002", teks="Retur uang diproses maksimal empat belas hari."),
     ])
     assert len(pengetahuan.search("retur")) == 2
+
+
+# ── multibahasa (CJK) ────────────────────────────────────────────────
+def test_kueri_mandarin_menemukan_teks_mandarin_setelah_judul_dikurasi():
+    """Kasus nyata yang dilaporkan: judul sudah dikurasi ke Indonesia, tapi
+    teks aslinya Mandarin — kueri Mandarin harus tetap ketemu."""
+    _tulis([_chunk(id="aa#0001", judul_id="Prosedur retur barang",
+                   kata_kunci=["retur"],
+                   teks="退货流程：货物必须在收到后七天内提出退货申请。")])
+    assert [h["id"] for h in pengetahuan.search("退货")] == ["aa#0001"]
+    assert [h["id"] for h in pengetahuan.search("retur")] == ["aa#0001"]
+
+
+def test_bigram_cjk_bukan_unigram():
+    assert pengetahuan._words("退货流程") == ["退货", "货流", "流程"]
+    assert pengetahuan._words("退") == ["退"]
+
+
+def test_hit_cjk_substring_tanpa_batas_kata():
+    assert pengetahuan._hit("退货", "退货流程：货物")
+    assert not pengetahuan._hit("退货", "货物流程")
+
+
+def test_frasa_indonesia_multi_kata_cocok_di_badan_teks():
+    _tulis([_chunk(id="aa#0001",
+                   teks="Ketentuan: prosedur retur barang wajib disertai foto.")])
+    assert [h["id"] for h in pengetahuan.search("prosedur retur barang")] == ["aa#0001"]
+
+
+def test_golden_peringkat_kueri_satu_kata_latin_tidak_berubah():
+    """Pagar regresi: bonus frasa-di-teks TIDAK boleh menyentuh kueri satu kata
+    Latin (yang kecocokan di badan teksnya sudah dihitung +1 di loop kata).
+
+    Hasil di bawah = perilaku V1: dua teratas lolos, sisanya dibuang ambang
+    relevansi 30% karena skornya jauh di bawah juara.
+    """
+    _tulis([
+        _chunk(id="aa#0001", judul_id="Prosedur retur barang"),
+        _chunk(id="aa#0002", judul="Kebijakan retur", judul_id="Langkah umum"),
+        _chunk(id="aa#0004", ringkasan="ringkasan tentang retur"),
+        _chunk(id="aa#0005", teks="dokumen ini menyebut retur sekali saja"),
+    ])
+    assert pengetahuan._frasa_layak("retur") is False      # pagar bonus frasa
+    assert [h["id"] for h in pengetahuan.search("retur", limit=9)] == \
+        ["aa#0001", "aa#0002"]
+
+
+def test_golden_hierarki_skor_antar_ladang_tetap():
+    """judul_id > judul > kode > ringkasan > teks — urutan bobot ini yang
+    membuat kurasi admin selalu menang atas kecocokan kebetulan."""
+    def sc(**kw):
+        return pengetahuan._score(_chunk(**kw), "retur", ["retur"])
+    assert (sc(judul_id="retur") > sc(judul="retur") > sc(kode=["retur"])
+            > sc(ringkasan="retur") > sc(teks="retur") > 0)
+
+
+def test_chunk_lama_tanpa_field_baru_tetap_aman():
+    """Skema 1 (tanpa bahasa/jalur/kolom/gambar_teks) harus tetap terbaca."""
+    pengetahuan._save_chunks([{"id": "aa#0001", "dok_id": "aa", "judul": "Lama",
+                               "teks": "prosedur retur barang", "dicari": True}])
+    knowledge_util._LOAD_CACHE.clear()
+    pengetahuan._HAY_CACHE.update(mtime=None, rows=None)
+    assert [h["id"] for h in pengetahuan.search("retur")] == ["aa#0001"]
+
+
+def test_kolom_tabel_dan_caption_gambar_bisa_dicari():
+    _tulis([_chunk(id="aa#0001", kolom=["Masa Garansi", "Biaya"],
+                   gambar_teks="alur pengajuan klaim di bengkel")])
+    assert [h["id"] for h in pengetahuan.search("masa garansi")] == ["aa#0001"]
+    assert [h["id"] for h in pengetahuan.search("pengajuan klaim")] == ["aa#0001"]
+
+
+def test_pencarian_tetap_cepat_pada_store_penuh():
+    """`search()` full-scan dipanggil tiap giliran chat. Batas store 5.000 chunk;
+    di sini SEMUA chunk cocok (kasus terburuk) — tetap harus di bawah 300 ms,
+    kalau tidak latensi chat ikut naik."""
+    import time
+    _tulis([_chunk(id=f"aa#{i:05d}", judul_id=f"Prosedur retur bagian {i}",
+                   kata_kunci=["retur", "klaim"],
+                   ringkasan="Retur diajukan maksimal 7 hari.",
+                   teks=f"Bagian {i}: barang retur wajib utuh disertai foto. " * 6,
+                   tabel=[["Kondisi", "Batas"], ["utuh", "7 hari"]])
+            for i in range(5000)])
+    pengetahuan.search("pemanasan cache")
+    t = time.perf_counter()
+    pengetahuan.search("syarat pengajuan klaim garansi barang")
+    assert (time.perf_counter() - t) < 0.30
 
 
 # ── gambar ───────────────────────────────────────────────────────────

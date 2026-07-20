@@ -299,6 +299,18 @@ def _finish_reason(data: dict) -> str | None:
 _EMPTY_FINAL_MSG = ("Maaf, jawabannya belum lengkap diproses. Coba ulangi pertanyaannya "
                     "ya — atau persempit (mis. sebutkan nomor rangka / PN).")
 _MAX_EMPTY_RETRIES = 2
+
+# Tool yang hasilnya boleh menaruh gambar INLINE di bawah jawaban (kanal
+# `result["gambar"]` → side-state exploded_images → GET /api/ai/excel/{id}).
+# SATU daftar untuk semua: sebelumnya logikanya tersebar di dua cabang elif
+# _capture_meta dan `cari_pengetahuan` terlewat — gambar di-stash lalu hilang
+# diam-diam. Menambah tool bergambar baru = tambahkan namanya DI SINI saja.
+_TOOLS_GAMBAR_INLINE = frozenset({
+    "gambar_exploded", "gambar_exploded_mesin", "uraikan_mesin", "uraikan_assembly",
+    "part_aus_dari_rangka", "diagram_wiring", "cari_manual",
+    "cari_pengetahuan",
+})
+
 # Budget output lebih besar untuk panggilan yang WAJIB menulis jawaban (bukan ronde
 # pemanggil-tool). Batas keras deepseek-chat = 8192; 8000 beri ruang [PIKIR]+jawaban.
 _MAX_TOKENS_ANSWER = 8000
@@ -878,6 +890,19 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
 
     def _capture_meta(name: str, args: dict, result: dict) -> None:
         """Kumpulkan metadata untuk tombol/kartu/gambar di frontend."""
+        # Gambar inline diambil DI LUAR rantai elif di bawah: dulu logikanya
+        # tersebar di dua cabang, dan `cari_pengetahuan` terlewat sama sekali
+        # sehingga gambarnya di-stash lalu hilang padahal catatan ke model
+        # menjanjikan "tampil OTOMATIS". Satu daftar + satu blok = tak bisa
+        # terlupa lagi saat tool bergambar berikutnya ditambahkan.
+        if name in _TOOLS_GAMBAR_INLINE and result.get("found"):
+            for g in (result.get("gambar") or []):
+                item = {"id": g.get("image_id"), "pn": g.get("pn") or result.get("pn"),
+                        "balon": g.get("balon"), "nama_figure": g.get("nama_figure"),
+                        "kategori": g.get("kategori")}
+                if item["id"] and item not in exploded_images:
+                    exploded_images.append(item)
+
         if name in ("buat_excel", "excel_bom_rangka", "excel_stok_gudang",
                     "katalog_kategori", "katalog_mesin", "banding_rangka_massal",
                     "sheet_isi_kolom", "sheet_isi_part_number", "sheet_cek_qty",
@@ -895,31 +920,13 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 if item["id"] and item not in excel_exports:
                     excel_exports.append(item)
         elif name in ("diagram_wiring", "cari_manual") and result.get("pdf_skema"):
-            # Kartu skema/manual PDF (skema_ref, 2026-07-18) → kanal kartu file;
-            # gambar (bila ada) ikut ditangkap di sini juga.
+            # Kartu skema/manual PDF (skema_ref, 2026-07-18) → kanal kartu file.
+            # Gambarnya sudah ditangkap blok _TOOLS_GAMBAR_INLINE di atas.
             for c in result["pdf_skema"]:
                 item = {"id": c.get("export_id"), "filename": c.get("filename"),
                         "judul": c.get("judul"), "jumlah_baris": None}
                 if item["id"] and item not in excel_exports:
                     excel_exports.append(item)
-            for g in (result.get("gambar") or []):
-                item = {"id": g.get("image_id"), "pn": g.get("pn"),
-                        "balon": g.get("balon"), "nama_figure": g.get("nama_figure"),
-                        "kategori": g.get("kategori")}
-                if item["id"] and item not in exploded_images:
-                    exploded_images.append(item)
-        elif name in ("gambar_exploded", "gambar_exploded_mesin",
-                      "uraikan_mesin", "uraikan_assembly", "part_aus_dari_rangka",
-                      "diagram_wiring", "cari_manual") and result.get("found"):
-            # gambar_exploded* = gambar yang diminta eksplisit; uraikan_mesin/
-            # part_aus = gambar OTOMATIS part utama yang menyertai cek part;
-            # diagram_wiring = diagram pin/kabel EOL (jpg dari data/wiring).
-            for g in (result.get("gambar") or []):
-                item = {"id": g.get("image_id"), "pn": g.get("pn") or result.get("pn"),
-                        "balon": g.get("balon"), "nama_figure": g.get("nama_figure"),
-                        "kategori": g.get("kategori")}
-                if item["id"] and item not in exploded_images:
-                    exploded_images.append(item)
         elif name == "repair_kit_transmisi":
             for h in (result.get("hasil") or []):
                 mk = h.get("model")
