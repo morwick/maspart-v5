@@ -51,8 +51,11 @@ def test_bom_lengkap_admin_dengan_stok_dan_harga(dunia):
     assert dunia["kolom"] == ["No", "Part Number", "Nama Part", "Qty",
                               "Stok Total", "Stok per Gudang", "Harga"]
     row = dunia["baris"][0]
-    assert row[4] == "3" and "01.Jakarta: 2" in row[5]     # stok dari indeks Accurate
-    assert row[6] == "Rp 50.000"
+    # Sel Stok/Harga = ANGKA (bukan "3"/"Rp 50.000") supaya rumus Excel user
+    # jalan — aturan pemilik 2026-07-20. 'Stok per Gudang' tetap teks rincian.
+    assert row[4] == 3 and isinstance(row[4], int)
+    assert "01.Jakarta: 2" in row[5]                       # stok dari indeks Accurate
+    assert row[6] == 50_000 and isinstance(row[6], int)
 
 
 def test_bom_staf_biasa_harga_disembunyikan(dunia):
@@ -106,7 +109,8 @@ def test_stok_satu_gudang_tanpa_pangkas_40(stok_dunia):
     assert r["found"] and r["jumlah_baris"] == 60
     assert stok_dunia["kolom"] == ["No", "Part Number", "Nama Part",
                                    "Stok Jakarta", "Stok Total", "Harga"]
-    assert stok_dunia["baris"][0][5].startswith("Rp ")
+    harga = stok_dunia["baris"][0][5]
+    assert isinstance(harga, int) and harga > 0     # angka, bukan "Rp …"
 
 
 def test_stok_semua_gudang_pakai_rincian(stok_dunia):

@@ -585,7 +585,14 @@ def _cari_kolom(headers: list[str], nama: str) -> int | None:
     return None
 
 
-def _fmt_rp(v) -> str:
+def _rp_tampilan(v) -> str:
+    """Angka → 'Rp 1.500.000' untuk DIBACA MANUSIA/MODEL.
+
+    ⛔ JANGAN dipakai untuk NILAI SEL Excel. Sel yang berisi teks membuat rumus
+    user (SUM/agregat) mengembalikan 0 — keluhan nyata pemilik 2026-07-20. Sel
+    wajib angka mentah; lihat `_num_sel` dan `ai_export.ke_angka`. Fungsi ini
+    hanya untuk blok RINGKASAN Excel & rekap yang dikirim balik ke model.
+    """
     try:
         return "Rp " + f"{int(v):,}".replace(",", ".")
     except (TypeError, ValueError):
@@ -675,8 +682,8 @@ def fill_column(
         peta = {r["pn"]: r for r in res["results"]}
         for r, p in zip(body, pns):
             d = peta.get(p)
-            r[tgt] = _fmt_rp(d["idr"]) if d and d.get("idr") is not None else ""
-            terisi += 1 if r[tgt] else 0
+            r[tgt] = int(d["idr"]) if d and d.get("idr") is not None else ""
+            terisi += 1 if r[tgt] != "" else 0
         catatan_sumber = f"SIMS live (kurs CNY→IDR {res['rate']:.0f})"
     else:
         # Sumber MURAH: indeks part lokal (bukan panggilan per-PN ke Accurate).
@@ -686,11 +693,18 @@ def fill_column(
         except Exception as e:
             return {"found": False, "error": f"gagal membaca indeks part: {e}"}
         key = {ISI_STOK: "stok", ISI_NAMA: "part_name", ISI_HARGA_LOKAL: "harga"}[isi]
+        numerik = isi in (ISI_STOK, ISI_HARGA_LOKAL)   # sel angka, lihat _num_sel
         for r, p in zip(body, pns):
             d = peta.get(p)
-            v = "" if not d else _txt(d.get(key))
-            r[tgt] = "" if v in ("N/A", "—") else v
-            terisi += 1 if r[tgt] else 0
+            if not d:
+                r[tgt] = ""
+            elif numerik:
+                n = _num_sel(d, key)
+                r[tgt] = "" if n is None else n
+            else:
+                v = _txt(d.get(key))
+                r[tgt] = "" if v in ("N/A", "—") else v
+            terisi += 1 if r[tgt] != "" else 0
         catatan_sumber = "indeks part lokal (stok.xlsx / harga.xlsx / katalog)"
 
     # PN yang TAK ketemu (setelah pemaaf suffix) — DAFTARKAN, bukan cuma dihitung.
@@ -844,8 +858,29 @@ def _qty_int(v) -> int | None:
         return None
 
 
+def _num_sel(d: dict, key: str) -> int | None:
+    """Angka MENTAH untuk sel Excel dari baris hasil `part_index`.
+
+    Utamakan field `*_num` (int bersih dari snapshot Accurate); fallback
+    mem-parse string tampilan ('Rp 1.500.000') supaya pemanggil/fixture lama
+    yang belum punya field baru tetap menghasilkan sel numerik.
+    """
+    v = d.get(key + "_num")
+    if v is not None:
+        return _int_or_none(v)
+    return _int_or_none(d.get(key))
+
+
 def _int_or_none(v) -> int | None:
-    """Stok/angka string → int; None bila tak jelas (N/A, kosong, non-angka)."""
+    """Stok/angka string → int; None bila tak jelas (N/A, kosong, non-angka).
+
+    ⚠️ Jalur numerik WAJIB di depan: jalur string membuang titik, sehingga
+    float 1500000.0 dulu jadi 15000000 — Subtotal user 10x lipat, diam-diam.
+    """
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return int(v)
     s = str(v or "").strip()
     if not s or s.upper() in ("N/A", "—", "-"):
         return None
@@ -1089,15 +1124,17 @@ def fill_columns(
 
     def _nilai_fn(isi: str, gud_canon: str | None):
         """Fungsi nilai per-PN untuk satu kolom (menutup peta lookup)."""
+        # ⛔ Nilai SEL wajib ANGKA (bukan 'Rp …'/str) — kalau teks, rumus user
+        # (SUM) mengembalikan 0. Tampilan 'Rp …' hanya di blok RINGKASAN & chat.
         if isi == ISI_STOK and gud_canon:
             def f(p):
                 d = peta_lokal.get(p)
-                return "" if not d else str((d.get("gudang") or {}).get(gud_canon, 0))
+                return "" if not d else int((d.get("gudang") or {}).get(gud_canon, 0))
             return f
         if isi == ISI_HARGA_SIMS:
             def f(p):
                 d = peta_sims.get(p)
-                return _fmt_rp(d["idr"]) if d and d.get("idr") is not None else ""
+                return int(d["idr"]) if d and d.get("idr") is not None else ""
             return f
         if isi == ISI_PENGGANTI:
             return lambda p: peta_pengganti.get(p) or ""
@@ -1109,16 +1146,20 @@ def fill_columns(
         if isi == ISI_BERAT:
             def f(p):
                 g = peta_berat.get(p) or 0
-                return f"{g / 1000:.2f}".replace(".", ",") if g > 0 else ""
+                return round(g / 1000, 2) if g > 0 else ""
             return f
         if isi == ISI_DIMENSI:
             return lambda p: peta_dim.get(p) or ""
         key = _ISI_KEY[isi]
+        numerik = isi in (ISI_STOK, ISI_HARGA_LOKAL)
 
         def f(p):
             d = peta_lokal.get(p)
             if not d:
                 return ""
+            if numerik:
+                n = _num_sel(d, key)
+                return "" if n is None else n
             v = _txt(d.get(key))
             return "" if v in ("N/A", "—") else v
         return f
@@ -1242,9 +1283,9 @@ def fill_columns(
                 if hv and q:
                     subtotal += hv * q
             if subtotal:
-                ringkasan.append(("Subtotal (qty × harga)", _fmt_rp(subtotal), ""))
+                ringkasan.append(("Subtotal (qty × harga)", _rp_tampilan(subtotal), ""))
                 ringkasan.append(("PPN 12% (sudah termasuk)",
-                                  _fmt_rp(orders.ppn_included(subtotal)), "hijau"))
+                                  _rp_tampilan(orders.ppn_included(subtotal)), "hijau"))
         if peta_berat:
             tot_g = sum((peta_berat.get(p) or 0) * (q or 1)
                         for p, q in zip(pns, qtys) if p)
@@ -1263,7 +1304,7 @@ def fill_columns(
                             ringkasan.append((
                                 f"Ongkir {rt.get('courier_name') or rt.get('courier')} "
                                 f"{rt.get('service')} (indikatif)",
-                                _fmt_rp(rt.get('price')) + f" · {rt.get('etd') or '?'} hari", ""))
+                                _rp_tampilan(rt.get('price')) + f" · {rt.get('etd') or '?'} hari", ""))
                 except Exception:  # pragma: no cover
                     pass
 

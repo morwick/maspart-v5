@@ -468,22 +468,42 @@ def gudang_breakdown(pn: str) -> dict:
     return out
 
 
-def _acc_stok_harga(snap: dict, pn_key: str) -> tuple[str, str]:
-    """(stok_str, harga_str) baris hasil pencarian, dari snapshot indeks Accurate.
+def _acc_stok_harga(snap: dict, pn_key: str) -> tuple[str, str, int | None, int | None]:
+    """(stok_str, harga_str, stok_int, harga_int) dari snapshot indeks Accurate.
+
+    Dua bentuk sekaligus, sengaja: string untuk TAMPILAN chat ('Rp 1.500.000'),
+    int MENTAH untuk SEL EXCEL — sel yang berisi teks membuat rumus user (SUM)
+    mengembalikan 0. Snapshot Accurate sudah menyimpan int bersih; string di sini
+    murni lapisan presentasi. Int `None` bila PN tak ada di Accurate.
     '—' bila PN tak ada di Accurate (perusahaan tak menstok/menjualnya).
-    ⛔ Dulu diisi dari stok.xlsx & harga.xlsx — dua-duanya kini dilarang pemilik."""
+    ⛔ Dulu diisi dari stok.xlsx & harga.xlsx — dua-duanya kini dilarang pemilik.
+    """
     from . import accurate
     # PN katalog/EPC kerap ber-suffix varian ('WG9525160004/2') sementara Accurate
     # menyimpan PN dasarnya → index_key mencocokkan keduanya (kalau tidak, part yang
     # ADA dilaporkan stok '—').
     e = snap.get(accurate.index_key(pn_key) or accurate.norm_pn(pn_key)) if snap else None
     if not e:
-        return "—", "—"
+        return "—", "—", None, None
     stok = e.get("stok")
     hg = e.get("harga")
-    s = f"{int(stok):,}".replace(",", ".") if stok is not None else "—"
-    h = "Rp " + f"{int(hg):,}".replace(",", ".") if hg else "—"
-    return s, h
+    s_num = int(stok) if stok is not None else None
+    h_num = int(hg) if hg else None
+    s = f"{s_num:,}".replace(",", ".") if s_num is not None else "—"
+    h = "Rp " + f"{h_num:,}".replace(",", ".") if h_num else "—"
+    return s, h, s_num, h_num
+
+
+def _acc_fields(snap: dict, pn_key: str) -> dict:
+    """Empat field stok/harga sekaligus untuk baris hasil pencarian.
+
+    `stok`/`harga` = string tampilan (dipakai chat, JANGAN diubah tipenya —
+    puluhan pemanggil meneruskannya apa adanya ke dump model).
+    `stok_num`/`harga_num` = int mentah untuk SEL EXCEL. `None` saat PN tak ada
+    di Accurate; `_compact_result` membuang None sehingga tak memakan token.
+    """
+    s, h, s_num, h_num = _acc_stok_harga(snap, pn_key)
+    return {"stok": s, "harga": h, "stok_num": s_num, "harga_num": h_num}
 
 
 def harga_map() -> dict[str, str]:
@@ -643,8 +663,7 @@ def search_part_number(term: str) -> list[dict]:
                     "part_name": str(row["part_name"]) if pd.notna(row["part_name"]) else "N/A",
                     "keterangan": str(row["remark"]).strip() if pd.notna(row.get("remark")) else "",
                     "quantity": str(row["quantity"]) if pd.notna(row["quantity"]) else "N/A",
-                    "stok": _acc_stok_harga(_snap, pn_key)[0],
-                    "harga": _acc_stok_harga(_snap, pn_key)[1],
+                    **_acc_fields(_snap, pn_key),
                     "berat": harga.weight_for(pn_key),
                     "gudang": gudang_breakdown(pn_key),
                     "excel_row": int(indices[0]) + 2,
@@ -696,8 +715,7 @@ def search_exact_pns(pns) -> list[dict]:
                 "part_name": str(row["part_name"]) if pd.notna(row["part_name"]) else "N/A",
                 "keterangan": str(row["remark"]).strip() if pd.notna(row.get("remark")) else "",
                 "quantity": str(row["quantity"]) if pd.notna(row["quantity"]) else "N/A",
-                "stok": _acc_stok_harga(_snap, pn_key)[0],
-                "harga": _acc_stok_harga(_snap, pn_key)[1],
+                **_acc_fields(_snap, pn_key),
                 "berat": harga.weight_for(pn_key),
                 "gudang": gudang_breakdown(pn_key),
                 "excel_row": int(indices[0]) + 2,
@@ -808,8 +826,7 @@ def search_part_name(term: str) -> list[dict]:
                 "part_name": pname if pname else "N/A",
                 "keterangan": remark,
                 "quantity": str(col_qty[pos]) if pd.notna(col_qty[pos]) else "N/A",
-                "stok": _acc_stok_harga(_snap, pn_key)[0],
-                "harga": _acc_stok_harga(_snap, pn_key)[1],
+                **_acc_fields(_snap, pn_key),
                 "berat": harga.weight_for(pn_key),
                 "gudang": gudang_breakdown(pn_key),
                 "excel_row": int(idx) + 2,

@@ -96,7 +96,10 @@ def test_kolom_pengganti_crossref_berat(dunia):
     br = hdr.index("Berat (kg)") + 1
     assert ws.cell(row=6, column=pg).value == "NEW777"          # GANTIME1 → NEW777
     assert ws.cell(row=5, column=cri).value == "FF5052, P550008"
-    assert ws.cell(row=5, column=br).value == "2,50"
+    # Berat kini ANGKA, bukan teks "2,50" — supaya rumus Excel user jalan
+    # (aturan pemilik 2026-07-20). Lihat ai_export.ke_angka.
+    berat = ws.cell(row=5, column=br).value
+    assert isinstance(berat, float) and abs(berat - 2.5) < 1e-9
 
 
 def test_rekap_gate_harga(dunia):

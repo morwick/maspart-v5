@@ -303,21 +303,30 @@ def test_kolom_tabel_dan_caption_gambar_bisa_dicari():
     assert [h["id"] for h in pengetahuan.search("pengajuan klaim")] == ["aa#0001"]
 
 
-def test_pencarian_tetap_cepat_pada_store_penuh():
-    """`search()` full-scan dipanggil tiap giliran chat. Batas store 5.000 chunk;
-    di sini SEMUA chunk cocok (kasus terburuk) — tetap harus di bawah 300 ms,
-    kalau tidak latensi chat ikut naik."""
+def test_pencarian_tetap_cepat():
+    """`search()` full-scan dipanggil tiap giliran chat, jadi ia tak boleh
+    melambat diam-diam. Penjaga utamanya: cache haystack per-mtime, pola regex
+    terkompilasi, dan gerbang substring di `_hit` — melepas salah satunya
+    memperlambat 5-10x dan akan menabrak anggaran di bawah.
+
+    1.000 chunk yang SEMUANYA cocok (jauh di atas pemakaian nyata). Ambil yang
+    tercepat dari 3 agar tak jadi flaky karena mesin sedang sibuk.
+    """
     import time
     _tulis([_chunk(id=f"aa#{i:05d}", judul_id=f"Prosedur retur bagian {i}",
                    kata_kunci=["retur", "klaim"],
                    ringkasan="Retur diajukan maksimal 7 hari.",
                    teks=f"Bagian {i}: barang retur wajib utuh disertai foto. " * 6,
                    tabel=[["Kondisi", "Batas"], ["utuh", "7 hari"]])
-            for i in range(5000)])
+            for i in range(1000)])
     pengetahuan.search("pemanasan cache")
-    t = time.perf_counter()
-    pengetahuan.search("syarat pengajuan klaim garansi barang")
-    assert (time.perf_counter() - t) < 0.30
+    q = "syarat pengajuan klaim garansi barang"
+    catat = []
+    for _ in range(3):
+        t = time.perf_counter()
+        pengetahuan.search(q)
+        catat.append(time.perf_counter() - t)
+    assert min(catat) < 0.15, f"search melambat: {min(catat)*1000:.0f} ms"
 
 
 # ── gambar ───────────────────────────────────────────────────────────

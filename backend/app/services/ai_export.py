@@ -45,6 +45,7 @@ _THIN = Side(style="thin", color="E1E4E1")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 _CENTER = Alignment(horizontal="center", vertical="center")
 _LEFT = Alignment(horizontal="left", vertical="center", wrap_text=True)
+_RIGHT = Alignment(horizontal="right", vertical="center")   # sel angka
 
 # Cegah CSV/Excel FORMULA INJECTION: sel teks yang diawali = + - @ (atau kendali
 # tab/CR/LF) diperlakukan Excel sebagai FORMULA/DDE. Nama part/tabel di file ini
@@ -320,6 +321,104 @@ def _cache_drop(entry: dict) -> None:
 # Header kolom yang isinya kode/PN → font mono di Excel.
 _MONO_HEAD_RE = re.compile(r"\b(part\s*number|part\s*no|pn|nomor\s*part|kode)\b", re.IGNORECASE)
 
+# ── Sel ANGKA vs sel TEKS ────────────────────────────────────────────────────
+# ⛔ Aturan pemilik (2026-07-20): kolom Harga/Stok/Qty/Berat di file unduhan
+# WAJIB berisi ANGKA asli, bukan teks "Rp 1.500.000" — kalau teks, SUM() dan
+# rumus agregat lain mengembalikan 0 ("rumusnya error"). Tampilan "Rp …" hanya
+# untuk JAWABAN CHAT & blok RINGKASAN, tidak pernah untuk nilai sel.
+#
+# Koersi dilakukan DI SINI (satu choke point saat menulis) supaya kolom milik
+# user sendiri — yang di-stringkan ai_sheet._finish_parse saat mem-parse
+# unggahan — ikut kembali jadi angka, tanpa membongkar logika pencocokan PN
+# yang mengandalkan bentuk string.
+
+# Format tampilan sel angka. None = General → sel menampilkan "1500000" polos,
+# sesuai permintaan pemilik "jangan ada Rp dan titik". Ganti ke "#,##0" bila
+# ingin tampilan bertitik — nilainya TETAP numerik & rumus TETAP jalan.
+_NUM_FMT: str | None = None
+
+# Header yang mengandung kata angka TAPI isinya naratif → jangan pernah dikoersi.
+_TEXT_HEAD_RE = re.compile(
+    r"\b(status|keterangan|catatan|remark|nama|name|deskripsi|description|"
+    r"per\s*gudang|rincian|pemenuhan|dimensi|cross|pengganti|satuan|merek|"
+    r"lokasi|gudang)\b", re.IGNORECASE)
+# Header yang isinya memang angka. Sejajar _HEAD_HARGA/_HEAD_STOK/_HEAD_QTY
+# di ai_sheet.py (deteksi peran kolom unggahan user).
+_NUM_HEAD_RE = re.compile(
+    r"\b(harga|price|rp|idr|cny|amount|nilai|subtotal|total|"
+    r"stok|stock|ready|sisa|on\s*hand|"
+    r"qty|quantity|jumlah|jml|pcs|order|"
+    r"berat|weight|kg)\b", re.IGNORECASE)
+# 'total'/'subtotal' SENGAJA tidak di sini: "Stok Total" bukan kolom uang, dan
+# "Total Harga" sudah tertangkap lewat kata 'harga'. Salah menandai kolom sbg
+# uang hanya mematikan sabuk pengaman anti-PN — jadi default-nya non-uang.
+_UANG_HEAD_RE = re.compile(r"\b(harga|price|rp|idr|cny|amount|nilai)\b", re.IGNORECASE)
+
+_KOSONG_ANGKA = {"", "-", "—", "–", "n/a", "na", "tidak ada"}
+_MATA_UANG_RE = re.compile(r"^(?:rp\.?|idr|cny|usd|\$|¥)\s*", re.IGNORECASE)
+_RIBUAN_RE = re.compile(r"^-?\d{1,3}(?:\.\d{3})+$")      # 1.500.000
+_POLOS_RE = re.compile(r"^-?\d+$")                        # 1500000
+_DESIMAL_RE = re.compile(r"^-?\d+,\d{1,2}$")              # 1,25
+_RIBUAN_DESIMAL_RE = re.compile(r"^-?\d{1,3}(?:\.\d{3})+,\d{1,2}$")   # 1.500,25
+# Angka polos sepanjang ini di kolom NON-uang hampir pasti identitas (PN),
+# bukan kuantitas. Ambang 9 disamakan dengan deteksi PN numerik di ai_sheet.
+_PN_DIGIT_MIN = 9
+
+
+def kolom_angka(kolom: list[str]) -> dict[int, bool]:
+    """{indeks_kolom_0based: apakah kolom UANG} untuk kolom yang boleh dikoersi.
+
+    Deny menang mutlak: kolom identitas (PN/kode) dan kolom naratif
+    (status/keterangan/'Stok per Gudang') tak pernah masuk, walau namanya
+    mengandung kata angka.
+    """
+    out: dict[int, bool] = {}
+    for i, h in enumerate(kolom):
+        s = h or ""
+        if _MONO_HEAD_RE.search(s) or _TEXT_HEAD_RE.search(s):
+            continue
+        if _NUM_HEAD_RE.search(s):
+            out[i] = bool(_UANG_HEAD_RE.search(s))
+    return out
+
+
+def ke_angka(v, uang: bool = False):
+    """Nilai sel → int/float bila JELAS angka; selain itu dikembalikan apa adanya.
+
+    Sengaja konservatif — ragu berarti biarkan teks. Yang TIDAK dikoersi:
+    penanda kosong ('—', 'N/A'), leading zero ('0012' = identitas), persen
+    (Excel mengubah maknanya), format ambigu ('1.50', '12 pcs'), dan angka
+    panjang di kolom non-uang (PN seperti '1013133963').
+    """
+    if v is None or isinstance(v, (int, float, bool)):
+        return v                      # idempoten; bool jangan disentuh
+    if not isinstance(v, str):
+        return v
+    s = v.strip()
+    if s.lower() in _KOSONG_ANGKA:
+        return v
+    inti = _MATA_UANG_RE.sub("", s).strip()
+    if not inti:
+        return v
+    neg = inti.startswith("-")
+    telanjang = inti[1:] if neg else inti
+    if telanjang.startswith("0") and len(telanjang) > 1 and telanjang[1] not in ".,":
+        return v                      # leading zero = semantik identitas
+    try:
+        if _POLOS_RE.match(inti):
+            if not uang and len(telanjang) >= _PN_DIGIT_MIN:
+                return v              # sabuk pengaman anti-PN
+            return int(inti)
+        if _RIBUAN_RE.match(inti):
+            return int(inti.replace(".", ""))
+        if _DESIMAL_RE.match(inti):
+            return float(inti.replace(",", "."))
+        if _RIBUAN_DESIMAL_RE.match(inti):
+            return float(inti.replace(".", "").replace(",", "."))
+    except ValueError:
+        return v
+    return v
+
 
 def _stash_put(entry: dict, judul: str, ext: str = "xlsx") -> tuple[str, str]:
     now = time.monotonic()
@@ -445,7 +544,9 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
     # Lebar kolom mengikuti isi (min 8, maks 60).
     widths = []
     for j, h in enumerate(kolom):
-        w = max([len(h or "")] + [len(r[j]) for r in baris if j < len(r)] or [0])
+        # str() WAJIB: sel bisa berisi int/float (harga & stok kini numerik agar
+        # rumus Excel user jalan) — len(int) melempar TypeError.
+        w = max([len(h or "")] + [len(str(r[j])) for r in baris if j < len(r)] or [0])
         widths.append(max(8, min(60, w + 4)))
 
     wb = Workbook()
@@ -461,13 +562,25 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
         c.alignment = _CENTER
         c.border = _BORDER
         ws.column_dimensions[get_column_letter(j)].width = w
+    # Kolom Harga/Stok/Qty/Berat ditulis sebagai ANGKA (lihat _NUM_FMT & ke_angka)
+    # supaya rumus Excel user jalan. _safe() dipanggil SETELAH koersi: string yang
+    # tidak jadi angka tetap dapat guard formula-injection, angka dilewatkan utuh.
+    num_cols = kolom_angka(kolom)
     r = start + 1
     for i, row in enumerate(baris):
         for j in range(1, len(kolom) + 1):
             val = row[j - 1] if j - 1 < len(row) else ""
+            if j - 1 in num_cols:
+                val = ke_angka(val, num_cols[j - 1])
             c = ws.cell(row=r, column=j, value=_safe(val))
             c.border = _BORDER
-            c.alignment = _CENTER if j == 1 or j in mono_cols else _LEFT
+            angka = isinstance(c.value, (int, float)) and not isinstance(c.value, bool)
+            if angka:
+                c.alignment = _RIGHT
+                if _NUM_FMT:
+                    c.number_format = _NUM_FMT
+            else:
+                c.alignment = _CENTER if j == 1 or j in mono_cols else _LEFT
             c.font = _MONO if j in mono_cols else _INK
             if i % 2:
                 c.fill = _ZEBRA
@@ -511,14 +624,23 @@ def sheet_status_excel(b: dict) -> tuple[bytes | None, str]:
         c.alignment = _CENTER
         c.border = _BORDER
         ws.column_dimensions[get_column_letter(j)].width = w
+    num_cols = kolom_angka(kolom)     # sama seperti generic_excel — lihat ke_angka
     r = start + 1
     for i, row in enumerate(baris):
         fill = _STATUS_FILL.get(status[i] if i < len(status) else "")
         for j in range(1, len(kolom) + 1):
             val = row[j - 1] if j - 1 < len(row) else ""
+            if j - 1 in num_cols:
+                val = ke_angka(val, num_cols[j - 1])
             c = ws.cell(row=r, column=j, value=_safe(val))
             c.border = _BORDER
-            c.alignment = _CENTER if j == 1 or j in mono_cols else _LEFT
+            angka = isinstance(c.value, (int, float)) and not isinstance(c.value, bool)
+            if angka:
+                c.alignment = _RIGHT
+                if _NUM_FMT:
+                    c.number_format = _NUM_FMT
+            else:
+                c.alignment = _CENTER if j == 1 or j in mono_cols else _LEFT
             c.font = _MONO if j in mono_cols else _INK
             if fill:
                 c.fill = fill

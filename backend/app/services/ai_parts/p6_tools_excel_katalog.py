@@ -246,14 +246,16 @@ def _t_excel_bom_rangka(args: dict, user: dict) -> dict:
     for i, p in enumerate(parts, start=1):
         pn = p["pn"]
         nama = (local.get(pn.upper(), {}).get("part_name") or p.get("nama_cn") or "").strip()
-        row = [str(i), pn, nama, str(p.get("qty") or "")]
+        # Sel Qty/Stok/Harga = ANGKA mentah (bukan "Rp …"/str) supaya rumus Excel
+        # user jalan — aturan pemilik 2026-07-20. Kolom "No" tetap label teks.
+        row = [str(i), pn, nama, ai_export.ke_angka(p.get("qty") or "")]
         if dengan_stok:
             total, rinci = _rincian_gudang_str(pn)
-            row += [str(total), rinci]
+            row += [ai_export.ke_angka(total), rinci]
         if dengan_harga:
             e = snap.get(accurate.index_key(pn))
             hg = (e or {}).get("harga")
-            row += ["Rp " + f"{int(hg):,}".replace(",", ".") if hg else "—"]
+            row += [int(hg) if hg else "—"]
         baris.append(row)
 
     judul = f"BOM {frame}" + (f" — {label_filter}" if label_filter else " (lengkap)")
@@ -310,7 +312,9 @@ def _t_excel_stok_gudang(args: dict, user: dict) -> dict:
         price = it.get("price")
         hasil.append({"pn": pn, "nama": it.get("name") or part_index.name_for(pn),
                       "qty": qty, "total": total, "rinci": rinci,
-                      "harga": "Rp " + f"{int(price):,}".replace(",", ".") if price else "—"})
+                      # ANGKA mentah — `hasil` HANYA dipakai membangun sel Excel
+                      # di bawah, tak pernah dikirim ke model.
+                      "harga": int(price) if price else "—"})
     if not hasil:
         if accurate.gudang_enriched_count() == 0:
             return {"found": False, "error": "Indeks stok per-gudang sedang disiapkan — coba lagi beberapa menit."}
@@ -328,7 +332,8 @@ def _t_excel_stok_gudang(args: dict, user: dict) -> dict:
     baris = []
     for i, h in enumerate(hasil, start=1):
         row = [str(i), h["pn"], h["nama"]]
-        row += ([str(h["qty"]), str(h["total"])] if gudang_kanonik else [str(h["total"]), h["rinci"]])
+        row += ([h["qty"], h["total"]] if gudang_kanonik
+                else [h["total"], h["rinci"]])
         if dengan_harga:
             row += [h["harga"]]
         baris.append(row)

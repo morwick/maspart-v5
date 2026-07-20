@@ -47,9 +47,20 @@ def test_gudang_names_fallback_hanya_saat_indeks_kosong(dua_sumber_beda, monkeyp
 
 def test_baris_pencarian_stok_harga_dari_accurate(dua_sumber_beda):
     snap = accurate.snapshot()
-    stok, hg = part_index._acc_stok_harga(snap, "PN-1")
+    # Dua bentuk sekaligus: string untuk TAMPILAN chat, int mentah untuk SEL
+    # EXCEL (sel teks membuat rumus user mengembalikan 0).
+    stok, hg, stok_num, hg_num = part_index._acc_stok_harga(snap, "PN-1")
     assert stok == "7" and hg == "Rp 80.000"                 # bukan 999 / Rp 999.999
-    assert part_index._acc_stok_harga(snap, "PN-ASING") == ("—", "—")
+    assert stok_num == 7 and hg_num == 80_000
+    assert isinstance(stok_num, int) and isinstance(hg_num, int)
+    assert part_index._acc_stok_harga(snap, "PN-ASING") == ("—", "—", None, None)
+
+
+def test_acc_fields_lengkap(dua_sumber_beda):
+    """Baris hasil pencarian membawa string tampilan DAN angka mentah."""
+    f = part_index._acc_fields(accurate.snapshot(), "PN-1")
+    assert f == {"stok": "7", "harga": "Rp 80.000",
+                 "stok_num": 7, "harga_num": 80_000}
 
 
 def test_warehouse_names_dibaca_dari_by_gudang(monkeypatch):
