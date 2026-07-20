@@ -263,6 +263,34 @@ export default function PengetahuanPage() {
     }
   }
 
+  async function reindexSemua() {
+    const token = getToken();
+    if (!token) return;
+    const perlu = docs.filter((d) => d.perlu_reindex);
+    if (!perlu.length) return;
+    if (
+      !window.confirm(
+        `Indeks ulang ${perlu.length} dokumen berskema lama?\n\n` +
+          "Kurasi manual (judul & kata kunci yang Anda perbaiki) dipertahankan. " +
+          "Job berjalan satu per satu di latar, jadi bisa memakan waktu.",
+      )
+    )
+      return;
+    setBusyId("semua");
+    try {
+      // Antrian server berjalan SERIAL, jadi mengirim semuanya sekaligus aman
+      // untuk RAM — tak ada dua dokumen besar diproses bersamaan.
+      for (const d of perlu) await reindexPengetahuan(token, d.id);
+      setNotice(`${perlu.length} dokumen diantre untuk diindeks ulang.`);
+      setJobId(perlu[perlu.length - 1].id);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal mengantre");
+    } finally {
+      setBusyId("");
+    }
+  }
+
   async function buka(d: PengetahuanDok) {
     if (expanded === d.id) {
       setExpanded("");
@@ -505,8 +533,21 @@ export default function PengetahuanPage() {
             <div style={{ fontWeight: 700, fontSize: 14 }}>
               Pengetahuan tersimpan ({docs.length})
             </div>
-            <div style={{ fontSize: 12, color: "var(--ink-500)" }}>
-              {jumlahChunk} bagian terindeks
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              {docs.some((d) => d.perlu_reindex) && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={reindexSemua}
+                  disabled={!!busyId || !!jobId}
+                  title="Ambil gambar di dalam berkas, breadcrumb bab, dan nama kolom tabel untuk dokumen berskema lama"
+                >
+                  Indeks ulang yang perlu (
+                  {docs.filter((d) => d.perlu_reindex).length})
+                </button>
+              )}
+              <div style={{ fontSize: 12, color: "var(--ink-500)" }}>
+                {jumlahChunk} bagian terindeks
+              </div>
             </div>
           </div>
 
@@ -581,6 +622,14 @@ export default function PengetahuanPage() {
                       </td>
                       <td style={{ fontSize: 12, color: warnaStatus(d.status) }}>
                         {LABEL_STATUS[d.status] || d.status}
+                        {d.perlu_reindex && (
+                          <div
+                            style={{ fontSize: 11, color: "var(--warn-700, #b45309)" }}
+                            title="Diindeks sebelum pembedahan dokumen ditingkatkan — indeks ulang untuk mengambil gambar di dalam berkas, breadcrumb bab, dan nama kolom tabel."
+                          >
+                            skema lama — indeks ulang
+                          </div>
+                        )}
                         {d.error && (
                           <div
                             style={{
@@ -641,7 +690,25 @@ export default function PengetahuanPage() {
                                   <div style={{ fontSize: 11, color: "var(--ink-400)" }}>
                                     {c.sumber}
                                     {c.halaman ? ` · hal ${c.halaman}` : ""} · {c.tipe}
+                                    {c.bahasa && c.bahasa !== "id"
+                                      ? ` · bahasa ${c.bahasa}`
+                                      : ""}
+                                    {c.kurasi ? " · dikurasi admin" : ""}
                                   </div>
+                                  {/* Hasil ekstraksi V2 — supaya admin bisa
+                                      MELIHAT apakah pembedahan dokumen berhasil,
+                                      bukan menebak dari hasil pencarian saja. */}
+                                  {(c.jalur?.length || c.kolom?.length) && (
+                                    <div style={{ fontSize: 11, color: "var(--ink-500)" }}>
+                                      {c.jalur?.length ? c.jalur.join(" › ") : ""}
+                                      {c.kolom?.length
+                                        ? `${c.jalur?.length ? " · " : ""}kolom: ${c.kolom.join(", ")}`
+                                        : ""}
+                                      {c.baris_total
+                                        ? ` · ${c.baris_total} baris`
+                                        : ""}
+                                    </div>
+                                  )}
                                   <input
                                     className="inp"
                                     value={c.judul_id}
@@ -722,7 +789,14 @@ export default function PengetahuanPage() {
                                   )}
                                   {c.gambar_ref?.length > 0 && (
                                     <div style={{ fontSize: 11, color: "var(--ink-400)" }}>
-                                      {c.gambar_ref.length} gambar terlampir
+                                      {c.gambar_ref.length} gambar
+                                      {c.gambar_info?.some((g) => g.caption)
+                                        ? ` · ${c.gambar_info
+                                            .filter((g) => g.caption)
+                                            .map((g) => g.caption)
+                                            .join(" | ")
+                                            .slice(0, 160)}`
+                                        : " · tanpa keterangan"}
                                     </div>
                                   )}
                                 </div>

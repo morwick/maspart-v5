@@ -205,6 +205,10 @@ def get_dokumen(dok_id: str) -> dict | None:
     return next((d for d in dokumen() if d.get("id") == dok_id), None)
 
 
+def dokumen_nonaktif() -> list[dict]:
+    return [d for d in dokumen() if not d.get("aktif", True)]
+
+
 def update_dokumen(dok_id: str, **fields) -> dict:
     """Perbarui field dokumen. `untuk_pembeli` DIPROPAGASI ke semua chunk-nya
     supaya tak ada chunk yatim yang publik padahal dokumennya internal."""
@@ -299,6 +303,37 @@ def replace_chunks(dok_id: str, baru: list[dict]) -> int:
         rows.extend(baru)
         _save_chunks(rows)
     return len(baru)
+
+
+def sapu_media(dok_id: str) -> int:
+    """Hapus berkas media milik dokumen ini yang tak lagi dirujuk chunk mana pun.
+
+    Re-index menomori ulang gambar (`{dok_id}_{n:03d}.png`), jadi tanpa sapuan
+    ini file lama menumpuk di bind-mount sampai penuh. Aman dipanggil setelah
+    `replace_chunks` karena penulisannya atomik — tak ada jendela referensi
+    menggantung.
+    """
+    dipakai = {f for c in chunks_dokumen(dok_id) for f in (c.get("gambar_ref") or [])}
+    n = 0
+    try:
+        for p in media_dir().glob(f"{dok_id}_*"):
+            if p.name in dipakai:
+                continue
+            try:
+                p.unlink()
+                n += 1
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return n
+
+
+def perlu_reindex(dok_id: str) -> bool:
+    """True bila dokumen masih berskema lama — belum punya gambar embedded,
+    breadcrumb, atau metadata kolom hasil ekstraksi V2."""
+    isi = chunks_dokumen(dok_id)
+    return bool(isi) and any(c.get("skema", 1) < 2 for c in isi)
 
 
 def update_chunk(cid: str, judul_id=None, kata_kunci=None, dicari=None) -> dict:
@@ -593,6 +628,123 @@ def search(topik: str = "", limit: int = 5, untuk_pembeli: bool = False) -> list
         if len(out) >= limit:
             break
     return out
+
+
+# ── pembacaan satu bagian (tool buka_pengetahuan) ────────────────────
+def _norm(s: str) -> str:
+    """Normalisasi longgar untuk mencocokkan judul yang diketik ulang model."""
+    return re.sub(r"[^a-z0-9一-鿿]+", " ", (s or "").lower()).strip()
+
+
+def cocokkan(kandidat: list[str], nama: str) -> tuple[str, list[str]]:
+    """Cocokkan nama manusiawi ke daftar kandidat, bertingkat: persis →
+    case-insensitive → normalisasi → substring UNIK.
+
+    Return (terpilih, ambigu). Ambigu (≥2 kandidat setara) TIDAK ditebak —
+    pemanggil mengembalikan daftarnya agar model memilih, pola
+    `ai_sheet.select_sheet`. Tak ada ID opaque di mana pun.
+    """
+    n = (nama or "").strip()
+    if not n:
+        return "", []
+    if n in kandidat:
+        return n, []
+    low = [c for c in kandidat if c.lower() == n.lower()]
+    if len(low) == 1:
+        return low[0], []
+    nn = _norm(n)
+    norm = [c for c in kandidat if _norm(c) == nn]
+    if len(norm) == 1:
+        return norm[0], []
+    if norm:
+        return "", norm
+    sub = [c for c in kandidat if nn and nn in _norm(c)]
+    if len(sub) == 1:
+        return sub[0], []
+    return "", sub
+
+
+def _bisa_dibaca(c: dict, mati: set, untuk_pembeli: bool) -> bool:
+    if c.get("dok_id") in mati or not c.get("dicari", True):
+        return False
+    return not (untuk_pembeli and not c.get("untuk_pembeli"))
+
+
+def buka(dokumen: str, bagian: str = "", halaman: int = 0,
+         untuk_pembeli: bool = False) -> dict:
+    """Satu bagian dokumen secara UTUH + daftar bagian tetangga.
+
+    Filter `untuk_pembeli` diterapkan SEBELUM pencocokan judul supaya judul
+    bagian internal tak bocor lewat pesan error sekalipun.
+    """
+    mati = {d.get("id") for d in dokumen_nonaktif()}
+    semua = [c for c in chunks() if _bisa_dibaca(c, mati, untuk_pembeli)]
+    if not semua:
+        return {"found": False, "dokumen_tersedia": [],
+                "catatan": "Belum ada pengetahuan internal yang bisa dibuka."}
+
+    judul_dok = list(dict.fromkeys(c.get("judul") or "" for c in semua if c.get("judul")))
+    pilih, ambigu = cocokkan(judul_dok, dokumen)
+    if not pilih:
+        return {"found": False, "dokumen_tersedia": (ambigu or judul_dok)[:30],
+                "catatan": (f"Dokumen '{dokumen}' tidak dikenali. Pilih SATU judul "
+                            "PERSIS dari 'dokumen_tersedia' — jangan mengarang judul lain.")}
+
+    isi_dok = [c for c in semua if (c.get("judul") or "") == pilih]
+    daftar = [{"judul": c.get("judul_id") or c.get("judul"),
+               "halaman": c.get("halaman") or 0} for c in isi_dok][:30]
+
+    target = None
+    if halaman and not bagian:
+        target = next((c for c in isi_dok if (c.get("halaman") or 0) == int(halaman)), None)
+    if target is None and bagian:
+        judul_bag = [c.get("judul_id") or c.get("judul") or "" for c in isi_dok]
+        pb, amb = cocokkan(judul_bag, bagian)
+        if not pb:
+            return {"found": False, "dokumen": pilih,
+                    "bagian_tersedia": [d for d in daftar
+                                        if not amb or d["judul"] in amb],
+                    "catatan": (f"Bagian '{bagian}' tidak ada di dokumen '{pilih}'. "
+                                "Pilih SATU judul PERSIS dari 'bagian_tersedia' — "
+                                "jangan menebak judul lain.")}
+        target = next(c for c in isi_dok
+                      if (c.get("judul_id") or c.get("judul") or "") == pb)
+    if target is None and not bagian and not halaman:
+        # Tanpa `bagian` → daftar isi dokumen (murah, dan mengajari model judul
+        # yang sah untuk panggilan berikutnya).
+        return {"found": True, "dokumen": pilih, "daftar_isi": daftar,
+                "jumlah_bagian": len(isi_dok),
+                "catatan": ("Daftar isi dokumen. Panggil lagi dengan 'bagian' = SATU "
+                            "judul PERSIS dari daftar ini untuk membaca isinya.")}
+    if target is None:
+        return {"found": False, "dokumen": pilih, "bagian_tersedia": daftar,
+                "catatan": (f"Tidak ada bagian pada halaman {halaman} di '{pilih}'. "
+                            "Pilih dari 'bagian_tersedia'.")}
+    return {"_target": target, "_dok": pilih, "_daftar": daftar, "_isi_dok": isi_dok}
+
+
+def jahit_tabel(isi_dok: list[dict], target: dict, maks: int = 60) -> tuple[list, int]:
+    """Satukan potongan tabel yang bersaudara (sumber+jalur+kolom sama) jadi
+    satu tabel utuh. Tabel panjang dipecah 30 baris/chunk saat indexing, jadi
+    tanpa penjahitan ini asisten tak pernah bisa membaca tabel besar."""
+    kolom = target.get("kolom") or []
+    if not target.get("tabel"):
+        return [], 0
+    if not kolom:
+        return target["tabel"][:maks + 1], target.get("baris_total") or 0
+    saudara = [c for c in isi_dok
+               if (c.get("kolom") or []) == kolom
+               and c.get("sumber") == target.get("sumber")
+               and (c.get("jalur") or []) == (target.get("jalur") or [])]
+    saudara.sort(key=lambda c: c.get("baris_dari") or 0)
+    header = target["tabel"][0] if target["tabel"] else kolom
+    baris: list = []
+    for c in saudara:
+        baris.extend((c.get("tabel") or [])[1:])
+        if len(baris) >= maks:
+            break
+    total = target.get("baris_total") or len(baris)
+    return [header, *baris[:maks]], total
 
 
 # ── gambar ───────────────────────────────────────────────────────────

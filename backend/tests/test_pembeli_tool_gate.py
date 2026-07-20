@@ -91,4 +91,11 @@ def test_cari_pengetahuan_terbuka_tapi_isinya_disaring(monkeypatch, tmp_path):
     res = ai._run_tool("cari_pengetahuan", {"topik": "retur"}, PEMBELI)
     isi = " ".join(h["isi"] for h in res.get("hasil") or [])
     assert "pelanggan" in isi and "margin internal" not in isi
+
+    # buka_pengetahuan sama: ditawarkan ke pembeli, isinya yang disaring —
+    # judul bagian internal tak boleh bocor bahkan lewat daftar isi.
+    assert "buka_pengetahuan" in ai._allowed_tool_names(PEMBELI)
+    buka = ai._run_tool("buka_pengetahuan", {"dokumen": "Kebijakan"}, PEMBELI)
+    assert "margin internal" not in str(buka)
     knowledge_util._LOAD_CACHE.clear()
+    pengetahuan._HAY_CACHE.update(mtime=None, rows=None)

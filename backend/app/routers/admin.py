@@ -755,6 +755,12 @@ class PengetahuanCari(BaseModel):
 @router.get("/pengetahuan")
 def pengetahuan_list(_admin: dict = Depends(require_admin)):
     dok = pengetahuan.load_dokumen()
+    # `perlu_reindex` = masih berskema lama (belum punya gambar embedded,
+    # breadcrumb, metadata kolom). Re-index TIDAK dipaksa — admin memutuskan.
+    # load_dokumen() membaca ulang dari disk (tanpa cache), jadi menambah field
+    # di sini tak mengotori store.
+    for d in dok:
+        d["perlu_reindex"] = pengetahuan.perlu_reindex(d.get("id") or "")
     return {"jumlah": len(dok), "jumlah_chunk": pengetahuan.count(), "dokumen": dok}
 
 

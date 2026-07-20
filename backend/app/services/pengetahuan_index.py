@@ -154,15 +154,31 @@ def bangun_chunks(dok: dict, bagian: list[dict], sumber: str,
     for n, b in enumerate(bagian):
         seq = mulai_seq + n
         refs: list[str] = []
-        for data in (b.get("gambar") or []):
+        info: list[dict] = []
+        meta = b.get("gambar_meta") or []
+        for j, data in enumerate(b.get("gambar") or []):
             if simpan_gambar is None:
                 break
             f = simpan_gambar(data, seq, len(refs))
-            if f:
-                refs.append(f)
+            if not f:
+                continue
+            refs.append(f)
+            m = meta[j] if j < len(meta) else {}
+            info.append({"file": f, "caption": (m.get("caption") or "")[:300],
+                         "halaman": m.get("halaman") or b.get("halaman") or 0})
         teks = (b.get("teks") or "")[:1800]
         tabel = [[str(c) for c in baris] for baris in (b.get("tabel") or [])]
-        if not teks.strip() and not tabel and not refs:
+        jalur = [str(x) for x in (b.get("jalur") or [])][-4:]
+        kolom = [str(x) for x in (b.get("kolom") or [])]
+        # Caption gambar digabung jadi satu ladang cari — inilah yang membuat
+        # gambar bisa DITEMUKAN sesuai konteks pertanyaan, bukan cuma ikut
+        # menempel pada chunk yang kebetulan terpilih.
+        gambar_teks = " ".join(i["caption"] for i in info if i["caption"])[:600]
+        # Chunk tanpa sinyal APA PUN (teks/tabel/caption/breadcrumb/gambar)
+        # skornya selalu 0 → sampah indeks, jangan disimpan. Chunk yang isinya
+        # hanya GAMBAR tetap disimpan: judul dokumen + tag admin dari
+        # _judul_fallback/_kata_kunci_fallback membuatnya tetap bisa ditemukan.
+        if not teks.strip() and not tabel and not gambar_teks and not jalur and not refs:
             continue
         out.append({
             "id": pengetahuan.chunk_id(dok["id"], seq),
@@ -175,6 +191,12 @@ def bangun_chunks(dok: dict, bagian: list[dict], sumber: str,
             "ringkasan": _ringkas_fallback(b),
             "teks": teks,
             "tabel": tabel,
+            "kolom": kolom,
+            "baris_total": b.get("baris_total") or 0,
+            "baris_dari": b.get("baris_dari") or 0,
+            "jalur": jalur,
+            "gambar_teks": gambar_teks,
+            "gambar_info": info,
             "gambar_ref": refs,
             "sumber": sumber,
             "halaman": b.get("halaman") or 0,
@@ -424,6 +446,7 @@ def proses(dok_id: str) -> None:
                        f"batas {MAX_CHUNK_STORE} bagian. Hapus dokumen lama dulu.")
         semua = semua[:boleh]
     pengetahuan.replace_chunks(dok_id, semua)
+    pengetahuan.sapu_media(dok_id)     # buang gambar yatim dari indeks lama
     pengetahuan.set_status(
         dok_id,
         "selesai_sebagian" if catatan else "selesai",

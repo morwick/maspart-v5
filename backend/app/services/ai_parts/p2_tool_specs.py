@@ -1320,6 +1320,42 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         },
     })
 
+    # Pembaca satu bagian pengetahuan — HANYA ditawarkan bila store-nya memang
+    # berisi. Spec dikirim di SETIAP panggilan API, jadi instalasi yang belum
+    # punya pengetahuan tak perlu membayar tokennya sama sekali.
+    if pengetahuan.available():
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "buka_pengetahuan",
+                "description": (
+                    "Buka SATU bagian pengetahuan internal MASPART secara UTUH: teks "
+                    "penuh tanpa dipotong, TABEL LENGKAP semua barisnya, gambar bagian "
+                    "itu, plus daftar bagian lain di dokumen yang sama. Pakai SETELAH "
+                    "cari_pengetahuan ketika jawaban butuh isi lengkap — seluruh langkah "
+                    "prosedur, seluruh baris tabel (syarat/tarif/spesifikasi), atau "
+                    "gambar penjelas bagian tertentu. 'dokumen' & 'bagian' WAJIB disalin "
+                    "PERSIS dari hasil cari_pengetahuan; jangan mengarang judul. Judul "
+                    "salah → tool mengembalikan daftar yang sah, pilih dari daftar itu. "
+                    "Kosongkan 'bagian' untuk melihat daftar isi dokumen."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "dokumen": {"type": "string",
+                                    "description": "Judul dokumen PERSIS seperti field 'dokumen'/'judul' pada hasil cari_pengetahuan."},
+                        "bagian": {"type": "string",
+                                   "description": "Judul bagian PERSIS seperti field 'judul' pada hasil cari_pengetahuan. Kosong → daftar isi dokumen."},
+                        "halaman": {"type": "integer",
+                                    "description": "Alternatif 'bagian': nomor halaman sumber."},
+                        "hanya": {"type": "string", "enum": ["semua", "tabel", "gambar"],
+                                  "description": "Batasi isi yang dikembalikan. Default 'semua'."},
+                    },
+                    "required": ["dokumen"],
+                },
+            },
+        })
+
     # Excel unggahan user — tool ini HANYA ada bila ada file terlampir di
     # percakapan ini. Tanpa lampiran, model tak melihatnya sama sekali.
     if sheet_id:

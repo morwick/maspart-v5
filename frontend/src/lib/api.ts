@@ -1526,6 +1526,7 @@ export type PengetahuanDok = {
   pengayaan: string;
   error: string;
   oleh?: string;
+  perlu_reindex?: boolean;
 };
 
 export type PengetahuanChunk = {
@@ -1544,6 +1545,14 @@ export type PengetahuanChunk = {
   untuk_pembeli: boolean;
   dicari: boolean;
   kode: string[];
+  // Hasil ekstraksi V2 — opsional, chunk skema lama tidak punya.
+  bahasa?: string;
+  jalur?: string[];
+  kolom?: string[];
+  baris_total?: number;
+  gambar_info?: { file: string; caption: string; halaman: number }[];
+  kurasi?: boolean;
+  skema?: number;
 };
 
 async function pgGet<T>(token: string, path: string): Promise<T> {

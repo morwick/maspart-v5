@@ -122,6 +122,7 @@ _DISPATCH = {
     "diagram_wiring": _t_diagram_wiring,
     "cari_manual": _t_cari_manual,
     "cari_pengetahuan": _t_cari_pengetahuan,
+    "buka_pengetahuan": _t_buka_pengetahuan,
     "template_excel_part": _t_template_excel,
     "sheet_jadi_penawaran": _t_sheet_jadi_penawaran,
     "pesanan_saya": _t_pesanan_saya,
@@ -291,6 +292,7 @@ _PROJECTIONS = {
     "uraikan_mesin": _proj_gambar_tanpa_image_id,
     "part_aus_dari_rangka": _proj_gambar_tanpa_image_id,
     "cari_pengetahuan": _proj_gambar_tanpa_image_id,
+    "buka_pengetahuan": _proj_gambar_tanpa_image_id,
 }
 
 

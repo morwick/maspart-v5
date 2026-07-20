@@ -236,6 +236,42 @@ def test_hapus_tak_dikenal_404():
     assert e.value.status_code == 404
 
 
+def test_list_menandai_dokumen_skema_lama():
+    res = _tambah()
+    pengetahuan.replace_chunks(res["id"], [{
+        "id": f"{res['id']}#0001", "dok_id": res["id"], "judul": "Prosedur Retur",
+        "teks": "isi", "dicari": True,          # tanpa `skema` → skema 1
+    }])
+    knowledge_util._LOAD_CACHE.clear()
+    d = R.pengetahuan_list(_admin=ADMIN)["dokumen"][0]
+    assert d["perlu_reindex"] is True
+
+    pengetahuan.replace_chunks(res["id"], [{
+        "id": f"{res['id']}#0001", "dok_id": res["id"], "judul": "Prosedur Retur",
+        "teks": "isi", "dicari": True, "skema": 2,
+    }])
+    knowledge_util._LOAD_CACHE.clear()
+    assert R.pengetahuan_list(_admin=ADMIN)["dokumen"][0]["perlu_reindex"] is False
+
+
+def test_sapu_media_membuang_gambar_yatim(_tmp_store):
+    """Re-index menomori ulang gambar; tanpa sapuan, file lama menumpuk di
+    bind-mount sampai penuh."""
+    res = _tambah()
+    media = _tmp_store / "media"
+    media.mkdir(parents=True, exist_ok=True)
+    (media / f"{res['id']}_000.png").write_bytes(b"PNG")
+    (media / f"{res['id']}_001.png").write_bytes(b"PNG")     # jadi yatim
+    pengetahuan.replace_chunks(res["id"], [{
+        "id": f"{res['id']}#0001", "dok_id": res["id"], "judul": "x",
+        "gambar_ref": [f"{res['id']}_000.png"], "dicari": True, "skema": 2,
+    }])
+    knowledge_util._LOAD_CACHE.clear()
+    assert pengetahuan.sapu_media(res["id"]) == 1
+    assert (media / f"{res['id']}_000.png").exists()
+    assert not (media / f"{res['id']}_001.png").exists()
+
+
 def test_uji_cari_seperti_asisten():
     res = _tambah()
     pengetahuan.replace_chunks(res["id"], [{

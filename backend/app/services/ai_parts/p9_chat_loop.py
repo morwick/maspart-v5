@@ -308,7 +308,7 @@ _MAX_EMPTY_RETRIES = 2
 _TOOLS_GAMBAR_INLINE = frozenset({
     "gambar_exploded", "gambar_exploded_mesin", "uraikan_mesin", "uraikan_assembly",
     "part_aus_dari_rangka", "diagram_wiring", "cari_manual",
-    "cari_pengetahuan",
+    "cari_pengetahuan", "buka_pengetahuan",
 })
 
 # Budget output lebih besar untuk panggilan yang WAJIB menulis jawaban (bukan ronde

@@ -645,6 +645,9 @@ def _t_cari_manual(args: dict, user: dict) -> dict:
 # (akumulasi lintas semua tool), jadi alat penemuan mengambil sedikit saja —
 # yang ingin melihat lengkap memakai buka_pengetahuan.
 _MAX_GAMBAR_PENGETAHUAN = 3
+# buka_pengetahuan = alat BACA satu bagian, biasanya dipanggil sendirian →
+# boleh memakai seluruh jatah 6 gambar per giliran.
+_MAX_GAMBAR_BUKA = 6
 
 
 def _label_gambar(r: dict, fname: str) -> str:
@@ -773,6 +776,96 @@ def _t_cari_pengetahuan(args: dict, user: dict) -> dict:
         catatan += (" Gambar terlampir & tampil OTOMATIS (inline) di bawah jawabanmu "
                     "— ⛔ JANGAN buat link/gambar sendiri.")
     out["catatan"] = catatan   # WAJIB key terakhir (_cap_tool_content potong tengah)
+    return out
+
+
+def _t_buka_pengetahuan(args: dict, user: dict) -> dict:
+    """Baca SATU bagian pengetahuan internal secara UTUH.
+
+    Pembagian peran: `cari_pengetahuan` = MENEMUKAN (banyak bagian, dipotong,
+    gambar sedikit); tool ini = MEMBACA (satu bagian, teks penuh, tabel dijahit
+    utuh, gambar lengkap). Teks penuh juga MENGURANGI false-positive guard
+    angka, karena makin banyak angka yang ter-grounding.
+    """
+    dokumen = (args.get("dokumen") or args.get("judul") or "").strip()
+    bagian = (args.get("bagian") or "").strip()
+    hanya = (args.get("hanya") or "semua").strip().lower()
+    try:
+        halaman = int(args.get("halaman") or 0)
+    except (TypeError, ValueError):
+        halaman = 0
+    if not dokumen:
+        return {"error": "Sebutkan 'dokumen' — judul PERSIS dari hasil cari_pengetahuan."}
+    if not pengetahuan.available():
+        return {"error": "Belum ada pengetahuan internal yang diindeks di server."}
+
+    is_pembeli = (user or {}).get("role") == "pembeli"
+    res = pengetahuan.buka(dokumen, bagian, halaman, untuk_pembeli=is_pembeli)
+    if "_target" not in res:
+        return res                       # sudah berbentuk hasil (gagal/daftar isi)
+
+    r, dok, daftar, isi_dok = (res["_target"], res["_dok"],
+                               res["_daftar"], res["_isi_dok"])
+    # Lapis kedua: jangan pernah percaya satu filter saja.
+    if is_pembeli and not r.get("untuk_pembeli"):
+        return {"found": False, "dokumen": dok, "bagian_tersedia": [],
+                "catatan": "Bagian itu tidak tersedia."}
+
+    out: dict = {"found": True, "dokumen": dok,
+                 "bagian": r.get("judul_id") or r.get("judul"),
+                 "sumber": r.get("sumber"), "halaman": r.get("halaman") or 0}
+    if r.get("jalur"):
+        out["jalur"] = r["jalur"]
+    if r.get("bahasa") in ("zh", "ja", "en"):
+        out["bahasa"] = r["bahasa"]
+    if hanya != "gambar":
+        if hanya != "tabel":
+            out["isi"] = (r.get("teks") or "")[:4000]
+        tabel, total = pengetahuan.jahit_tabel(isi_dok, r)
+        if tabel:
+            out["tabel"] = tabel
+            out["kolom"] = r.get("kolom") or []
+            out["baris_ditampilkan"] = max(len(tabel) - 1, 0)
+            out["baris_total"] = total or max(len(tabel) - 1, 0)
+    gambar: list[dict] = []
+    if hanya != "tabel":
+        for f in (r.get("gambar_ref") or [])[:_MAX_GAMBAR_BUKA]:
+            data = pengetahuan.image_bytes(f)
+            if not data:
+                continue
+            label = _label_gambar(r, f)
+            image_id, filename = ai_export.stash_raw(label, data, f"pengetahuan_{f}")
+            gambar.append({"image_id": image_id, "filename": filename,
+                           "pn": (out["bagian"] or f)[:60], "nama_figure": label,
+                           "kategori": "Pengetahuan"})
+        if gambar:
+            out["gambar"] = gambar
+            out["gambar_keterangan"] = [
+                {"keterangan": g["nama_figure"], "halaman": r.get("halaman") or 0}
+                for g in gambar]
+    # Daftar bagian dikembalikan juga saat SUKSES: hasil tool ronde lama diganti
+    # stub oleh _trim_old_tool_messages, jadi tanpa ini model bisa lupa judul
+    # yang sah saat ingin membuka bagian lain.
+    out["bagian_tersedia"] = daftar
+
+    catatan = (
+        f"Isi LENGKAP bagian ini (ditulis/diunggah ADMIN MASPART). Jawab HANYA dari "
+        f"isi ini, sebut judul dokumen '{dok}' + berkas/halaman sumbernya. Angka & "
+        "kode salin APA ADANYA — ⛔ jangan mengonversi satuan, menjumlahkan, atau "
+        "menghitung sendiri. 'bagian_tersedia' = bagian lain dokumen ini bila perlu "
+        "membuka yang lain. ⛔ JANGAN mengarang di luar isi ini."
+    )
+    if out.get("bahasa"):
+        catatan += (" ⚠️ Isi bagian ini BUKAN Bahasa Indonesia — WAJIB kamu "
+                    "TERJEMAHKAN saat menjawab (angka/kode/PN/satuan apa adanya).")
+    if out.get("baris_total", 0) > out.get("baris_ditampilkan", 0):
+        catatan += (f" Tabel masih terpotong ({out['baris_ditampilkan']} dari "
+                    f"{out['baris_total']} baris) — sebutkan itu ke user.")
+    if gambar:
+        catatan += (" Gambar terlampir & tampil OTOMATIS (inline) di bawah jawabanmu "
+                    "— ⛔ JANGAN buat link/gambar sendiri. 'gambar_keterangan' berasal "
+                    "dari teks DI SEKITAR gambar, bukan hasil membaca gambarnya.")
+    out["catatan"] = catatan             # WAJIB key terakhir
     return out
 
 

@@ -39,6 +39,31 @@ def _pdf(halaman: list[list[str]]) -> bytes:
     return buf.getvalue()
 
 
+def _pdf_bergambar(baris_teks, warna=(200, 30, 30), sisi=300, halaman=1,
+                   logo=False):
+    """PDF ber-TEKS yang juga memuat gambar — kasus yang di V1 gambarnya
+    hilang total karena hanya halaman tanpa teks yang diproses."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas
+    from PIL import Image
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    img = ImageReader(Image.new("RGB", (sisi, sisi), warna))
+    kecil = ImageReader(Image.new("RGB", (24, 24), (9, 9, 9)))
+    for n in range(halaman):
+        y = 780
+        for ln in baris_teks:
+            c.drawString(60, y, ln)
+            y -= 18
+        c.drawImage(img, 80, 320, width=260, height=260)
+        if logo:                       # gambar identik di tiap halaman = logo
+            c.drawImage(kecil, 60, 20, width=24, height=24)
+        c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
 def _docx(paragraf=(), tabel=None, heading=""):
     import docx
     d = docx.Document()
@@ -151,6 +176,105 @@ def test_docx_zip_bomb_ditolak(monkeypatch):
         z.writestr("word/document.xml", "x" * 5000)
     with pytest.raises(ValueError, match="mengembang"):
         ext.ekstrak(buf.getvalue(), "bom.docx")
+
+
+# ── gambar embedded di PDF ber-teks (celah utama V1) ─────────────────
+def test_pdf_berteks_mengekstrak_gambar_embedded():
+    data = _pdf_bergambar(["Prosedur retur barang", "Gambar 1: alur pengajuan retur"])
+    bagian = ext.ekstrak(data, "kebijakan.pdf")
+    ber = [b for b in bagian if b["gambar"]]
+    assert ber, "gambar embedded di halaman ber-teks tidak terekstrak"
+    assert (ber[0]["teks"] or "").strip(), "gambar harus menempel ke chunk BERTEKS"
+
+
+def test_caption_gambar_dari_baris_figur():
+    data = _pdf_bergambar(["Prosedur retur", "Gambar 1: alur pengajuan retur"])
+    bagian = ext.ekstrak(data, "kebijakan.pdf")
+    caps = [m.get("caption", "") for b in bagian for m in b.get("gambar_meta", [])]
+    assert any("alur pengajuan retur" in c for c in caps), caps
+
+
+def test_gambar_kecil_dan_logo_berulang_dibuang():
+    data = _pdf_bergambar(["Prosedur retur barang dagangan"], halaman=6, logo=True)
+    bagian = ext.ekstrak(data, "kebijakan.pdf")
+    # logo 24px kena filter ukuran; gambar utama identik di 6 halaman kena
+    # filter "hash sama di >=3 halaman" → hanya menyisakan sedikit/nol
+    total = sum(len(b["gambar"]) for b in bagian)
+    assert total <= 1, f"logo/watermark tidak tersaring (total {total})"
+
+
+def test_ekstraksi_gambar_gagal_tidak_menjatuhkan_indexing(monkeypatch):
+    """Kegagalan API gambar tak boleh membuat isi TEKS ikut hilang."""
+    def boom(*a, **kw):
+        raise RuntimeError("API berubah")
+    monkeypatch.setattr(ext, "_gambar_halaman_pdf", boom)
+    bagian = ext.ekstrak(_pdf_bergambar(["Prosedur retur barang"]), "a.pdf")
+    assert any("retur" in (b["teks"] or "").lower() for b in bagian)
+
+
+def test_breadcrumb_pdf_heuristik_bernomor():
+    data = _pdf(["3. Retur", "3.2 Syarat pengajuan",
+                 "Barang wajib utuh dan disertai foto kondisi."])
+    bagian = ext.ekstrak(data, "kebijakan.pdf")
+    jalur = [b.get("jalur") for b in bagian if b.get("jalur")]
+    assert jalur and any("3.2" in " ".join(j) for j in jalur), jalur
+
+
+def test_breadcrumb_docx_bertingkat():
+    import docx
+    d = docx.Document()
+    d.add_heading("3 Retur", level=1)
+    d.add_heading("3.2 Syarat", level=2)
+    d.add_paragraph("Barang wajib utuh dan disertai foto kondisi saat diterima.")
+    buf = io.BytesIO()
+    d.save(buf)
+    bagian = ext.ekstrak(buf.getvalue(), "kebijakan.docx")
+    isi = [b for b in bagian if "wajib utuh" in (b["teks"] or "")]
+    assert isi and isi[0]["jalur"] == ["3 Retur", "3.2 Syarat"]
+
+
+def test_docx_gambar_mewarisi_heading_dan_menempel_ke_teks():
+    import docx
+    from PIL import Image
+    img = io.BytesIO()
+    Image.new("RGB", (200, 150), (10, 120, 200)).save(img, format="PNG")
+    img.seek(0)
+    d = docx.Document()
+    d.add_heading("4 Pemasangan", level=1)
+    p = d.add_paragraph("Langkah pemasangan filter oli mesin.")
+    p.add_run().add_picture(img)
+    buf = io.BytesIO()
+    d.save(buf)
+    bagian = ext.ekstrak(buf.getvalue(), "panduan.docx")
+    ber = [b for b in bagian if b["gambar"]]
+    assert ber, "gambar inline DOCX tak terambil"
+    assert ber[0]["jalur"] == ["4 Pemasangan"]
+    assert (ber[0]["teks"] or "").strip()
+
+
+def test_excel_gambar_terambil():
+    from openpyxl import Workbook
+    from openpyxl.drawing.image import Image as XLImage
+    from PIL import Image
+    p = io.BytesIO()
+    Image.new("RGB", (180, 140), (30, 160, 90)).save(p, format="PNG")
+    p.seek(0)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Torsi"
+    ws.append(["Part", "Nm"])
+    ws.append(["baut roda", 600])
+    ws.add_image(XLImage(p), "D2")
+    buf = io.BytesIO()
+    wb.save(buf)
+    bagian = ext.ekstrak(buf.getvalue(), "torsi.xlsx")
+    assert any(b["gambar"] for b in bagian), "gambar Excel tak terambil"
+
+
+def test_kolom_tabel_tersimpan():
+    data = b"Part;Torsi;Satuan\nbaut roda;600;Nm\n"
+    bagian = ext.ekstrak(data, "torsi.csv")
+    assert bagian[0]["kolom"] == ["Part", "Torsi", "Satuan"]
 
 
 # ── end-to-end lewat job ─────────────────────────────────────────────
