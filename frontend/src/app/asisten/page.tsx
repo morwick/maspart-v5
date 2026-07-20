@@ -186,6 +186,10 @@ export default function AsistenPage() {
   // agar follow-up "isikan stoknya" tetap mengacu ke file yang sama.
   const [sheetId, setSheetId] = useState("");
   const [sheetName, setSheetName] = useState("");
+  // Seret-lepas file ke area chat. dragDepth: dragenter/dragleave ikut terpicu
+  // di tiap anak elemen — hitung kedalaman agar overlay tidak kedip.
+  const [dragOver, setDragOver] = useState(false);
+  const dragDepth = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -488,6 +492,56 @@ export default function AsistenPage() {
     }
   }
 
+  // ── Seret-lepas file ke area chat ──────────────────────────────────────────
+  // Gambar → langsung dikirim sbg foto part (perilaku tombol kamera).
+  // Excel .xlsx/.xlsm → hanya DILAMPIRKAN (perilaku tombol klip) — user mengetik
+  // maunya dulu, baru tekan Kirim.
+  function dragHasFiles(e: React.DragEvent) {
+    return Array.from(e.dataTransfer.types).includes("Files");
+  }
+
+  function onDragEnter(e: React.DragEvent) {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragOver(true);
+  }
+
+  function onDragOver(e: React.DragEvent) {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+  }
+
+  function onDragLeave(e: React.DragEvent) {
+    if (!dragHasFiles(e)) return;
+    dragDepth.current -= 1;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setDragOver(false);
+    }
+  }
+
+  function onDrop(e: React.DragEvent) {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragOver(false);
+    if (busy || available === false) return;
+    const f = e.dataTransfer.files?.[0];
+    if (!f) return;
+    if (f.type.startsWith("image/")) {
+      sendWithPhoto(f);
+      return;
+    }
+    if (/\.(xlsx|xlsm)$/i.test(f.name)) {
+      setError(null);
+      setPendingSheet(f);
+      taRef.current?.focus();
+      return;
+    }
+    setError("File tidak didukung — seret foto part (gambar) atau Excel .xlsx/.xlsm.");
+  }
+
   return (
     <AppShell active="/asisten" title="Asisten AI" sub="Tanya apa saja tentang part, stok, harga, dan pesanan">
       <div className="flex h-full w-full flex-col">
@@ -504,8 +558,54 @@ export default function AsistenPage() {
         {/* Chat memenuhi seluruh area kerja: header identitas · area pesan · input */}
         <div
           className="flex flex-1 flex-col"
-          style={{ minHeight: 0, overflow: "hidden" }}
+          style={{ minHeight: 0, overflow: "hidden", position: "relative" }}
+          onDragEnter={onDragEnter}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
         >
+          {/* Overlay saat file diseret di atas area chat. pointerEvents none agar
+              tidak mengganggu hitungan dragenter/dragleave kontainer. */}
+          {dragOver && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 30,
+                pointerEvents: "none",
+                display: "grid",
+                placeItems: "center",
+                background: "color-mix(in srgb, var(--paper) 82%, transparent)",
+                backdropFilter: "blur(2px)",
+              }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gap: 10,
+                  justifyItems: "center",
+                  border: "2px dashed var(--brand-400, var(--brand-700))",
+                  borderRadius: 16,
+                  background: "var(--brand-50)",
+                  padding: "28px 36px",
+                  margin: 16,
+                  textAlign: "center",
+                }}
+              >
+                <span style={{ color: "var(--brand-700)", display: "inline-flex" }}>
+                  <Icon d={IC.paperclip} size={28} />
+                </span>
+                <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--ink-900)" }}>
+                  Lepaskan file di sini
+                </div>
+                <div style={{ fontSize: 12, color: "var(--ink-500)", lineHeight: 1.5 }}>
+                  Foto part (gambar) langsung dikenali ·<br />
+                  Excel .xlsx/.xlsm terlampir dulu, kirim setelah mengetik perintah
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Header */}
           <div className="chat-head">
             <Avatar size={32} />
@@ -783,6 +883,7 @@ export default function AsistenPage() {
               <span className="chat-kbd-hint">
                 <span className="kbd">Enter</span> kirim · <span className="kbd">Shift+Enter</span> baris baru
               </span>
+              <span>Seret foto part atau Excel ke area chat untuk melampirkan.</span>
               <span>Jawaban part paling akurat bila menyertakan nomor rangka (VIN).</span>
             </div>
           </div>
