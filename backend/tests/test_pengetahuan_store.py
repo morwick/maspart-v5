@@ -110,13 +110,14 @@ def test_update_chunk_tak_dikenal_keyerror():
 
 # ── pencarian ────────────────────────────────────────────────────────
 def test_judul_id_menang_atas_teks():
-    _tulis([
-        _chunk(id="aa#0001", judul_id="Prosedur retur barang",
-               teks="ringkasan singkat"),
-        _chunk(id="aa#0002", teks="dokumen ini menyebut retur sekali saja"),
-    ])
-    hasil = pengetahuan.search("retur")
-    assert [h["id"] for h in hasil] == ["aa#0001", "aa#0002"]
+    kuat = _chunk(id="aa#0001", judul_id="Prosedur retur barang",
+                  teks="ringkasan singkat")
+    lemah = _chunk(id="aa#0002", teks="dokumen ini menyebut retur sekali saja")
+    # peringkat mentah: kurasi judul_id jauh di atas kecocokan di badan teks
+    assert (pengetahuan._score(kuat, "retur", ["retur"])
+            > pengetahuan._score(lemah, "retur", ["retur"]))
+    _tulis([kuat, lemah])
+    assert pengetahuan.search("retur")[0]["id"] == "aa#0001"
 
 
 def test_token_berangka_berbobot_lebih():
@@ -183,8 +184,50 @@ def test_kecocokan_langsung_menang_atas_sinonim(monkeypatch):
 
 
 def test_limit_dihormati():
-    _tulis([_chunk(id=f"aa#{i:04d}", teks="prosedur retur") for i in range(9)])
+    # teks dibuat BERBEDA agar tak kena dedup kembar
+    _tulis([_chunk(id=f"aa#{i:04d}", teks=f"prosedur retur varian {i}")
+            for i in range(9)])
     assert len(pengetahuan.search("retur", limit=3)) == 3
+
+
+# ── akurasi & hemat token ────────────────────────────────────────────
+def test_hasil_jauh_lebih_lemah_dibuang():
+    """Chunk yang cuma kebetulan berbagi satu kata umum bukan jawaban —
+    membuangnya menaikkan akurasi sekaligus menghemat token."""
+    _tulis([
+        _chunk(id="aa#0001", judul_id="Prosedur retur barang",
+               kata_kunci=["retur", "pengembalian"], teks="langkah retur"),
+        _chunk(id="aa#0002", teks="dokumen lain yang menyinggung retur sekali"),
+    ])
+    hasil = pengetahuan.search("prosedur retur barang")
+    assert [h["id"] for h in hasil] == ["aa#0001"]
+
+
+def test_hasil_setara_tetap_dikembalikan_semua():
+    """Ambang bersifat RELATIF — jangan sampai memangkas hasil yang sama kuat."""
+    _tulis([
+        _chunk(id="aa#0001", judul_id="Prosedur retur gudang A"),
+        _chunk(id="aa#0002", judul_id="Prosedur retur gudang B"),
+    ])
+    assert len(pengetahuan.search("prosedur retur")) == 2
+
+
+def test_chunk_kembar_akibat_overlap_dibuang():
+    sama = "Retur barang wajib disertai foto kondisi barang saat diterima " * 3
+    _tulis([
+        _chunk(id="aa#0001", teks=sama),
+        _chunk(id="aa#0002", teks=sama + " Tambahan sedikit di ekor."),
+    ])
+    hasil = pengetahuan.search("retur")
+    assert len(hasil) == 1
+
+
+def test_chunk_berbeda_tidak_ikut_terbuang():
+    _tulis([
+        _chunk(id="aa#0001", teks="Retur barang wajib disertai foto kondisi."),
+        _chunk(id="aa#0002", teks="Retur uang diproses maksimal empat belas hari."),
+    ])
+    assert len(pengetahuan.search("retur")) == 2
 
 
 # ── gambar ───────────────────────────────────────────────────────────

@@ -673,14 +673,22 @@ def _t_cari_pengetahuan(args: dict, user: dict) -> dict:
     for r in rows:
         if is_pembeli and not r.get("untuk_pembeli"):
             continue  # lapis kedua — jangan pernah percaya satu filter saja
+        judul = r.get("judul_id") or r.get("judul")
+        # Hasil TERATAS dapat kutipan penuh (itu yang menjawab pertanyaan);
+        # hasil berikutnya cuma konteks pendukung → cukup potongan pendek.
+        # Menghemat ~2 KB per panggilan tanpa mengurangi bahan jawaban.
+        batas_isi = 1200 if not hasil else 500
         item = {
-            "judul": r.get("judul_id") or r.get("judul"),
-            "dokumen": r.get("judul"),
+            "judul": judul,
             "sumber": r.get("sumber"),
             "halaman": r.get("halaman") or 0,
             "ringkasan": r.get("ringkasan") or "",
-            "isi": (r.get("teks") or "")[:1200],
+            "isi": (r.get("teks") or "")[:batas_isi],
         }
+        # `dokumen` hanya disertakan bila beda dari judul bagian — kalau sama,
+        # itu string kembar yang dibayar dua kali.
+        if r.get("judul") and r.get("judul") != judul:
+            item["dokumen"] = r.get("judul")
         if r.get("tabel"):
             item["tabel"] = r["tabel"][:8]
             if (r.get("tipe") or "") == "pdf":

@@ -94,6 +94,44 @@ def test_isi_dipotong_1200_char():
     assert len(res["hasil"][0]["isi"]) == 1200
 
 
+def test_hasil_pendukung_dipotong_lebih_pendek():
+    """Hemat token: juara dapat kutipan penuh, pendukung cukup potongan."""
+    _isi([
+        _chunk(id="aa#0001", judul_id="Prosedur retur", teks="retur " + "x" * 4000),
+        _chunk(id="aa#0002", judul_id="Prosedur retur lanjutan",
+               teks="retur " + "y" * 4000),
+    ])
+    res = ai._t_cari_pengetahuan({"topik": "prosedur retur"}, ADMIN)
+    assert len(res["hasil"]) == 2
+    assert len(res["hasil"][0]["isi"]) == 1200
+    assert len(res["hasil"][1]["isi"]) == 500
+
+
+def test_dokumen_tak_diulang_saat_sama_dengan_judul():
+    _isi([_chunk(judul="Prosedur Retur", judul_id="Prosedur Retur")])
+    res = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)
+    assert "dokumen" not in res["hasil"][0]      # string kembar tak dibayar 2x
+
+
+def test_dokumen_disertakan_saat_beda():
+    _isi([_chunk(judul="Kebijakan Gudang", judul_id="Cara retur")])
+    res = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)
+    assert res["hasil"][0]["dokumen"] == "Kebijakan Gudang"
+
+
+def test_image_id_dibuang_dari_salinan_model(_tmp_store):
+    """image_id opaque — gambar inline dibangun dari side-state, bukan teks."""
+    media = _tmp_store / "media"
+    media.mkdir(parents=True, exist_ok=True)
+    (media / "aa_000.png").write_bytes(b"PNG")
+    _isi([_chunk(gambar_ref=["aa_000.png"])])
+    res = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)
+    assert res["gambar"][0]["image_id"]                 # hasil UTUH tetap punya
+    dump = ai._dump_tool(res, "cari_pengetahuan")
+    assert "image_id" not in dump                       # salinan model tidak
+    assert dump.rstrip("}").endswith('"')               # catatan tetap di ekor
+
+
 def test_peringatan_tabel_pdf_rekonstruksi():
     _isi([_chunk(tabel=[["a", "b"]], tipe="pdf")])
     res = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)

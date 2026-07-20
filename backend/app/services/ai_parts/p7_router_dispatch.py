@@ -290,6 +290,7 @@ _PROJECTIONS = {
     "uraikan_assembly": _proj_gambar_tanpa_image_id,
     "uraikan_mesin": _proj_gambar_tanpa_image_id,
     "part_aus_dari_rangka": _proj_gambar_tanpa_image_id,
+    "cari_pengetahuan": _proj_gambar_tanpa_image_id,
 }
 
 

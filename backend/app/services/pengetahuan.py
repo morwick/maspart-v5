@@ -361,6 +361,24 @@ def _words(ql: str) -> list[str]:
 # menggeser kecocokan LANGSUNG ke kata yang benar-benar diketik user.
 _BOBOT_SINONIM = 0.6
 
+# Ambang relatif: hasil yang skornya jauh di bawah juara BUKAN jawaban, hanya
+# kebetulan berbagi satu kata umum. Membuangnya menaikkan akurasi (model tak
+# terdistraksi isi yang tak relevan) SEKALIGUS menghemat token — chunk lemah
+# tak ikut diserialisasi ke messages.
+_AMBANG_RELATIF = 0.30
+
+
+def _mirip(a: str, b: str) -> bool:
+    """Dua chunk dianggap kembar bila salah satu memuat 120 char awal yang lain.
+    Chunking memakai overlap 120 char, jadi potongan bersebelahan bisa muncul
+    berdua untuk kueri yang sama — mengirim keduanya ke model = token terbuang
+    untuk kalimat yang sama."""
+    a, b = (a or "").strip(), (b or "").strip()
+    if not a or not b:
+        return False
+    pendek, panjang = (a, b) if len(a) <= len(b) else (b, a)
+    return pendek[:120] in panjang
+
 
 def search(topik: str = "", limit: int = 5, untuk_pembeli: bool = False) -> list[dict]:
     """Cari chunk aktif (`dicari=True`, dokumen `aktif`), diranking relevansi.
@@ -389,8 +407,20 @@ def search(topik: str = "", limit: int = 5, untuk_pembeli: bool = False) -> list
         sc = max(_score(r, t, _words(t)) * b for t, b in varian)
         if sc > 0:
             scored.append((sc, i, r))  # i = tie-break stabil
+    if not scored:
+        return []
     scored.sort(key=lambda t: (-t[0], t[1]))
-    return [r for _, _, r in scored[:limit]]
+    lantai = scored[0][0] * _AMBANG_RELATIF
+    out: list[dict] = []
+    for sc, _, r in scored:
+        if sc < lantai:
+            break                      # sisanya makin lemah — berhenti
+        if any(_mirip(r.get("teks") or "", p.get("teks") or "") for p in out):
+            continue                   # kembar akibat overlap chunking
+        out.append(r)
+        if len(out) >= limit:
+            break
+    return out
 
 
 # ── gambar ───────────────────────────────────────────────────────────
