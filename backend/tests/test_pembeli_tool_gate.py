@@ -67,3 +67,28 @@ def test_eksekusi_tetap_boleh_untuk_staf():
     allowed = ai._allowed_tool_names(STAF)
     for t in ("daftar_transmisi_assy", "banding_assy", "banding_kategori"):
         assert t in allowed, t
+
+
+def test_cari_pengetahuan_terbuka_tapi_isinya_disaring(monkeypatch, tmp_path):
+    """cari_pengetahuan SENGAJA tidak masuk _GATED_PEMBELI — pembeli boleh
+    memanggilnya, yang disaring adalah ISI-nya (untuk_pembeli per chunk).
+    Gating di level tool akan mematikan pengetahuan publik yang memang
+    diniatkan admin untuk pembeli."""
+    from app.services import knowledge_util, pengetahuan
+    assert "cari_pengetahuan" in _nama(PEMBELI)
+    assert "cari_pengetahuan" in ai._allowed_tool_names(PEMBELI)
+
+    monkeypatch.setattr(pengetahuan, "_dir", lambda: tmp_path)
+    knowledge_util._LOAD_CACHE.clear()
+    dasar = {"dok_id": "aa", "judul": "Kebijakan", "judul_id": "", "kata_kunci": [],
+             "ringkasan": "", "tabel": [], "gambar_ref": [], "sumber": "admin",
+             "halaman": 0, "tipe": "teks", "dicari": True, "kode": []}
+    pengetahuan._save_chunks([
+        {**dasar, "id": "aa#0001", "teks": "margin internal retur", "untuk_pembeli": False},
+        {**dasar, "id": "aa#0002", "teks": "syarat retur pelanggan", "untuk_pembeli": True},
+    ])
+    knowledge_util._LOAD_CACHE.clear()
+    res = ai._run_tool("cari_pengetahuan", {"topik": "retur"}, PEMBELI)
+    isi = " ".join(h["isi"] for h in res.get("hasil") or [])
+    assert "pelanggan" in isi and "margin internal" not in isi
+    knowledge_util._LOAD_CACHE.clear()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import ai_chat_log, ai_sinonim_learn, catalog_bom, gudang, gudang_config, harga, image_search, login_history, orders, part_index, permissions, populasi, presence, reservations, search_log, session_policy, sinonim
+from ..services import ai_chat_log, ai_sinonim_learn, catalog_bom, gudang, gudang_config, harga, image_search, login_history, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, reservations, search_log, session_policy, sinonim
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -697,6 +698,203 @@ def sinonim_delete(index: int, _admin: dict = Depends(require_admin)):
     except IndexError as err:
         raise HTTPException(status.HTTP_409_CONFLICT, str(err))
     return {"ok": True, "entry": entry}
+
+
+# ── Pengetahuan Asisten AI (data/ai_pengetahuan) ────────────────────────────
+# Admin menulis/mengunggah pengetahuan internal; job latar mengindeksnya jadi
+# chunk yang dicari tool `cari_pengetahuan`. Berkas asli disimpan agar re-index
+# tak perlu unggah ulang.
+_MAX_PENGETAHUAN_BYTES = 20 * 1024 * 1024     # per berkas
+_MAX_PENGETAHUAN_TOTAL = 60 * 1024 * 1024     # seluruh unggahan satu dokumen
+_MAX_PENGETAHUAN_FILE = 10
+# Magic byte per ekstensi — tolak berkas yang isinya tak sesuai namanya.
+_MAGIC = {
+    ".pdf": (b"%PDF-",),
+    ".xlsx": (b"PK\x03\x04",), ".xlsm": (b"PK\x03\x04",), ".docx": (b"PK\x03\x04",),
+    ".png": (b"\x89PNG\r\n\x1a\n",),
+    ".jpg": (b"\xff\xd8\xff",), ".jpeg": (b"\xff\xd8\xff",),
+}
+
+
+def _cek_berkas(nama: str, data: bytes) -> str:
+    """Validasi ekstensi + magic byte. Return ekstensi ternormalisasi."""
+    ekst = Path(nama or "").suffix.lower()
+    if ekst not in pengetahuan_extract.EKSTENSI:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Format '{ekst or nama}' tidak didukung. Yang bisa: "
+            "PDF, Excel (.xlsx/.xlsm), Word (.docx), CSV, TXT, PNG/JPG.")
+    sig = _MAGIC.get(ekst)
+    if sig and not any(data.startswith(s) for s in sig):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Isi berkas '{nama}' tidak cocok dengan ekstensinya — mungkin rusak "
+            "atau salah rename.")
+    return ekst
+
+
+class PengetahuanPatch(BaseModel):
+    judul: str | None = None
+    deskripsi: str | None = None
+    tag: list[str] | None = None
+    untuk_pembeli: bool | None = None
+    aktif: bool | None = None
+    pakai_ai: bool | None = None
+
+
+class PengetahuanChunkPatch(BaseModel):
+    judul_id: str | None = None
+    kata_kunci: list[str] | None = None
+    dicari: bool | None = None
+
+
+class PengetahuanCari(BaseModel):
+    q: str
+
+
+@router.get("/pengetahuan")
+def pengetahuan_list(_admin: dict = Depends(require_admin)):
+    dok = pengetahuan.load_dokumen()
+    return {"jumlah": len(dok), "jumlah_chunk": pengetahuan.count(), "dokumen": dok}
+
+
+@router.get("/pengetahuan/{dok_id}")
+def pengetahuan_detail(dok_id: str, _admin: dict = Depends(require_admin)):
+    d = pengetahuan.get_dokumen(dok_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Dokumen tidak ditemukan.")
+    return {"dokumen": d, "chunk": pengetahuan.chunks_dokumen(dok_id)}
+
+
+@router.get("/pengetahuan/{dok_id}/status")
+def pengetahuan_status(dok_id: str, _admin: dict = Depends(require_admin)):
+    d = pengetahuan.get_dokumen(dok_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Dokumen tidak ditemukan.")
+    return {k: d.get(k) for k in
+            ("id", "status", "progres", "jumlah_chunk", "pengayaan", "error")}
+
+
+@router.post("/pengetahuan", status_code=status.HTTP_202_ACCEPTED)
+async def pengetahuan_add(
+    judul: str = Form(...),
+    deskripsi: str = Form(""),
+    teks: str = Form(""),
+    tabel_json: str = Form(""),
+    tag: str = Form(""),
+    untuk_pembeli: bool = Form(False),
+    pakai_ai: bool = Form(True),
+    files: list[UploadFile] = File(None),
+    admin: dict = Depends(require_admin),
+):
+    """Simpan dokumen + berkasnya, lalu antre indexing di latar (202)."""
+    berkas_in = [f for f in (files or []) if f and f.filename]
+    if len(berkas_in) > _MAX_PENGETAHUAN_FILE:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Maksimum {_MAX_PENGETAHUAN_FILE} berkas per pengetahuan.")
+    tabel = []
+    if tabel_json.strip():
+        try:
+            tabel = json.loads(tabel_json)
+            if not isinstance(tabel, list):
+                raise ValueError
+        except Exception:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Format tabel tidak valid.")
+
+    # Baca & validasi SEMUA berkas dulu — jangan daftarkan dokumen kalau ada yang
+    # ditolak (hindari dokumen setengah jadi di daftar admin).
+    muatan: list[tuple[str, str, bytes]] = []
+    total = 0
+    for f in berkas_in:
+        data = await _read_capped(f, _MAX_PENGETAHUAN_BYTES)
+        total += len(data)
+        if total > _MAX_PENGETAHUAN_TOTAL:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                f"Total unggahan melebihi {_MAX_PENGETAHUAN_TOTAL // (1024 * 1024)} MB.")
+        nama = Path(f.filename).name          # buang komponen path dari klien
+        muatan.append((nama, _cek_berkas(nama, data), data))
+
+    try:
+        # `berkas` sementara (nama+ext) sudah cukup untuk validasi "ada isi";
+        # nama_simpan baru bisa dihitung setelah id dokumen terbit.
+        dok = pengetahuan.add_dokumen(
+            judul, deskripsi, [t for t in tag.split(",") if t.strip()],
+            untuk_pembeli, pakai_ai, admin.get("username") or "",
+            berkas=[{"nama": n, "ext": e} for n, e, _ in muatan],
+            teks_admin=teks, tabel_admin=tabel)
+    except ValueError as err:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(err))
+
+    # Nama simpan DIBANGKITKAN SERVER — nama asli hanya metadata, jadi tak ada
+    # jalan bagi input user untuk mempengaruhi path di disk.
+    d = pengetahuan.berkas_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    meta = []
+    for i, (nama, ekst, data) in enumerate(muatan):
+        simpan = f"{dok['id']}_{i}{ekst}"
+        (d / simpan).write_bytes(data)
+        meta.append({"nama": nama, "nama_simpan": simpan,
+                     "ukuran": len(data), "ext": ekst})
+    if meta:
+        pengetahuan.update_dokumen(dok["id"], berkas=meta)
+
+    pengetahuan_index.antre(dok["id"])
+    return {"ok": True, "id": dok["id"], "status": "antre"}
+
+
+@router.post("/pengetahuan/{dok_id}/reindex", status_code=status.HTTP_202_ACCEPTED)
+def pengetahuan_reindex(dok_id: str, _admin: dict = Depends(require_admin)):
+    if not pengetahuan.get_dokumen(dok_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Dokumen tidak ditemukan.")
+    pengetahuan.set_status(dok_id, "antre",
+                           {"langkah": "Menunggu giliran", "kini": 0, "total": 0, "persen": 0})
+    pengetahuan_index.antre(dok_id)
+    return {"ok": True, "id": dok_id, "status": "antre"}
+
+
+@router.patch("/pengetahuan/{dok_id}")
+def pengetahuan_update(dok_id: str, body: PengetahuanPatch,
+                       _admin: dict = Depends(require_admin)):
+    upd = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not upd:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tidak ada perubahan.")
+    try:
+        d = pengetahuan.update_dokumen(dok_id, **upd)
+    except KeyError as err:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(err))
+    except ValueError as err:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(err))
+    return {"ok": True, "dokumen": d}
+
+
+@router.patch("/pengetahuan/{dok_id}/chunk/{cid}")
+def pengetahuan_update_chunk(dok_id: str, cid: str, body: PengetahuanChunkPatch,
+                             _admin: dict = Depends(require_admin)):
+    try:
+        c = pengetahuan.update_chunk(f"{dok_id}#{cid}", body.judul_id,
+                                     body.kata_kunci, body.dicari)
+    except KeyError as err:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(err))
+    return {"ok": True, "chunk": c}
+
+
+@router.delete("/pengetahuan/{dok_id}")
+def pengetahuan_delete(dok_id: str, _admin: dict = Depends(require_admin)):
+    try:
+        d = pengetahuan.delete_dokumen(dok_id)
+    except KeyError as err:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(err))
+    return {"ok": True, "dokumen": d}
+
+
+@router.post("/pengetahuan/cari")
+def pengetahuan_cari(body: PengetahuanCari, _admin: dict = Depends(require_admin)):
+    """Uji pencarian PERSIS seperti yang dilihat asisten — tanpa ini admin buta
+    soal kualitas kurasi kata kuncinya."""
+    hasil = pengetahuan.search(body.q, limit=8)
+    return {"jumlah": len(hasil), "hasil": hasil}
 
 
 # ── Observabilitas Asisten AI (ai_chat_log) ─────────────────────────────────

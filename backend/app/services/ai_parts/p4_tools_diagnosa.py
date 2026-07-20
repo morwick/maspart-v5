@@ -641,6 +641,87 @@ def _t_cari_manual(args: dict, user: dict) -> dict:
     return out
 
 
+def _t_cari_pengetahuan(args: dict, user: dict) -> dict:
+    """Cari PENGETAHUAN INTERNAL yang ditulis/diunggah admin (store `pengetahuan`).
+
+    Beda dari cari_manual (manual pabrikan, dibangun offline): isi ini dikurasi
+    admin lewat /admin/pengetahuan dan bisa berubah kapan saja. Role pembeli HANYA
+    melihat chunk yang sengaja dipublikasikan (untuk_pembeli=True) — disaring di
+    search() lalu di-recek di sini (dua lapis, sengaja).
+    """
+    topik = (args.get("topik") or args.get("query") or args.get("kata_kunci") or "").strip()
+    if not topik:
+        return {"error": "Sebutkan topik yang ingin dicari."}
+    if not pengetahuan.available():
+        return {"error": "Belum ada pengetahuan internal yang diindeks di server."}
+
+    is_pembeli = (user or {}).get("role") == "pembeli"
+    rows = pengetahuan.search(topik, limit=4, untuk_pembeli=is_pembeli)
+    if not rows:
+        logger.info("MISS cari_pengetahuan q=%r user=%s", topik,
+                    (user or {}).get("username") or "?")
+        return {
+            "found": False, "jumlah": 0,
+            "catatan": (f"Tidak ada pengetahuan internal yang cocok untuk '{topik}'. "
+                        "Jangan mengarang jawabannya — bila memang tidak ada, katakan "
+                        "terus terang dan sarankan menghubungi admin."),
+        }
+
+    hasil: list[dict] = []
+    gambar: list[dict] = []
+    ada_tabel_pdf = False
+    for r in rows:
+        if is_pembeli and not r.get("untuk_pembeli"):
+            continue  # lapis kedua — jangan pernah percaya satu filter saja
+        item = {
+            "judul": r.get("judul_id") or r.get("judul"),
+            "dokumen": r.get("judul"),
+            "sumber": r.get("sumber"),
+            "halaman": r.get("halaman") or 0,
+            "ringkasan": r.get("ringkasan") or "",
+            "isi": (r.get("teks") or "")[:1200],
+        }
+        if r.get("tabel"):
+            item["tabel"] = r["tabel"][:8]
+            if (r.get("tipe") or "") == "pdf":
+                ada_tabel_pdf = True
+        if r.get("kode"):
+            item["kode"] = r["kode"]
+        hasil.append(item)
+        for f in (r.get("gambar_ref") or [])[:3]:
+            if len(gambar) >= 8:
+                break
+            data = pengetahuan.image_bytes(f)
+            if not data:
+                continue
+            label = r.get("judul_id") or r.get("judul") or f
+            image_id, filename = ai_export.stash_raw(label, data, f"pengetahuan_{f}")
+            gambar.append({"image_id": image_id, "filename": filename,
+                           "pn": label, "nama_figure": label, "kategori": "Pengetahuan"})
+
+    if not hasil:
+        return {"found": False, "jumlah": 0,
+                "catatan": f"Tidak ada pengetahuan internal yang cocok untuk '{topik}'."}
+
+    catatan = (
+        "Isi ini ditulis/diunggah ADMIN MASPART (pengetahuan internal perusahaan, "
+        "BUKAN katalog part). Jawab HANYA dari isi di atas dan SEBUTKAN judul "
+        "dokumen + berkas/halaman sumbernya supaya user bisa menelusuri. ⛔ JANGAN "
+        "mengarang di luar isi ini; bila isi ini tidak menjawab pertanyaannya, "
+        "katakan terus terang."
+    )
+    if ada_tabel_pdf:
+        catatan += (" ⚠️ Field 'tabel' dari sumber PDF adalah REKONSTRUKSI tata letak "
+                    "— jangan klaim presisi kolomnya, sebut angka apa adanya.")
+    out = {"found": True, "jumlah": len(hasil), "hasil": hasil}
+    if gambar:
+        out["gambar"] = gambar
+        catatan += (" Gambar terlampir & tampil OTOMATIS (inline) di bawah jawabanmu "
+                    "— ⛔ JANGAN buat link/gambar sendiri.")
+    out["catatan"] = catatan   # WAJIB key terakhir (_cap_tool_content potong tengah)
+    return out
+
+
 def _t_jadwal_perawatan(args: dict, user: dict) -> dict:
     if not maintenance_ref.available():
         return {"error": "Data jadwal perawatan Shantui belum tersedia di server."}

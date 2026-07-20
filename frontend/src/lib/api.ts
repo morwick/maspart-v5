@@ -1494,6 +1494,165 @@ export async function uploadCatalog(
   return res.json();
 }
 
+// ── Admin: Pengetahuan Asisten AI ───────────────────────────────────
+// Admin menulis/mengunggah pengetahuan internal; server mengindeksnya di latar
+// (status di-polling) lalu asisten memakainya lewat tool `cari_pengetahuan`.
+export type PengetahuanBerkas = {
+  nama: string;
+  nama_simpan?: string;
+  ukuran?: number;
+  ext?: string;
+};
+
+export type PengetahuanProgres = {
+  langkah: string;
+  kini: number;
+  total: number;
+  persen: number;
+};
+
+export type PengetahuanDok = {
+  id: string;
+  judul: string;
+  deskripsi: string;
+  tag: string[];
+  berkas: PengetahuanBerkas[];
+  untuk_pembeli: boolean;
+  pakai_ai: boolean;
+  aktif: boolean;
+  status: "antre" | "proses" | "selesai" | "selesai_sebagian" | "gagal";
+  progres: PengetahuanProgres;
+  jumlah_chunk: number;
+  pengayaan: string;
+  error: string;
+  oleh?: string;
+};
+
+export type PengetahuanChunk = {
+  id: string;
+  dok_id: string;
+  judul: string;
+  judul_id: string;
+  kata_kunci: string[];
+  ringkasan: string;
+  teks: string;
+  tabel: string[][];
+  gambar_ref: string[];
+  sumber: string;
+  halaman: number;
+  tipe: string;
+  untuk_pembeli: boolean;
+  dicari: boolean;
+  kode: string[];
+};
+
+async function pgGet<T>(token: string, path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+async function pgSend<T>(token: string, path: string, method: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function getPengetahuan(
+  token: string,
+): Promise<{ jumlah: number; jumlah_chunk: number; dokumen: PengetahuanDok[] }> {
+  return pgGet(token, "/api/admin/pengetahuan");
+}
+
+export async function getPengetahuanDetail(
+  token: string,
+  id: string,
+): Promise<{ dokumen: PengetahuanDok; chunk: PengetahuanChunk[] }> {
+  return pgGet(token, `/api/admin/pengetahuan/${id}`);
+}
+
+export async function getPengetahuanStatus(
+  token: string,
+  id: string,
+): Promise<Pick<PengetahuanDok, "id" | "status" | "progres" | "jumlah_chunk" | "pengayaan" | "error">> {
+  return pgGet(token, `/api/admin/pengetahuan/${id}/status`);
+}
+
+export async function addPengetahuan(
+  token: string,
+  body: {
+    judul: string;
+    deskripsi?: string;
+    teks?: string;
+    tabel?: string[][];
+    tag?: string;
+    untuk_pembeli?: boolean;
+    pakai_ai?: boolean;
+    files?: File[];
+  },
+): Promise<{ ok: boolean; id: string; status: string }> {
+  const form = new FormData();
+  form.append("judul", body.judul);
+  form.append("deskripsi", body.deskripsi || "");
+  form.append("teks", body.teks || "");
+  if (body.tabel?.length) form.append("tabel_json", JSON.stringify(body.tabel));
+  form.append("tag", body.tag || "");
+  form.append("untuk_pembeli", String(!!body.untuk_pembeli));
+  form.append("pakai_ai", String(body.pakai_ai !== false));
+  for (const f of body.files || []) form.append("files", f);
+  const res = await fetch(`${API_BASE}/api/admin/pengetahuan`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }, // JANGAN set Content-Type
+    body: form,
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function reindexPengetahuan(
+  token: string,
+  id: string,
+): Promise<{ ok: boolean; id: string; status: string }> {
+  return pgSend(token, `/api/admin/pengetahuan/${id}/reindex`, "POST", {});
+}
+
+export async function updatePengetahuan(
+  token: string,
+  id: string,
+  patch: Partial<Pick<PengetahuanDok, "judul" | "deskripsi" | "tag" | "untuk_pembeli" | "aktif" | "pakai_ai">>,
+): Promise<{ ok: boolean; dokumen: PengetahuanDok }> {
+  return pgSend(token, `/api/admin/pengetahuan/${id}`, "PATCH", patch);
+}
+
+export async function updatePengetahuanChunk(
+  token: string,
+  dokId: string,
+  seq: string,
+  patch: { judul_id?: string; kata_kunci?: string[]; dicari?: boolean },
+): Promise<{ ok: boolean; chunk: PengetahuanChunk }> {
+  return pgSend(token, `/api/admin/pengetahuan/${dokId}/chunk/${seq}`, "PATCH", patch);
+}
+
+export async function deletePengetahuan(
+  token: string,
+  id: string,
+): Promise<{ ok: boolean }> {
+  return pgSend(token, `/api/admin/pengetahuan/${id}`, "DELETE");
+}
+
+export async function cariPengetahuan(
+  token: string,
+  q: string,
+): Promise<{ jumlah: number; hasil: PengetahuanChunk[] }> {
+  return pgSend(token, "/api/admin/pengetahuan/cari", "POST", { q });
+}
+
 // ── Admin: Laporan Penjualan ────────────────────────────────────────
 export type SalesRecap = {
   summary: { total_orders: number; paid_orders: number; omzet: number; items_sold: number };

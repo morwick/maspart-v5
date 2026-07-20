@@ -214,6 +214,35 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "cari_pengetahuan",
+                "description": (
+                    "Cari PENGETAHUAN INTERNAL MASPART yang ditulis/diunggah ADMIN: "
+                    "kebijakan & prosedur perusahaan (retur, garansi, klaim, pengiriman, "
+                    "pembayaran), panduan & catatan teknis internal, informasi produk di "
+                    "luar katalog, serta ISI BERKAS yang diunggah admin (PDF/Excel/Word/"
+                    "CSV/TXT) termasuk tabel dan gambar penjelasnya. Pakai bila pertanyaan "
+                    "menyangkut ATURAN/PROSEDUR/KEBIJAKAN MASPART, atau hal yang tidak "
+                    "dilayani tool katalog/stok/harga/manual pabrikan. Jawaban WAJIB "
+                    "bersumber dari isi yang dikembalikan tool ini dan MENYEBUT judul "
+                    "dokumen + berkas/halaman sumbernya. Untuk part/stok/harga pakai "
+                    "cari_part; untuk kode error SPN/FMI/P pakai cari_kode_kesalahan; "
+                    "untuk manual teknik pabrikan pakai cari_manual."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "topik": {
+                            "type": "string",
+                            "description": "Topik dalam Bahasa Indonesia, mis. 'prosedur retur barang', 'syarat klaim garansi', 'kebijakan ongkos kirim', 'panduan pemasangan'.",
+                        },
+                    },
+                    "required": ["topik"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "diagnosa",
                 "description": (
                     "⭐ DIAGNOSA KERUSAKAN — pakai untuk 'kenapa …', 'apa penyebab kode X', "
