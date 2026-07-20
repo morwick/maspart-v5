@@ -1945,24 +1945,6 @@ export async function resolveAiFeedback(
   return res.json();
 }
 
-// Chat dengan FOTO part: foto dikenali via Cari-by-Foto lalu AI menjelaskan.
-export async function aiChatImage(
-  token: string,
-  messages: AIChatTurn[],
-  file: File,
-): Promise<AIChatResult> {
-  const form = new FormData();
-  form.append("messages", JSON.stringify(messages));
-  form.append("file", file);
-  const res = await fetch(`${API_BASE}/api/ai/chat-image`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: form,
-  });
-  if (!res.ok) throw new ApiError(res.status, await parseError(res));
-  return res.json();
-}
-
 // Chat dengan LAMPIRAN EXCEL: server membaca kolomnya, asisten bisa mengisi
 // stok/nama/harga lalu mengeluarkan Excel baru. Balasan memuat `sheet_id` yang
 // harus dikirim ulang di giliran berikutnya agar file tetap terlampir.

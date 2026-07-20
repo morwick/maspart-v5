@@ -8,7 +8,6 @@ import Markdown from "@/components/Markdown";
 import {
   ApiError,
   aiChat,
-  aiChatImage,
   aiChatSheet,
   aiChatStream,
   downloadBlob,
@@ -28,7 +27,6 @@ import { clearSession, getToken } from "@/lib/auth";
 
 type Msg = AIChatTurn & {
   tools?: string[];
-  photo?: string;
   sheetName?: string;  // nama file Excel yang dilampirkan user di pesan ini
   sheet?: AISheetSummary; // ringkasan kolom hasil deteksi server
   repairkitModels?: string[];
@@ -124,8 +122,6 @@ function Icon({ d, size = 16, sw = 1.8 }: { d: string; size?: number; sw?: numbe
 }
 const IC = {
   send: "M22 2 11 13 M22 2 15 22 11 13 2 9 22 2",
-  camera:
-    "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z M16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0z",
   trash:
     "M3 6h18 M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6",
   copy:
@@ -192,7 +188,6 @@ export default function AsistenPage() {
   const dragDepth = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const sheetRef = useRef<HTMLInputElement>(null);
   const firstSave = useRef(true);
 
@@ -332,54 +327,6 @@ export default function AsistenPage() {
     }
   }
 
-  async function sendWithPhoto(file: File) {
-    if (busy) return;
-    const token = getToken();
-    if (!token) return router.replace("/login");
-    if (!file.type.startsWith("image/")) {
-      setError("File harus berupa gambar.");
-      return;
-    }
-    setError(null);
-    const caption = input.trim();
-    const userText =
-      caption || "Tolong kenali part di foto ini (stok, harga, dipakai di unit apa).";
-    const preview = URL.createObjectURL(file);
-    const next: Msg[] = [...msgs, { role: "user", content: userText, photo: preview, at: Date.now() }];
-    setMsgs(next);
-    setInput("");
-    resetTextarea();
-    setBusy(true);
-    try {
-      const payload: AIChatTurn[] = next.map((m) => ({ role: m.role, content: m.content }));
-      const res = await aiChatImage(token, payload, file);
-      setMsgs((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content: res.reply || "(tidak ada jawaban)",
-          tools: res.tools_used,
-          repairkitModels: res.repairkit_models,
-          bandingExports: res.banding_exports,
-          excelExports: res.excel_exports,
-          explodedImages: res.exploded_images,
-          at: Date.now(),
-        },
-      ]);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        clearSession();
-        return router.replace("/login");
-      }
-      setError(err instanceof Error ? err.message : "Gagal mengirim foto.");
-      setMsgs((m) => m.slice(0, -1));
-    } finally {
-      setBusy(false);
-      if (fileRef.current) fileRef.current.value = "";
-      taRef.current?.focus();
-    }
-  }
-
   // Unggah Excel: server membaca kolomnya & menyimpan sheet (TTL 2 jam) → sheet_id
   // dipakai giliran berikutnya ("isikan stoknya di kolom D"). Dipanggil dari send()
   // saat user menekan Kirim — memilih file hanya MELAMPIRKAN, tidak mengirim.
@@ -493,7 +440,6 @@ export default function AsistenPage() {
   }
 
   // ── Seret-lepas file ke area chat ──────────────────────────────────────────
-  // Gambar → langsung dikirim sbg foto part (perilaku tombol kamera).
   // Excel .xlsx/.xlsm → hanya DILAMPIRKAN (perilaku tombol klip) — user mengetik
   // maunya dulu, baru tekan Kirim.
   function dragHasFiles(e: React.DragEvent) {
@@ -529,17 +475,13 @@ export default function AsistenPage() {
     if (busy || available === false) return;
     const f = e.dataTransfer.files?.[0];
     if (!f) return;
-    if (f.type.startsWith("image/")) {
-      sendWithPhoto(f);
-      return;
-    }
     if (/\.(xlsx|xlsm)$/i.test(f.name)) {
       setError(null);
       setPendingSheet(f);
       taRef.current?.focus();
       return;
     }
-    setError("File tidak didukung — seret foto part (gambar) atau Excel .xlsx/.xlsm.");
+    setError("File tidak didukung — seret file Excel .xlsx atau .xlsm.");
   }
 
   return (
@@ -599,7 +541,6 @@ export default function AsistenPage() {
                   Lepaskan file di sini
                 </div>
                 <div style={{ fontSize: 12, color: "var(--ink-500)", lineHeight: 1.5 }}>
-                  Foto part (gambar) langsung dikenali ·<br />
                   Excel .xlsx/.xlsm terlampir dulu, kirim setelah mengetik perintah
                 </div>
               </div>
@@ -668,7 +609,7 @@ export default function AsistenPage() {
                       }}
                     >
                       Cek stok per gudang, harga, part per unit (EPC per-VIN), kode kesalahan,
-                      repair kit, hingga pengenalan part dari <b>foto</b> — semua dari data live.
+                      hingga repair kit — semua dari data live.
                     </div>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
@@ -784,16 +725,6 @@ export default function AsistenPage() {
             )}
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
               <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) sendWithPhoto(f);
-                }}
-              />
-              <input
                 ref={sheetRef}
                 type="file"
                 accept=".xlsx,.xlsm"
@@ -812,15 +743,6 @@ export default function AsistenPage() {
                   taRef.current?.focus();
                 }}
               />
-              <button
-                className="btn btn-ghost"
-                title="Cari part dari foto"
-                onClick={() => fileRef.current?.click()}
-                disabled={busy || available === false}
-                style={{ padding: "0 10px", color: "var(--ink-600)" }}
-              >
-                <Icon d={IC.camera} size={19} />
-              </button>
               <button
                 className="btn btn-ghost"
                 title="Lampirkan Excel (.xlsx) — asisten bisa isi stok/nama part/harga"
@@ -883,7 +805,7 @@ export default function AsistenPage() {
               <span className="chat-kbd-hint">
                 <span className="kbd">Enter</span> kirim · <span className="kbd">Shift+Enter</span> baris baru
               </span>
-              <span>Seret foto part atau Excel ke area chat untuk melampirkan.</span>
+              <span>Seret file Excel ke area chat untuk melampirkan.</span>
               <span>Jawaban part paling akurat bila menyertakan nomor rangka (VIN).</span>
             </div>
           </div>
@@ -1461,19 +1383,6 @@ function Bubble({
             boxShadow: "var(--shadow-1)",
           }}
         >
-          {m.photo && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={m.photo}
-              alt="foto part"
-              onError={(e) => {
-                // URL blob foto bisa mati setelah refresh penuh — sembunyikan
-                // agar tidak tampil ikon gambar rusak.
-                (e.currentTarget as HTMLImageElement).style.display = "none";
-              }}
-              style={{ maxWidth: 200, borderRadius: 10, marginBottom: m.content ? 8 : 0, display: "block" }}
-            />
-          )}
           {m.sheetName && (
             <div
               style={{
