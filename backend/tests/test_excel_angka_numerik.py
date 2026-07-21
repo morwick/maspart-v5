@@ -44,6 +44,20 @@ def test_kolom_harga_jadi_int():
     assert c.data_type == "n"
 
 
+def test_sel_angka_pakai_format_pemisah_ribuan():
+    """Tampilan bertitik (pemisah ribuan) TANPA mengubah nilai — SUM tetap jalan
+    karena selnya tetap numerik. Kunci: NILAI int, FORMAT '#,##0'."""
+    ws = _bangun(["Harga"], [["Rp 1.500.000"]])
+    c = _sel(ws, "Harga")
+    assert c.value == 1500000 and c.data_type == "n"   # nilai tetap angka murni
+    assert c.number_format == X._NUM_FMT               # tampilan bertitik
+
+
+def test_sel_teks_tidak_kena_number_format():
+    ws = _bangun(["Nama Part"], [["Spring bracket 12"]])
+    assert _sel(ws, "Nama Part").number_format == "General"
+
+
 def test_pn_murni_angka_tetap_teks():
     """PN 10 digit tak boleh jadi angka — hilang makna & tampil notasi ilmiah."""
     ws = _bangun(["Part Number", "Qty"], [["1013133963", "2"]])

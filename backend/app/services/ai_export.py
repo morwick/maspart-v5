@@ -332,10 +332,10 @@ _MONO_HEAD_RE = re.compile(r"\b(part\s*number|part\s*no|pn|nomor\s*part|kode)\b"
 # unggahan — ikut kembali jadi angka, tanpa membongkar logika pencocokan PN
 # yang mengandalkan bentuk string.
 
-# Format tampilan sel angka. None = General → sel menampilkan "1500000" polos,
-# sesuai permintaan pemilik "jangan ada Rp dan titik". Ganti ke "#,##0" bila
-# ingin tampilan bertitik — nilainya TETAP numerik & rumus TETAP jalan.
-_NUM_FMT: str | None = None
+# Format TAMPILAN sel angka — hanya kosmetik, NILAI sel tetap int/float murni
+# sehingga SUM/rumus user tetap jalan. "#,##0" = pemisah ribuan mengikuti locale
+# Excel user (titik di Indonesia). Ganti ke None utk angka polos "1500000".
+_NUM_FMT: str | None = "#,##0"
 
 # Header yang mengandung kata angka TAPI isinya naratif → jangan pernah dikoersi.
 _TEXT_HEAD_RE = re.compile(
