@@ -574,6 +574,47 @@ def test_isi_multi_gudang_dan_harga_satu_file(gudang_stok):
     assert per["Harga"] == 1                              # AZ '—' → kosong
 
 
+def test_alias_harga_accurate_sama_dengan_harga_lokal(gudang_stok):
+    """User bilang 'isikan harga Accurate' → model wajar memilih
+    isi='harga_accurate'; alias itu HARUS identik dengan 'harga_lokal'
+    (nama warisan yang menyesatkan — nilainya memang dari indeks Accurate)."""
+    r1 = ai_sheet.fill_columns(_sheet_pn(USER), USER, [{"isi": "harga_accurate"}])
+    r2 = ai_sheet.fill_columns(_sheet_pn(USER), USER, [{"isi": "harga_lokal"}])
+    assert r1["found"] and r2["found"]
+    assert ([c["baris_terisi"] for c in r1["kolom"]]
+            == [c["baris_terisi"] for c in r2["kolom"]] == [1])
+    # Sumber JUJUR: harga datang dari Accurate, bukan harga.xlsx.
+    assert "Accurate" in r1["sumber"]
+    assert "xlsx" not in r1["sumber"]
+
+
+def test_isi_harga_accurate_dan_sims_satu_file(gudang_stok, monkeypatch):
+    """Permintaan pemilik 2026-07-21: 'isikan harga accurate dan harga sims' →
+    SATU file dengan dua kolom harga bersebelahan (jual Rp + modal CNY)."""
+    monkeypatch.setattr(ai_sheet.harga, "batch_harga", lambda pns, **k: {
+        "rate": 2200.0, "count": len(pns), "found": 1,
+        "results": [{"pn": "WG9925520270", "cny": 700, "idr": 1540000, "status": "ok"}],
+    })
+    sid = _sheet_pn(ADMIN)
+    r = ai_sheet.fill_columns(sid, ADMIN, [
+        {"isi": "harga_accurate"},
+        {"isi": "harga_sims"},
+    ], can_sims=True)
+    assert r["found"] and r["export_id"]                  # SATU file
+    per = {c["kolom"]: c["baris_terisi"] for c in r["kolom"]}
+    assert list(per) == ["Harga", "Harga SIMS (CNY)"]
+    assert per["Harga"] == 1                              # WG punya harga Accurate
+    assert per["Harga SIMS (CNY)"] == 1                   # WG punya harga SIMS
+    assert r["mata_uang_harga_sims"] == "CNY"
+
+
+def test_alias_tak_membuka_gerbang_sims(gudang_stok):
+    """Alias ('harga_modal' → harga_sims) TIDAK boleh melewati gerbang admin."""
+    r = ai_sheet.fill_columns(_sheet_pn(USER), USER,
+                              [{"isi": "harga_modal"}], can_sims=False)
+    assert r.get("denied") is True
+
+
 def test_fill_columns_daftar_pn_tidak_ditemukan(gudang_stok):
     """P6 (jalur produksi fill_columns): PN tak ketemu didaftar, bukan cuma dihitung."""
     sid = _sheet_pn(USER)   # berisi ZZZ0000000 (di luar katalog)

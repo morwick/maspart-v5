@@ -1408,10 +1408,13 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         })
         # Pilihan isi kolom: harga_sims HANYA ditawarkan ke admin/SEE_ALL.
-        pilihan = [ai_sheet.ISI_STOK, ai_sheet.ISI_NAMA, ai_sheet.ISI_HARGA_LOKAL,
+        pilihan = [ai_sheet.ISI_STOK, ai_sheet.ISI_NAMA, ai_sheet.ISI_HARGA_ACCURATE,
+                   ai_sheet.ISI_HARGA_LOKAL,
                    ai_sheet.ISI_PENGGANTI, ai_sheet.ISI_CROSS_REF, ai_sheet.ISI_BERAT,
                    ai_sheet.ISI_DIMENSI, ai_sheet.ISI_PEMENUHAN]
-        ket_sims = (" 'pengganti'=PN pengganti (supersession); 'cross_ref'=cross-reference "
+        ket_sims = (" 'harga_accurate'=harga JUAL rupiah dari indeks Accurate ('harga_lokal' "
+                    "= alias lama, sama persis); 'pengganti'=PN pengganti (supersession); "
+                    "'cross_ref'=cross-reference "
                     "merek filter (Fleetguard/Donaldson/dll); 'berat'=berat tertagih kg; "
                     "'dimensi'=ukuran P×L×T cm; 'rencana_pemenuhan'=gudang mana bisa penuhi qty.")
         if _can_sims(user):
@@ -1444,7 +1447,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                             "type": "array",
                             "description": ("Daftar kolom yang akan diisi — SEMUA masuk ke file "
                                             "yang sama. Contoh: [{isi:'stok',gudang:'Jakarta'}, "
-                                            "{isi:'stok',gudang:'Pekanbaru'}, {isi:'harga_lokal'}]."),
+                                            "{isi:'stok',gudang:'Pekanbaru'}, {isi:'harga_accurate'}]."),
                             "items": {
                                 "type": "object",
                                 "properties": {

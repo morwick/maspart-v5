@@ -68,6 +68,30 @@ ISI_PEMENUHAN = "rencana_pemenuhan"  # gudang mana bisa penuhi qty
 ISI_PILIHAN = (ISI_STOK, ISI_NAMA, ISI_HARGA_LOKAL, ISI_HARGA_SIMS,
                ISI_PENGGANTI, ISI_CROSS_REF, ISI_BERAT, ISI_DIMENSI, ISI_PEMENUHAN)
 
+# Alias 'isi' → kanonik. `harga_lokal` adalah NAMA WARISAN yang menyesatkan:
+# nilainya sudah lama datang dari indeks Accurate (harga JUAL rupiah), bukan
+# harga.xlsx. User bilang "isikan harga Accurate" → model wajar menebak
+# 'harga_accurate' — tanpa alias ini tebakan wajar itu berbuah error enum.
+# Gate (can_sims/boleh_harga) dicek SETELAH normalisasi, jadi alias tak pernah
+# menjadi jalan pintas melewati izin.
+ISI_HARGA_ACCURATE = "harga_accurate"
+_ISI_ALIAS = {
+    ISI_HARGA_ACCURATE: ISI_HARGA_LOKAL,
+    "harga": ISI_HARGA_LOKAL,
+    "harga_jual": ISI_HARGA_LOKAL,
+    "harga_rp": ISI_HARGA_LOKAL,
+    "harga_idr": ISI_HARGA_LOKAL,
+    "harga_modal": ISI_HARGA_SIMS,
+    "harga_cny": ISI_HARGA_SIMS,
+    "sims": ISI_HARGA_SIMS,
+}
+
+
+def isi_norm(isi: str) -> str:
+    """Normalkan nilai 'isi' dari model (alias → kanonik, trim + lowercase)."""
+    s = (isi or "").strip().lower()
+    return _ISI_ALIAS.get(s, s)
+
 # ── Deteksi peran kolom ──
 _HEAD_PN = re.compile(r"\b(part\s*number|part\s*no|part\s*num|pn|no\.?\s*part|nomor\s*part|kode\s*part|item\s*code)\b", re.I)
 _HEAD_NAMA = re.compile(r"\b(part\s*name|nama\s*part|nama\s*barang|deskripsi|description|item\s*name|keterangan\s*part)\b", re.I)
@@ -585,6 +609,21 @@ def _cari_kolom(headers: list[str], nama: str) -> int | None:
     return None
 
 
+def _kolom_persis(headers: list[str], nama: str) -> int | None:
+    """Cocok header PERSIS (case/spasi-insensitif) — untuk label OTOMATIS.
+
+    ⛔ Jangan pakai `_cari_kolom` (fuzzy) untuk label otomatis: 'Harga SIMS (CNY)'
+    akan fuzzy-match ke kolom 'Harga' yang baru dibuat sebelumnya → kolom harga
+    Accurate DITIMPA harga SIMS senyap (kasus nyata pemilik 2026-07-21: minta
+    'harga accurate dan harga sims' → satu kolom campur aduk). Fuzzy hanya untuk
+    nama yang DISEBUT user ('kolom D', 'harga')."""
+    n = (nama or "").strip().lower()
+    if not n:
+        return None
+    low = [h.strip().lower() for h in headers]
+    return low.index(n) if n in low else None
+
+
 def _rp_tampilan(v) -> str:
     """Angka → 'Rp 1.500.000' untuk DIBACA MANUSIA/MODEL.
 
@@ -636,6 +675,7 @@ def fill_column(
     if not parsed:
         return {"found": False, "error": "Belum ada file Excel yang diunggah di percakapan ini "
                                          "(atau sudah kedaluwarsa). Minta user unggah ulang."}
+    isi = isi_norm(isi)
     if isi not in ISI_PILIHAN:
         return {"error": f"isi harus salah satu dari {list(ISI_PILIHAN)}"}
     if isi == ISI_HARGA_SIMS and not can_sims:
@@ -663,7 +703,9 @@ def fill_column(
         ISI_HARGA_LOKAL: "Harga",
         ISI_HARGA_SIMS: _label_sims(konversi_idr),
     }[isi]
-    tgt = _cari_kolom(headers, kolom_tujuan) if kolom_tujuan else None
+    # Nama disebut user → fuzzy; label OTOMATIS → cocok persis saja (konsisten
+    # dgn fill_columns: jangan menimpa kolom lain yang kebetulan mirip namanya).
+    tgt = _cari_kolom(headers, kolom_tujuan) if kolom_tujuan else _kolom_persis(headers, label)
     if tgt is None:
         headers.append(kolom_tujuan.strip() or label)
         tgt = len(headers) - 1
@@ -706,7 +748,11 @@ def fill_column(
                 v = _txt(d.get(key))
                 r[tgt] = "" if v in ("N/A", "—") else v
             terisi += 1 if r[tgt] != "" else 0
-        catatan_sumber = "indeks part lokal (stok.xlsx / harga.xlsx / katalog)"
+        # Jujur soal sumber: stok & harga JUAL rupiah = indeks Accurate (bukan
+        # lagi stok.xlsx/harga.xlsx — dilarang pemilik); nama = katalog MASPART.
+        catatan_sumber = ("indeks Accurate (harga JUAL rupiah)" if isi == ISI_HARGA_LOKAL
+                          else "indeks Accurate (stok live)" if isi == ISI_STOK
+                          else "katalog part MASPART")
 
     # PN yang TAK ketemu (setelah pemaaf suffix) — DAFTARKAN, bukan cuma dihitung.
     pn_tidak_ditemukan = [p for p in unik if p not in peta]
@@ -1023,7 +1069,7 @@ def fill_columns(
     for s in (permintaan or []):
         if not isinstance(s, dict):
             continue
-        isi = (s.get("isi") or "").strip()
+        isi = isi_norm(s.get("isi"))
         if not isi:
             continue
         specs.append({"isi": isi,
@@ -1220,7 +1266,10 @@ def fill_columns(
         else:
             label = s["kolom_tujuan"] or _ISI_LABEL[isi]
 
-        tgt = _cari_kolom(headers, label)
+        # Nama disebut user → fuzzy ('kolom D', 'harga'); label OTOMATIS → wajib
+        # persis, supaya 'Harga SIMS (CNY)' tak menimpa kolom 'Harga' (Accurate).
+        tgt = (_cari_kolom(headers, label) if s["kolom_tujuan"]
+               else _kolom_persis(headers, label))
         if tgt is None:
             headers.append(label)
             tgt = len(headers) - 1
@@ -1354,7 +1403,9 @@ def fill_columns(
         "gudang_tak_dikenal": gudang_tak_dikenal,
         "pn_tidak_ditemukan": pn_tidak_ditemukan[:20],
         "pn_tidak_ditemukan_total": len(pn_tidak_ditemukan),
-        "sumber": ("indeks part lokal (stok.xlsx/harga.xlsx/katalog)"
+        # Jujur soal sumber: stok & harga JUAL rupiah = indeks Accurate; nama/
+        # pengganti/berat = katalog & SIMS — BUKAN stok.xlsx/harga.xlsx lagi.
+        "sumber": ("indeks Accurate (stok & harga jual Rp) + katalog MASPART"
                    + (f" + {sumber_sims}" if sumber_sims else "")),
         "catatan": (
             "📎 SATU kartu unduh Excel muncul otomatis di bawah — SEMUA kolom yang diminta ada "
