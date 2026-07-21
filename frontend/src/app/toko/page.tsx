@@ -263,7 +263,7 @@ export default function TokoPage() {
 
   return (
     <AppShell active="/toko" title="Belanja Part" sub="Etalase part siap kirim dari gudang terdekat Anda.">
-      <div className="mx-auto" style={{ maxWidth: 1180, padding: "18px 18px 60px" }}>
+      <div style={{ padding: "18px 18px 60px" }}>
         {/* ── Hero: cari + lokasi + keranjang ── */}
         <div
           style={{
