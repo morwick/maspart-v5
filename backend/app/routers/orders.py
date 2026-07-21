@@ -1,8 +1,12 @@
 """Router Pesanan internal: buat order, pesanan saya, detail, bukti bayar, admin status."""
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import secrets
+import threading
+import time
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel
@@ -14,6 +18,70 @@ from ..services import accurate, gudang, harga, notify, orders, part_index, paym
 from ..services import supabase_client as sb
 
 logger = logging.getLogger("maspart.orders")
+
+# ── Idempotensi POST /orders (L5) ────────────────────────────────────────────
+# Dobel-klik "Bayar" / retry jaringan dgn keranjang identik → satu order & satu
+# VA, bukan dua. Uvicorn 1 worker → state proses-lokal cukup (pola ai_export).
+_ORDER_IDEM_TTL = 90.0
+_order_idem: dict[str, dict] = {}          # fp → {at, resp}
+_order_locks: dict[str, tuple] = {}        # fp → (Lock, terakhir_dipakai)
+_order_locks_guard = threading.Lock()
+
+
+def _order_fp(username: str, body: "CreateOrderRequest") -> str:
+    """Sidik jari checkout: user + item (PN,qty) + penerima + kurir. Sama = maksud
+    pesan yang sama."""
+    items = sorted((str(i.part_number or "").strip().upper(), int(i.qty or 0)) for i in body.items)
+    key = json.dumps({
+        "u": username, "items": items,
+        "r": [body.recipient_name, body.recipient_phone, body.recipient_address, body.recipient_postal],
+        "c": [body.courier, body.courier_service, body.payment_channel],
+    }, sort_keys=True, default=str)
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _order_lock(fp: str) -> threading.Lock:
+    """Lock per-sidik-jari agar dua request kembar diserialkan (yang kedua
+    menemukan hasil yang pertama, tak membuat order baru)."""
+    now = time.monotonic()
+    with _order_locks_guard:
+        for k in [k for k, v in _order_idem.items() if now - v["at"] > _ORDER_IDEM_TTL]:
+            _order_idem.pop(k, None)
+        # Sapu lock lama agar tak menumpuk sepanjang uptime — termasuk lock YATIM
+        # (checkout gagal → tak pernah punya entri cache). Yang sedang dipegang
+        # thread lain JANGAN dibuang: penggantinya membuat dua request kembar
+        # masuk bagian kritis bersamaan.
+        for k, (lk, at) in list(_order_locks.items()):
+            if k != fp and now - at > _ORDER_IDEM_TTL and not lk.locked():
+                _order_locks.pop(k, None)
+        lk, _at = _order_locks.get(fp) or (threading.Lock(), 0.0)
+        _order_locks[fp] = (lk, now)
+        return lk
+
+
+def _order_idem_get(fp: str):
+    ent = _order_idem.get(fp)
+    if ent and time.monotonic() - ent["at"] < _ORDER_IDEM_TTL:
+        return ent["resp"]
+    return None
+
+
+def _order_idem_put(fp: str, resp) -> None:
+    _order_idem[fp] = {"at": time.monotonic(), "resp": resp}
+
+
+def _idem_masih_berlaku(resp) -> bool:
+    """Hasil lama boleh dipakai ulang hanya selama ordernya masih bisa dibayar.
+    Pembeli yang MEMBATALKAN lalu checkout ulang keranjang yang sama dalam <TTL
+    detik harus dapat order + VA baru, bukan order batal berikut VA matinya.
+    Bila status tak bisa dibaca (DB sedang gagal), tetap pakai hasil lama — salah
+    di sisi 'jangan buat order kedua' lebih aman daripada tagihan ganda."""
+    try:
+        cur = orders.get_order(str((resp or {}).get("order_code") or ""))
+    except Exception:                 # pragma: no cover — DB down
+        return True
+    return not cur or cur.get("status") in _PAYABLE
+
 
 router = APIRouter(prefix="/api", tags=["orders"])
 
@@ -192,6 +260,20 @@ def payment_methods(_user: dict = Depends(require_buyer_ready)):
 
 @router.post("/orders")
 def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_ready)):
+    """L5 idempoten: dobel-klik/retry dgn keranjang identik → satu order & satu
+    VA. Lock per-sidik-jari menserialkan request kembar; yang kedua menemukan
+    hasil yang pertama alih-alih membuat order + reservasi + transaksi baru."""
+    fp = _order_fp(user["username"], body)
+    with _order_lock(fp):
+        cached = _order_idem_get(fp)
+        if cached is not None and _idem_masih_berlaku(cached):
+            return cached
+        order = _create_order_impl(body, user)
+        _order_idem_put(fp, order)
+        return order
+
+
+def _create_order_impl(body: CreateOrderRequest, user: dict):
     # Harga & stok yang ditagih HARUS dari indeks Accurate yang masih bisa
     # dipertanggungjawabkan. Bila indeks terlalu tua (sesi Accurate rusak
     # berhari-hari, refresh terjadwal gagal beruntun), harga bisa basi & stok
@@ -490,9 +572,14 @@ async def upload_proof(code: str, file: UploadFile = File(...), user: dict = Dep
 _PAYABLE = {"menunggu_pembayaran", "menunggu_verifikasi"}
 
 
-@router.get("/orders/{code}/payment/status")
+@router.get("/orders/{code}/payment/status",
+            dependencies=[Depends(limit("paystatus", 30, 60))])
 def payment_status(code: str, user: dict = Depends(get_current_user)):
-    """Cek status pembayaran ke gateway; kalau lunas, tandai order diproses."""
+    """Cek status pembayaran ke gateway; kalau lunas, tandai order diproses.
+
+    L3: dibatasi 30/60dtk per IP — tiap panggilan memicu get_status (HTTP ke
+    Midtrans) + berpotensi mutasi; polling normal ~tiap 3-5 dtk aman di bawahnya.
+    """
     is_admin = user.get("role") == "admin"
     o = orders.get_order(code, username=None if is_admin else user["username"])
     if not o:
@@ -505,11 +592,21 @@ def payment_status(code: str, user: dict = Depends(get_current_user)):
     # Verifikasi nominal: jumlah yang dibayar harus sama dengan total tagihan
     # (dicek bila gateway menyertakan amount; VA/QRIS bernominal tetap aman).
     gw_amount = int(res.get("amount") or 0)
-    if paid and gw_amount and gw_amount != int(o.get("total") or 0):
+    _total = int(o.get("total") or 0)
+    if paid and gw_amount and gw_amount != _total:
+        # L2: uang MASUK tapi nominal beda → angkat ke radar admin (jangan hanya
+        # tolak diam-diam; jalur reconcile sudah flag, samakan di sini).
+        orders.flag_amount_mismatch(code, gw_amount, _total)
         return {
             "status": o.get("status"), "paid": False,
-            "error": f"Nominal pembayaran (Rp{gw_amount:,}) tidak sama dengan total tagihan (Rp{int(o.get('total') or 0):,}). Hubungi admin.",
+            "error": f"Nominal pembayaran (Rp{gw_amount:,}) tidak sama dengan total tagihan (Rp{_total:,}). Hubungi admin.",
         }
+    if paid and not gw_amount:
+        # L1: lunas tapi gateway tak menyertakan nominal → tak bisa verifikasi
+        # underpay. Snap mengunci nominal saat pembuatan, jadi ini rare; log agar
+        # tak lolos senyap.
+        logger.warning("polling: gateway lunas TANPA nominal utk order %s — "
+                       "verifikasi underpay dilewati", code)
     if paid and o.get("status") in _PAYABLE:
         if not orders.mark_paid(code, raw=res.get("raw")):
             # Gateway bilang LUNAS tapi status gagal disimpan (DB down). Jangan
@@ -551,8 +648,15 @@ async def payment_webhook(request: Request):
         return {"ok": True, "ignored": "order_id tidak cocok"}
     # Verifikasi nominal (bila gateway menyertakannya) — tolak underpayment.
     gw_amount = int(chk.get("amount") or 0)
-    if gw_amount and gw_amount != int(o.get("total") or 0):
-        return {"ok": True, "ignored": f"nominal tidak cocok ({gw_amount} vs {o.get('total')})"}
+    _total = int(o.get("total") or 0)
+    if gw_amount and gw_amount != _total:
+        # L2: uang beda-nominal masuk → tandai agar admin tahu (dulu hanya
+        # 'ignored' → uang bisa senyap dari radar).
+        orders.flag_amount_mismatch(o["order_code"], gw_amount, _total)
+        return {"ok": True, "ignored": f"nominal tidak cocok ({gw_amount} vs {_total})"}
+    if not gw_amount:
+        logger.warning("webhook: gateway lunas TANPA nominal utk order %s — "
+                       "verifikasi underpay dilewati", o["order_code"])
     # Idempotent: hanya proses kalau order belum lunas.
     if o.get("status") in _PAYABLE:
         if not orders.mark_paid(o["order_code"], raw=data.get("raw")):

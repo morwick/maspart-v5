@@ -55,6 +55,25 @@ def _jangan_bangun_indeks_epc_nyata(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _bersihkan_idempotensi_order():
+    """Cache idempotensi POST /orders (L5) proses-lokal → bersihkan antar-test
+    agar hasil order satu test tak bocor ke test lain yang sidik jarinya sama."""
+    try:
+        from app.routers import orders as _o
+        _o._order_idem.clear()
+        _o._order_locks.clear()
+    except Exception:
+        pass
+    yield
+    try:
+        from app.routers import orders as _o
+        _o._order_idem.clear()
+        _o._order_locks.clear()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _indeks_accurate_segar(monkeypatch):
     """Guard umur indeks (accurate.index_too_old_for_checkout) memblokir checkout
     bila ts=0 (default env test) — dianggap basi. Beri ts SEGAR agar test checkout
