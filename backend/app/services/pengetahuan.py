@@ -756,6 +756,108 @@ _AMBANG_RELATIF = 0.30
 # yang relevan. Kursi sisa tetap diisi ulang, jadi `limit` tak pernah dikorbankan.
 _MAX_PER_DOK = 2
 
+# Kata fungsi & kata tanya yang cocok di hampir semua chunk — menyumbang skor
+# tanpa membedakan apa pun ("bagaimana cara ganti filter": 'bagaimana'/'cara'
+# menaikkan chunk yang salah). Dibuang HANYA dari daftar kata skor; frasa kueri
+# utuh tetap dinilai, dan `_words()` sendiri tidak diubah. Daftar SENGAJA
+# pendek & konservatif: salah-buang kata bermakna lebih mahal daripada
+# membiarkan satu-dua kata umum lolos.
+_STOP_SKOR = frozenset({
+    "yang", "dan", "untuk", "dari", "dengan", "pada", "atau", "ini", "itu",
+    "apa", "apakah", "bagaimana", "berapa", "kenapa", "mengapa", "cara",
+    "adalah", "bisa", "kapan", "dimana", "saat", "jika", "bila",
+})
+
+
+def kata_kueri(topik: str) -> list[str]:
+    """Kata kueri siap-skor/sorot: token `_words` minus stopword skor. Dipakai
+    internal `search_skor` dan oleh tool untuk memilih jendela isi & baris
+    tabel yang relevan."""
+    ql = (topik or "").strip().lower()
+    return [w for w in _words(ql) if w not in _STOP_SKOR]
+
+
+# ── pemilihan isi relevan (dipakai tool penyaji) ─────────────────────
+def potong_relevan(teks: str, words: list[str], batas: int) -> str:
+    """Jendela ≤`batas` char yang memuat kecocokan kata-kueri BERBEDA terbanyak
+    — pengganti `teks[:batas]` yang buta posisi: kalimat penjawab di char 1500
+    dulu terpotong senyap padahal 1200 char kepala tetap terbayar.
+
+    Tie → jendela paling awal. Jendela yang tak mulai dari awal diberi prefiks
+    '…' dan dirapikan ke batas kata. Nol kecocokan eksak (mis. chunk lolos via
+    stem/typo) → kepala teks, perilaku lama."""
+    s = (teks or "").strip()
+    if len(s) <= batas:
+        return s
+    hay = s.lower()
+    posisi: list[tuple[int, int]] = []          # (pos, idx_kata)
+    for wi, w in enumerate(words or []):
+        if not w:
+            continue
+        if _CJK_RE.search(w):
+            p = hay.find(w)
+            while p >= 0 and len(posisi) <= 200:
+                posisi.append((p, wi))
+                p = hay.find(w, p + 1)
+        else:
+            for m in _pola(w).finditer(hay):
+                posisi.append((m.start(), wi))
+                if len(posisi) > 200:
+                    break
+    if not posisi:
+        return s[:batas]
+    posisi.sort()
+    # Kandidat jendela: berawal sedikit SEBELUM tiap posisi kecocokan supaya
+    # kalimatnya ikut terbawa. n posisi ≤ 200 → kuadratik kecil, murah.
+    efektif = batas - 1                          # sisakan 1 char untuk '…'
+    terbaik_n, terbaik_mulai = -1, 0
+    for p, _ in posisi:
+        mulai = max(0, p - 80)
+        akhir = mulai + (batas if mulai == 0 else efektif)
+        n = len({wi for q, wi in posisi if mulai <= q < akhir})
+        if n > terbaik_n:
+            terbaik_n, terbaik_mulai = n, mulai
+    if terbaik_mulai == 0:
+        return s[:batas]
+    potong = s[terbaik_mulai:terbaik_mulai + efektif]
+    # Rapikan kepala ke batas kata (buang pecahan kata pertama).
+    sp = potong.find(" ", 0, 30)
+    if sp > 0:
+        potong = potong[sp + 1:]
+    return "…" + potong
+
+
+def baris_relevan(tabel: list, words: list[str], maks: int = 8) -> tuple[list, int]:
+    """Baris tabel yang memuat kata kueri DIDAHULUKAN (header selalu ikut),
+    kursi sisa diisi baris awal — pengganti `tabel[:maks]` yang buta: baris
+    penjawab di indeks 25 dulu tak pernah terlihat model.
+
+    Return (baris ≤ maks termasuk header, jumlah baris cocok). Urutan asli
+    baris dipertahankan (di-sort ulang) supaya konteks antarbaris tak teracak."""
+    rows = tabel or []
+    if len(rows) <= maks:
+        return rows, 0
+    header, body = rows[0], rows[1:]
+    kursi = maks - 1
+    cocok: list[int] = []
+    if words:
+        for i, b in enumerate(body):
+            hay = " ".join(str(c) for c in b).lower()
+            if any(w in hay for w in words):
+                cocok.append(i)
+                if len(cocok) >= kursi:
+                    break
+    if not cocok:
+        return rows[:maks], 0
+    pilih = list(cocok)
+    for i in range(len(body)):
+        if len(pilih) >= kursi:
+            break
+        if i not in cocok:
+            pilih.append(i)
+    pilih.sort()
+    return [header, *(body[i] for i in pilih)], len(cocok)
+
 
 def _mirip(a: str, b: str) -> bool:
     """Dua chunk dianggap kembar bila salah satu memuat 120 char awal yang lain.
@@ -775,6 +877,14 @@ def search(topik: str = "", limit: int = 5, untuk_pembeli: bool = False) -> list
     `untuk_pembeli=True` (role pembeli) → HANYA chunk yang sengaja dipublikasikan
     admin. Query kosong → []. Query diperluas kamus sinonim istilah lapangan.
     """
+    return [r for _, r in search_skor(topik, limit, untuk_pembeli)]
+
+
+def search_skor(topik: str = "", limit: int = 5,
+                untuk_pembeli: bool = False) -> list[tuple[float, dict]]:
+    """Seperti `search()` tapi mengembalikan (skor, chunk) — skor TIDAK dibuang
+    di ambang modul: tool penyaji memakainya untuk bertingkat (juara kutipan
+    penuh, pendukung lemah cukup judul) dan mendeteksi kecocokan lemah."""
     ql = (topik or "").strip().lower()
     if not ql:
         return []
@@ -796,10 +906,12 @@ def search(topik: str = "", limit: int = 5, untuk_pembeli: bool = False) -> list
     if koreksi:
         daftar.append((koreksi, _BOBOT_TIPO))
     # Token, kelayakan-frasa & stem dihitung SEKALI per varian, bukan per chunk.
+    # Stopword skor dibuang dari daftar KATA saja — frasa `tl` utuh tetap
+    # dinilai, jadi judul kurasi "Cara mengajukan retur" tetap bisa cocok frasa.
     varian = []
     for t, b in daftar:
         tl = t.strip().lower()
-        w = _words(tl)
+        w = [x for x in _words(tl) if x not in _STOP_SKOR]
         stems = _stems_kueri(w)
         qstem = frozenset(k for sk in stems.values() for k in sk)
         varian.append((tl, w, _frasa_layak(tl), b, stems, qstem))
@@ -834,29 +946,29 @@ def search(topik: str = "", limit: int = 5, untuk_pembeli: bool = False) -> list
     # memonopoli seluruh hasil — dokumen lain yang relevan ikut tampil. Kursi
     # yang masih kosong setelah lintasan pertama diisi lagi dari chunk yang
     # tadinya tertahan pagar (limit selalu terpenuhi bila kandidatnya ada).
-    kandidat: list[dict] = []
+    kandidat: list[tuple[float, dict]] = []
     for sc, _, r in scored:
         if sc < lantai:
             break                      # sisanya makin lemah — berhenti
-        kandidat.append(r)
-    out: list[dict] = []
+        kandidat.append((sc, r))
+    out: list[tuple[float, dict]] = []
     per_dok: dict[str, int] = {}
-    tertahan: list[dict] = []
-    for r in kandidat:
-        if any(_mirip(r.get("teks") or "", p.get("teks") or "") for p in out):
+    tertahan: list[tuple[float, dict]] = []
+    for sc, r in kandidat:
+        if any(_mirip(r.get("teks") or "", p.get("teks") or "") for _, p in out):
             continue                   # kembar akibat overlap chunking
         dok = r.get("dok_id") or ""
         if per_dok.get(dok, 0) >= _MAX_PER_DOK:
-            tertahan.append(r)
+            tertahan.append((sc, r))
             continue
-        out.append(r)
+        out.append((sc, r))
         per_dok[dok] = per_dok.get(dok, 0) + 1
         if len(out) >= limit:
             return out
-    for r in tertahan:
-        if any(_mirip(r.get("teks") or "", p.get("teks") or "") for p in out):
+    for sc, r in tertahan:
+        if any(_mirip(r.get("teks") or "", p.get("teks") or "") for _, p in out):
             continue
-        out.append(r)
+        out.append((sc, r))
         if len(out) >= limit:
             break
     return out

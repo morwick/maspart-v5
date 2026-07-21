@@ -648,6 +648,9 @@ _MAX_GAMBAR_PENGETAHUAN = 3
 # buka_pengetahuan = alat BACA satu bagian, biasanya dipanggil sendirian →
 # boleh memakai seluruh jatah 6 gambar per giliran.
 _MAX_GAMBAR_BUKA = 6
+# Ambang skor juara "kecocokan lemah": di bawah ini berarti tak ada satu pun
+# kecocokan kurasi (5)/frasa (20+) — paling banter beberapa kata level teks.
+_SKOR_LEMAH = 10
 
 
 def _label_gambar(r: dict, fname: str) -> str:
@@ -677,8 +680,8 @@ def _t_cari_pengetahuan(args: dict, user: dict) -> dict:
         return {"error": "Belum ada pengetahuan internal yang diindeks di server."}
 
     is_pembeli = (user or {}).get("role") == "pembeli"
-    rows = pengetahuan.search(topik, limit=4, untuk_pembeli=is_pembeli)
-    if not rows:
+    berskor = pengetahuan.search_skor(topik, limit=4, untuk_pembeli=is_pembeli)
+    if not berskor:
         logger.info("MISS cari_pengetahuan q=%r user=%s", topik,
                     (user or {}).get("username") or "?")
         return {
@@ -688,26 +691,45 @@ def _t_cari_pengetahuan(args: dict, user: dict) -> dict:
                         "terus terang dan sarankan menghubungi admin."),
         }
 
+    # Kata kueri (tanpa stopword) untuk memilih JENDELA isi & BARIS tabel yang
+    # benar-benar relevan — bukan kepala chunk/tabel yang buta posisi.
+    kata = pengetahuan.kata_kueri(topik)
+    skor_juara = berskor[0][0]
     hasil: list[dict] = []
     gambar: list[dict] = []
     ada_tabel_pdf = False
     ada_asing = False
     ada_tabel_potong = False
-    for r in rows:
+    ada_tier_lemah = False
+    ada_baris_pilihan = False
+    for sc, r in berskor:
         if is_pembeli and not r.get("untuk_pembeli"):
             continue  # lapis kedua — jangan pernah percaya satu filter saja
         judul = r.get("judul_id") or r.get("judul")
-        # Hasil TERATAS dapat kutipan penuh (itu yang menjawab pertanyaan);
-        # hasil berikutnya cuma konteks pendukung → cukup potongan pendek.
-        # Menghemat ~2 KB per panggilan tanpa mengurangi bahan jawaban.
-        batas_isi = 1200 if not hasil else 500
+        # Penyajian BERTINGKAT sadar-skor: juara dapat kutipan penuh; pendukung
+        # kuat potongan pendek terarah; pendukung lemah (0.30–0.45× juara)
+        # cukup judul+ringkasan — model bisa buka_pengetahuan bila relevan.
+        # Lemah ≠ tak berguna: ketertelusurannya tetap ada, harganya turun.
+        juara = not hasil
+        kuat = sc >= 0.45 * skor_juara
+        batas_isi = 1200 if juara else (400 if kuat else 0)
         item = {
             "judul": judul,
             "sumber": r.get("sumber"),
             "halaman": r.get("halaman") or 0,
-            "ringkasan": r.get("ringkasan") or "",
-            "isi": (r.get("teks") or "")[:batas_isi],
         }
+        isi = ""
+        if batas_isi:
+            isi = pengetahuan.potong_relevan(r.get("teks") or "", kata, batas_isi)
+            if isi:
+                item["isi"] = isi
+        else:
+            ada_tier_lemah = True
+        # Ringkasan fallback = kepala teks — kembar dengan `isi` berjendela-awal;
+        # kembar tak dibayar dua kali. Ringkasan kurasi/LLM (beda isi) tetap ikut.
+        ringkas = (r.get("ringkasan") or "").strip()
+        if ringkas and not (isi and isi[:200].startswith(ringkas[:60])):
+            item["ringkasan"] = ringkas[:160] if not batas_isi else ringkas
         # `dokumen` hanya disertakan bila beda dari judul bagian — kalau sama,
         # itu string kembar yang dibayar dua kali.
         if r.get("judul") and r.get("judul") != judul:
@@ -717,15 +739,26 @@ def _t_cari_pengetahuan(args: dict, user: dict) -> dict:
             ada_asing = True
         if r.get("jalur"):
             item["bagian_dari"] = " › ".join(r["jalur"][-2:])
-        if r.get("tabel"):
-            item["tabel"] = r["tabel"][:8]
-            if r.get("baris_total") and r["baris_total"] > 8:
-                item["tabel_dipotong"] = f"8 dari {r['baris_total']} baris"
+        if r.get("tabel") and batas_isi:
+            baris, n_cocok = pengetahuan.baris_relevan(r["tabel"], kata, 8)
+            item["tabel"] = baris
+            if n_cocok:
+                ada_baris_pilihan = True
+            ditampilkan = max(len(baris) - 1, 0)
+            if r.get("baris_total") and r["baris_total"] > ditampilkan:
+                item["tabel_dipotong"] = f"{ditampilkan} dari {r['baris_total']} baris"
                 ada_tabel_potong = True
             if (r.get("tipe") or "") == "pdf":
                 ada_tabel_pdf = True
         if r.get("kode"):
-            item["kode"] = r["kode"]
+            kd = [str(k) for k in r["kode"]]
+            # Kode yang menyinggung token kueri berangka DIDAHULUKAN, cap 6 —
+            # daftar 12 kode tak relevan = token terbuang.
+            digit_q = [w for w in kata if any(c.isdigit() for c in w)]
+            if digit_q:
+                cocok = [k for k in kd if any(q in k.lower() for q in digit_q)]
+                kd = cocok + [k for k in kd if k not in cocok]
+            item["kode"] = kd[:6]
         hasil.append(item)
         # Anggaran gambar KETAT: batas nyata 6 per giliran ditegakkan frontend
         # dan diakumulasi lintas SEMUA tool, jadi alat penemuan seperti ini tak
@@ -752,12 +785,23 @@ def _t_cari_pengetahuan(args: dict, user: dict) -> dict:
                 "catatan": f"Tidak ada pengetahuan internal yang cocok untuk '{topik}'."}
 
     catatan = (
-        "Isi ini ditulis/diunggah ADMIN MASPART (pengetahuan internal perusahaan, "
-        "BUKAN katalog part). Jawab HANYA dari isi di atas dan SEBUTKAN judul "
-        "dokumen + berkas/halaman sumbernya supaya user bisa menelusuri. ⛔ JANGAN "
-        "mengarang di luar isi ini; bila isi ini tidak menjawab pertanyaannya, "
-        "katakan terus terang."
+        "Pengetahuan internal ADMIN MASPART (bukan katalog part). Jawab HANYA "
+        "dari isi di atas + sebut judul & sumber/halaman. ⛔ JANGAN mengarang; "
+        "bila tak menjawab pertanyaannya, katakan terus terang."
     )
+    # Sinyal keyakinan: skor juara rendah = hanya 1-2 kata lemah yang cocok
+    # (tak ada kecocokan kurasi/frasa) — bahan seperti ini rawan dipaksakan
+    # jadi jawaban. Beri tahu model terang-terangan, itu lebih murah daripada
+    # koreksi halusinasi belakangan.
+    if skor_juara < _SKOR_LEMAH:
+        catatan += (" ⚠️ Kecocokan LEMAH — kemungkinan TIDAK menjawab pertanyaan; "
+                    "jangan dipaksakan, katakan bila tidak relevan.")
+    if ada_tier_lemah:
+        catatan += (" Hasil tanpa 'isi' = kecocokan tipis; bila judulnya relevan, "
+                    "baca utuh via buka_pengetahuan(dokumen, bagian).")
+    if ada_baris_pilihan:
+        catatan += (" Baris tabel yang memuat kata kueri DIDAHULUKAN — urutan "
+                    "baris bukan urutan asli dokumen penuh.")
     if ada_tabel_pdf:
         catatan += (" ⚠️ Field 'tabel' dari sumber PDF adalah REKONSTRUKSI tata letak "
                     "— jangan klaim presisi kolomnya, sebut angka apa adanya.")

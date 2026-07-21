@@ -145,3 +145,88 @@ def test_kursi_sisa_diisi_ulang_dokumen_sama():
     _tulis([_chunk(id=f"aa#{i:04d}", teks=f"prosedur retur varian {i}")
             for i in range(6)])
     assert len(pengetahuan.search("retur", limit=4)) == 4
+
+
+# ── search_skor (V3) ─────────────────────────────────────────────────
+def test_search_skor_juara_terdepan_dan_konsisten_dengan_search():
+    _tulis([
+        _chunk(id="aa#0001", judul_id="Prosedur retur barang"),
+        _chunk(id="bb#0001", dok_id="bb", ringkasan="ringkasan menyebut retur"),
+    ])
+    berskor = pengetahuan.search_skor("retur")
+    assert berskor[0][1]["id"] == "aa#0001"
+    assert berskor[0][0] == max(s for s, _ in berskor)
+    assert [r["id"] for _, r in berskor] == \
+        [r["id"] for r in pengetahuan.search("retur")]
+
+
+# ── stopword skor (V3) ───────────────────────────────────────────────
+def test_kata_tanya_tidak_mencemari_peringkat():
+    """'bagaimana cara …' — kata tanya cocok di mana-mana; tanpa filter, chunk
+    yang kebetulan penuh kata umum bisa menyalip chunk yang benar."""
+    _tulis([
+        _chunk(id="aa#0001", judul_id="Prosedur klaim garansi"),
+        _chunk(id="bb#0001", dok_id="bb",
+               teks="bagaimana cara ini dan itu adalah pertanyaan yang umum "
+                    "bagaimana cara bagaimana cara"),
+    ])
+    hasil = pengetahuan.search("bagaimana cara klaim garansi")
+    assert hasil[0]["id"] == "aa#0001"
+    assert all(h["id"] != "bb#0001" for h in hasil)
+
+
+def test_kueri_full_stopword_tidak_crash():
+    _tulis([_chunk(teks="prosedur retur barang")])
+    assert pengetahuan.search("apa itu ini") == []
+
+
+# ── potong_relevan (V3) ──────────────────────────────────────────────
+def test_potong_relevan_menjangkau_jawaban_di_tengah():
+    """Kalimat penjawab di char ~2200 — `teks[:batas]` lama membuangnya."""
+    teks = ("kalimat pengantar umum tentang dokumen ini. " * 50
+            + "Torsi baut roda adalah 600 Nm sesuai standar pabrikan. "
+            + "penutup dokumen. " * 20)
+    isi = pengetahuan.potong_relevan(teks, ["torsi", "baut"], 400)
+    assert "Torsi baut roda" in isi
+    assert isi.startswith("…")
+    assert len(isi) <= 400
+
+
+def test_potong_relevan_tanpa_kecocokan_pakai_kepala():
+    teks = "awal dokumen. " * 100
+    assert pengetahuan.potong_relevan(teks, ["zebra"], 300) == teks.strip()[:300]
+
+
+def test_potong_relevan_teks_pendek_utuh():
+    assert pengetahuan.potong_relevan("teks pendek saja", ["teks"], 300) == \
+        "teks pendek saja"
+
+
+def test_potong_relevan_kecocokan_di_awal_tanpa_elipsis():
+    teks = "retur barang wajib foto. " + "z" * 4000
+    isi = pengetahuan.potong_relevan(teks, ["retur"], 1200)
+    assert isi == teks[:1200]
+
+
+# ── baris_relevan (V3) ───────────────────────────────────────────────
+def test_baris_relevan_mendahulukan_baris_cocok():
+    """Baris penjawab di indeks 20 — `tabel[:8]` lama tak pernah mengirimnya."""
+    rows = [["Nama", "Nilai"]] + [[f"part {i}", str(i)] for i in range(30)]
+    rows[21] = ["torsi baut roda", "600 Nm"]
+    baris, n_cocok = pengetahuan.baris_relevan(rows, ["torsi"], 8)
+    assert n_cocok == 1
+    assert len(baris) <= 8
+    assert baris[0] == ["Nama", "Nilai"]
+    assert any("torsi" in " ".join(b) for b in baris[1:])
+
+
+def test_baris_relevan_tanpa_cocok_pakai_baris_awal():
+    rows = [["Nama", "Nilai"]] + [[f"part {i}", str(i)] for i in range(30)]
+    baris, n_cocok = pengetahuan.baris_relevan(rows, ["zebra"], 8)
+    assert n_cocok == 0
+    assert baris == rows[:8]
+
+
+def test_baris_relevan_tabel_kecil_utuh():
+    rows = [["a", "b"], ["1", "2"]]
+    assert pengetahuan.baris_relevan(rows, ["zzz"], 8) == (rows, 0)

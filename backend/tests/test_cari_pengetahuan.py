@@ -80,10 +80,11 @@ def test_pembeli_melihat_yang_dipublikasikan():
 
 
 def test_lapis_kedua_menyaring_walau_search_bocor(monkeypatch):
-    """Bila filter search() gagal/di-bypass, handler tetap menahan record internal."""
+    """Bila filter search_skor() gagal/di-bypass, handler tetap menahan record
+    internal."""
     _isi([_chunk(untuk_pembeli=False)])
-    monkeypatch.setattr(pengetahuan, "search",
-                        lambda *a, **k: [_chunk(untuk_pembeli=False)])
+    monkeypatch.setattr(pengetahuan, "search_skor",
+                        lambda *a, **k: [(60.0, _chunk(untuk_pembeli=False))])
     res = ai._t_cari_pengetahuan({"topik": "retur"}, PEMBELI)
     assert res["found"] is False
 
@@ -95,7 +96,9 @@ def test_isi_dipotong_1200_char():
 
 
 def test_hasil_pendukung_dipotong_lebih_pendek():
-    """Hemat token: juara dapat kutipan penuh, pendukung cukup potongan."""
+    """Hemat token: juara dapat kutipan penuh, pendukung KUAT potongan pendek.
+    (V3: 500 → 400 — jendela kini terarah ke kecocokan, bukan kepala buta,
+    jadi lebih pendek TANPA kehilangan bagian yang relevan.)"""
     _isi([
         _chunk(id="aa#0001", judul_id="Prosedur retur", teks="retur " + "x" * 4000),
         _chunk(id="aa#0002", judul_id="Prosedur retur lanjutan",
@@ -104,7 +107,7 @@ def test_hasil_pendukung_dipotong_lebih_pendek():
     res = ai._t_cari_pengetahuan({"topik": "prosedur retur"}, ADMIN)
     assert len(res["hasil"]) == 2
     assert len(res["hasil"][0]["isi"]) == 1200
-    assert len(res["hasil"][1]["isi"]) == 500
+    assert len(res["hasil"][1]["isi"]) == 400
 
 
 def test_dokumen_tak_diulang_saat_sama_dengan_judul():
@@ -191,9 +194,11 @@ def test_instruksi_terjemah_hanya_saat_ada_isi_asing():
 
 
 def test_tabel_terpotong_diberitahukan_ke_model():
+    """V3: angka 'ditampilkan' kini JUJUR (dulu hardcode 8 walau cuma 1 baris
+    yang benar-benar terkirim)."""
     _isi([_chunk(tabel=[["a", "b"], ["1", "2"]], baris_total=40)])
     res = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)
-    assert res["hasil"][0]["tabel_dipotong"] == "8 dari 40 baris"
+    assert res["hasil"][0]["tabel_dipotong"] == "1 dari 40 baris"
     assert "buka_pengetahuan" in res["catatan"]
 
 
@@ -242,3 +247,94 @@ def test_prompt_tidak_berubah_walau_store_diisi():
     sebelum = ai._system_prompt(ADMIN)
     _isi([_chunk(), _chunk(id="aa#0002", judul_id="Klaim garansi")])
     assert ai._system_prompt(ADMIN) == sebelum
+
+
+# ── penyajian bertingkat sadar-skor (V3) ─────────────────────────────
+def _juara_dan_pendukung_lemah():
+    """Juara kurasi (skor ~65) + 2 pendukung frasa-di-teks (~23 ≈ 0.35×) —
+    rasio di bawah 0.45 → tier lemah."""
+    return [
+        _chunk(id="aa#0001", judul_id="Prosedur retur barang",
+               teks="Langkah retur: " + "a" * 2000),
+        _chunk(id="bb#0001", dok_id="bb", judul="Dok B", judul_id="",
+               teks="Bab lain menyinggung prosedur retur barang sekilas. " + "b" * 2000),
+        _chunk(id="cc#0001", dok_id="cc", judul="Dok C", judul_id="",
+               teks="Lampiran juga membahas prosedur retur barang singkat. " + "c" * 2000),
+    ]
+
+
+def test_pendukung_lemah_tanpa_isi_tapi_tetap_tertelusur():
+    _isi(_juara_dan_pendukung_lemah())
+    res = ai._t_cari_pengetahuan({"topik": "prosedur retur barang"}, ADMIN)
+    assert len(res["hasil"]) == 3
+    assert "isi" in res["hasil"][0]                    # juara utuh
+    for h in res["hasil"][1:]:
+        assert "isi" not in h                          # lemah: tanpa isi
+        assert h["judul"] and h["sumber"]              # tapi tetap tertelusur
+    assert "buka_pengetahuan" in res["catatan"]
+    assert list(res)[-1] == "catatan"
+
+
+def test_payload_lemah_jauh_lebih_hemat():
+    """Anggaran token: 2 pendukung lemah TANPA isi — payload harus jauh di
+    bawah era V2 (juara 1200 + 2×500 + ringkasan kembar ≈ >3400 char)."""
+    _isi(_juara_dan_pendukung_lemah())
+    res = ai._t_cari_pengetahuan({"topik": "prosedur retur barang"}, ADMIN)
+    assert len(ai._dump_tool(res, "cari_pengetahuan")) < 3000
+
+
+def test_sinyal_kecocokan_lemah_di_catatan():
+    """Skor juara < ambang (hanya kata level-teks) → model diberi tahu agar
+    tidak memaksakan jawaban dari bahan lemah."""
+    _isi([_chunk(teks="dokumen ini menyebut retur sekali saja tanpa detail")])
+    res = ai._t_cari_pengetahuan({"topik": "retur bengkel"}, ADMIN)
+    assert "LEMAH" in res["catatan"]
+    assert list(res)[-1] == "catatan"
+
+
+def test_kecocokan_kuat_tanpa_sinyal_lemah():
+    _isi([_chunk()])                                   # judul_id kurasi cocok
+    res = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)
+    assert "LEMAH" not in res["catatan"]
+
+
+def test_isi_terarah_ke_kecocokan_bukan_kepala():
+    """Kalimat penjawab di ekor chunk panjang — V2 memotongnya senyap."""
+    teks = ("paragraf pembuka tanpa jawaban. " * 70
+            + "Denda keterlambatan retur adalah dua persen per hari.")
+    _isi([_chunk(judul_id="Ketentuan denda retur", teks=teks)])
+    res = ai._t_cari_pengetahuan({"topik": "denda retur"}, ADMIN)
+    assert "Denda keterlambatan" in res["hasil"][0]["isi"]
+
+
+def test_ringkasan_kembar_dengan_isi_dibuang():
+    """Ringkasan fallback = kepala teks; bila isi juga mulai dari kepala,
+    kembar itu tak dibayar dua kali."""
+    teks = "Barang retur wajib utuh dan disertai foto kondisi. " + "x" * 2000
+    _isi([_chunk(teks=teks, ringkasan=teks[:200])])
+    res = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)
+    assert "ringkasan" not in res["hasil"][0]
+
+    _isi([_chunk(teks=teks, ringkasan="Aturan kondisi barang saat retur.")])
+    res = ai._t_cari_pengetahuan({"topik": "retur"}, ADMIN)
+    assert res["hasil"][0]["ringkasan"] == "Aturan kondisi barang saat retur."
+
+
+def test_baris_tabel_cocok_didahulukan_dan_dicatat():
+    baris = [["Kondisi", "Denda"]] + [[f"kasus {i}", str(i)] for i in range(28)]
+    baris[20] = ["terlambat retur", "2% per hari"]
+    _isi([_chunk(judul_id="Tabel denda retur", tabel=baris, baris_total=28)])
+    res = ai._t_cari_pengetahuan({"topik": "terlambat retur"}, ADMIN)
+    t = res["hasil"][0]["tabel"]
+    assert any("terlambat" in " ".join(b) for b in t[1:])
+    assert "DIDAHULUKAN" in res["catatan"]
+    assert list(res)[-1] == "catatan"
+
+
+def test_kode_cocok_kueri_didahulukan_dan_dicap():
+    kode = [f"AZ15{i:02d}" for i in range(9)] + ["WG9725190102"]
+    _isi([_chunk(teks="daftar kode retur", kode=kode)])
+    res = ai._t_cari_pengetahuan({"topik": "retur WG9725190102"}, ADMIN)
+    k = res["hasil"][0]["kode"]
+    assert k[0] == "WG9725190102"                      # yang ditanya, terdepan
+    assert len(k) <= 6
