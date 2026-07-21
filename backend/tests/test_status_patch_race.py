@@ -57,6 +57,30 @@ def test_patch_tanpa_expect_status_tak_ada_filter(capture):
     assert "status" not in capture["params"]   # perilaku lama tak berubah
 
 
+# ── M2: set_status (jalur admin) compare-and-set ────────────────────────────
+def test_set_status_admin_pakai_expect_status(monkeypatch, capture):
+    """Jalur admin kini compare-and-set: PATCH menyertakan filter status saat ini
+    supaya order yang keburu berubah (mis. dibayar) tak ditimpa."""
+    monkeypatch.setattr(orders, "current_status", lambda code, gudang=None: "menunggu_pembayaran")
+    monkeypatch.setattr(orders, "can_transition", lambda a, b: True)
+    monkeypatch.setattr(reservations, "release", lambda code: None)
+    orders.set_status("PO-1", "batal")
+    assert capture["params"]["status"].startswith("in.(")
+    assert "menunggu_pembayaran" in capture["params"]["status"]
+
+
+def test_set_status_admin_kalah_race_tak_release(monkeypatch, capture):
+    """Order dibayar tepat sebelum admin batal → 0 baris cocok → set_status False
+    & reservasi TIDAK dilepas (mencegah oversell order lunas)."""
+    capture["rows"] = []                       # kalah race
+    monkeypatch.setattr(orders, "current_status", lambda code, gudang=None: "menunggu_pembayaran")
+    monkeypatch.setattr(orders, "can_transition", lambda a, b: True)
+    released = []
+    monkeypatch.setattr(reservations, "release", lambda code: released.append(code))
+    assert orders.set_status("PO-1", "batal") is False
+    assert released == []                       # reservasi TAK dilepas
+
+
 # ── cancel_by_buyer kalah race ──────────────────────────────────────────────
 def test_cancel_kalah_race_saat_sudah_diproses(monkeypatch, capture):
     """Order tampak cancelable saat dibaca, tapi keburu lunas → PATCH 0 baris →
@@ -100,11 +124,27 @@ def test_mark_paid_kalah_race_tak_commit(monkeypatch, capture):
 def test_mark_paid_sukses_commit(monkeypatch, capture):
     capture["rows"] = [{"id": 1}]
     committed = []
-    monkeypatch.setattr(reservations, "commit", lambda code: committed.append(code))
+    # commit mengembalikan True (sukses) — mark_paid kini MEMERIKSA hasilnya &
+    # retry/flag bila gagal. Sukses sekali → dipanggil sekali.
+    monkeypatch.setattr(reservations, "commit",
+                        lambda code: (committed.append(code), True)[1])
     monkeypatch.setattr(orders, "_notify_paid_async", lambda code: None)
 
     assert orders.mark_paid("PO-1", raw={}) is True
     assert committed == ["PO-1"]
+
+
+def test_mark_paid_commit_gagal_ditandai(monkeypatch, capture):
+    """M3: kegagalan commit TAK boleh ditelan — order lunas ditandai agar admin
+    tahu (kalau tidak, reservasi kedaluwarsa → oversell)."""
+    capture["rows"] = [{"id": 1}]
+    monkeypatch.setattr(reservations, "commit", lambda code: False)  # selalu gagal
+    monkeypatch.setattr(orders, "_notify_paid_async", lambda code: None)
+    flagged = []
+    monkeypatch.setattr(orders, "flag_reservation_stuck",
+                        lambda code: flagged.append(code) or True)
+    assert orders.mark_paid("PO-1", raw={}) is True   # pelunasan tetap sukses
+    assert flagged == ["PO-1"]                         # tapi ditandai
 
 
 # ── expire_order kalah race ─────────────────────────────────────────────────

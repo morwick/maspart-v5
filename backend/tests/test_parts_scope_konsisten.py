@@ -24,8 +24,9 @@ def test_detail_scope_reserve_sebelum_scope(monkeypatch):
                         lambda: {("WG9100443050", "01.Jakarta"): 5})
     results = [{"part_number": "WG9100443050", "gudang": {"01.Jakarta": 5, "23.Medan": 2}}]
     out = parts._scope_gudang(results, {"username": "budi", "role": "pembeli"})
-    # Jakarta habis direservasi → fallback Medan 2 (BUKAN kosong).
-    assert out[0]["gudang"] == {"23.Medan": 2}
+    # Jakarta habis direservasi → fallback Medan 2 (BUKAN kosong). Label pembeli
+    # kini nama KOTA (tanpa nomor gudang) — rincian internal disembunyikan.
+    assert out[0]["gudang"] == {"Medan": 2}
 
 
 def test_detail_scope_tanpa_reservasi_pakai_gudang_sendiri(monkeypatch):
@@ -33,7 +34,7 @@ def test_detail_scope_tanpa_reservasi_pakai_gudang_sendiri(monkeypatch):
     monkeypatch.setattr(parts.reservations, "reserved_map", lambda: {})
     results = [{"part_number": "WG9100443050", "gudang": {"01.Jakarta": 5, "23.Medan": 2}}]
     out = parts._scope_gudang(results, {"username": "budi", "role": "pembeli"})
-    assert out[0]["gudang"] == {"01.Jakarta": 5}
+    assert out[0]["gudang"] == {"Jakarta": 5}      # label kota (M5)
 
 
 def test_katalog_dan_detail_sepakat_saat_reservasi(monkeypatch):
@@ -54,8 +55,8 @@ def test_katalog_dan_detail_sepakat_saat_reservasi(monkeypatch):
         {"part_number": "WG9100443050", "gudang": dict(bd)},
         "budi", own="01.Jakarta", all_names=["01.Jakarta", "23.Medan"], resv=dict(resv),
     )
-    # Detail → {'23.Medan': 2}; etalase → (2, 'Medan') — gudang & qty konsisten.
-    assert detail == {"23.Medan": 2}
+    # Detail → {'Medan': 2} (label kota); etalase → (2, 'Medan') — konsisten.
+    assert detail == {"Medan": 2}
     assert qty == 2 and "Medan" in label
 
 

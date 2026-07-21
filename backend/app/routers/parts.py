@@ -101,7 +101,14 @@ def _scope_gudang(results: list[dict], user: dict) -> list[dict]:
             pn = str(r.get("part_number", "")).upper()
             bd = {g: q - resv.get((pn, g), 0) for g, q in bd.items()}
             bd = {g: q for g, q in bd.items() if q > 0}  # buang yang habis (tersisa ≤ 0)
-        r["gudang"] = gudang.scope_breakdown(bd, uname, role, names, own=own)
+        scoped = gudang.scope_breakdown(bd, uname, role, names, own=own)
+        if role == "pembeli":
+            # Sembunyikan label gudang BERNOMOR (mis. '01.Jakarta','06.B80 H1')
+            # — pembeli hanya boleh lihat nama kota, konsisten dgn etalase.
+            # scope_breakdown mengembalikan SATU gudang pemenuh utk pembeli →
+            # tak ada tabrakan kunci saat di-relabel.
+            scoped = {gudang.gudang_label(g): q for g, q in scoped.items()}
+        r["gudang"] = scoped
     return results
 
 
@@ -252,6 +259,11 @@ def accurate_stock(
         permissions.strip_harga(resp)
     if not permissions.boleh_stok(user):
         permissions.strip_stok(resp, extra=permissions.ROUTER_STOK_EXTRA)
+    # Pembeli boleh_stok=True (perlu tahu ketersediaan) TAPI rincian antar-gudang
+    # (per_gudang: distribusi stok semua cabang, termasuk gudang internal) TIDAK
+    # boleh bocor — aturan pemilik "gudang disembunyikan dari pembeli".
+    if (user.get("role") or "").lower() == "pembeli":
+        resp.get("stock", {}).pop("per_gudang", None)
     return resp
 
 

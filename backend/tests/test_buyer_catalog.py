@@ -46,6 +46,11 @@ def _mock_sumber(monkeypatch):
     monkeypatch.setattr(part_index, "gudang_names", lambda: ["01.Jakarta", "23.Medan"])
     monkeypatch.setattr(part_index, "status", lambda: {"indexed_at": "T1"})
     monkeypatch.setattr(accurate, "all_items", lambda force=False: list(_ACC_ITEMS))
+    # stock_full = sumber harga/stok SAMA dgn checkout (etalase kini memakainya
+    # agar harga tampil = harga ditagih). Konsisten dgn _ACC_ITEMS (PN unik).
+    _acc_by_pn = {it["pn"].upper(): it for it in _ACC_ITEMS}
+    monkeypatch.setattr(accurate, "stock_full",
+                        lambda pn: _acc_by_pn.get((pn or "").upper()))
     monkeypatch.setattr(accurate, "snapshot", lambda: {"x": 1})
     monkeypatch.setattr(accurate, "gudang_breakdown", lambda pn: {})
     monkeypatch.setattr(image_search, "photo_url_map", lambda: dict(_FOTOS))

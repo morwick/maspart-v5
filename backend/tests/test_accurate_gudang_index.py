@@ -56,6 +56,40 @@ def test_enrich_warehouses(monkeypatch):
     assert ac.gudang_enriched_count() == 2
 
 
+# ── H2: guard-kosong — jangan timpa by_gudang bagus dengan {} ────────────────
+def test_enrich_per_pn_kosong_tak_menimpa_indeks_bagus(monkeypatch):
+    """Nol PN ter-enrich (mis. semua stok 0) TAK boleh menimpa indeks lama →
+    kalau tidak, etalase & checkout jadi 'habis' semua sampai window berikut."""
+    bagus = {"AZ1": {"04.Palembang": 5.0}}
+    monkeypatch.setitem(ac._index_cache, "by_gudang", dict(bagus))
+    monkeypatch.setattr(ac, "available", lambda: True)
+    monkeypatch.setattr(ac, "refresh", lambda force=False: {"by_pn": {}})  # 0 in-stock
+    n = ac.enrich_warehouses()
+    assert n == 1                                              # jumlah lama
+    assert ac.gudang_breakdown("AZ1") == {"04.Palembang": 5.0}  # DIPERTAHANKAN
+
+
+def test_enrich_report_kosong_tak_menimpa_indeks_bagus(monkeypatch):
+    bagus = {"AZ1": {"01.Jakarta": 9.0}}
+    monkeypatch.setitem(ac._index_cache, "by_gudang", dict(bagus))
+    monkeypatch.setattr(ac, "_ensure_session", lambda: object())
+    monkeypatch.setattr(ac, "_stock_report_xls", lambda sess: b"")
+    monkeypatch.setattr(ac, "_parse_stock_report", lambda xls: {})   # parse 0 PN
+    ac.enrich_warehouses_via_report()
+    assert ac.gudang_breakdown("AZ1") == {"01.Jakarta": 9.0}   # tak ditimpa {}
+
+
+# ── H3: umur indeks untuk checkout ──────────────────────────────────────────
+def test_index_too_old_for_checkout(monkeypatch):
+    import time
+    monkeypatch.setitem(ac._index_cache, "ts", 0.0)
+    assert ac.index_too_old_for_checkout() is True            # belum pernah refresh
+    monkeypatch.setitem(ac._index_cache, "ts", time.time())
+    assert ac.index_too_old_for_checkout() is False           # baru
+    monkeypatch.setitem(ac._index_cache, "ts", time.time() - 25 * 3600)
+    assert ac.index_too_old_for_checkout() is True            # 25 jam → basi
+
+
 def test_gudang_breakdown_kosong(monkeypatch):
     monkeypatch.setitem(ac._index_cache, "by_gudang", {})
     assert ac.gudang_breakdown("XYZ") == {}

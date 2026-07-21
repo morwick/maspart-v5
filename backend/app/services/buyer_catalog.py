@@ -133,6 +133,16 @@ def _build_products() -> list[dict]:
     out: list[dict] = []
     for p in picked.values():
         pn = p["part_number"]
+        # Harga & stok TAMPIL diambil dari sumber yang SAMA dgn checkout
+        # (accurate.stock_full → by_pn item stok tertinggi). Dulu etalase memakai
+        # kemunculan all_items PERTAMA → bisa item berbeda dari yang dipilih
+        # checkout → harga tampil ≠ ditagih, atau tampil padahal checkout menolak
+        # (item stok-tertinggi berharga 0). Bila harga checkout ≤0 → jangan pajang.
+        hit = accurate.stock_full(pn)
+        harga_jual = int((hit or {}).get("price") or 0)
+        if harga_jual <= 0:
+            continue
+        stok_tot = int((hit or {}).get("available_to_sell") or 0)
         berat = harga.weight_for(pn)
         if not berat or berat <= 0:
             continue  # keranjang menolak part tanpa berat — jangan dipajang
@@ -143,13 +153,13 @@ def _build_products() -> list[dict]:
         out.append({
             "part_number": pn,
             "name": p["name"],
-            "harga": p["harga"],
-            "harga_display": _rupiah(p["harga"]),
+            "harga": harga_jual,
+            "harga_display": _rupiah(harga_jual),
             "berat": int(berat),
             "foto": photos.get(pn),
             "kategori": _kategori_for(name_up),
             "gudang": bd,
-            "stok_total": max(int(p["stok_total"]), sum(bd.values())),
+            "stok_total": max(stok_tot, sum(bd.values())),
             "_hay": f"{pn} {name_up}",
             "_flat": _flat(pn),
         })

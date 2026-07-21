@@ -771,6 +771,14 @@ def enrich_warehouses() -> int:
             built[key] = _warehouse_map(v.get("accurate_id"))
             if i % _GUDANG_ENRICH_PUBLISH_EVERY == 0:
                 _index_cache["by_gudang"] = dict(built)   # publish parsial
+        if not built:
+            # Nol PN ter-enrich (mis. by_pn kosong / semua available_to_sell 0)
+            # — jangan timpa indeks per-gudang lama yang bagus dgn {}.
+            prev = gudang_enriched_count()
+            if prev:
+                logger.warning("[accurate] enrichment per-PN 0 hasil — indeks lama "
+                               "(%d) DIPERTAHANKAN", prev)
+                return prev
         _index_cache["by_gudang"] = built
         _index_cache["gudang_ts"] = time.time()
         return len(built)
@@ -891,6 +899,20 @@ def enrich_warehouses_via_report() -> int:
         by_g = _do(_refresh_session())
     except AccurateError as e:
         logger.warning("[accurate] enrichment via report gagal (%s) — fallback per-PN", e)
+        return enrich_warehouses()
+    if not by_g:
+        # Report HTTP sukses tapi parsing 0 PN (format report berubah / baris
+        # bergeser / semua qty 0). Menimpa by_gudang dgn {} membuat etalase &
+        # checkout 'habis' semua (gudang_breakdown kosong) sampai window
+        # berikutnya, DAN _save_index mem-persist kosong itu. Guard sama dgn
+        # refresh: cache tua > cache kosong.
+        prev = gudang_enriched_count()
+        if prev:
+            logger.warning("[accurate] report enrichment 0 PN — indeks per-gudang "
+                           "lama (%d) DIPERTAHANKAN, tak ditimpa kosong", prev)
+            return prev
+        logger.warning("[accurate] report enrichment 0 PN & belum ada indeks — "
+                       "fallback per-PN")
         return enrich_warehouses()
     _index_cache["by_gudang"] = by_g
     _index_cache["gudang_ts"] = time.time()
@@ -1067,6 +1089,23 @@ def index_stamp() -> tuple[float, float]:
         float(_index_cache.get("ts") or 0.0),
         float(_index_cache.get("gudang_ts") or 0.0),
     )
+
+
+# Batas umur indeks agregat untuk TRANSAKSI UANG (checkout). Refresh terjadwal
+# 3×/hari; 24 jam = beberapa window gagal berturut-turut → harga/stok tak bisa
+# dipertanggungjawabkan untuk menagih pembeli. TIDAK dipakai memblokir
+# pencarian/etalase (yang boleh best-effort).
+_INDEX_MAX_AGE_CHECKOUT = 24 * 3600.0
+
+
+def index_too_old_for_checkout() -> bool:
+    """True bila indeks agregat Accurate terlalu tua (atau belum ada) untuk jadi
+    dasar checkout — harga bisa basi & stok bisa oversell vs ERP. `ts` dipersist
+    ke disk, jadi restart dgn indeks masih segar TIDAK ikut terblokir."""
+    ts = float(_index_cache.get("ts") or 0.0)
+    if ts <= 0:
+        return True
+    return (time.time() - ts) > _INDEX_MAX_AGE_CHECKOUT
 
 
 def items_matching(terms: Iterable[str], *, limit: int = 400) -> list[dict[str, Any]]:

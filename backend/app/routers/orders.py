@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.ratelimit import limit
 from ..deps import get_current_user, require_admin, require_buyer_ready
-from ..services import gudang, harga, notify, orders, part_index, payments, reservations, shipping
+from ..services import accurate, gudang, harga, notify, orders, part_index, payments, reservations, shipping
 from ..services import supabase_client as sb
 
 logger = logging.getLogger("maspart.orders")
@@ -192,6 +192,15 @@ def payment_methods(_user: dict = Depends(require_buyer_ready)):
 
 @router.post("/orders")
 def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_ready)):
+    # Harga & stok yang ditagih HARUS dari indeks Accurate yang masih bisa
+    # dipertanggungjawabkan. Bila indeks terlalu tua (sesi Accurate rusak
+    # berhari-hari, refresh terjadwal gagal beruntun), harga bisa basi & stok
+    # oversell vs ERP — tolak checkout, jangan menjual buta.
+    if accurate.index_too_old_for_checkout():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Stok & harga sedang disinkronkan ulang dari sistem gudang. Silakan "
+            "coba lagi beberapa saat lagi.")
     items = [i.model_dump() for i in body.items]
     # SATU pesanan = SATU gudang (aturan pemilik). Dicek di awal, sebelum order/reservasi
     # dibuat — bukan cuma di UI, karena ongkirnya hanya bisa dihitung dari satu asal.
@@ -230,10 +239,17 @@ def create_order(body: CreateOrderRequest, user: dict = Depends(require_buyer_re
     stock_map: dict[tuple[str, str], int] = {}  # (PN, gudang) → stok Excel, untuk verifikasi pasca-reservasi
     for it in body.items:
         pn = (it.part_number or "").strip().upper()
+        # Tolak qty tak valid SECARA EKSPLISIT. Dulu router men-clamp ke 1
+        # sedangkan create_order men-skip qty<1 → item qty-negatif direservasi
+        # tapi tak masuk pesanan (stok hantu tertahan). Samakan: qty<1 = 400.
         try:
-            qty = max(1, int(it.qty or 1))
+            qty = int(it.qty or 1)
         except Exception:
-            qty = 1
+            qty = 0
+        if qty < 1:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Jumlah tidak valid untuk {it.part_number or pn}.")
         # Reservasi dikurangkan SEBELUM scoping agar gudang pemenuh dipilih dengan
         # fallback gudang terdekat saat gudang sendiri habis — konsisten dgn
         # etalase (buyer_catalog) & halaman detail (parts._scope_gudang).

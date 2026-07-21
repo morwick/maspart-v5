@@ -78,11 +78,20 @@ def test_accurate_stock_strip_stok_tanpa_izin(perms, accurate_full):
     assert stock["name"] == "N"                      # non-stok utuh
 
 
-def test_accurate_stock_stok_utuh_utk_yang_berhak(perms, accurate_full):
-    for u in (ADMIN, AGUS, PEMBELI):
+def test_accurate_stock_stok_utuh_utk_admin_dan_staf(perms, accurate_full):
+    for u in (ADMIN, AGUS):
         stock = parts_router.accurate_stock(pn="X", user=u)["stock"]
         assert stock["available_to_sell"] == 5
-        assert stock["per_gudang"]
+        assert stock["per_gudang"]              # rincian antar-gudang utk internal
+
+
+def test_accurate_stock_pembeli_lihat_ketersediaan_tanpa_per_gudang(perms, accurate_full):
+    """Pembeli perlu tahu ADA stok (available_to_sell) tapi TIDAK boleh melihat
+    distribusi antar-gudang — aturan 'gudang disembunyikan dari pembeli'."""
+    stock = parts_router.accurate_stock(pn="X", user=PEMBELI)["stock"]
+    assert stock["available_to_sell"] == 5      # ketersediaan tetap
+    assert stock["harga"] == 100000             # harga jual tetap
+    assert "per_gudang" not in stock            # rincian gudang DIBUANG
 
 
 # ── /api/stok/list ───────────────────────────────────────────────────────────

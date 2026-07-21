@@ -610,10 +610,19 @@ def set_status(order_code: str, status: str) -> bool:
     if status not in STATUSES:
         return False
     # Tolak transisi ilegal (mis. selesai→menunggu_pembayaran, hidupkan batal).
-    if not can_transition(current_status(order_code), status):
+    cur = current_status(order_code)
+    if not can_transition(cur, status):
         return False
-    ok = _patch(order_code, {"status": status})
-    if ok and status in _RELEASE_ON:
+    # COMPARE-AND-SET: tulis HANYA bila status masih `cur` saat ini. Tanpa ini,
+    # admin membatalkan order tepat saat pembeli membayar bisa MENIMPA order
+    # lunas jadi 'batal' + melepas reservasi permanen (uang sudah masuk, stok
+    # oversell). Jalur mark_paid/expire/cancel_by_buyer sudah pakai pola ini.
+    ok = _patch(order_code, {"status": status}, expect_status={cur} if cur else None)
+    if not ok:
+        logger.warning("set_status(%s→%s) kalah race / status berubah — tak menimpa",
+                       order_code, status)
+        return False
+    if status in _RELEASE_ON:
         reservations.release(order_code)  # lepas tahanan stok (lihat _RELEASE_ON)
     return ok
 
@@ -623,13 +632,20 @@ def set_status_branch(order_code: str, gudang_label: str, status: str, tracking_
     if status not in STATUSES:
         return False
     # Validasi transisi pada order milik gudang ini (None bila bukan miliknya → ditolak).
-    if not can_transition(current_status(order_code, gudang=gudang_label), status):
+    cur = current_status(order_code, gudang=gudang_label)
+    if not can_transition(cur, status):
         return False
     data: dict = {"status": status}
     if tracking_no is not None:
         data["tracking_no"] = tracking_no
-    ok = _patch(order_code, data, gudang=gudang_label)
-    if ok and status in _RELEASE_ON:
+    # COMPARE-AND-SET (lihat set_status) — jangan menimpa order yang statusnya
+    # keburu berubah (mis. dibayar) di antara baca & tulis.
+    ok = _patch(order_code, data, gudang=gudang_label, expect_status={cur} if cur else None)
+    if not ok:
+        logger.warning("set_status_branch(%s→%s) kalah race — tak menimpa",
+                       order_code, status)
+        return False
+    if status in _RELEASE_ON:
         reservations.release(order_code)  # lepas tahanan stok (lihat _RELEASE_ON)
     return ok
 
@@ -774,11 +790,34 @@ def mark_paid(order_code: str, raw: dict | None = None) -> bool:
     ok = _patch(order_code, data, expect_status=_PAYABLE)
     if ok:
         # Order lunas: jadikan reservasi stok permanen agar tidak ikut kedaluwarsa.
-        reservations.commit(order_code)
+        # Kegagalan commit TAK BOLEH ditelan: bila expires_at tetap terpasang,
+        # reservasi order yang SUDAH DIBAYAR kedaluwarsa 24 jam kemudian → stok
+        # "kembali tersedia" → oversell. Retry; bila tetap gagal, tandai order
+        # agar admin memperbaikinya (uang sudah masuk).
+        if not _commit_reservasi(order_code):
+            logger.error("mark_paid: reservations.commit GAGAL utk %s (uang sudah "
+                         "masuk) — reservasi bisa kedaluwarsa → oversell; ditandai",
+                         order_code)
+            try:
+                flag_reservation_stuck(order_code)
+            except Exception:  # pragma: no cover
+                pass
         # Notif Telegram LUNAS — di daemon thread. get_order() = 2 GET Supabase;
         # menjalankannya sinkron di jalur webhook bisa timeout → Midtrans retry.
         _notify_paid_async(order_code)
     return ok
+
+
+def _commit_reservasi(order_code: str, percobaan: int = 3) -> bool:
+    """reservations.commit dgn beberapa percobaan (Supabase bisa tersendat
+    sesaat). True bila salah satu percobaan sukses."""
+    for _ in range(percobaan):
+        try:
+            if reservations.commit(order_code):
+                return True
+        except Exception:  # pragma: no cover
+            pass
+    return False
 
 
 def _notify_paid_async(order_code: str) -> None:
@@ -815,6 +854,16 @@ def _flag_payment(order_code: str, note: str) -> bool:
     except Exception:
         logger.exception("_flag_payment gagal (order %s)", order_code)
         return False
+
+
+def flag_reservation_stuck(order_code: str) -> bool:
+    """Tandai order LUNAS yang reservasi stoknya gagal dijadikan permanen — tanpa
+    intervensi, reservasi kedaluwarsa & stok bisa oversell. Muncul di
+    problem_orders (uang_perlu_dicek) supaya admin cek stoknya."""
+    return _flag_payment(order_code, (
+        "Order LUNAS tapi reservasi stok gagal dipermanenkan — cek & tahan stoknya "
+        "manual sebelum kedaluwarsa (risiko oversell)."
+    ))
 
 
 def flag_late_payment(order_code: str, amount: int = 0) -> bool:

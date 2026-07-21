@@ -122,6 +122,36 @@ def test_create_order_menolak_keranjang_lintas_gudang(monkeypatch):
     assert dibuat == []          # order tak pernah dibuat / stok tak direservasi
 
 
+def test_create_order_tolak_qty_negatif(monkeypatch):
+    """M4: qty<1 ditolak EKSPLISIT (400). Dulu router men-clamp ke 1 sedangkan
+    create_order men-skip → item hantu direservasi tapi tak masuk pesanan."""
+    monkeypatch.setattr(R.payments, "available", lambda: True)
+    dibuat = []
+    monkeypatch.setattr(R.orders, "create_order", lambda *a, **kw: dibuat.append(a) or ({}, None))
+    body = R.CreateOrderRequest(
+        items=[R.OrderItemIn(part_number="P-PKU", qty=-1)],
+        payment_method="gateway", recipient_name="Roni", recipient_phone="0811",
+        recipient_address="Jl. X", recipient_postal="40111")
+    with pytest.raises(HTTPException) as e:
+        R.create_order(body, USER)
+    assert e.value.status_code == 400
+    assert "tidak valid" in str(e.value.detail).lower()
+    assert dibuat == []          # order & reservasi tak pernah dibuat
+
+
+def test_create_order_diblokir_saat_indeks_basi(monkeypatch):
+    """H3: indeks Accurate terlalu tua → checkout ditolak 503 (jangan jual harga
+    basi / oversell vs ERP)."""
+    monkeypatch.setattr(R.accurate, "index_too_old_for_checkout", lambda: True)
+    body = R.CreateOrderRequest(
+        items=[R.OrderItemIn(part_number="P-PKU", qty=1)],
+        payment_method="gateway", recipient_name="Roni", recipient_phone="0811",
+        recipient_address="Jl. X", recipient_postal="40111")
+    with pytest.raises(HTTPException) as e:
+        R.create_order(body, USER)
+    assert e.value.status_code == 503
+
+
 def test_keranjang_satu_gudang_tetap_lolos(monkeypatch):
     """Aturan ini tak boleh mengganggu keranjang normal (satu gudang)."""
     body = R.RatesRequest(weight_grams=2000, dest_postal="40111",

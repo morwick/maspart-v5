@@ -52,3 +52,17 @@ def _jangan_bangun_indeks_epc_nyata(monkeypatch):
         monkeypatch.setattr(epc_bom, "items_index_ready", lambda r: False)
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _indeks_accurate_segar(monkeypatch):
+    """Guard umur indeks (accurate.index_too_old_for_checkout) memblokir checkout
+    bila ts=0 (default env test) — dianggap basi. Beri ts SEGAR agar test checkout
+    yang tak menguji integritas indeks tetap jalan; test khusus H3 meng-override
+    ts-nya sendiri (monkeypatch.setitem menang di scope test)."""
+    try:
+        import time
+        from app.services import accurate
+        monkeypatch.setitem(accurate._index_cache, "ts", time.time())
+    except Exception:
+        pass
