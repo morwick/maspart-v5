@@ -65,6 +65,11 @@ def create_for_order(order: dict) -> dict:
     except accurate.AccurateError as e:
         return {"status": "failed", "note": f"login Accurate gagal: {str(e)[:150]}"}
 
+    # ⚠️ MULAI SINI SESI ACCURATE SUDAH TERBUKA → apa pun hasilnya, LEPASKAN di
+    # `finally`. Akun Accurate 1-SESI: selama MASPART memegangnya, admin tak bisa
+    # login manual. Pemicunya adalah pembeli MEMBAYAR — bisa tengah malam, tanpa
+    # siapa pun menunggu — jadi menahan kursi sampai idle-logout 2 menit murni
+    # merugikan. Dulu jalur ini memang tak pernah logout sama sekali.
     try:
         lines, missing, noprice = [], [], []
         for it in (order.get("items") or []):
@@ -122,6 +127,16 @@ def create_for_order(order: dict) -> dict:
     except Exception as e:  # jaring pengaman terakhir — jangan pernah bocor ke pemanggil
         logger.exception("buat penawaran otomatis gagal (order %s)", code)
         return {"status": "failed", "note": str(e)[:200]}
+    finally:
+        # ⛔ SENGAJA TANPA suppress_autologin(), beda dari jalur manual asisten:
+        # di sana admin baru saja menekan tombol dan akan segera membuka Accurate,
+        # jadi auto-login latar ditahan 10 menit. Di sini tak ada siapa-siapa yang
+        # menunggu — menahan auto-login hanya akan menunda refresh indeks
+        # terjadwal tanpa manfaat. Cukup lepaskan kursinya.
+        try:
+            accurate.logout()
+        except Exception:   # pragma: no cover — logout() sendiri sudah best-effort
+            logger.exception("logout Accurate setelah penawaran gagal (order %s)", code)
 
 
 def create_for_order_bg(order_code: str) -> None:

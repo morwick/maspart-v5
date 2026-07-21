@@ -111,3 +111,51 @@ def test_failed_create_exception_tak_bocor(acc, monkeypatch):
     monkeypatch.setattr(aq.accurate, "create_sales_quotation", _boom)
     r = aq.create_for_order(_order())            # tak boleh raise
     assert r["status"] == "failed"
+
+
+# ── Lepas sesi Accurate setelah selesai (akun 1-SESI) ───────────────────────
+
+@pytest.fixture
+def sesi(monkeypatch):
+    """Catat logout & penahanan auto-login."""
+    jejak = {"logout": 0, "suppress": 0}
+    monkeypatch.setattr(aq.accurate, "logout",
+                        lambda: jejak.__setitem__("logout", jejak["logout"] + 1) or True)
+    monkeypatch.setattr(aq.accurate, "suppress_autologin",
+                        lambda *a, **k: jejak.__setitem__("suppress", jejak["suppress"] + 1),
+                        raising=False)
+    return jejak
+
+
+def test_sesi_dilepas_setelah_penawaran_dibuat(acc, sesi):
+    """Selama MASPART memegang sesi, admin TAK BISA login Accurate manual."""
+    assert aq.create_for_order(_order())["status"] == "created"
+    assert sesi["logout"] == 1
+
+
+def test_sesi_dilepas_walau_penawaran_di_skip(acc, sesi):
+    """Sesi sudah terbuka sebelum PN dicek — skip pun harus melepasnya."""
+    r = aq.create_for_order(_order(items=[{"part_number": "ZZZ0000", "qty": 1}]))
+    assert r["status"] == "skip" and sesi["logout"] == 1
+
+
+def test_sesi_dilepas_walau_gagal(acc, sesi, monkeypatch):
+    def _boom(**kw):
+        raise RuntimeError("Accurate down")
+    monkeypatch.setattr(aq.accurate, "create_sales_quotation", _boom)
+    assert aq.create_for_order(_order())["status"] == "failed"
+    assert sesi["logout"] == 1
+
+
+def test_tanpa_login_tak_perlu_logout(acc, sesi):
+    """Akun belum tertaut → keluar SEBELUM login, jadi tak ada sesi untuk dilepas."""
+    r = aq.create_for_order(_order(username="pembeli_baru"))
+    assert r["status"] == "skip" and sesi["logout"] == 0
+
+
+def test_autologin_latar_tidak_ditahan(acc, sesi):
+    """⛔ Beda dari jalur manual asisten: di sini tak ada admin yang menunggu untuk
+    membuka Accurate, jadi menahan auto-login 10 menit hanya menunda refresh
+    indeks terjadwal tanpa manfaat."""
+    aq.create_for_order(_order())
+    assert sesi["suppress"] == 0

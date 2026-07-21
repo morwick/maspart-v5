@@ -19,7 +19,12 @@ export default function KeranjangPage() {
   const [note, setNote] = useState("");
   // Alamat penerima diingat antar-order (localStorage) — pembeli tetap tak perlu
   // mengetik ulang nama/HP/alamat tiap belanja; boleh dikoreksi kapan saja.
-  const ALAMAT_KEY = "maspart_alamat_v1";
+  // ⛔ WAJIB per-username (sama seperti kunci keranjang di lib/cart.ts): kunci
+  // global membuat akun BARU di browser yang sama mewarisi nama, nomor HP, dan
+  // alamat lengkap milik akun sebelumnya — data pelanggan lain bocor ke layar,
+  // dan barang berisiko dikirim ke penerima yang salah bila tak diperiksa.
+  const ALAMAT_KEY = `maspart_alamat_v1_${getUser()?.username || "anon"}`;
+  const ALAMAT_KEY_LAMA = "maspart_alamat_v1";   // sisa versi global — dibuang
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +61,10 @@ export default function KeranjangPage() {
     setItems(c);
     // Prefill alamat dari order sebelumnya (tersimpan lokal saat checkout sukses).
     try {
+      // Buang sisa kunci global lama: isinya alamat milik akun yang kebetulan
+      // checkout terakhir di browser ini. ⛔ JANGAN dimigrasikan ke kunci baru —
+      // itu justru menyalinkan alamat orang lain ke akun yang login duluan.
+      localStorage.removeItem(ALAMAT_KEY_LAMA);
       const a = JSON.parse(localStorage.getItem(ALAMAT_KEY) || "null");
       if (a && typeof a === "object") {
         setRcpName(a.name || "");
