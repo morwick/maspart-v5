@@ -347,6 +347,88 @@ def test_harga_sims_jalan_untuk_admin(monkeypatch, katalog):
     assert r["found"] and r["baris_terisi"] == 1 and "SIMS" in r["sumber"]
 
 
+# ── HARGA SIMS = harga MODAL ber-CNY; jangan dikonversi kecuali diminta ──────
+
+@pytest.fixture
+def sims_palsu(monkeypatch):
+    """1 CNY = Rp 2.200 → 700 CNY = Rp 1.540.000. Dua angka yang jelas beda."""
+    monkeypatch.setattr(ai_sheet.harga, "batch_harga", lambda pns, **k: {
+        "rate": 2200.0, "count": len(pns), "found": 1,
+        "results": [{"pn": "WG9925520270", "cny": 700, "idr": 1540000, "status": "ok"},
+                    {"pn": "ZZZ0000000", "cny": None, "idr": None, "status": "not_found"}],
+    })
+
+
+def _sel_kolom(export_id: str, nama_kolom: str):
+    """Nilai terisi PERTAMA di bawah header `nama_kolom` pada Excel hasil."""
+    from openpyxl import load_workbook
+
+    from app.services import ai_export
+    data, _fn = ai_export.generic_excel(export_id)
+    rows = list(load_workbook(io.BytesIO(data)).active.iter_rows(values_only=True))
+    for i, row in enumerate(rows):
+        teks = [str(c) if c is not None else "" for c in (row or ())]
+        if nama_kolom in teks:
+            j = teks.index(nama_kolom)
+            for bawah in rows[i + 1:]:
+                v = bawah[j] if bawah and j < len(bawah) else None
+                if v not in (None, ""):
+                    return v
+            return None
+    raise AssertionError(f"kolom '{nama_kolom}' tak ada di Excel hasil")
+
+
+def test_harga_sims_default_cny_tanpa_konversi(sims_palsu, katalog):
+    """Harga SIMS = harga MODAL, mata uang aslinya CNY. Default TIDAK dikonversi:
+    kalau diam-diam jadi rupiah, kolom modal tampak seperti harga jual dan ikut
+    bergoyang mengikuti kurs harian."""
+    sid = _sheet_untuk(ADMIN, katalog)
+    r = ai_sheet.fill_column(sid, ADMIN, isi="harga_sims", can_sims=True)
+    assert r["kolom_diisi"] == "Harga SIMS (CNY)"
+    assert r["mata_uang_harga_sims"] == "CNY"
+    assert "tanpa konversi" in r["sumber"]
+    assert _sel_kolom(r["export_id"], "Harga SIMS (CNY)") == 700     # ⛔ bukan 1_540_000
+
+
+def test_harga_sims_dikonversi_bila_user_minta(sims_palsu, katalog):
+    sid = _sheet_untuk(ADMIN, katalog)
+    r = ai_sheet.fill_column(sid, ADMIN, isi="harga_sims", can_sims=True, konversi_idr=True)
+    assert r["kolom_diisi"] == "Harga SIMS (IDR)"
+    assert r["mata_uang_harga_sims"] == "IDR"
+    assert _sel_kolom(r["export_id"], "Harga SIMS (IDR)") == 1_540_000
+
+
+def test_harga_sims_banyak_kolom_juga_cny_secara_default(sims_palsu, katalog):
+    sid = _sheet_untuk(ADMIN, katalog)
+    r = ai_sheet.fill_columns(sid, ADMIN, [{"isi": "harga_sims"}], can_sims=True)
+    assert r["kolom"][0]["kolom"] == "Harga SIMS (CNY)"
+    assert r["mata_uang_harga_sims"] == "CNY"
+    assert _sel_kolom(r["export_id"], "Harga SIMS (CNY)") == 700
+
+
+def test_harga_sims_banyak_kolom_konversi_bila_diminta(sims_palsu, katalog):
+    sid = _sheet_untuk(ADMIN, katalog)
+    r = ai_sheet.fill_columns(sid, ADMIN, [{"isi": "harga_sims"}], can_sims=True,
+                              konversi_idr=True)
+    assert r["kolom"][0]["kolom"] == "Harga SIMS (IDR)"
+    assert _sel_kolom(r["export_id"], "Harga SIMS (IDR)") == 1_540_000
+
+
+def test_tool_harga_sims_tak_kirim_rupiah_kecuali_diminta(monkeypatch):
+    """Tool chat: bila IDR selalu ikut dikirim, model hampir selalu menyajikan
+    yang rupiah — jadi nilai IDR hanya disertakan saat user memintanya."""
+    monkeypatch.setattr(ai.harga, "cari_harga",
+                        lambda pn, **k: {"pn": pn, "cny": 700, "idr": 1540000,
+                                         "rate": 2200.0, "note": ""})
+    polos = ai._t_harga_sims({"part_number": "WG9925520270"}, ADMIN)
+    assert polos["harga_cny"] == 700 and polos["mata_uang"] == "CNY"
+    assert "harga_idr" not in polos and "kurs_cny_idr" not in polos
+    assert "jangan dikonversi" in polos["catatan"].lower()
+
+    diminta = ai._t_harga_sims({"part_number": "WG9925520270", "konversi_idr": True}, ADMIN)
+    assert diminta["harga_idr"] == 1540000 and diminta["kurs_cny_idr"] == 2200.0
+
+
 def test_harga_sims_batasi_jumlah_pn(monkeypatch, katalog):
     baris = [["Part Number"]] + [[f"WG99255{i:05d}"] for i in range(ai_sheet._MAX_SIMS + 5)]
     p = ai_sheet.parse_upload(_xlsx(baris), "besar.xlsx")

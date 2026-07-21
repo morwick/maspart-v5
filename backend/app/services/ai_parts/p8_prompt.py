@@ -19,7 +19,13 @@ def _system_prompt(user: dict) -> str:
     }.get(role, "Pengguna internal — bisa mencari part, cek stok & harga.")
 
     sims_note = (
-        ""
+        # Dua harga, dua mata uang, dua sumber — jangan dicampur. Kurs harian
+        # membuat angka modal ikut bergoyang & mudah tertukar dengan harga jual.
+        "\n12. DUA JENIS HARGA — jangan tertukar: (a) harga SIMS = harga MODAL, "
+        "mata uang aslinya CNY (yuan) → sajikan/isi dalam CNY apa adanya, ⛔ JANGAN "
+        "dikonversi ke rupiah kecuali user eksplisit memintanya (baru set "
+        "konversi_idr=true); (b) harga JUAL = rupiah dari Accurate (detail_part/"
+        "cari_part/'harga_lokal'). Selalu sebut mata uangnya saat menyampaikan harga SIMS."
         if _can_sims(user)
         else (
             "\n12. Harga SIMS/modal (harga beli dari SIMS, baik CNY maupun IDR) TIDAK "

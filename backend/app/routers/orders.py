@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from pydantic import BaseModel
 
 from ..core.config import get_settings
-from ..core.ratelimit import limit
+from ..core.ratelimit import hit as _rl_hit, limit
 from ..deps import get_current_user, require_admin, require_buyer_ready
 from ..services import accurate, gudang, harga, notify, orders, part_index, payments, reservations, shipping
 from ..services import supabase_client as sb
@@ -572,14 +572,21 @@ async def upload_proof(code: str, file: UploadFile = File(...), user: dict = Dep
 _PAYABLE = {"menunggu_pembayaran", "menunggu_verifikasi"}
 
 
-@router.get("/orders/{code}/payment/status",
-            dependencies=[Depends(limit("paystatus", 30, 60))])
+@router.get("/orders/{code}/payment/status")
 def payment_status(code: str, user: dict = Depends(get_current_user)):
     """Cek status pembayaran ke gateway; kalau lunas, tandai order diproses.
 
-    L3: dibatasi 30/60dtk per IP — tiap panggilan memicu get_status (HTTP ke
-    Midtrans) + berpotensi mutasi; polling normal ~tiap 3-5 dtk aman di bawahnya.
+    L3: dibatasi 30 panggilan/menit per AKUN — tiap panggilan memicu get_status
+    (HTTP ke Midtrans) + berpotensi mutasi status. ⛔ Sengaja BUKAN per IP:
+    pembeli seluler berbagi satu IP publik lewat CGNAT operator, jadi batas
+    per-IP akan menendang pembeli sah yang kebetulan satu jaringan. Web & mobile
+    sama-sama polling tiap 8 dtk (7,5/menit) → masih longgar untuk beberapa
+    pesanan terbuka sekaligus + tombol 'cek status' manual.
     """
+    if not _rl_hit(f"paystatus:{user['username']}", 30, 60):
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Terlalu sering mengecek status pembayaran. Tunggu sebentar lalu coba lagi.")
     is_admin = user.get("role") == "admin"
     o = orders.get_order(code, username=None if is_admin else user["username"])
     if not o:

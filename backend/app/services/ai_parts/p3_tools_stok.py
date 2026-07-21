@@ -984,13 +984,23 @@ def _t_harga_sims(args: dict, user: dict) -> dict:
         return {"error": "part_number kosong"}
     try:
         d = harga.cari_harga(pn)
-        return {
+        out = {
             "part_number": d.get("pn"),
             "harga_cny": d.get("cny"),
-            "harga_idr": d.get("idr"),
-            "kurs_cny_idr": d.get("rate"),
+            "mata_uang": "CNY",
             "catatan": d.get("note"),
         }
+        # Harga SIMS = harga MODAL, satuan aslinya CNY. Harga JUAL rupiah datang
+        # dari Accurate (detail_part/cari_part), BUKAN dari kurs. Nilai IDR hanya
+        # disertakan bila user memintanya — kalau selalu dikirim, model hampir
+        # selalu menyajikan yang rupiah (aturan pemilik 2026-07-21).
+        if bool(args.get("konversi_idr")):
+            out.update(harga_idr=d.get("idr"), kurs_cny_idr=d.get("rate"), mata_uang="IDR")
+        else:
+            out["catatan"] = ((out["catatan"] or "") +
+                              " Sajikan dalam CNY apa adanya; ⛔ jangan dikonversi ke rupiah "
+                              "kecuali user memintanya.").strip()
+        return out
     except Exception as e:  # pragma: no cover
         logger.exception("harga SIMS gagal")
         return {"error": "gagal ambil harga SIMS (gangguan internal/jaringan)"}
@@ -1266,6 +1276,9 @@ def _t_sheet_isi_kolom(args: dict, user: dict) -> dict:
         kode_pos_tujuan=(args.get("kode_pos_tujuan") or "").strip(),
         boleh_harga=_boleh_harga(user),   # gate Subtotal/PPN di FILE (bukan cuma hasil model)
         boleh_stok=_boleh_stok(user),     # gate kolom Stok/pemenuhan/warna status di FILE
+        # Harga SIMS = harga MODAL ber-CNY; harga JUAL rupiah datang dari Accurate.
+        # Konversi HANYA bila user memintanya (aturan pemilik 2026-07-21).
+        konversi_idr=bool(args.get("konversi_idr")),
     )
 
 

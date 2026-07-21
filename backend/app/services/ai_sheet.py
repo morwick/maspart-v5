@@ -625,11 +625,13 @@ def fill_column(
     kolom_tujuan: str = "",
     kolom_pn: str = "",
     can_sims: bool = False,
+    konversi_idr: bool = False,
 ) -> dict:
     """Isi satu kolom pada sheet unggahan, lalu siapkan Excel hasil untuk diunduh.
 
     `kolom_tujuan` boleh kolom yang sudah ada (ditimpa) atau nama baru (ditambah
-    di ujung). `can_sims` WAJIB True untuk isi='harga_sims' (harga modal)."""
+    di ujung). `can_sims` WAJIB True untuk isi='harga_sims' (harga modal).
+    `konversi_idr` HANYA bila user minta rupiah — lihat _sel_sims."""
     parsed = get_sheet(sheet_id, user.get("username", ""))
     if not parsed:
         return {"found": False, "error": "Belum ada file Excel yang diunggah di percakapan ini "
@@ -659,7 +661,7 @@ def fill_column(
         ISI_STOK: "Stok",
         ISI_NAMA: "Nama Part",
         ISI_HARGA_LOKAL: "Harga",
-        ISI_HARGA_SIMS: "Harga SIMS (IDR)",
+        ISI_HARGA_SIMS: _label_sims(konversi_idr),
     }[isi]
     tgt = _cari_kolom(headers, kolom_tujuan) if kolom_tujuan else None
     if tgt is None:
@@ -681,10 +683,9 @@ def fill_column(
         res = harga.batch_harga(unik)
         peta = {r["pn"]: r for r in res["results"]}
         for r, p in zip(body, pns):
-            d = peta.get(p)
-            r[tgt] = int(d["idr"]) if d and d.get("idr") is not None else ""
+            r[tgt] = _sel_sims(peta.get(p), konversi_idr)
             terisi += 1 if r[tgt] != "" else 0
-        catatan_sumber = f"SIMS live (kurs CNY→IDR {res['rate']:.0f})"
+        catatan_sumber = _sumber_sims(res, konversi_idr)
     else:
         # Sumber MURAH: indeks part lokal (bukan panggilan per-PN ke Accurate).
         # PEMAAF suffix varian (PN sheet '…/2' ↔ PN dasar katalog); kunci = PN sheet.
@@ -725,8 +726,13 @@ def fill_column(
         "pn_tidak_ditemukan": pn_tidak_ditemukan[:20],
         "pn_tidak_ditemukan_total": len(pn_tidak_ditemukan),
         "sumber": catatan_sumber,
+        **({"mata_uang_harga_sims": "IDR" if konversi_idr else "CNY"}
+           if isi == ISI_HARGA_SIMS else {}),
         "catatan": (
-            "📎 Kartu unduh Excel muncul otomatis di bawah jawaban — beri tahu user singkat. "
+            ("Harga SIMS diisi dalam CNY apa adanya (harga MODAL) — sebut mata uangnya "
+             "saat menjawab & ⛔ JANGAN mengonversi ke rupiah sendiri. "
+             if isi == ISI_HARGA_SIMS and not konversi_idr else "")
+            + "📎 Kartu unduh Excel muncul otomatis di bawah jawaban — beri tahu user singkat. "
             f"{terisi} dari {len(body)} baris terisi; sisanya PN tak ditemukan di sumber — "
             "sampaikan apa adanya, ⛔ JANGAN mengarang nilai untuk baris kosong."
             + (f" ⚠️ {len(pn_tidak_ditemukan)} PN tak ketemu (lihat 'pn_tidak_ditemukan') — "
@@ -836,7 +842,7 @@ _ISI_LABEL = {
     ISI_STOK: "Stok",
     ISI_NAMA: "Nama Part",
     ISI_HARGA_LOKAL: "Harga",
-    ISI_HARGA_SIMS: "Harga SIMS (IDR)",
+    ISI_HARGA_SIMS: "Harga SIMS (CNY)",   # default TANPA konversi — lihat _label_sims
     ISI_PENGGANTI: "PN Pengganti",
     ISI_CROSS_REF: "Cross Ref (Fleetguard/Donaldson/dll)",
     ISI_BERAT: "Berat (kg)",
@@ -844,6 +850,30 @@ _ISI_LABEL = {
     ISI_PEMENUHAN: "Rencana Pemenuhan",
 }
 _ISI_KEY = {ISI_STOK: "stok", ISI_NAMA: "part_name", ISI_HARGA_LOKAL: "harga"}
+
+
+def _label_sims(konversi_idr: bool) -> str:
+    return "Harga SIMS (IDR)" if konversi_idr else "Harga SIMS (CNY)"
+
+
+def _sel_sims(d: dict | None, konversi_idr: bool):
+    """Sel harga SIMS. DEFAULT = CNY APA ADANYA — harga SIMS itu harga MODAL yang
+    memang berdenominasi CNY; harga JUAL rupiah datang dari Accurate (isi='harga_
+    lokal'), bukan dari kurs. Mengonversi diam-diam membuat kolom modal tampak
+    seperti harga jual & ikut hanyut mengikuti kurs harian. Konversi HANYA bila
+    user memintanya (aturan pemilik 2026-07-21)."""
+    if not d:
+        return ""
+    if konversi_idr:
+        return int(d["idr"]) if d.get("idr") is not None else ""
+    cny = d.get("cny")
+    return "" if cny is None else round(float(cny), 2)
+
+
+def _sumber_sims(res: dict, konversi_idr: bool) -> str:
+    if konversi_idr:
+        return f"SIMS live, DIKONVERSI ke IDR atas permintaan user (kurs CNY→IDR {res['rate']:.0f})"
+    return "SIMS live — CNY apa adanya (harga modal), tanpa konversi"
 _MAX_DIM_SIMS = 150   # plafon call live SIMS get_part_spec (dimensi)
 
 
@@ -955,6 +985,7 @@ def fill_columns(
     kode_pos_tujuan: str = "",
     boleh_harga: bool = True,
     boleh_stok: bool = True,
+    konversi_idr: bool = False,
 ) -> dict:
     """Isi BEBERAPA kolom sekaligus ke SATU file (satu kartu unduh). `permintaan` =
     daftar spesifikasi kolom, tiap elemen menghasilkan SATU kolom:
@@ -1052,7 +1083,7 @@ def fill_columns(
                              f"Maksimum {_MAX_SIMS} per permintaan — minta user memecah filenya."}
         res = harga.batch_harga(unik)
         peta_sims = {r["pn"]: r for r in res["results"]}
-        sumber_sims = f"SIMS live (kurs CNY→IDR {res['rate']:.0f})"
+        sumber_sims = _sumber_sims(res, konversi_idr)
     tersedia_gudang = part_index.gudang_names()
 
     # ── Lookup fitur baru (batch 1× per sheet, deterministik) ──
@@ -1132,10 +1163,7 @@ def fill_columns(
                 return "" if not d else int((d.get("gudang") or {}).get(gud_canon, 0))
             return f
         if isi == ISI_HARGA_SIMS:
-            def f(p):
-                d = peta_sims.get(p)
-                return int(d["idr"]) if d and d.get("idr") is not None else ""
-            return f
+            return lambda p: _sel_sims(peta_sims.get(p), konversi_idr)
         if isi == ISI_PENGGANTI:
             return lambda p: peta_pengganti.get(p) or ""
         if isi == ISI_CROSS_REF:
@@ -1187,6 +1215,8 @@ def fill_columns(
                 continue
             gudang_dipakai += 1
             label = s["kolom_tujuan"] or f"Stok {gud_canon}"
+        elif isi == ISI_HARGA_SIMS:
+            label = s["kolom_tujuan"] or _label_sims(konversi_idr)
         else:
             label = s["kolom_tujuan"] or _ISI_LABEL[isi]
 
@@ -1338,9 +1368,14 @@ def fill_columns(
                if tandai_status else "")
             + ("⚠️ 'mungkin_maksud' = saran PN mirip yang BELUM DIPASTIKAN — sampaikan sebagai "
                "kemungkinan, ⛔ JANGAN sajikan sebagai PN pasti. " if mungkin_maksud else "")
+            + ("Harga SIMS diisi dalam CNY apa adanya (harga MODAL) — sebut mata uangnya "
+               "saat menjawab & ⛔ JANGAN mengonversi ke rupiah sendiri. "
+               if sumber_sims and not konversi_idr else "")
             + "⛔ JANGAN mengarang nilai untuk baris kosong."
         ),
     }
+    if sumber_sims:
+        out["mata_uang_harga_sims"] = "IDR" if konversi_idr else "CNY"
     if tandai_status:
         out["status_ringkas"] = status_ringkas
         if mungkin_maksud:

@@ -78,7 +78,10 @@ const TOOL_LABELS: Record<string, string> = {
   detail_pesanan: "Detail pesanan",
   rekap_penjualan: "Rekap penjualan",
   daftar_pesanan: "Daftar pesanan",
-  harga_sims: "Harga SIMS",
+  // Harga SIMS = harga MODAL ber-CNY; asisten menyajikan apa adanya (tanpa
+  // konversi) kecuali user minta rupiah — satuannya disebut agar tak tertukar
+  // dengan harga jual Accurate yang ber-Rupiah.
+  harga_sims: "Harga SIMS (CNY)",
   buat_excel: "Export Excel",
   katalog_kategori: "EPC · katalog bergambar",
   sheet_ringkasan: "Excel lampiran",

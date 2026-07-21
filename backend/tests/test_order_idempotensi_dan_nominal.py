@@ -210,20 +210,33 @@ def test_lunas_tanpa_nominal_tercatat_di_log(monkeypatch, caplog):
 
 
 # ── L3. Rate limit endpoint status pembayaran ───────────────────────────────
-def test_payment_status_dibatasi_per_ip():
-    """Batas diambil dari rute yang benar-benar terpasang (bukan angka yang
-    ditulis ulang di test) lalu ditekan sampai lewat."""
-    rute = next(r for r in R.router.routes
-                if getattr(r, "path", "").endswith("/payment/status"))
-    limiter = [d.call for d in rute.dependant.dependencies
-               if getattr(d.call, "__name__", "") == "_dep"]
-    assert limiter, "endpoint /payment/status wajib punya dependency rate-limit"
-
+def test_payment_status_dibatasi_per_akun(monkeypatch):
+    """Batas ditekan lewat endpoint sungguhan. Order sengaja 'tak ditemukan' →
+    tiap panggilan berhenti di 404, membuktikan gerbang limit berjalan LEBIH DULU
+    (sebelum get_status ke Midtrans & mutasi status)."""
+    monkeypatch.setattr(R.orders, "get_order", lambda code, username=None: None)
     RL._hits.clear()
-    req = _Req(ip="203.0.113.7")
-    for _ in range(30):                          # polling normal (~3-5 dtk sekali) aman
-        limiter[0](req)
+    for _ in range(30):                          # polling 8 dtk = 7,5/menit → longgar
+        with pytest.raises(HTTPException) as e:
+            R.payment_status("PO-1", USER)
+        assert e.value.status_code == 404
     with pytest.raises(HTTPException) as e:
-        limiter[0](req)
+        R.payment_status("PO-1", USER)
     assert e.value.status_code == 429
+    RL._hits.clear()
+
+
+def test_batas_payment_status_tidak_menular_antar_akun(monkeypatch):
+    """⛔ Per AKUN, bukan per IP: pembeli seluler berbagi IP publik lewat CGNAT
+    operator — batas per-IP akan menendang pembeli sah yang satu jaringan."""
+    monkeypatch.setattr(R.orders, "get_order", lambda code, username=None: None)
+    RL._hits.clear()
+    for _ in range(31):
+        try:
+            R.payment_status("PO-1", USER)
+        except HTTPException:
+            pass
+    with pytest.raises(HTTPException) as e:      # akun lain masih dilayani
+        R.payment_status("PO-1", {"username": "siti", "role": "pembeli"})
+    assert e.value.status_code == 404
     RL._hits.clear()

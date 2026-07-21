@@ -1235,14 +1235,22 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "harga_sims",
                 "description": (
-                    "Cek harga part dari sumber SIMS secara live (dalam CNY) lalu "
-                    "dikonversi ke IDR memakai kurs terkini. Gunakan saat user minta "
-                    "harga modal/SIMS atau harga yang tidak ada di list lokal."
+                    "Cek harga MODAL part dari sumber SIMS secara live. Satuannya CNY "
+                    "(yuan) — itu mata uang aslinya, sajikan apa adanya. ⛔ JANGAN "
+                    "mengonversi ke rupiah kecuali user eksplisit memintanya; harga JUAL "
+                    "rupiah datang dari Accurate (detail_part/cari_part), BUKAN dari kurs. "
+                    "Gunakan saat user minta harga modal/SIMS."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "part_number": {"type": "string", "description": "Part Number yang dicek harganya."},
+                        "konversi_idr": {
+                            "type": "boolean",
+                            "description": ("true HANYA bila user eksplisit minta harga SIMS "
+                                            "dalam rupiah/dikonversi/'berapa kalau di-rupiah-kan'. "
+                                            "Default false = CNY apa adanya."),
+                        },
                     },
                     "required": ["part_number"],
                 },
@@ -1408,7 +1416,9 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "'dimensi'=ukuran P×L×T cm; 'rencana_pemenuhan'=gudang mana bisa penuhi qty.")
         if _can_sims(user):
             pilihan.append(ai_sheet.ISI_HARGA_SIMS)
-            ket_sims += " 'harga_sims'=harga modal SIMS live (khusus admin)."
+            ket_sims += (" 'harga_sims'=harga MODAL SIMS live, diisi dalam CNY apa adanya "
+                         "(⛔ jangan set konversi_idr kecuali user minta rupiah; harga JUAL "
+                         "rupiah = 'harga_lokal' dari Accurate) — khusus admin.")
         specs.append({
             "type": "function",
             "function": {
@@ -1478,6 +1488,12 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "kode_pos_tujuan": {
                             "type": "string",
                             "description": ("Kode pos tujuan (opsional, utk estimasi ongkir di rekap)."),
+                        },
+                        "konversi_idr": {
+                            "type": "boolean",
+                            "description": ("KHUSUS isi='harga_sims'. true HANYA bila user "
+                                            "eksplisit minta harga SIMS dikonversi ke rupiah. "
+                                            "Default false = kolom diisi CNY apa adanya."),
                         },
                     },
                 },
