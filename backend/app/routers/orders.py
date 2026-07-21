@@ -9,7 +9,7 @@ import threading
 import time
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..core.config import get_settings
 from ..core.ratelimit import hit as _rl_hit, limit
@@ -96,25 +96,33 @@ _IMG_MIME = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "web
 _MAX_PROOF_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
+# Plafon input pembeli. `items` WAJIB dibatasi: /shipping/weight, /cart/gudang
+# & /orders menghitung berat per item dgn allow_remote=True — tiap PN asing =
+# fetch SIMS live. Tanpa plafon, satu akun bisa mengirim ribuan PN sampah per
+# request dan membanjiri SIMS (sesi bersama seluruh toko) + menyandera worker.
+# String juga dibatasi supaya note/alamat megabyte tak bisa disimpan ke DB.
+_MAX_ITEMS = 60
+
+
 class OrderItemIn(BaseModel):
-    part_number: str
-    qty: int = 1
-    name: str | None = None
+    part_number: str = Field(max_length=64)
+    qty: int = Field(1, le=99_999)           # batas bawah dicek eksplisit (400 berpesan)
+    name: str | None = Field(None, max_length=200)
 
 
 class CreateOrderRequest(BaseModel):
-    note: str | None = None
-    items: list[OrderItemIn]
-    courier: str | None = None
-    courier_service: str | None = None
+    note: str | None = Field(None, max_length=2000)
+    items: list[OrderItemIn] = Field(max_length=_MAX_ITEMS)
+    courier: str | None = Field(None, max_length=20)
+    courier_service: str | None = Field(None, max_length=40)
     shipping_cost: int = 0
     weight_grams: int = 0
     payment_method: str = "gateway"          # hanya 'gateway' (VA/QRIS)
-    payment_channel: str | None = None      # 'qris' | 'va_bca' | ...
-    recipient_name: str | None = None
-    recipient_phone: str | None = None
-    recipient_address: str | None = None
-    recipient_postal: str | None = None
+    payment_channel: str | None = Field(None, max_length=30)  # 'qris' | 'va_bca' | ...
+    recipient_name: str | None = Field(None, max_length=120)
+    recipient_phone: str | None = Field(None, max_length=32)
+    recipient_address: str | None = Field(None, max_length=500)
+    recipient_postal: str | None = Field(None, max_length=10)
 
 
 class StatusRequest(BaseModel):
@@ -122,7 +130,7 @@ class StatusRequest(BaseModel):
 
 
 class WeightRequest(BaseModel):
-    items: list[OrderItemIn]
+    items: list[OrderItemIn] = Field(max_length=_MAX_ITEMS)
 
 
 @router.post("/shipping/weight")
@@ -135,10 +143,11 @@ def shipping_weight(body: WeightRequest, _user: dict = Depends(require_buyer_rea
 
 
 class RatesRequest(BaseModel):
-    weight_grams: int = 1000
+    weight_grams: int = Field(1000, le=2_000_000)   # 2 ton — di atas ini pasti sampah
     value: int = 0
-    dest_postal: str = ""                     # kode pos tujuan (penerima)
-    items: list[OrderItemIn] = []             # isi keranjang → tentukan gudang pemenuh (asal ongkir)
+    dest_postal: str = Field("", max_length=10)     # kode pos tujuan (penerima)
+    # isi keranjang → tentukan gudang pemenuh (asal ongkir)
+    items: list[OrderItemIn] = Field(default_factory=list, max_length=_MAX_ITEMS)
 
 
 def _satu_gudang(username: str, items: list[dict]) -> tuple[str, str]:
@@ -196,7 +205,7 @@ def shipping_rates(body: RatesRequest, user: dict = Depends(require_buyer_ready)
 
 
 class CartGudangRequest(BaseModel):
-    items: list[OrderItemIn] = []
+    items: list[OrderItemIn] = Field(default_factory=list, max_length=_MAX_ITEMS)
 
 
 @router.post("/cart/gudang")
