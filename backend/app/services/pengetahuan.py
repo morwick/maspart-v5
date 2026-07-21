@@ -414,6 +414,77 @@ _CJK_RE = re.compile(r"[㐀-䶿一-鿿豈-﫿぀-ヿ]+")
 _MAX_TERM_CJK = 12
 
 
+# ── stemming Indonesia ringan ────────────────────────────────────────
+# Dipakai HANYA sebagai fallback per-kata saat kecocokan eksak gagal, dengan
+# bobot di bawah kecocokan teks eksak — jadi salah-stem paling banter menambah
+# hasil lemah, tak pernah menggeser kecocokan eksak. Kedua sisi (indeks & kueri)
+# distem dengan algoritme yang SAMA, sehingga konsistensi lebih penting daripada
+# ketepatan linguistik.
+_NASAL = {"meng": "k", "meny": "s", "men": "t", "mem": "p",
+          "peng": "k", "peny": "s", "pen": "t", "pem": "p"}
+_PREFIKS = ("meng", "meny", "men", "mem", "me", "peng", "peny", "pen", "pem",
+            "pe", "ber", "ter", "di", "ke", "se")
+_SUFIKS = ("lah", "kah", "pun", "nya", "kan", "an", "i")
+
+
+def _stem_kandidat(w: str) -> tuple[str, ...]:
+    """Kandidat akar kata: buang sufiks umum lalu prefiks; prefiks nasal
+    (mem-/men-/meng-/meny- dst.) juga melahirkan varian ber-huruf-pulih
+    ('memasang' → asang + pasang) supaya ketemu dgn 'pasang' polos."""
+    if len(w) < 5 or any(c.isdigit() for c in w):
+        return ()
+    kandidat: set[str] = set()
+    s = w
+    for suf in _SUFIKS:
+        if s.endswith(suf) and len(s) - len(suf) >= 4:
+            s = s[: -len(suf)]
+            kandidat.add(s)
+            break
+    for pre in _PREFIKS:
+        if s.startswith(pre) and len(s) - len(pre) >= 3:
+            akar = s[len(pre):]
+            kandidat.add(akar)
+            pulih = _NASAL.get(pre)
+            if pulih:
+                kandidat.add(pulih + akar)
+            break
+    kandidat.discard(w)
+    return tuple(kandidat)
+
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _stem_set(gabung: str) -> frozenset[str]:
+    """Token + seluruh kandidat stemnya untuk SATU chunk. Dihitung sekali per
+    penulisan store (ikut cache _hay_semua), bukan per kueri."""
+    out: set[str] = set()
+    for t in _TOKEN_RE.findall(gabung):
+        if len(t) < 4:
+            continue
+        out.add(t)
+        out.update(_stem_kandidat(t))
+    return frozenset(out)
+
+
+def _stems_kueri(words: list[str]) -> dict[str, tuple[str, ...]]:
+    """Per kata kueri → (kata, *kandidat stem) untuk dicek ke stemset chunk."""
+    return {w: (w, *_stem_kandidat(w)) for w in words}
+
+
+# Token PN/kode di kueri: runtun huruf-angka BERPEMISAH ('WG-9725.190102') yang
+# oleh pemecah kata Latin tercerai jadi pecahan pendek tak berarti. Digabung
+# ulang tanpa pemisah supaya cocok dgn `kode` chunk yang juga dinormalkan.
+_SEP_RE = re.compile(r"[-./]")
+_PN_RUN_RE = re.compile(r"[a-z0-9][a-z0-9\-./]{4,}[a-z0-9]")
+_MIN_KODE_NORM = 6
+
+
+def _kode_norm(kode: list) -> str:
+    """Kode chunk tanpa pemisah, satu string siap-substring ('wg9725190102')."""
+    return " ".join(_SEP_RE.sub("", str(k)).lower() for k in (kode or []))
+
+
 # Pola batas-kata per term, dikompilasi SEKALI. `search()` memanggil _hit
 # ~(jumlah chunk × 5 ladang × jumlah kata) kali; merakit ulang string pola di
 # tiap panggilan adalah biaya dominan pencarian (terukur: 368 ms → 34 ms untuk
@@ -443,8 +514,9 @@ def _hit(term: str, hay: str) -> bool:
     return _pola(term).search(hay) is not None
 
 
-def _hay(r: dict) -> tuple[str, str, str, str, str, str]:
-    """Lima ladang jerami siap-cocok untuk satu chunk (semuanya lowercase).
+def _hay(r: dict) -> tuple:
+    """Ladang jerami siap-cocok untuk satu chunk (semuanya lowercase):
+    (idn, judul, ringkas, kode, teks, gabung, stemset, kode_norm).
 
     Dihitung SEKALI per penulisan store lewat `_hay_semua`, bukan per kueri:
     dulu `_score` merakit ulang gabungan tabel + beberapa .lower() untuk tiap
@@ -460,11 +532,15 @@ def _hay(r: dict) -> tuple[str, str, str, str, str, str]:
     tabel = " ".join(" ".join(str(c) for c in (baris or []))
                      for baris in (r.get("tabel") or []))
     teks = f"{r.get('teks','')} {tabel} {' '.join(r.get('jalur') or [])}".lower()
-    # Elemen terakhir = gabungan semua ladang, dipakai HANYA sebagai penyaring
-    # murah: `in` (level-C) jauh lebih cepat dari regex, dan kecocokan
-    # batas-kata selalu mensyaratkan kecocokan substring — jadi tak ada hasil
-    # yang hilang, hanya chunk yang mustahil cocok yang dilewati lebih awal.
-    return idn, judul, ringkas, kode, teks, f"{idn} {judul} {ringkas} {kode} {teks}"
+    # Elemen ke-6 = gabungan semua ladang, dipakai sebagai penyaring murah:
+    # `in` (level-C) jauh lebih cepat dari regex, dan kecocokan batas-kata
+    # selalu mensyaratkan kecocokan substring — jadi tak ada hasil yang hilang,
+    # hanya chunk yang mustahil cocok yang dilewati lebih awal.
+    # Elemen ke-7/8 = stemset (fallback morfologi Indonesia) & kode ternormal
+    # (PN berpemisah) — keduanya prakomputasi supaya per-kueri tinggal lookup.
+    gabung = f"{idn} {judul} {ringkas} {kode} {teks}"
+    return (idn, judul, ringkas, kode, teks, gabung,
+            _stem_set(gabung), _kode_norm(r.get("kode") or []))
 
 
 _HAY_CACHE: dict = {"mtime": None, "rows": None}
@@ -485,11 +561,25 @@ def _hay_semua(rows: list[dict]) -> list[tuple]:
     return ent["rows"]
 
 
-def _score_hay(hay: tuple, ql: str, words: list[str], frasa_ok: bool) -> float:
+# Bobot fallback stem: DI BAWAH kecocokan teks eksak (1) supaya morfologi tak
+# pernah menggeser kecocokan yang benar-benar diketik user.
+_BOBOT_STEM = 0.7
+
+
+def _score_hay(hay: tuple, ql: str, words: list[str], frasa_ok: bool,
+               stems: dict[str, tuple[str, ...]] | None = None) -> float:
     """Peringkat: judul_id/kata_kunci (kurasi Indonesia) > judul dokumen > kode >
     ringkasan > teks/tabel. Token ber-ANGKA (PN, kode error) ×3 karena paling
-    diskriminatif; frasa penuh cocok → bonus besar. Pola manual_teks._score."""
+    diskriminatif; frasa penuh cocok → bonus besar. Pola manual_teks._score.
+
+    Dua fallback per-kata (hanya bila SEMUA kecocokan eksak gagal):
+    - kode ternormal: 'wg9725190102' / prefiks ≥6 char cocok substring ke
+      `kode` chunk tanpa pemisah — setara bobot ladang kode;
+    - stem Indonesia: 'pemasangan' ↔ 'pasang' — bobot di bawah teks eksak.
+    """
     idn, judul, ringkas, kode, teks = hay[:5]
+    stemset = hay[6] if len(hay) > 6 else frozenset()
+    kodenorm = hay[7] if len(hay) > 7 else ""
     s = 0.0
     if ql and (_hit(ql, idn) or _hit(ql, judul)):
         s += 50
@@ -499,23 +589,31 @@ def _score_hay(hay: tuple, ql: str, words: list[str], frasa_ok: bool) -> float:
         # Indonesia. `elif` menjaga hierarki: kurasi judul selalu di atas ini.
         s += 20
     for w in words:
-        spec = 3 if any(c.isdigit() for c in w) else 1
+        berangka = any(c.isdigit() for c in w)
+        spec = 3 if berangka else 1
         if _hit(w, idn):
             s += 5 * spec
         elif _hit(w, judul):
             s += 3 * spec
         elif _hit(w, kode):
             s += 4 * spec
+        elif (berangka and kodenorm and len(w) >= _MIN_KODE_NORM
+              and w in kodenorm):
+            s += 4 * spec
         elif _hit(w, ringkas):
             s += 2 * spec
         elif _hit(w, teks):
             s += 1 * spec
+        elif stems and stemset:
+            sk = stems.get(w)
+            if sk and any(k in stemset for k in sk):
+                s += _BOBOT_STEM * spec
     return s
 
 
 def _score(r: dict, ql: str, words: list[str]) -> float:
     """Skor satu chunk mentah — dipertahankan untuk test & pemakaian ad-hoc."""
-    return _score_hay(_hay(r), ql, words, _frasa_layak(ql))
+    return _score_hay(_hay(r), ql, words, _frasa_layak(ql), _stems_kueri(words))
 
 
 def _words(ql: str) -> list[str]:
@@ -527,6 +625,16 @@ def _words(ql: str) -> list[str]:
     relatif jadi tak berguna.
     """
     out = [w for w in re.findall(r"[a-z0-9]+", ql) if len(w) >= 2]
+    # Runtun PN berpemisah ('wg-9725.190102') digabung ulang tanpa pemisah jadi
+    # token tambahan — pemecah di atas mencerainya jadi pecahan yang tak akan
+    # pernah cocok dengan kode utuh di indeks.
+    for run in _PN_RUN_RE.findall(ql):
+        if "-" not in run and "." not in run and "/" not in run:
+            continue
+        norm = _SEP_RE.sub("", run)
+        if (len(norm) >= _MIN_KODE_NORM and any(c.isdigit() for c in norm)
+                and norm not in out):
+            out.append(norm)
     for run in _CJK_RE.findall(ql):
         if len(run) == 1:
             out.append(run)
@@ -554,11 +662,99 @@ def _frasa_layak(ql: str) -> bool:
 # menggeser kecocokan LANGSUNG ke kata yang benar-benar diketik user.
 _BOBOT_SINONIM = 0.6
 
+# Kueri hasil koreksi typo ikut dinilai tapi diredam — kueri asli user (siapa
+# tahu memang benar) selalu menang bila dua-duanya cocok.
+_BOBOT_TIPO = 0.8
+
+
+# ── koreksi typo (kueri → kosakata store) ────────────────────────────
+# Mekanik mengetik cepat di HP: 'slenoid', 'kompresso'. Kata kueri yang TIDAK
+# ada di kosakata store dicarikan tetangga terdekatnya (jarak edit ≤1, kata
+# panjang ≤2) lalu seluruh kueri diulang sebagai varian teredam. Kosakata
+# di-cache per-mtime seperti haystack. Batasan sadar: huruf PERTAMA dianggap
+# benar (bucket per huruf awal) — menekan biaya scan dan salah-koreksi.
+_VOCAB_CACHE: dict = {"kunci": None, "ember": None}
+_ALPHA_RE = re.compile(r"[a-z]{4,}")
+
+
+def _vocab_ember(hays: list[tuple]) -> dict[str, set[str]]:
+    p = _chunk_file()
+    try:
+        mt = p.stat().st_mtime if p.exists() else None
+    except OSError:
+        mt = None
+    kunci = (str(p), mt, len(hays))
+    ent = _VOCAB_CACHE
+    if ent["kunci"] != kunci or ent["ember"] is None:
+        ember: dict[str, set[str]] = {}
+        for hay in hays:
+            for t in _ALPHA_RE.findall(hay[5]):
+                ember.setdefault(t[0], set()).add(t)
+        ent["ember"] = ember
+        ent["kunci"] = kunci
+    return ent["ember"]
+
+
+def _jarak_edit(a: str, b: str, maks: int) -> int:
+    """Levenshtein terpangkas: begitu seluruh baris > maks, menyerah (maks+1)."""
+    if abs(len(a) - len(b)) > maks:
+        return maks + 1
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        terbaik = i
+        for j, cb in enumerate(b, 1):
+            v = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
+            cur.append(v)
+            if v < terbaik:
+                terbaik = v
+        if terbaik > maks:
+            return maks + 1
+        prev = cur
+    return prev[-1]
+
+
+def _koreksi_tipo(ql: str, hays: list[tuple]) -> str:
+    """Kueri dgn kata-tak-dikenal diganti tetangga terdekat di kosakata store;
+    '' bila tak ada yang perlu/bisa dikoreksi."""
+    kata = [w for w in re.findall(r"(?<![a-z0-9])[a-z]{5,}(?![a-z0-9])", ql)]
+    if not kata or not hays:
+        return ""
+    ember = _vocab_ember(hays)
+    if not ember:
+        return ""
+    ganti: dict[str, str] = {}
+    for w in dict.fromkeys(kata):
+        kandidat = ember.get(w[0])
+        if not kandidat or w in kandidat:
+            continue
+        maks = 1 if len(w) < 8 else 2
+        best, best_d = "", maks + 1
+        for k in kandidat:
+            d = _jarak_edit(w, k, maks)
+            if d < best_d:
+                best, best_d = k, d
+                if d == 1:
+                    break
+        if best:
+            ganti[w] = best
+    if not ganti:
+        return ""
+    out = ql
+    for a, b in ganti.items():
+        out = re.sub(rf"(?<![a-z0-9]){re.escape(a)}(?![a-z0-9])", b, out)
+    return out if out != ql else ""
+
 # Ambang relatif: hasil yang skornya jauh di bawah juara BUKAN jawaban, hanya
 # kebetulan berbagi satu kata umum. Membuangnya menaikkan akurasi (model tak
 # terdistraksi isi yang tak relevan) SEKALIGUS menghemat token — chunk lemah
 # tak ikut diserialisasi ke messages.
 _AMBANG_RELATIF = 0.30
+
+# Pagar diversitas hasil: maksimal sekian chunk per dokumen di lintasan pertama
+# seleksi — dokumen tebal (400 chunk) tak boleh menenggelamkan dokumen lain
+# yang relevan. Kursi sisa tetap diisi ulang, jadi `limit` tak pernah dikorbankan.
+_MAX_PER_DOK = 2
 
 
 def _mirip(a: str, b: str) -> bool:
@@ -582,17 +778,31 @@ def search(topik: str = "", limit: int = 5, untuk_pembeli: bool = False) -> list
     ql = (topik or "").strip().lower()
     if not ql:
         return []
+    mati = {d.get("id") for d in dokumen() if not d.get("aktif", True)}
+    rows = chunks()
+    hays = _hay_semua(rows)
     try:
         terms, _ = sinonim.expand_query(ql)
     except Exception:
         terms = [ql]
-    # Token & kelayakan-frasa dihitung SEKALI per varian, bukan per chunk.
-    varian = [(t.strip().lower(), _words(t.strip().lower()),
-               _frasa_layak(t.strip().lower()), 1.0 if i == 0 else _BOBOT_SINONIM)
+    daftar = [(t, 1.0 if i == 0 else _BOBOT_SINONIM)
               for i, t in enumerate(terms) if (t or "").strip()]
-    mati = {d.get("id") for d in dokumen() if not d.get("aktif", True)}
-    rows = chunks()
-    hays = _hay_semua(rows)
+    # Koreksi typo terhadap kosakata store — kueri terkoreksi jadi varian
+    # teredam TAMBAHAN; kueri asli tetap dinilai penuh.
+    try:
+        koreksi = _koreksi_tipo(ql, hays)
+    except Exception:
+        koreksi = ""
+    if koreksi:
+        daftar.append((koreksi, _BOBOT_TIPO))
+    # Token, kelayakan-frasa & stem dihitung SEKALI per varian, bukan per chunk.
+    varian = []
+    for t, b in daftar:
+        tl = t.strip().lower()
+        w = _words(tl)
+        stems = _stems_kueri(w)
+        qstem = frozenset(k for sk in stems.values() for k in sk)
+        varian.append((tl, w, _frasa_layak(tl), b, stems, qstem))
     scored: list[tuple[float, int, dict]] = []
     for i, r in enumerate(rows):
         if not r.get("dicari", True):
@@ -603,13 +813,15 @@ def search(topik: str = "", limit: int = 5, untuk_pembeli: bool = False) -> list
             continue
         hay = hays[i]
         gabung = hay[5]
+        stemset = hay[6] if len(hay) > 6 else frozenset()
         sc = 0.0
-        for t, w, f, b in varian:
+        for t, w, f, b, stems, qstem in varian:
             # Tolak murah dulu: chunk yang tak memuat satu pun kata kueri
-            # sebagai substring mustahil lolos pencocokan batas-kata.
-            if w and not any(x in gabung for x in w):
+            # sebagai substring — dan tak beririsan stem — mustahil cocok.
+            if w and not any(x in gabung for x in w) \
+                    and (not stemset or not (qstem & stemset)):
                 continue
-            v = _score_hay(hay, t, w, f) * b
+            v = _score_hay(hay, t, w, f, stems) * b
             if v > sc:
                 sc = v
         if sc > 0:
@@ -618,12 +830,32 @@ def search(topik: str = "", limit: int = 5, untuk_pembeli: bool = False) -> list
         return []
     scored.sort(key=lambda t: (-t[0], t[1]))
     lantai = scored[0][0] * _AMBANG_RELATIF
-    out: list[dict] = []
+    # Seleksi dua-lintasan dgn pagar diversitas: satu dokumen besar tak boleh
+    # memonopoli seluruh hasil — dokumen lain yang relevan ikut tampil. Kursi
+    # yang masih kosong setelah lintasan pertama diisi lagi dari chunk yang
+    # tadinya tertahan pagar (limit selalu terpenuhi bila kandidatnya ada).
+    kandidat: list[dict] = []
     for sc, _, r in scored:
         if sc < lantai:
             break                      # sisanya makin lemah — berhenti
+        kandidat.append(r)
+    out: list[dict] = []
+    per_dok: dict[str, int] = {}
+    tertahan: list[dict] = []
+    for r in kandidat:
         if any(_mirip(r.get("teks") or "", p.get("teks") or "") for p in out):
             continue                   # kembar akibat overlap chunking
+        dok = r.get("dok_id") or ""
+        if per_dok.get(dok, 0) >= _MAX_PER_DOK:
+            tertahan.append(r)
+            continue
+        out.append(r)
+        per_dok[dok] = per_dok.get(dok, 0) + 1
+        if len(out) >= limit:
+            return out
+    for r in tertahan:
+        if any(_mirip(r.get("teks") or "", p.get("teks") or "") for p in out):
+            continue
         out.append(r)
         if len(out) >= limit:
             break
