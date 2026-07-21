@@ -78,6 +78,7 @@ const NAV_ADMIN: NavItem[] = [
   { href: "/admin/gudang", label: "Lokasi Gudang", icon: I.truck },
   { href: "/admin/foto", label: "Foto Part", icon: I.photo },
   { href: "/admin/index", label: "Image Index", icon: I.grid },
+  { href: "/admin/pelanggan", label: "Pelanggan Accurate", icon: I.user },
   { href: "/admin/app-config", label: "Config Aplikasi", icon: I.phone },
 ];
 

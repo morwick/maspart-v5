@@ -1722,6 +1722,51 @@ export async function saveAdminGudang(
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
 }
 
+// ── Tautan akun → pelanggan Accurate (dipakai penawaran otomatis) ───────────
+export type AccurateCustomer = { id: number; no: string; name: string };
+export type TautPelangganRow = {
+  username: string;
+  role: string;
+  is_active: boolean;
+  customer_id: number | null;
+  customer_name: string;
+  customer_no: string;
+};
+
+export async function getTautPelanggan(
+  token: string,
+): Promise<{ siap: boolean; users: TautPelangganRow[]; error?: string }> {
+  const res = await fetch(`${API_BASE}/api/admin/pelanggan-accurate`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function cariPelangganAccurate(
+  token: string,
+  q: string,
+): Promise<{ configured: boolean; customers: AccurateCustomer[] }> {
+  const res = await fetch(
+    `${API_BASE}/api/admin/pelanggan-accurate/cari?q=${encodeURIComponent(q)}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function tautPelanggan(
+  token: string,
+  body: { username: string; customer_id: number | null; customer_name?: string; customer_no?: string },
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/admin/pelanggan-accurate`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+}
+
 // ── Config aplikasi mobile (versi APK + feature-flag, tanpa rebuild APK) ────
 // Bentuknya cerminan GET /api/app/meta yang dipanggil aplikasi tiap kali dibuka.
 export type AppMetaVersion = {

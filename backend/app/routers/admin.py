@@ -6,13 +6,13 @@ import json
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import ai_chat_log, ai_sinonim_learn, app_config, catalog_bom, gudang, gudang_config, harga, image_search, login_history, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, reservations, search_log, session_policy, sinonim
+from ..services import accurate, ai_chat_log, ai_sinonim_learn, app_config, catalog_bom, customer_map, gudang, gudang_config, harga, image_search, login_history, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, reservations, search_log, session_policy, sinonim
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -997,3 +997,50 @@ def save_app_config(body: AppConfigRequest, _admin: dict = Depends(require_admin
     """Simpan versi APK terbaru + feature-flag. Berlaku saat aplikasi dibuka
     berikutnya — tak perlu rebuild/deploy APK."""
     return app_config.save(body.version, body.config)
+
+
+# ── Tautan akun → pelanggan Accurate (untuk penawaran otomatis) ─────────────
+
+class TautPelangganRequest(BaseModel):
+    username: str
+    customer_id: int | None = None     # None = lepas tautan
+    customer_name: str | None = None
+    customer_no: str | None = None
+
+
+@router.get("/pelanggan-accurate/cari")
+def cari_pelanggan_accurate(q: str = Query(..., min_length=1),
+                            _admin: dict = Depends(require_admin)):
+    """Cari pelanggan di Accurate untuk dipilih admin saat menautkan akun."""
+    if not accurate.available():
+        return {"configured": False, "customers": []}
+    try:
+        rows = accurate.search_customers(q, limit=20)
+    except accurate.AccurateError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Accurate: {str(e)[:150]}")
+    return {"configured": True, "customers": rows}
+
+
+@router.get("/pelanggan-accurate")
+def daftar_taut_pelanggan(_admin: dict = Depends(require_admin)):
+    """Daftar akun + pelanggan Accurate yang tertaut."""
+    try:
+        users = customer_map.daftar()
+    except customer_map.KolomBelumAda:
+        return {"siap": False, "users": [],
+                "error": ("Kolom tautan belum ada di database. Jalankan "
+                          "migrations/024_users_accurate_customer.sql di Supabase.")}
+    except Exception as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)[:200])
+    return {"siap": True, "users": users}
+
+
+@router.put("/pelanggan-accurate")
+def taut_pelanggan(body: TautPelangganRequest, _admin: dict = Depends(require_admin)):
+    """Tautkan (atau lepas) akun ke pelanggan Accurate. Dipakai penawaran
+    otomatis saat order lunas — memakai customer_id, bukan nama."""
+    ok, msg = customer_map.tautkan(body.username, body.customer_id,
+                                   body.customer_name or "", body.customer_no or "")
+    if not ok:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, msg)
+    return {"ok": True}

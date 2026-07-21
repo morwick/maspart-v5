@@ -7,10 +7,17 @@ from app.services import accurate, accurate_quotation as aq
 
 @pytest.fixture
 def acc(monkeypatch):
-    """Accurate palsu: 1 customer 'PT ARGCIO', 2 item berharga."""
+    """Accurate palsu: 2 item berharga + akun 'roni' TERTAUT ke pelanggan.
+
+    Pelanggan datang dari tautan akun (users.accurate_customer_id) yang diatur
+    admin — bukan lagi dari `recipient_name`. Pencocokan nama sudah dihapus;
+    lihat test_customer_map.py."""
     monkeypatch.setattr(aq.accurate, "available", lambda: True)
     monkeypatch.setattr(aq.accurate, "ensure_session_force", lambda: None)
     monkeypatch.setattr(aq.accurate, "next_quotation_number", lambda: "MASPART-07")
+    monkeypatch.setattr(aq.customer_map, "untuk",
+                        lambda u: {"id": 99, "no": "C.1", "name": "PT ARGCIO"}
+                        if (u or "").strip().lower() == "roni" else None)
     items = {
         "WG9925520270": {"id": 11, "pn": "WG9925520270", "name": "Spring bracket",
                          "unit_id": 1, "price": 1_500_000},
@@ -18,9 +25,6 @@ def acc(monkeypatch):
                          "unit_id": 1, "price": 0},          # tanpa harga
     }
     monkeypatch.setattr(aq.accurate, "item_for_quotation", lambda pn: items.get(pn.upper()))
-    monkeypatch.setattr(aq.accurate, "search_customers",
-                        lambda name, limit=20: [{"id": 99, "no": "C.1", "name": "PT ARGCIO"}]
-                        if "argcio" in name.lower() else [])
     created = {}
     def _create(**kw):
         created.update(kw)
@@ -30,7 +34,9 @@ def acc(monkeypatch):
 
 
 def _order(**kw):
-    o = {"order_code": "ORD-1", "recipient_name": "PT ARGCIO",
+    # `recipient_name` sengaja BUKAN nama pelanggan: ia hanya alamat kirim dan
+    # tak boleh lagi mempengaruhi pelanggan pada penawaran.
+    o = {"order_code": "ORD-1", "username": "roni", "recipient_name": "rizki",
          "items": [{"part_number": "WG9925520270", "qty": 2}]}
     o.update(kw)
     return o
@@ -44,17 +50,10 @@ def test_created_happy_path(acc):
     assert acc["lines"][0]["item_id"] == 11 and acc["lines"][0]["qty"] == 2.0
 
 
-def test_skip_customer_tak_ditemukan(acc):
-    r = aq.create_for_order(_order(recipient_name="Budi Perorangan"))
-    assert r["status"] == "skip" and "tak ditemukan" in r["note"]
-
-
-def test_skip_customer_ambigu(acc, monkeypatch):
-    monkeypatch.setattr(aq.accurate, "search_customers",
-                        lambda name, limit=20: [{"id": 1, "name": "PT JAYA A"},
-                                                {"id": 2, "name": "PT JAYA B"}])
-    r = aq.create_for_order(_order(recipient_name="jaya"))
-    assert r["status"] == "skip" and "ambigu" in r["note"]
+def test_skip_akun_belum_ditautkan(acc):
+    """Akun tanpa tautan → skip SEBELUM login Accurate (jangan buang sesi)."""
+    r = aq.create_for_order(_order(username="pembeli_baru"))
+    assert r["status"] == "skip" and "belum ditautkan" in r["note"]
 
 
 def test_skip_pn_tak_ada(acc):
@@ -68,9 +67,9 @@ def test_skip_pn_tanpa_harga(acc):
     assert r["status"] == "skip" and "tanpa harga" in r["note"]
 
 
-def test_skip_nama_kosong(acc):
-    r = aq.create_for_order(_order(recipient_name="", username=""))
-    assert r["status"] == "skip" and "kosong" in r["note"]
+def test_skip_order_tanpa_username(acc):
+    r = aq.create_for_order(_order(username=""))
+    assert r["status"] == "skip" and "username" in r["note"]
 
 
 def test_harga_baris_ikut_yang_DIBAYAR_bukan_live_accurate(acc):

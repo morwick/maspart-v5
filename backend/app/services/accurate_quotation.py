@@ -7,8 +7,13 @@ agar webhook/polling tetap cepat, dan bersifat BEST-EFFORT: kegagalan Accurate
 TAK PERNAH membatalkan pembayaran — order tetap lunas, hasilnya dicatat di order.
 
 Kebijakan (disepakati pemilik):
-  • Customer: DICOCOKKAN dari nama penerima (recipient_name). Tak ada / ambigu →
-    di-SKIP (bukan error) — admin bisa buat manual lewat asisten.
+  • Customer: dari TAUTAN AKUN → pelanggan Accurate (`users.accurate_customer_id`,
+    diatur admin di menu "Pelanggan Accurate"). Akun belum ditautkan → di-SKIP
+    (bukan error) — admin bisa buat manual lewat asisten.
+    ⛔ TIDAK LAGI mencocokkan `recipient_name`: itu teks bebas yang diketik
+    pembeli di form pengiriman, jadi akun yang sama bisa menulis nama orang hari
+    ini dan nama PT besok — penawaran kadang jadi, kadang di-skip diam-diam, dan
+    berisiko menempel ke pelanggan yang SALAH bila namanya mirip.
   • PN tak ada di Accurate ATAU harga jual Rp 0 → SKIP seluruh penawaran (jangan
     buat sebagian). Order tetap lunas.
 
@@ -21,7 +26,7 @@ import logging
 import threading
 import time
 
-from . import accurate, orders
+from . import accurate, customer_map, orders
 
 logger = logging.getLogger("maspart.penawaran")
 
@@ -32,20 +37,6 @@ _lock = threading.Lock()
 _seen: set[str] = set()
 
 
-def _match_customer(name: str):
-    """(customer|None, alasan_skip|None). Cocok persis menang; 1 hasil diterima;
-    >1 tanpa cocok-persis = ambigu → skip (jangan menebak)."""
-    cust = accurate.search_customers(name, limit=20)
-    if not cust:
-        return None, f"customer '{name}' tak ditemukan di Accurate"
-    exact = [c for c in cust if (c.get("name") or "").strip().lower() == name.strip().lower()]
-    if exact:
-        return exact[0], None
-    if len(cust) == 1:
-        return cust[0], None
-    return None, f"nama '{name}' ambigu ({len(cust)} customer cocok)"
-
-
 def create_for_order(order: dict) -> dict:
     """Buat penawaran untuk SATU order lunas. TAK PERNAH raise.
     Return {status: created|skip|failed, number?, id?, customer?, note?}."""
@@ -53,9 +44,20 @@ def create_for_order(order: dict) -> dict:
     if not accurate.available():
         return {"status": "skip", "note": "Accurate tak aktif"}
 
-    name = (order.get("recipient_name") or order.get("username") or "").strip()
-    if not name:
-        return {"status": "skip", "note": "nama penerima kosong"}
+    # PELANGGAN diambil dari TAUTAN AKUN (admin menautkannya sekali di menu
+    # "Pelanggan Accurate"), BUKAN dari `recipient_name`.
+    # ⛔ recipient_name adalah teks BEBAS yang diketik pembeli di form pengiriman:
+    # akun yang sama menulis nama orang hari ini dan nama PT besok, sehingga
+    # penawaran kadang jadi & kadang di-skip diam-diam — dan bisa menempel ke
+    # pelanggan SALAH bila namanya mirip. Aturan pemilik 2026-07-21.
+    uname = (order.get("username") or "").strip()
+    if not uname:
+        return {"status": "skip", "note": "order tanpa username"}
+    pel = customer_map.untuk(uname)
+    if not pel:
+        return {"status": "skip",
+                "note": (f"akun '{uname}' belum ditautkan ke pelanggan Accurate — "
+                         "tautkan di menu Admin → Pelanggan Accurate")}
 
     try:
         # Aksi non-interaktif → paksa sesi (abaikan cooldown backoff refresh latar).
@@ -64,10 +66,6 @@ def create_for_order(order: dict) -> dict:
         return {"status": "failed", "note": f"login Accurate gagal: {str(e)[:150]}"}
 
     try:
-        pel, cerr = _match_customer(name)
-        if not pel:
-            return {"status": "skip", "note": cerr}
-
         lines, missing, noprice = [], [], []
         for it in (order.get("items") or []):
             pn = str(it.get("part_number") or "").strip()
