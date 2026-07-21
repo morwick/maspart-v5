@@ -178,7 +178,13 @@ def add(order_code: str, items: list[tuple[str, str, int]], ttl_seconds: int = _
 
 def commit(order_code: str) -> bool:
     """Jadikan reservasi order ini permanen (expires_at = null) — dipakai saat
-    order LUNAS, agar stok tetap tertahan dan tidak ikut kedaluwarsa."""
+    order LUNAS, agar stok tetap tertahan dan tidak ikut kedaluwarsa.
+
+    Resilient bila migrasi 014 belum dijalankan: TANPA kolom expires_at,
+    reservasi memang tak pernah kedaluwarsa → sudah permanen → tak ada yang
+    perlu di-commit. Perlakukan 'kolom tak ada' sebagai SUKSES (bukan gagal),
+    supaya jaring pengaman mark_paid tak menandai setiap order lunas keliru.
+    """
     try:
         r = requests.patch(
             _rest_url("stock_reservations"),
@@ -188,7 +194,12 @@ def commit(order_code: str) -> bool:
             timeout=_TIMEOUT,
         )
         _cache["ts"] = 0.0
-        return r.status_code in (200, 204)
+        if r.status_code in (200, 204):
+            return True
+        txt = (r.text or "").lower()
+        if r.status_code == 400 and "expires_at" in txt and "column" in txt:
+            return True     # skema lama tanpa expires_at → reservasi sudah permanen
+        return False
     except Exception:
         return False
 

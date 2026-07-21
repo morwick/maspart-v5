@@ -192,3 +192,29 @@ def test_active_rows_buang_reservasi_kedaluwarsa(monkeypatch):
 
 def test_status_map_kosong_bila_tak_ada_kode():
     assert O.status_map([]) == {}
+
+
+# ── commit() resilient bila kolom expires_at belum ada (migrasi 014) ─────────
+class _Resp:
+    def __init__(self, code, text=""):
+        self.status_code = code
+        self.text = text
+
+
+def test_commit_sukses_normal(monkeypatch):
+    monkeypatch.setattr(RES.requests, "patch", lambda *a, **kw: _Resp(204))
+    assert RES.commit("PO-1") is True
+
+
+def test_commit_kolom_expires_at_hilang_dianggap_sukses(monkeypatch):
+    """Tanpa migrasi 014, kolom expires_at tak ada → PATCH 400. Reservasi memang
+    sudah permanen (tak bisa kedaluwarsa) → commit dianggap SUKSES supaya jaring
+    pengaman mark_paid tak menandai setiap order lunas keliru."""
+    monkeypatch.setattr(RES.requests, "patch", lambda *a, **kw: _Resp(
+        400, '{"code":"42703","message":"column stock_reservations.expires_at does not exist"}'))
+    assert RES.commit("PO-1") is True
+
+
+def test_commit_gagal_lain_tetap_false(monkeypatch):
+    monkeypatch.setattr(RES.requests, "patch", lambda *a, **kw: _Resp(500, "server error"))
+    assert RES.commit("PO-1") is False
