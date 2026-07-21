@@ -1722,6 +1722,42 @@ export async function saveAdminGudang(
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
 }
 
+// ── Config aplikasi mobile (versi APK + feature-flag, tanpa rebuild APK) ────
+// Bentuknya cerminan GET /api/app/meta yang dipanggil aplikasi tiap kali dibuka.
+export type AppMetaVersion = {
+  latest_code: number;   // legacy: aplikasi ≤2.1.3 membandingkan versionCode
+  latest_name: string;   // versi APK terbaru, mis. "2.1.4" — sumber banding utama
+  min_code: number;      // legacy
+  min_name: string;      // versi minimum; isi + force=true → update dipaksa
+  download_url: string;
+  force: boolean;
+};
+export type AppConfigResponse = {
+  version: AppMetaVersion;
+  config: Record<string, unknown>;
+};
+
+export async function getAdminAppConfig(token: string): Promise<AppConfigResponse> {
+  const res = await fetch(`${API_BASE}/api/admin/app-config`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function saveAdminAppConfig(
+  token: string,
+  body: { version?: AppMetaVersion; config?: Record<string, unknown> },
+): Promise<AppConfigResponse> {
+  const res = await fetch(`${API_BASE}/api/admin/app-config`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 export async function getMe(token: string): Promise<UserOut> {
   const res = await fetch(`${API_BASE}/api/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },

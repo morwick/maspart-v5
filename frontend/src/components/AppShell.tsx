@@ -28,6 +28,7 @@ const I = {
   money: <Ic d={<><rect x="3" y="6" width="18" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /></>} />,
   clipboard: <Ic d={<><rect x="6" y="4" width="12" height="17" rx="2" /><path d="M9 4h6v3H9zM9 11h6M9 15h4" /></>} />,
   shield: <Ic d={<><path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z" /></>} />,
+  phone: <Ic d={<><rect x="7" y="2" width="10" height="20" rx="2" /><path d="M11 18h2" /></>} />,
   upload: <Ic d={<><path d="M12 21V9m0 0 4 4m-4-4-4 4M5 3h14" /></>} />,
   user: <Ic d={<><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>} />,
   photo: <Ic d={<><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="11" r="2" /><path d="m3 17 5-5 4 4 3-3 6 6" /></>} />,
@@ -77,6 +78,7 @@ const NAV_ADMIN: NavItem[] = [
   { href: "/admin/gudang", label: "Lokasi Gudang", icon: I.truck },
   { href: "/admin/foto", label: "Foto Part", icon: I.photo },
   { href: "/admin/index", label: "Image Index", icon: I.grid },
+  { href: "/admin/app-config", label: "Config Aplikasi", icon: I.phone },
 ];
 
 // Akun pembeli hanya melihat alur belanja. Item ber-`key` tunduk pada Menu Control

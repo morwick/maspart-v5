@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import ai_chat_log, ai_sinonim_learn, catalog_bom, gudang, gudang_config, harga, image_search, login_history, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, reservations, search_log, session_policy, sinonim
+from ..services import ai_chat_log, ai_sinonim_learn, app_config, catalog_bom, gudang, gudang_config, harga, image_search, login_history, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, reservations, search_log, session_policy, sinonim
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -976,3 +976,24 @@ def sinonim_usulan_reject(body: UsulanDecisionRequest,
     except KeyError as err:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(err))
     return {"ok": True, "usulan": u}
+
+
+# ── Config aplikasi mobile (versi APK + feature-flag, tanpa rebuild) ────────
+
+class AppConfigRequest(BaseModel):
+    # Keduanya opsional: panel boleh menyimpan versi saja atau config saja.
+    version: dict | None = None
+    config: dict | None = None
+
+
+@router.get("/app-config")
+def get_app_config(_admin: dict = Depends(require_admin)):
+    """Isi yang sama dengan GET /api/app/meta, tapi untuk panel admin."""
+    return app_config.load()
+
+
+@router.put("/app-config")
+def save_app_config(body: AppConfigRequest, _admin: dict = Depends(require_admin)):
+    """Simpan versi APK terbaru + feature-flag. Berlaku saat aplikasi dibuka
+    berikutnya — tak perlu rebuild/deploy APK."""
+    return app_config.save(body.version, body.config)
