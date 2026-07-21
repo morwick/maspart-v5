@@ -507,6 +507,32 @@ def order_detail(code: str, user: dict = Depends(get_current_user)):
     return o
 
 
+@router.get("/orders/{code}/tracking")
+def order_tracking(code: str, user: dict = Depends(get_current_user)):
+    """Perjalanan paket dari kurir, untuk resi yang diisi admin cabang.
+
+    ⛔ BUKAN pemesanan pengiriman: resi tetap dibuat gerai ekspedisi. Ini hanya
+    membacakan manifest kurir supaya pembeli tak perlu menyalin nomornya ke
+    situs kurir. Kegagalan dikembalikan sebagai `error` (200), BUKAN exception —
+    halaman pesanan tetap tampil walau layanan lacak sedang mati.
+    """
+    if not _rl_hit(f"tracking:{user['username']}", 20, 60):
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Terlalu sering melacak. Tunggu sebentar lalu coba lagi.")
+    is_admin = user.get("role") == "admin"
+    o = orders.get_order(code, username=None if is_admin else user["username"])
+    if not o:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pesanan tidak ditemukan.")
+    resi = (o.get("tracking_no") or "").strip()
+    if not resi:
+        return {"ada_resi": False, "error": "Nomor resi belum diisi admin."}
+    hasil, err = shipping.track(resi, o.get("courier") or "")
+    if err:
+        return {"ada_resi": True, "resi": resi, "kurir": o.get("courier") or "", "error": err}
+    return {"ada_resi": True, **hasil}
+
+
 @router.post("/orders/{code}/confirm")
 def confirm_order(code: str, user: dict = Depends(get_current_user)):
     """Pembeli konfirmasi barang sudah diterima → pesanan ditandai 'selesai'."""

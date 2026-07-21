@@ -1722,6 +1722,31 @@ export async function saveAdminGudang(
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
 }
 
+// ── Lacak resi (manifest kurir) ─────────────────────────────────────────────
+// ⛔ BUKAN pemesanan pengiriman: resi tetap dibuat gerai ekspedisi lalu diketik
+// admin cabang. Ini hanya membacakan perjalanan paket dari kurir.
+export type TrackingStep = { waktu: string; keterangan: string; lokasi: string };
+export type TrackingResult = {
+  ada_resi: boolean;
+  resi?: string;
+  kurir?: string;
+  delivered?: boolean;
+  status?: string;
+  penerima?: string;
+  waktu_terima?: string;
+  layanan?: string;
+  riwayat?: TrackingStep[];
+  error?: string;
+};
+
+export async function getOrderTracking(code: string, token: string): Promise<TrackingResult> {
+  const res = await fetch(`${API_BASE}/api/orders/${encodeURIComponent(code)}/tracking`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 // ── Tautan akun → pelanggan Accurate (dipakai penawaran otomatis) ───────────
 export type AccurateCustomer = { id: number; no: string; name: string; address?: string };
 export type TautPelangganRow = {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { ApiError, cancelOrder, confirmOrder, geoReverse, getOrder, getPaymentStatus, uploadProof, type OrderDetail } from "@/lib/api";
+import { ApiError, cancelOrder, confirmOrder, geoReverse, getOrder, getOrderTracking, getPaymentStatus, uploadProof, type OrderDetail, type TrackingResult } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { ORDER_STATUS, ppnOf, rp, fmtDate } from "@/lib/order-ui";
 import OrderStepper from "@/components/OrderStepper";
@@ -25,6 +25,9 @@ export default function OrderDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [senderPlace, setSenderPlace] = useState<string | null>(null);
+  // Perjalanan paket dari kurir — hanya ada setelah admin cabang mengisi resi.
+  const [track, setTrack] = useState<TrackingResult | null>(null);
+  const [trackBusy, setTrackBusy] = useState(false);
 
   const load = useCallback(async () => {
     const token = getToken();
@@ -46,6 +49,27 @@ export default function OrderDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Lacak paket. Backend men-cache 10 menit, jadi memanggilnya tiap halaman
+  // dibuka tidak menguras kuota API kurir.
+  const lacak = useCallback(async () => {
+    const token = getToken();
+    if (!token || !order?.tracking_no) return;
+    setTrackBusy(true);
+    try {
+      setTrack(await getOrderTracking(code, token));
+    } catch (err) {
+      // ⛔ Jangan jadikan error halaman: pesanan tetap harus tampil walau
+      // layanan lacak sedang mati.
+      setTrack({ ada_resi: true, error: err instanceof Error ? err.message : "Gagal melacak" });
+    } finally {
+      setTrackBusy(false);
+    }
+  }, [code, order?.tracking_no]);
+
+  useEffect(() => {
+    lacak();
+  }, [lacak]);
 
   // Ubah koordinat gudang pengirim → nama lokasi (reverse geocode, di-cache).
   useEffect(() => {
@@ -253,15 +277,62 @@ export default function OrderDetailPage() {
                     {order.courier && <span style={{ color: "var(--ink-500)" }}>({order.courier.toUpperCase()}{order.courier_service ? " " + order.courier_service : ""})</span>}
                     <button className="btn btn-secondary btn-sm" onClick={() => navigator.clipboard?.writeText(order.tracking_no || "")}>Salin</button>
                   </div>
-                  <a
-                    className="link"
-                    style={{ fontSize: 12 }}
-                    href={`https://cekresi.com/?noresi=${encodeURIComponent(order.tracking_no)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Lacak paket →
-                  </a>
+                  {/* Perjalanan paket langsung dari kurir — pembeli tak perlu
+                      menyalin nomor resi ke situs lain. */}
+                  {trackBusy && !track && (
+                    <div style={{ fontSize: 12, color: "var(--ink-500)", marginTop: 6 }}>Melacak paket…</div>
+                  )}
+                  {track?.riwayat?.length ? (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <span
+                          className={`pill ${track.delivered ? "pill-success" : ""}`}
+                          style={{ fontSize: 11.5 }}
+                        >
+                          {track.delivered ? "TERKIRIM" : track.status || "DALAM PERJALANAN"}
+                        </span>
+                        {track.delivered && track.penerima && (
+                          <span style={{ fontSize: 12, color: "var(--ink-500)" }}>
+                            diterima {track.penerima}
+                            {track.waktu_terima ? ` · ${track.waktu_terima}` : ""}
+                          </span>
+                        )}
+                        <button className="btn btn-ghost btn-sm" disabled={trackBusy} onClick={lacak}>
+                          {trackBusy ? "…" : "Segarkan"}
+                        </button>
+                      </div>
+                      <ol style={{ display: "flex", flexDirection: "column", gap: 6, margin: 0, paddingLeft: 0, listStyle: "none" }}>
+                        {track.riwayat.map((s, i) => (
+                          <li key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                            <span
+                              aria-hidden
+                              style={{
+                                marginTop: 5, width: 8, height: 8, borderRadius: 999, flexShrink: 0,
+                                background: i === 0 ? "var(--brand-700, #038612)" : "var(--ink-300)",
+                              }}
+                            />
+                            <span style={{ fontSize: 12.5 }}>
+                              <span style={{ color: "var(--ink-500)" }}>{s.waktu}</span>{" "}
+                              {s.keterangan}
+                              {s.lokasi ? <span style={{ color: "var(--ink-500)" }}> · {s.lokasi}</span> : null}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  ) : track?.error ? (
+                    <div style={{ fontSize: 12, color: "var(--ink-500)", marginTop: 6 }}>
+                      Perjalanan paket belum bisa ditampilkan ({track.error}).{" "}
+                      <a
+                        className="link"
+                        href={`https://cekresi.com/?noresi=${encodeURIComponent(order.tracking_no)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Cek di situs kurir →
+                      </a>
+                    </div>
+                  ) : null}
                 </div>
               )}
               {order.gudang && (

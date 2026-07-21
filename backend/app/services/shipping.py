@@ -9,6 +9,8 @@ Perlu RAJAONGKIR_API_KEY di .env (key dari https://rajaongkir.komerce.id).
 """
 from __future__ import annotations
 
+import time
+
 import requests
 
 from ..core.config import get_settings
@@ -141,3 +143,86 @@ def get_rates(username: str, weight_grams: int, item_value: int = 0, dest_postal
         return out, None
     except Exception as e:
         return [], str(e)
+
+
+# ── Lacak resi (waybill) ────────────────────────────────────────────────────
+# Paket RajaOngkir yang dipakai MEMANG punya endpoint ini (diprobe 2026-07-21:
+# nomor karangan dijawab {"meta":{"message":"Invalid Awb"}} — amplop JSON milik
+# API, bukan '404 page not found' seperti rute yang tak ada). ⛔ Ini BUKAN
+# pemesanan pengiriman: resi tetap dibuat gerai ekspedisi & diketik admin.
+_TRACK_URL = f"{_BASE}/track/waybill"
+_TRACK_TTL = 600.0          # 10 mnt — paket tak berpindah lebih cepat dari ini
+_track_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+
+
+def _teks(v) -> str:
+    return str(v).strip() if v is not None else ""
+
+
+def track(awb: str, courier: str) -> tuple[dict | None, str | None]:
+    """(hasil, error). hasil = {delivered, status, ringkas, riwayat[]}.
+
+    Di-cache 10 menit per (resi, kurir): halaman pesanan pembeli & aplikasi
+    memanggilnya tiap dibuka, sedangkan paket tak berpindah secepat itu — tanpa
+    cache satu pembeli yang menyegarkan berulang kali menghabiskan kuota API.
+    """
+    no = _teks(awb).upper()
+    kur = _teks(courier).lower()
+    if not no or not kur:
+        return None, "Nomor resi atau kurir belum ada."
+    if not available():
+        return None, "Layanan lacak resi belum aktif."
+
+    kunci = (no, kur)
+    now = time.time()
+    hit = _track_cache.get(kunci)
+    if hit and now - hit[0] < _TRACK_TTL:
+        return hit[1], None
+
+    try:
+        r = requests.post(_TRACK_URL, data={"awb": no, "courier": kur},
+                          headers=_headers(), timeout=20)
+    except Exception as e:
+        return None, f"Gagal menghubungi layanan lacak: {e}"
+    try:
+        body = r.json() or {}
+    except ValueError:
+        return None, f"Balasan lacak tak terbaca ({r.status_code})."
+    if r.status_code != 200:
+        # Pesan dari kurir/API diteruskan apa adanya — 'Invalid Awb' jauh lebih
+        # berguna bagi admin daripada 'gagal'.
+        pesan = _teks(((body.get("meta") or {}).get("message"))) or f"HTTP {r.status_code}"
+        return None, pesan
+
+    d = body.get("data") or {}
+    ringkas = d.get("summary") or {}
+    status = d.get("delivery_status") or {}
+    manifest = d.get("manifest") or []
+    hasil = {
+        "resi": no,
+        "kurir": kur,
+        "delivered": bool(d.get("delivered")),
+        # Nama field berbeda antar-kurir → ambil yang pertama tersedia.
+        "status": _teks(status.get("status") or ringkas.get("status")),
+        "penerima": _teks(status.get("pod_receiver") or status.get("pod_receiver_name")),
+        "waktu_terima": _teks(status.get("pod_date") or status.get("pod_time")),
+        "layanan": _teks(ringkas.get("service_code") or ringkas.get("service")),
+        "riwayat": [
+            {
+                "waktu": f"{_teks(m.get('manifest_date'))} {_teks(m.get('manifest_time'))}".strip(),
+                "keterangan": _teks(m.get("manifest_description") or m.get("manifest_code")),
+                "lokasi": _teks(m.get("city_name") or m.get("city")),
+            }
+            for m in manifest
+            if isinstance(m, dict)
+        ],
+    }
+    # Kurir mengirim manifest dari yang TERLAMA; pembeli ingin yang terbaru dulu.
+    hasil["riwayat"].reverse()
+    _track_cache[kunci] = (now, hasil)
+    return hasil, None
+
+
+def bersihkan_cache_lacak() -> None:
+    """Untuk test."""
+    _track_cache.clear()
