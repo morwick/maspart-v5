@@ -4,7 +4,7 @@
 // Penawaran Accurate otomatis (saat order lunas) memakai tautan ini — bukan
 // nama penerima yang diketik pembeli di form pengiriman. Satu kali tautkan,
 // selamanya benar; kalau belum ditautkan, penawaran di-skip dengan alasan jelas.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import {
@@ -12,6 +12,28 @@ import {
   type AccurateCustomer, type TautPelangganRow,
 } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
+
+/** Tandai potongan yang cocok dengan yang diketik — seperti sorotan kuning di
+ *  daftar "Dipesan oleh" Accurate. Pencocokan case-insensitive, SEMUA kemunculan. */
+function Sorot({ teks, cari }: { teks: string; cari: string }) {
+  const q = cari.trim();
+  if (!q || !teks) return <>{teks}</>;
+  // Escape supaya karakter regex yang diketik user (mis. '.', '(') tak meledak.
+  const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+  return (
+    <>
+      {/* ⛔ jangan pakai re.test() di sini: regex ber-flag /g menyimpan lastIndex
+          dan hasilnya berselang-seling. Cukup bandingkan teksnya. */}
+      {teks.split(re).map((bagian, i) =>
+        bagian.toLowerCase() === q.toLowerCase() ? (
+          <mark key={i} style={{ background: "#fde047", color: "inherit", padding: 0 }}>{bagian}</mark>
+        ) : (
+          <span key={i}>{bagian}</span>
+        ),
+      )}
+    </>
+  );
+}
 
 export default function AdminPelangganPage() {
   const router = useRouter();
@@ -56,22 +78,39 @@ export default function AdminPelangganPage() {
     load();
   }, [router, load]);
 
-  async function cari() {
-    const token = getToken();
-    if (!token || !q.trim()) return;
-    setMencari(true);
-    setError(null);
-    try {
-      const d = await cariPelangganAccurate(token, q.trim());
-      setHasil(d.customers || []);
-      if (!d.configured) setError("Accurate belum aktif — tak bisa mencari pelanggan.");
-      else if (!d.customers?.length) setError(`Tidak ada pelanggan cocok "${q.trim()}".`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Pencarian gagal");
-    } finally {
+  // Pencarian LANGSUNG saat mengetik (seperti "Dipesan oleh" di Accurate).
+  // Ditunda 300 ms supaya tiap huruf tidak jadi satu panggilan ke Accurate, dan
+  // `seq` menjaga agar balasan yang datang TERLAMBAT dari ketikan lama tidak
+  // menimpa hasil ketikan terbaru (race klasik pada typeahead).
+  const seq = useRef(0);
+  useEffect(() => {
+    if (!editing) return;
+    const kw = q.trim();
+    if (kw.length < 2) {
+      setHasil([]);
       setMencari(false);
+      return;
     }
-  }
+    const token = getToken();
+    if (!token) return;
+    const ku = ++seq.current;
+    setMencari(true);
+    const t = setTimeout(async () => {
+      try {
+        const d = await cariPelangganAccurate(token, kw);
+        if (ku !== seq.current) return;          // sudah ada ketikan lebih baru
+        setHasil(d.customers || []);
+        setError(d.configured ? null : "Accurate belum aktif — tak bisa mencari pelanggan.");
+      } catch (err) {
+        if (ku !== seq.current) return;
+        setHasil([]);
+        setError(err instanceof Error ? err.message : "Pencarian gagal");
+      } finally {
+        if (ku === seq.current) setMencari(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q, editing]);
 
   async function simpan(username: string, c: AccurateCustomer | null) {
     const token = getToken();
@@ -203,38 +242,69 @@ export default function AdminPelangganPage() {
                 <div style={{ fontWeight: 600, marginBottom: 8 }}>
                   Pilih pelanggan Accurate untuk <code>{editing}</code>
                 </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <input
                     className="input"
-                    style={{ flex: "1 1 240px" }}
-                    placeholder="Ketik nama pelanggan (mis. PT …)"
+                    style={{ flex: "1 1 260px" }}
+                    autoFocus
+                    placeholder="Ketik nama pelanggan — hasil muncul otomatis"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && cari()}
+                    onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
                   />
-                  <button className="btn btn-primary" disabled={mencari || !q.trim()} onClick={cari}>
-                    {mencari ? "Mencari…" : "Cari"}
-                  </button>
+                  <span style={{ fontSize: 12.5, color: "var(--ink-500)", minWidth: 64 }}>
+                    {mencari ? "mencari…" : q.trim().length < 2 ? "min. 2 huruf" : `${hasil.length} hasil`}
+                  </span>
                   <button className="btn btn-ghost" onClick={() => { setEditing(null); setHasil([]); }}>
                     Batal
                   </button>
                 </div>
+
+                {/* Daftar hasil: nama + nomor pelanggan di kanan, alamat di bawah —
+                    tata letak yang sama dengan daftar "Dipesan oleh" di Accurate. */}
                 {!!hasil.length && (
-                  <ul style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-                    {hasil.map((c) => (
-                      <li key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                        <span>
-                          {c.name}
-                          <span style={{ fontSize: 12, color: "var(--ink-500)" }}>
-                            {c.no ? ` · ${c.no}` : ""} · id {c.id}
-                          </span>
-                        </span>
-                        <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => simpan(editing, c)}>
-                          Pilih
+                  <ul
+                    style={{
+                      marginTop: 10, display: "flex", flexDirection: "column",
+                      border: "1px solid var(--ink-200)", borderRadius: 10,
+                      overflow: "hidden", maxHeight: 340, overflowY: "auto",
+                    }}
+                  >
+                    {hasil.map((c, i) => (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => simpan(editing, c)}
+                          style={{
+                            display: "block", width: "100%", textAlign: "left",
+                            padding: "10px 12px", background: "transparent", border: 0,
+                            borderTop: i ? "1px solid var(--ink-100)" : undefined,
+                            cursor: busy ? "wait" : "pointer",
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                            <span style={{ fontWeight: 600 }}>
+                              <Sorot teks={c.name} cari={q} />
+                            </span>
+                            <span style={{ fontSize: 12.5, color: "var(--ink-500)", whiteSpace: "nowrap" }}>
+                              {c.no || `id ${c.id}`}
+                            </span>
+                          </div>
+                          {c.address && (
+                            <div style={{ fontSize: 12.5, color: "var(--ink-500)", marginTop: 2 }}>
+                              <Sorot teks={c.address} cari={q} />
+                            </div>
+                          )}
                         </button>
                       </li>
                     ))}
                   </ul>
+                )}
+                {!mencari && q.trim().length >= 2 && !hasil.length && (
+                  <div style={{ marginTop: 10, fontSize: 13, color: "var(--ink-500)" }}>
+                    Tidak ada pelanggan cocok “{q.trim()}”.
+                  </div>
                 )}
               </section>
             )}

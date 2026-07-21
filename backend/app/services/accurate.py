@@ -1256,8 +1256,17 @@ def search_customers(keyword: str, *, limit: int = 15) -> list[dict[str, Any]]:
     def _do(sess):
         rows = _call(sess, "customer/search-customer.do",
                      {"start": 0, "limit": limit, "keywords": kw}).get("d") or []
-        return [{"id": r.get("id"), "no": r.get("customerNo"), "name": (r.get("name") or "").strip()}
-                for r in rows]
+        out = []
+        for r in rows:
+            # Alamat ikut dikirim supaya admin bisa membedakan pelanggan bernama
+            # mirip — persis daftar 'Dipesan oleh' di Accurate sendiri.
+            alamat = (r.get("fullShipAddress") or "").strip()
+            if not alamat:
+                bill = r.get("billAddress") or {}
+                alamat = str(bill.get("address") or "").strip() if isinstance(bill, dict) else ""
+            out.append({"id": r.get("id"), "no": r.get("customerNo"),
+                        "name": (r.get("name") or "").strip(), "address": alamat})
+        return out
 
     sess = _ensure_session()
     try:

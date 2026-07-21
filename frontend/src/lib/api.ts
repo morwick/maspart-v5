@@ -1723,7 +1723,7 @@ export async function saveAdminGudang(
 }
 
 // ── Tautan akun → pelanggan Accurate (dipakai penawaran otomatis) ───────────
-export type AccurateCustomer = { id: number; no: string; name: string };
+export type AccurateCustomer = { id: number; no: string; name: string; address?: string };
 export type TautPelangganRow = {
   username: string;
   role: string;
