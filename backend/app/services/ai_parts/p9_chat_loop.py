@@ -883,6 +883,12 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     pos = len(messages) - 1 if messages[-1].get("role") == "user" else len(messages)
     messages.insert(pos, {"role": "system", "content": ctx})
 
+    # Pertanyaan user giliran ini — dipakai penjaga istilah lapangan di
+    # _run_tool (kata kunci karangan model ditimpa istilah mentah user).
+    q_user_terakhir = next((str((m or {}).get("content") or "")
+                            for m in reversed(history or [])
+                            if (m or {}).get("role") == "user"), "")
+
     tools_used: list[str] = []
     repairkit_models: list[str] = []  # model transmisi yg dibahas → tombol unduh Excel di UI
     banding_exports: list[dict] = []  # perbandingan rangka → kartu unduh Excel di UI
@@ -1116,7 +1122,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                         rangka_tool_attempted = True
                     if name in ("cari_kode_kesalahan", "diagnosa"):
                         dtc_tool_attempted = True
-                    result = _run_tool(name, lc_args, user, sheet_id)
+                    result = _run_tool(name, {**lc_args, "_q_user": q_user_terakhir},
+                                       user, sheet_id)
                     tools_used.append(name)
                     _dump = _dump_tool(result, name)
                     _res_pns = _extract_pns(_dump)
@@ -1271,7 +1278,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 args = {}
             if name in ("buat_excel", "hitung_part"):   # pagar anti-karangan PN
                 args = {**args, "_grounded": grounded}
-            return tc, name, args, _run_tool(name, args, user, sheet_id)
+            return tc, name, args, _run_tool(name, {**args, "_q_user": q_user_terakhir},
+                                             user, sheet_id)
 
         # PERCEPATAN: batch >1 tool dieksekusi PARALEL (model kerap memanggil
         # beberapa tool sekaligus, mis. detail_part 3 PN / EPC + katalog) —

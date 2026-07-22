@@ -147,6 +147,62 @@ _DISPATCH = {
 }
 
 
+# ── Penjaga istilah lapangan (2026-07-22) ────────────────────────────
+# Kasus produksi "cucuk per": kamus sinonim tahu itu spring pin, tapi model DUA
+# KALI mengarang terjemahannya sendiri ("cross joint", lalu "fuel injector")
+# meski aturan prompt + [KAMUS ISTILAH GILIRAN INI] melarang — soft guard
+# terbukti kalah. Penegakan deterministik: bila pertanyaan user memuat trigger
+# kamus dan kata kunci model tidak memuaskan SATU grup pun (bukan trigger,
+# bukan keyword resmi, bukan PN), kata kunci model DITIMPA istilah mentah user
+# — ekspansi sinonim di handler yang menerjemahkannya dengan benar.
+_TOOLS_ISTILAH = {
+    "cari_part": ("query",),
+    "cari_part_di_unit": ("kata_kunci", "query"),
+    "part_aus_dari_rangka": ("query",),
+    "stok_gudang": ("kata_kunci", "query"),
+}
+
+
+def _paksa_istilah_kamus(name: str, args: dict, question: str) -> str:
+    """Mutasi `args` in-place bila model mengarang istilah; return catatan
+    untuk model ("" = tidak menimpa apa-apa)."""
+    fields = _TOOLS_ISTILAH.get(name)
+    if not fields or not (question or "").strip():
+        return ""
+    field = next((f for f in fields if str(args.get(f) or "").strip()), None)
+    if not field:
+        return ""
+    kata = str(args.get(field) or "").strip()
+    if any(c.isdigit() for c in kata):
+        return ""                      # kemungkinan PN — jangan diganggu
+    cocok: list[tuple[str, dict]] = []  # (trigger yg muncul di question, entri)
+    try:
+        for e in _load_sinonim_entries():
+            t = next((t for t in (e.get("triggers") or [])
+                      if t and sinonim.hit(t, question)), None)
+            if t:
+                cocok.append((t, e))
+    except Exception:                  # kamus rusak tak boleh mematikan tool
+        logger.exception("penjaga istilah gagal membaca kamus (dilewati)")
+        return ""
+    if not cocok:
+        return ""
+    for _t, e in cocok:
+        istilah = [*(e.get("triggers") or []), *(e.get("keywords") or [])]
+        if any(i and sinonim.hit(i, kata) for i in istilah):
+            return ""                  # model selaras kamus utk salah satu grup
+    # Tak satu grup pun terpuaskan → model mengarang. Trigger TERPANJANG yang
+    # muncul di pertanyaan dipakai ('cucuk per' menang atas 'per').
+    t, e = max(cocok, key=lambda te: len(te[0]))
+    args[field] = t
+    kw = ", ".join(k for k in (e.get("keywords") or []) if k)
+    logger.info("istilah dipaksa: %r -> %r (tool %s)", kata, t, name)
+    return (f"⚠️ kata kunci buatanmu '{kata}' TIDAK sesuai istilah user '{t}' — "
+            f"server MENGGANTINYA dengan istilah user (kamus lapangan resmi: "
+            f"{kw or t}). Sajikan hasil di atas apa adanya; sebut padanan "
+            "istilahnya dari kamus, ⛔ JANGAN memakai tafsiran sendiri.")
+
+
 def _run_tool(name: str, args: dict, user: dict, sheet_id: str = "") -> dict:
     fn = _DISPATCH.get(name)
     if not fn:
@@ -161,10 +217,15 @@ def _run_tool(name: str, args: dict, user: dict, sheet_id: str = "") -> dict:
         return {"denied": True,
                 "error": f"Tool '{name}' tidak tersedia untuk peran Anda."}
     args = dict(args or {})
+    # `_q_user` = pertanyaan user giliran ini, dititipkan chat loop (pola
+    # _sheet_id: kunci server, BUKAN dari model). Di-pop agar handler & log
+    # tak pernah melihatnya; arity _run_tool tetap 4 (banyak test mem-patch).
+    question = str(args.pop("_q_user", "") or "")
     if name.startswith("sheet_"):
         # sheet_id datang dari server (lampiran giliran ini), BUKAN dari model —
         # model tak boleh memilih file milik siapa pun lewat argumen.
         args["_sheet_id"] = sheet_id
+    catatan_istilah = _paksa_istilah_kamus(name, args, question)
     try:
         res = fn(args, user)
     except Exception:  # pragma: no cover
@@ -184,6 +245,10 @@ def _run_tool(name: str, args: dict, user: dict, sheet_id: str = "") -> dict:
     # (part_aus_dari_rangka, bom_dari_rangka, cari_part_di_unit, …).
     if isinstance(res, dict) and not _boleh_stok(user):
         _strip_stok(res)
+    if catatan_istilah and isinstance(res, dict):
+        # Key TERAKHIR dengan sengaja — _cap_tool_content memotong tengah,
+        # instruksi di ekor selamat.
+        res["catatan_istilah"] = catatan_istilah
     return res
 
 
