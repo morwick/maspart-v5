@@ -408,6 +408,93 @@ def test_kata_kunci_berangka_fiktif_dibuang():
     assert "garansi" in upd["kata_kunci"]
 
 
+def test_validasi_pengayaan_membuang_field_cjk():
+    """Pagar bahasa per-field: pengayaan Mandarin tak boleh masuk indeks."""
+    chunk = {"teks": "电控模块连接失败，点击启动测试。", "tabel": []}
+    upd = idx._validasi_pengayaan(
+        {"judul_id": "电控模块连接失败处理",
+         "kata_kunci": ["ECU未连接", "启动测试", "EOL"],
+         "ringkasan": "若电控模块连接失败，可点击启动测试。"}, chunk)
+    assert "judul_id" not in upd
+    assert "ringkasan" not in upd
+    assert upd["kata_kunci"] == ["EOL"]            # yang Latin selamat
+
+
+def test_pengayaan_mandarin_diulang_dengan_teguran(monkeypatch):
+    """Putaran 1 ikut bahasa sumber → putaran 2 (tegur) hasil Indonesia dipakai."""
+    _aktifkan_llm(monkeypatch)
+    dok = pengetahuan.add_dokumen(
+        "EOL", teks_admin="电控模块连接失败，点击启动测试即可重连。")
+    panggilan = []
+
+    def fake_post(url, **kw):
+        kirim = json.loads(kw["json"]["messages"][1]["content"])
+        cid = kirim["chunk"][0]["id"]
+        sistem = kw["json"]["messages"][0]["content"]
+        panggilan.append("tegur" if idx._PROMPT_TEGUR in sistem else "biasa")
+        if len(panggilan) == 1:
+            return _Resp({"chunk": [{"id": cid, "judul_id": "电控模块连接失败处理",
+                                     "kata_kunci": ["ECU未连接"],
+                                     "ringkasan": "点击启动测试。"}]})
+        return _Resp({"chunk": [{"id": cid, "judul_id": "Modul kontrol gagal terhubung",
+                                 "kata_kunci": ["ecu tidak terhubung", "mulai tes"],
+                                 "ringkasan": "Klik mulai tes untuk menghubungkan ulang."}]})
+    monkeypatch.setattr(idx.requests, "post", fake_post)
+    idx.proses(dok["id"])
+    knowledge_util._LOAD_CACHE.clear()
+    c = pengetahuan.chunks_dokumen(dok["id"])[0]
+    assert panggilan == ["biasa", "tegur"]
+    assert c["judul_id"] == "Modul kontrol gagal terhubung"
+    assert "ecu tidak terhubung" in c["kata_kunci"]
+    d = pengetahuan.get_dokumen(dok["id"])
+    assert d["status"] == "selesai" and d["pengayaan"] == "llm"
+
+
+def test_pengayaan_tetap_asing_jatuh_ke_fallback_dan_dilaporkan(monkeypatch):
+    """LLM keras kepala berbahasa Mandarin dua putaran → fallback + admin tahu."""
+    _aktifkan_llm(monkeypatch)
+    dok = pengetahuan.add_dokumen(
+        "EOL", teks_admin="电控模块连接失败，点击启动测试即可重连。")
+
+    def fake_post(url, **kw):
+        kirim = json.loads(kw["json"]["messages"][1]["content"])
+        cid = kirim["chunk"][0]["id"]
+        return _Resp({"chunk": [{"id": cid, "judul_id": "电控模块连接失败处理",
+                                 "kata_kunci": ["ECU未连接", "启动测试"],
+                                 "ringkasan": "点击启动测试。"}]})
+    monkeypatch.setattr(idx.requests, "post", fake_post)
+    idx.proses(dok["id"])
+    knowledge_util._LOAD_CACHE.clear()
+    c = pengetahuan.chunks_dokumen(dok["id"])[0]
+    # Jawaban LLM Mandarin TIDAK dipakai — yang tersimpan fallback deterministik
+    # (baris pertama teks sumber), bukan judul karangan model.
+    assert c["judul_id"] != "电控模块连接失败处理"
+    assert "ECU未连接" not in c["kata_kunci"]
+    d = pengetahuan.get_dokumen(dok["id"])
+    assert d["status"] == "selesai_sebagian"
+    assert "berbahasa asing" in d["error"]
+    assert d["pengayaan"] == "fallback"
+
+
+def test_pengayaan_indonesia_tidak_kena_putaran_ulang(monkeypatch):
+    """Dokumen Indonesia normal: satu panggilan saja — tak bayar token teguran."""
+    _aktifkan_llm(monkeypatch)
+    dok = pengetahuan.add_dokumen("Garansi", teks_admin="Klaim garansi maksimal 30 hari.")
+    dipanggil = {"n": 0}
+
+    def fake_post(url, **kw):
+        dipanggil["n"] += 1
+        kirim = json.loads(kw["json"]["messages"][1]["content"])
+        cid = kirim["chunk"][0]["id"]
+        return _Resp({"chunk": [{"id": cid, "judul_id": "Syarat klaim garansi",
+                                 "kata_kunci": ["garansi"],
+                                 "ringkasan": "Klaim maksimal 30 hari."}]})
+    monkeypatch.setattr(idx.requests, "post", fake_post)
+    idx.proses(dok["id"])
+    assert dipanggil["n"] == 1
+    assert pengetahuan.get_dokumen(dok["id"])["status"] == "selesai"
+
+
 def test_id_asing_dari_llm_diabaikan(monkeypatch):
     _aktifkan_llm(monkeypatch)
     monkeypatch.setattr(idx.requests, "post", lambda *a, **kw: _Resp(

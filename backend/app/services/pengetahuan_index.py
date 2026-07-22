@@ -215,17 +215,59 @@ _PROMPT_SISTEM = (
     "maks 80 karakter), kata_kunci (maks 8 istilah Bahasa Indonesia yang biasa dipakai "
     "mekanik/pembeli saat mencari hal ini, termasuk sinonim lapangan), dan ringkasan "
     "(maks 2 kalimat Bahasa Indonesia). "
+    "Potongan bisa berbahasa China/Inggris/Jepang — output WAJIB tetap Bahasa "
+    "Indonesia (terjemahkan istilahnya; nomor part & kode tetap apa adanya). "
     'Jawab HANYA JSON dengan bentuk: {"chunk": [{"id": "<id potongan>", '
     '"judul_id": "...", "kata_kunci": ["..."], "ringkasan": "..."}]}. '
     "⛔ ATURAN KERAS: gunakan HANYA informasi yang tertulis di potongan. DILARANG "
     "menambah fakta, angka, satuan, atau nomor part yang tidak ada di potongan itu."
 )
 
+# Teguran putaran kedua: DeepSeek pada dokumen asing kerap IKUT bahasa sumber
+# meski prompt minta Indonesia — tanpa teguran eksplisit hasil ulangannya sama.
+_PROMPT_TEGUR = (
+    "PENGINGAT KERAS: jawaban sebelumnya untuk potongan-potongan ini ikut bahasa "
+    "dokumen (bukan Indonesia). judul_id, kata_kunci, dan ringkasan WAJIB 100% "
+    "Bahasa Indonesia — TERJEMAHKAN istilah asingnya; nomor part/kode apa adanya."
+)
+
+# Porsi karakter CJK maksimal agar sebuah field pengayaan masih dianggap
+# Bahasa Indonesia (istilah teknis China dalam kurung sesekali masih lolos).
+_CJK_MAKS = 0.2
+
+
+def _cjk_ratio(s: str) -> float:
+    s = (s or "").strip()
+    if not s:
+        return 0.0
+    return (len(_HAN_RE.findall(s)) + len(_KANA_RE.findall(s))) / len(s)
+
+
+def _pengayaan_asing(item: dict) -> bool:
+    """True bila LLM menjawab dalam bahasa sumber (CJK), bukan Indonesia.
+
+    Inilah bug yang membuat 18% chunk terindeks dengan judul_id/kata_kunci
+    Mandarin berstatus "llm" sukses: tak ada yang memeriksa BAHASA jawaban.
+    Chunk seperti itu tak akan pernah ketemu dari pertanyaan Indonesia —
+    padahal justru dokumen asing yang paling butuh jembatan pencarian ini.
+    """
+    if _cjk_ratio(str(item.get("judul_id") or "")) > _CJK_MAKS:
+        return True
+    if _cjk_ratio(str(item.get("ringkasan") or "")) > _CJK_MAKS:
+        return True
+    kk = [str(k) for k in (item.get("kata_kunci") or []) if str(k).strip()]
+    asing = sum(1 for k in kk if _cjk_ratio(k) > _CJK_MAKS)
+    return bool(kk) and asing > len(kk) / 2
+
 
 def _validasi_pengayaan(item: dict, chunk: dict) -> dict:
     """Pagar anti-halusinasi: kata kunci ber-ANGKA yang tak muncul di teks chunk
     DIBUANG — tanpa ini LLM bisa menyuntikkan nomor part karangan ke indeks, dan
-    indeks yang salah lebih berbahaya daripada indeks yang miskin."""
+    indeks yang salah lebih berbahaya daripada indeks yang miskin.
+
+    Pagar bahasa: field pengayaan yang dominan CJK juga DIBUANG per-field —
+    tujuan pengayaan adalah jembatan pencarian Indonesia; jawaban berbahasa
+    sumber hanya menduplikasi teks asli dan menyita kursi kata kunci."""
     hay = f"{chunk.get('teks','')} {' '.join(str(c) for b in (chunk.get('tabel') or []) for c in b)}".lower()
     kk: list[str] = []
     for k in (item.get("kata_kunci") or [])[:12]:
@@ -234,22 +276,27 @@ def _validasi_pengayaan(item: dict, chunk: dict) -> dict:
             continue
         if any(c.isdigit() for c in s) and s.lower() not in hay:
             continue
+        if _cjk_ratio(s) > _CJK_MAKS:
+            continue
         kk.append(s)
     out = {}
-    if isinstance(item.get("judul_id"), str) and item["judul_id"].strip():
+    if (isinstance(item.get("judul_id"), str) and item["judul_id"].strip()
+            and _cjk_ratio(item["judul_id"]) <= _CJK_MAKS):
         out["judul_id"] = item["judul_id"].strip()[:80]
     if kk:
         out["kata_kunci"] = pengetahuan.clean_list(kk, 8)
-    if isinstance(item.get("ringkasan"), str) and item["ringkasan"].strip():
+    if (isinstance(item.get("ringkasan"), str) and item["ringkasan"].strip()
+            and _cjk_ratio(item["ringkasan"]) <= _CJK_MAKS):
         out["ringkasan"] = item["ringkasan"].strip()[:300]
     return out
 
 
-def _llm_batch(batch: list[dict]) -> dict[str, dict]:
+def _llm_batch(batch: list[dict], tegur: bool = False) -> dict[str, dict]:
     s = get_settings()
     muatan = [{"id": c["id"],
                "isi": (c.get("teks") or "")[:1200],
                "tabel": (c.get("tabel") or [])[:4]} for c in batch]
+    sistem = _PROMPT_SISTEM + (" " + _PROMPT_TEGUR if tegur else "")
     r = requests.post(
         f"{s.deepseek_base_url.rstrip('/')}/chat/completions",
         headers={"Authorization": f"Bearer {s.deepseek_api_key}",
@@ -257,7 +304,7 @@ def _llm_batch(batch: list[dict]) -> dict[str, dict]:
         json={
             "model": s.deepseek_model,
             "messages": [
-                {"role": "system", "content": _PROMPT_SISTEM},
+                {"role": "system", "content": sistem},
                 {"role": "user", "content": json.dumps({"chunk": muatan}, ensure_ascii=False)},
             ],
             "temperature": 0.0,
@@ -274,10 +321,14 @@ def _llm_batch(batch: list[dict]) -> dict[str, dict]:
     return {str(i.get("id")): i for i in (items or []) if isinstance(i, dict)}
 
 
-def perkaya(chunks: list[dict], lapor=None) -> str:
+def perkaya(chunks: list[dict], lapor=None, catatan: list[str] | None = None) -> str:
     """Perkaya judul_id/kata_kunci/ringkasan lewat LLM. Return "llm" | "campuran"
     | "fallback". TIDAK PERNAH melempar — kegagalan LLM hanya berarti fallback
-    deterministik yang sudah terpasang tetap dipakai."""
+    deterministik yang sudah terpasang tetap dipakai.
+
+    Jawaban berbahasa sumber (CJK) TIDAK diterima: chunk-nya diantre ke putaran
+    kedua dengan teguran eksplisit; yang tetap asing dibiarkan fallback dan
+    dilaporkan lewat `catatan` supaya admin tahu, bukan diam-diam sukses."""
     s = get_settings()
     if not getattr(s, "ai_configured", False):
         return "fallback"
@@ -289,6 +340,7 @@ def perkaya(chunks: list[dict], lapor=None) -> str:
     batches = [chunks[i:i + _BATCH_LLM] for i in range(0, len(chunks), _BATCH_LLM)]
     batches = batches[:_MAX_LLM_CALLS]
     kena = 0
+    ulang: list[dict] = []
     for n, batch in enumerate(batches):
         if lapor:
             lapor(n + 1, len(batches))
@@ -301,10 +353,41 @@ def perkaya(chunks: list[dict], lapor=None) -> str:
             item = hasil.get(c["id"])
             if not item:
                 continue          # id asing / tak dijawab → biarkan fallback
+            if _pengayaan_asing(item):
+                ulang.append(c)   # ikut bahasa sumber → coba lagi dengan teguran
+                continue
             upd = _validasi_pengayaan(item, c)
             if upd:
                 c.update(upd)
                 kena += 1
+    # Putaran kedua, SEKALI: sisa plafon panggilan dipakai (minimal 1 batch).
+    gagal_bahasa = 0
+    if ulang:
+        sisa = max(_MAX_LLM_CALLS - len(batches), 1)
+        rbatches = [ulang[i:i + _BATCH_LLM]
+                    for i in range(0, len(ulang), _BATCH_LLM)][:sisa]
+        dicoba = {c["id"] for b in rbatches for c in b}
+        for n, batch in enumerate(rbatches):
+            try:
+                hasil = _llm_batch(batch, tegur=True)
+            except Exception as err:
+                logger.info("pengayaan ulang gagal batch %s: %s", n + 1, err)
+                hasil = {}
+            for c in batch:
+                item = hasil.get(c["id"])
+                if item and not _pengayaan_asing(item):
+                    upd = _validasi_pengayaan(item, c)
+                    if upd:
+                        c.update(upd)
+                        kena += 1
+                        continue
+                gagal_bahasa += 1
+        gagal_bahasa += sum(1 for c in ulang if c["id"] not in dicoba)
+    if gagal_bahasa and catatan is not None:
+        catatan.append(
+            f"{gagal_bahasa} bagian: pengayaan AI tetap berbahasa asing setelah "
+            "diulang — judul & kata kunci memakai fallback. Indeks ulang, atau isi "
+            "kata kunci Indonesia manual agar bagian itu bisa dicari.")
     if kena == 0:
         return "fallback"
     return "llm" if kena == len(chunks) else "campuran"
@@ -435,7 +518,7 @@ def proses(dok_id: str) -> None:
         def lapor(n, total):
             pengetahuan.set_status(
                 dok_id, "proses", _progres("Memperkaya dengan AI", n, total))
-        pengayaan = perkaya(semua, lapor)
+        pengayaan = perkaya(semua, lapor, catatan)
 
     # 4) simpan
     pengetahuan.set_status(dok_id, "proses", _progres("Menyimpan indeks"))
