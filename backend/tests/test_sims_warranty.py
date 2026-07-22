@@ -38,9 +38,9 @@ def test_status_label_terpetakan():
     assert "Kantor Perwakilan" in w.status_label("s-ro-status-dbcfwjl")
     assert "Regional" in w.status_label("s-ro-status-dqfwjl")
     assert "Dibatalkan" in w.status_label("s-ro-status-zf")
-    # dua kode belum pernah terlihat → label wajib jujur belum pasti
-    assert "belum terkonfirmasi" in w.status_label("s-ro-status-kswx")
-    assert "belum terkonfirmasi" in w.status_label("s-ro-status-wg")
+    # kswx/wg/bh dipetakan 2026-07-22 (lihat test_status_label_bh_kswx_wg_terpetakan)
+    assert w.status_label("s-ro-status-kswx") == "Mulai perbaikan"
+    assert w.status_label("s-ro-status-wg") == "Selesai kerja"
     assert w.status_label("kode-aneh") == "kode-aneh"   # tak dikenal → apa adanya
 
 
@@ -371,7 +371,8 @@ def test_rekap_klaim(klaim_penuh):
     top = r["gejala_tersering"][0]
     assert top["gejala"] == "transmisi keras" and top["jumlah"] == 2
     assert r["rata_durasi_jam"] == 4.0
-    assert "TIDAK diagregasi" in r["catatan"]
+    # ≤60 klaim → jalur nilai diambil; baris mock tanpa ro_id → 0 WO (tanpa HTTP)
+    assert r["nilai_total_cny"] == 0.0 and "nilai_total_cny" in r["catatan"]
 
 
 def test_sheet_garansi_massal(monkeypatch):
@@ -414,3 +415,52 @@ def test_spec_garansi_tambahan_admin_dan_sheet():
     na_ns = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "")}
     assert "sheet_garansi_massal" not in na_ns
     assert {"excel_riwayat_klaim", "rekap_klaim"} <= na_ns
+
+
+# ── B: label status lengkap + agregasi nilai (2026-07-22) ────────────
+def test_status_label_bh_kswx_wg_terpetakan():
+    assert w.status_label("s-ro-status-kswx") == "Mulai perbaikan"
+    assert w.status_label("s-ro-status-wg") == "Selesai kerja"
+    assert w.status_label("s-ro-status-bh") == "Diajukan bengkel"
+    # tak ada '(belum terkonfirmasi)' lagi
+    assert "belum terkonfirmasi" not in w.status_label("s-ro-status-kswx")
+
+
+def test_nilai_wo_ambil_total_tertinggi(monkeypatch):
+    monkeypatch.setattr(w, "ringkas_audit", lambda rid: {"roId": rid, "amountList": [
+        {"auditType": "s-ro-status-kd", "totalAmount": 8533.05},
+        {"auditType": "s-ro-status-js", "totalAmount": 8000.0}]})
+    assert w.nilai_wo("1") == 8533.05
+
+
+def test_nilai_klaim_paralel_dan_bounded(monkeypatch):
+    monkeypatch.setattr(w, "ringkas_audit",
+                        lambda rid: {"roId": rid, "amountList": [{"totalAmount": 100.0}]})
+    nv = w.nilai_klaim(["a", "b", "c"], maks=2)
+    assert nv["total_cny"] == 200.0 and nv["jumlah_wo"] == 2 and nv["terpotong"] is True
+
+
+def test_rekap_klaim_nilai_saat_difilter(klaim_penuh, monkeypatch):
+    monkeypatch.setattr(ai.sims_warranty, "nilai_klaim",
+                        lambda ro_ids, maks=60: {"total_cny": 12345.0,
+                                                 "jumlah_wo": len(list(ro_ids)), "terpotong": False})
+    # data klaim_penuh kecil (≤60) & tanpa rangka → tetap dihitung
+    r = ai._t_rekap_klaim({}, ADMIN)
+    assert r["nilai_total_cny"] == 12345.0
+    assert "nilai_total_cny" in r["catatan"]
+
+
+def test_rekap_klaim_nilai_dilewati_bila_banyak(monkeypatch):
+    monkeypatch.setattr(ai, "_boleh_ai", lambda u, k: True)
+    monkeypatch.setattr(ai.sims_warranty, "available", lambda: True)
+    banyak = [{"status": "Selesai", "ro_id": str(i), "frame": "SJ0001",
+               "gejala": "x", "durasi_jam": 1.0, "tanggal": "2026-07-01"}
+              for i in range(200)]
+    monkeypatch.setattr(ai.sims_warranty, "semua_klaim",
+                        lambda vin="": {"total": 200, "klaim": banyak})
+    dipanggil = {"n": 0}
+    monkeypatch.setattr(ai.sims_warranty, "nilai_klaim",
+                        lambda *a, **k: dipanggil.__setitem__("n", dipanggil["n"] + 1) or {})
+    r = ai._t_rekap_klaim({}, ADMIN)          # 200 klaim, tanpa rangka
+    assert "nilai_total_cny" not in r and dipanggil["n"] == 0   # TIDAK dihitung
+    assert "TIDAK dihitung" in r["catatan"]

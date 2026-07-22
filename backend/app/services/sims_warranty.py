@@ -41,9 +41,10 @@ STATUS_LABEL: dict[str, str] = {
     "s-ro-status-dqfwjl": "Menunggu review Manajer Servis Regional",
     "s-ro-status-js": "Selesai",
     "s-ro-status-zf": "Dibatalkan/dikembalikan",
-    # Dua di bawah belum pernah terlihat di portal — jangan disajikan seolah pasti.
-    "s-ro-status-kswx": "Mulai perbaikan (belum terkonfirmasi)",
-    "s-ro-status-wg": "Selesai kerja (belum terkonfirmasi)",
+    # Dipetakan 2026-07-22 dari singkatan pinyin standar + jejak audit:
+    "s-ro-status-kswx": "Mulai perbaikan",       # 开始维修 (kāishǐ wéixiū)
+    "s-ro-status-wg": "Selesai kerja",           # 完工 (wángōng)
+    "s-ro-status-bh": "Diajukan bengkel",        # jejak audit: 服务站提交
 }
 
 _REPAIR_TYPE = {"ro-part-repair-gh": "ganti", "ro-part-repair-wx": "perbaiki"}
@@ -246,6 +247,33 @@ def semua_klaim(vin: str = "", maks_halaman: int = 40) -> dict | None:
                 "klaim": semua}
 
     return _cached(key, _TTL_SEMUA, _fetch)
+
+
+_NILAI_MAKS_WO = 60      # batas WO yg dibuka utk agregasi nilai (per-WO lambat)
+
+
+def nilai_wo(ro_id: str) -> float:
+    """Nilai (CNY) satu WO = totalAmount tertinggi di amountList (per tahap
+    audit). 0.0 bila tak ada / WO belum bernilai."""
+    d = ringkas_audit(ro_id) or {}
+    vals = [a.get("totalAmount") for a in (d.get("amountList") or [])
+            if isinstance(a.get("totalAmount"), (int, float))]
+    return float(max(vals)) if vals else 0.0
+
+
+def nilai_klaim(ro_ids, maks: int = _NILAI_MAKS_WO) -> dict:
+    """Agregasi nilai CNY beberapa WO (buka auditDetail PARALEL). BOUNDED —
+    hanya `maks` WO pertama (buka tiap WO lambat). Return {total_cny, jumlah_wo,
+    terpotong}."""
+    ids = [i for i in ro_ids if i][:maks]
+    terpotong = len([i for i in ro_ids if i]) > maks
+    if not ids:
+        return {"total_cny": 0.0, "jumlah_wo": 0, "terpotong": False}
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        vals = list(ex.map(nilai_wo, ids))
+    return {"total_cny": round(sum(vals), 2), "jumlah_wo": len(ids),
+            "terpotong": terpotong}
 
 
 def detail_wo(ro_id: str) -> dict | None:

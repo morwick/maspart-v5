@@ -1586,11 +1586,24 @@ def _t_rekap_klaim(args: dict, user: dict) -> dict:
         "rata_durasi_jam": (round(sum(durasi) / len(durasi), 1) if durasi else None),
         "unit_dari_rangka": rangka or None,
     }
+    # Agregasi NILAI CNY — BOUNDED: hanya bila difilter per unit ATAU klaim
+    # cukup sedikit (≤_NILAI_MAKS_WO); buka tiap WO (auditDetail) lambat.
+    nilai_ket = ("Nilai CNY TIDAK dihitung (klaim terlalu banyak — buka tiap WO "
+                 "lambat). Filter per unit (rangka) atau minta detail_klaim untuk "
+                 "nilai per WO.")
+    if rangka or len(klaim) <= sims_warranty._NILAI_MAKS_WO:
+        ro_ids = [k.get("ro_id") for k in klaim if k.get("ro_id")]
+        nv = sims_warranty.nilai_klaim(ro_ids)
+        out["nilai_total_cny"] = nv.get("total_cny")
+        out["nilai_dari_wo"] = nv.get("jumlah_wo")
+        nilai_ket = (f"nilai_total_cny = jumlah biaya {nv.get('jumlah_wo')} WO (CNY, "
+                     "totalAmount audit tertinggi/WO)"
+                     + ("; DIPOTONG ke batas — belum semua WO dihitung." if nv.get("terpotong")
+                        else ".") + " Nilai CNY apa adanya (jangan ubah ke rupiah kecuali diminta).")
     out["catatan"] = (
         "Rekap klaim garansi SIMS DMS armada. Angka dari daftar klaim (queryRepairOrder). "
-        "⚠️ NILAI/biaya CNY TIDAK diagregasi di sini (perlu buka tiap WO — terlalu lambat "
-        "untuk ribuan klaim); untuk nilai per klaim pakai detail_klaim. 'gejala_tersering' "
-        "= teks keluhan apa adanya (belum dikelompokkan makna). Sajikan ringkas & jujur."
+        f"⚠️ {nilai_ket} 'gejala_tersering' = teks keluhan apa adanya (belum dikelompokkan "
+        "makna). Sajikan ringkas & jujur."
     )
     return out
 
