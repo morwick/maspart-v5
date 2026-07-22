@@ -2472,3 +2472,148 @@ def _t_sheet_isi_nama_telematik(args: dict, user: dict) -> dict:
     }
 
 
+def _t_daftarkan_unit(args: dict, user: dict) -> dict:
+    """⚠️ WRITE (2 langkah): DAFTARKAN unit baru ke telematics (VIN + serial GPS)."""
+    if not _is_admin(user):
+        return dict(_TELE_DENIED)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    vin = (args.get("vin") or args.get("rangka") or "").strip().upper()
+    sbh = (args.get("sbh") or args.get("serial_gps") or args.get("gps") or "").strip()
+    if not vin or not sbh:
+        return {"error": "Butuh VIN unit DAN serial perangkat GPS (sbh). Keduanya wajib."}
+    try:
+        km = int(args.get("km") or args.get("mileage") or 0)
+    except (TypeError, ValueError):
+        km = 0
+    euro2 = bool(args.get("euro2"))
+    frame = telematics.frame_dari_rangka(vin)
+    sudah = telematics.cari_unit(vin) or telematics.cari_unit(frame)
+
+    if not args.get("konfirmasi"):
+        # LANGKAH 1 — pratinjau, TIDAK menulis.
+        return {
+            "perlu_konfirmasi": True,
+            "pratinjau": {"vin": vin, "frame": frame, "serial_gps": sbh,
+                          "km_awal": km, "euro2": euro2,
+                          "sudah_terdaftar": bool(sudah)},
+            "catatan": (
+                (f"⚠️ Unit VIN {vin} (frame {frame}) SUDAH ADA di telematics — "
+                 "mendaftarkan ulang mungkin ditolak/duplikat. Konfirmasi ke user "
+                 "apakah tetap lanjut."
+                 if sudah else
+                 f"⚠️ KONFIRMASI DULU ke user: daftarkan unit BARU VIN {vin} "
+                 f"(frame {frame}) dengan perangkat GPS serial {sbh}, km awal {km}, "
+                 f"Euro2={euro2}? Ini MENAMBAH data permanen di server Sinotruk.")
+                + " Bila user setuju, panggil daftarkan_unit lagi dengan konfirmasi=true. "
+                "⛔ Pastikan serial GPS benar — tak bisa ditebak."),
+        }
+    # LANGKAH 2 — user setuju → daftarkan.
+    hasil = telematics.daftarkan(sbh, vin, km, euro2)
+    if hasil is None:
+        return {"found": False,
+                "catatan": f"Gagal mendaftarkan VIN {vin} — server telematics menolak/timeout "
+                           "(cek serial GPS & VIN, mungkin sudah terdaftar). Sampaikan jujur, "
+                           "jangan klaim berhasil."}
+    return {"found": True, "berhasil": True, "vin": vin,
+            "frame": hasil.get("cjh") or frame, "serial_gps": sbh,
+            "catatan": f"✅ Unit VIN {vin} (frame {hasil.get('cjh') or frame}) berhasil "
+                       "didaftarkan ke telematics/GPS."}
+
+
+def _t_sheet_daftar_unit(args: dict, user: dict) -> dict:
+    """⚠️ WRITE (2 langkah): DAFTARKAN unit MASSAL dari Excel (VIN + serial GPS)."""
+    if not _is_admin(user):
+        return dict(_TELE_DENIED)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    parsed = ai_sheet.get_sheet(args.get("_sheet_id", ""), user.get("username", ""))
+    if not parsed:
+        return {"found": False, "error": "Tidak ada file Excel terlampir (atau kedaluwarsa). "
+                                         "Minta user mengunggah Excel berisi VIN & serial GPS."}
+    headers = parsed.get("headers") or []
+    body = parsed.get("_body") or []
+
+    def _kolom(minta, kandidat):
+        if (minta or "").strip():
+            return ai_sheet._cari_kolom(headers, minta)
+        for k in kandidat:
+            i = ai_sheet._cari_kolom(headers, k)
+            if i is not None:
+                return i
+        return None
+    i_vin = _kolom(args.get("kolom_vin"), ["vin", "no rangka", "rangka", "frame", "chassis"])
+    i_sbh = _kolom(args.get("kolom_sbh"), ["sbh", "serial", "gps", "terminal", "box", "imei"])
+    i_km = _kolom(args.get("kolom_km"), ["km", "mileage", "kilometer", "odometer"])
+    i_e2 = _kolom(args.get("kolom_euro2"), ["euro2", "euro 2", "eu2"])
+    if i_vin is None or i_sbh is None:
+        return {"found": False,
+                "catatan": ("Kolom VIN dan/atau serial GPS (sbh) tidak terdeteksi "
+                            f"(header: {headers}). Minta user menyebut nama kolomnya.")}
+
+    baris: list[dict] = []
+    for r in body:
+        vin = (r[i_vin] if i_vin < len(r) else "").strip().upper()
+        sbh = (r[i_sbh] if i_sbh < len(r) else "").strip()
+        if not vin or not sbh:
+            continue
+        km = 0
+        if i_km is not None and i_km < len(r):
+            try:
+                km = int(float(r[i_km])) if r[i_km] else 0
+            except (TypeError, ValueError):
+                km = 0
+        euro2 = False
+        if i_e2 is not None and i_e2 < len(r):
+            euro2 = str(r[i_e2]).strip().lower() in ("1", "true", "ya", "yes", "euro2")
+        baris.append({"vin": vin, "sbh": sbh, "km": km, "euro2": euro2})
+    if not baris:
+        return {"found": False, "catatan": "Tidak ada baris berisi VIN + serial GPS di Excel."}
+    if len(baris) > _TELE_MAX_RENAME:
+        return {"found": False,
+                "catatan": f"Terlalu banyak baris ({len(baris)}) — batas {_TELE_MAX_RENAME}. Pecah filenya."}
+
+    # Cek mana yang SUDAH terdaftar (peta ditarik sekali).
+    d = telematics.semua_unit()
+    ada_set = set()
+    if d is not None:
+        for rec in (d.get("records") or []):
+            for k in (rec.get("cjh"), rec.get("vin")):
+                if k:
+                    ada_set.add(k.strip().upper())
+    baru = [b for b in baris
+            if telematics.frame_dari_rangka(b["vin"]) not in ada_set
+            and b["vin"] not in ada_set]
+    sudah = len(baris) - len(baru)
+
+    if not args.get("konfirmasi"):
+        return {
+            "perlu_konfirmasi": bool(baru),
+            "ringkasan": {"total_baris": len(baris), "akan_didaftar": len(baru),
+                          "sudah_terdaftar": sudah},
+            "contoh": [{"vin": b["vin"], "serial_gps": b["sbh"], "km": b["km"]} for b in baru[:15]],
+            "catatan": (
+                (f"⚠️ KONFIRMASI DULU ke user: daftarkan {len(baru)} unit BARU ke "
+                 f"telematics (server Sinotruk, PERMANEN)? {sudah} sudah terdaftar (dilewati). "
+                 "Pastikan serial GPS tiap unit benar. Bila setuju, panggil sheet_daftar_unit "
+                 "lagi dengan konfirmasi=true.")
+                if baru else
+                f"Semua {sudah} unit di Excel sudah terdaftar di telematics — tidak ada yang perlu ditambah."
+            ),
+        }
+    # LANGKAH 2 — daftarkan yang baru.
+    berhasil = 0
+    gagal: list[str] = []
+    for b in baru:
+        res = telematics.daftarkan(b["sbh"], b["vin"], b["km"], b["euro2"])
+        if res is not None:
+            berhasil += 1
+        else:
+            gagal.append(b["vin"])
+    return {"found": True, "selesai": True, "didaftar": berhasil, "gagal": len(gagal),
+            "dilewati_sudah_ada": sudah, "contoh_gagal": gagal[:10],
+            "catatan": (f"✅ {berhasil} unit didaftarkan ke telematics"
+                        + (f", {len(gagal)} gagal (server menolak — cek serial/VIN)" if gagal else "")
+                        + f". {sudah} sudah terdaftar dilewati.")}
+
+

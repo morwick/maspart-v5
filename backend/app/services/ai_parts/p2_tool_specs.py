@@ -1138,6 +1138,32 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 },
             },
         })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "daftarkan_unit",
+                "description": (
+                    "⚠️ DAFTARKAN/MASUKKAN unit BARU ke telematics/GPS Sinotruk (OPERASI "
+                    "TULIS, PERMANEN — menambah data). Butuh VIN penuh + SERIAL perangkat "
+                    "GPS (sbh) yang terpasang di unit. WAJIB 2 langkah: panggil DULU tanpa "
+                    "konfirmasi → pratinjau (VIN, frame, serial, apakah sudah terdaftar) & "
+                    "MINTA PERSETUJUAN; setelah user setuju baru konfirmasi=true. ⛔ Serial "
+                    "GPS tak bisa ditebak — harus dari user. Untuk BANYAK unit sekaligus "
+                    "dari Excel pakai sheet_daftar_unit."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "vin": {"type": "string", "description": "VIN penuh 17 karakter unit baru."},
+                        "sbh": {"type": "string", "description": "Serial perangkat GPS (sbh) yang terpasang di unit."},
+                        "km": {"type": "integer", "description": "Kilometer saat pendaftaran (default 0)."},
+                        "euro2": {"type": "boolean", "description": "true bila unit Euro 2 (default false)."},
+                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau."},
+                    },
+                    "required": ["vin", "sbh"],
+                },
+            },
+        })
 
     # Populasi Unit — data armada/unit terdaftar. HANYA admin & akun 'mas'
     # (SEE_ALL). User lain (cabang/biasa/pembeli) TIDAK diberi tool ini.
@@ -1805,6 +1831,30 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "properties": {
                             "kolom_rangka": {"type": "string", "description": "Kolom nomor rangka/frame. Kosongkan bila terdeteksi otomatis."},
                             "kolom_nama": {"type": "string", "description": "Kolom nama/label baru. Kosongkan bila terdeteksi otomatis."},
+                            "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau. Default false = pratinjau."},
+                        },
+                    },
+                },
+            })
+            specs.append({
+                "type": "function",
+                "function": {
+                    "name": "sheet_daftar_unit",
+                    "description": (
+                        "DAFTARKAN unit BARU MASSAL ke telematics/GPS dari Excel lampiran "
+                        "(kolom VIN + serial GPS/sbh; opsional km & euro2). ⚠️ OPERASI TULIS "
+                        "PERMANEN & massal. WAJIB 2 langkah: tanpa konfirmasi → PRATINJAU "
+                        "(berapa unit BARU akan didaftar, berapa sudah terdaftar) & MINTA "
+                        "PERSETUJUAN; setelah user setuju baru konfirmasi=true. ⛔ JANGAN "
+                        "langsung konfirmasi=true."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "kolom_vin": {"type": "string", "description": "Kolom VIN. Kosongkan bila terdeteksi otomatis."},
+                            "kolom_sbh": {"type": "string", "description": "Kolom serial perangkat GPS (sbh). Kosongkan bila terdeteksi otomatis."},
+                            "kolom_km": {"type": "string", "description": "Opsional: kolom kilometer awal."},
+                            "kolom_euro2": {"type": "string", "description": "Opsional: kolom penanda Euro 2."},
                             "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau. Default false = pratinjau."},
                         },
                     },

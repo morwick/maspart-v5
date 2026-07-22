@@ -783,6 +783,8 @@ _TOOL_LABEL = {
     "ganti_nama_unit": "Mengganti nama unit",
     "excel_unit_armada": "Menyiapkan Excel armada",
     "sheet_isi_nama_telematik": "Mengisi nama unit ke telematics",
+    "daftarkan_unit": "Mendaftarkan unit ke telematics",
+    "sheet_daftar_unit": "Mendaftarkan unit massal ke telematics",
     "katalog_kategori": "Menyiapkan katalog bergambar",
     "katalog_mesin": "Menyiapkan katalog mesin",
     "gambar_exploded": "Mengambil gambar exploded view",

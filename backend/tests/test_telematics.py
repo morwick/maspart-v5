@@ -331,3 +331,104 @@ def test_spec_isi_nama_massal_admin_only_saat_ada_sheet():
     ns = {s["function"]["name"] for s in ai._tool_specs(STAF, "sheet-1")}
     assert "sheet_isi_nama_telematik" in na
     assert "sheet_isi_nama_telematik" not in ns
+
+
+# ── daftarkan unit BARU (recordingVehicle) ───────────────────────────
+@pytest.fixture
+def daftar_on(monkeypatch):
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.telematics, "cari_unit", lambda q: None)  # belum ada
+    tulis = []
+    monkeypatch.setattr(ai.telematics, "daftarkan",
+                        lambda sbh, vin, km=0, euro2=False:
+                        (tulis.append((sbh, vin, km, euro2)) or {"cjh": vin[-8:]}))
+    return tulis
+
+
+def test_daftarkan_unit_langkah1_pratinjau_tak_menulis(daftar_on):
+    r = ai._t_daftarkan_unit({"vin": "LZZ1BG3H1SJ399331", "sbh": "80741773",
+                              "km": 100}, ADMIN)
+    assert r["perlu_konfirmasi"] is True
+    assert r["pratinjau"]["frame"] == "SJ399331"
+    assert r["pratinjau"]["serial_gps"] == "80741773"
+    assert r["pratinjau"]["sudah_terdaftar"] is False
+    assert daftar_on == []                          # BELUM menulis
+
+
+def test_daftarkan_unit_langkah2_eksekusi(daftar_on):
+    r = ai._t_daftarkan_unit({"vin": "LZZ1BG3H1SJ399331", "sbh": "80741773",
+                              "km": 100, "konfirmasi": True}, ADMIN)
+    assert r.get("berhasil") is True and r["frame"] == "SJ399331"
+    assert daftar_on == [("80741773", "LZZ1BG3H1SJ399331", 100, False)]
+
+
+def test_daftarkan_unit_wajib_vin_dan_sbh(daftar_on):
+    assert "error" in ai._t_daftarkan_unit({"vin": "X"}, ADMIN)   # tanpa sbh
+    assert "error" in ai._t_daftarkan_unit({"sbh": "1"}, ADMIN)   # tanpa vin
+    assert daftar_on == []
+
+
+def test_daftarkan_unit_admin_only(daftar_on):
+    r = ai._t_daftarkan_unit({"vin": "V", "sbh": "S", "konfirmasi": True}, STAF)
+    assert "error" in r and daftar_on == []
+
+
+def test_daftarkan_unit_sudah_ada_diperingatkan(monkeypatch):
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.telematics, "cari_unit", lambda q: {"cjh": "SJ399331"})
+    r = ai._t_daftarkan_unit({"vin": "LZZ1BG3H1SJ399331", "sbh": "807"}, ADMIN)
+    assert r["pratinjau"]["sudah_terdaftar"] is True
+    assert "SUDAH ADA" in r["catatan"]
+
+
+# ── daftar unit MASSAL dari Excel ────────────────────────────────────
+_SHEET_DAFTAR = {
+    "headers": ["VIN", "Serial GPS", "KM", "Euro2"],
+    "_body": [
+        ["LZZ1BG3H1SJ399331", "80741773", "100", ""],       # baru
+        ["LZZ7CLXB5PC531850", "80615204", "500", "ya"],      # sudah ada (PC531850)
+        ["LZZ1BG3H9SJ399999", "80741999", "", ""],           # baru
+    ],
+}
+
+
+@pytest.fixture
+def daftar_massal_on(monkeypatch):
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.ai_sheet, "get_sheet", lambda sid, un: dict(_SHEET_DAFTAR))
+    monkeypatch.setattr(ai.telematics, "semua_unit", lambda fleet="": {
+        "records": [{"cjh": "PC531850", "vin": "LZZ7CLXB5PC531850"}]})
+    tulis = []
+    monkeypatch.setattr(ai.telematics, "daftarkan",
+                        lambda sbh, vin, km=0, euro2=False:
+                        (tulis.append((vin, sbh, km, euro2)) or {"cjh": vin[-8:]}))
+    return tulis
+
+
+def test_sheet_daftar_pratinjau_tak_menulis(daftar_massal_on):
+    r = ai._t_sheet_daftar_unit({"_sheet_id": "s1"}, ADMIN)
+    assert r["perlu_konfirmasi"] is True
+    assert r["ringkasan"] == {"total_baris": 3, "akan_didaftar": 2, "sudah_terdaftar": 1}
+    assert daftar_massal_on == []                    # BELUM menulis
+
+
+def test_sheet_daftar_eksekusi_hanya_baru(daftar_massal_on):
+    r = ai._t_sheet_daftar_unit({"_sheet_id": "s1", "konfirmasi": True}, ADMIN)
+    assert r["selesai"] and r["didaftar"] == 2 and r["dilewati_sudah_ada"] == 1
+    vins = {t[0] for t in daftar_massal_on}
+    assert vins == {"LZZ1BG3H1SJ399331", "LZZ1BG3H9SJ399999"}   # yang sudah ada tidak
+    # euro2 & km terbaca dari kolom
+    assert daftar_massal_on[0][2] == 100
+
+
+def test_sheet_daftar_admin_only(daftar_massal_on):
+    r = ai._t_sheet_daftar_unit({"_sheet_id": "s1", "konfirmasi": True}, STAF)
+    assert "error" in r and daftar_massal_on == []
+
+
+def test_spec_daftar_unit_admin_only():
+    na = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "")}
+    ns = {s["function"]["name"] for s in ai._tool_specs(STAF, "")}
+    assert "daftarkan_unit" in na and "daftarkan_unit" not in ns
+    na_sheet = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "s1")}
+    assert "sheet_daftar_unit" in na_sheet

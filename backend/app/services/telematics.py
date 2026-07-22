@@ -53,6 +53,14 @@ def available() -> bool:
     return bool(get_settings().telematics_configured)
 
 
+def frame_dari_rangka(rangka: str) -> str:
+    """VIN 17 karakter → frame 8 karakter terakhir ('LZZ1ELSF7SJ392741' →
+    'SJ392741'); frame/kode pendek → apa adanya (upper). Pola sama dgn
+    sims_warranty.frame_dari_rangka."""
+    r = (rangka or "").strip().upper().replace(" ", "")
+    return r[-8:] if len(r) >= 17 else r
+
+
 # ── auth ─────────────────────────────────────────────────────────────
 def _rsa_encrypt(public_key_b64: str, plaintext: str) -> str:
     from Crypto.PublicKey import RSA
@@ -221,6 +229,22 @@ def ganti_nama(cjh: str, nama: str) -> dict | None:
     """⚠️ WRITE: ubah carNumber (nama/label) unit di server Sinotruk."""
     d = _post("/api/vehicleManage/updateCarNumber",
               {"cjh": cjh, "carNumber": nama})
+    return d if isinstance(d, dict) else None
+
+
+def daftarkan(sbh: str, vin: str, mileage=0, euro2: bool = False) -> dict | None:
+    """⚠️ WRITE: DAFTARKAN unit baru ke telematics (recordingVehicle).
+    `sbh` = serial perangkat GPS terpasang; `vin` = VIN 17-char penuh. Server
+    menurunkan cjh dari VIN & memasukkan ke org login. Return record baru atau
+    None (gagal/ditolak)."""
+    try:
+        km = int(mileage or 0)
+    except (TypeError, ValueError):
+        km = 0
+    d = _post("/api/vehicleManage/recordingVehicle",
+              {"sbh": str(sbh).strip(), "vin": str(vin).strip().upper(),
+               "currentMileage": km,
+               "isEuro2Vehicle": "true" if euro2 else "false"})
     return d if isinstance(d, dict) else None
 
 
