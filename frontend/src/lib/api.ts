@@ -2083,7 +2083,9 @@ export async function getPartExploded(token: string, id: string): Promise<Blob> 
   return res.blob();
 }
 
-export async function getAiStatus(token: string): Promise<{ available: boolean; allowed?: boolean }> {
+export async function getAiStatus(
+  token: string,
+): Promise<{ available: boolean; allowed?: boolean; perbaikan?: boolean }> {
   const res = await fetch(`${API_BASE}/api/ai/status`, {
     headers: { Authorization: `Bearer ${token}` },
   });

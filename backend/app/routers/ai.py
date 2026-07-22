@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from ..core.config import get_settings
 from ..core.ratelimit import limit
 from ..deps import get_current_user, require_admin, require_menu
-from ..services import ai_assistant, ai_export, ai_feedback, ai_sheet, image_search
+from ..services import ai_assistant, ai_export, ai_feedback, ai_sheet, app_config, image_search
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -20,6 +20,29 @@ router = APIRouter(prefix="/api/ai", tags=["ai"])
 # menyembunyikan menu di sidebar; endpoint tetap terbuka sehingga fiturnya masih
 # bisa dipakai lewat URL langsung. Semua jalur PEMAKAIAN asisten kini dijaga.
 require_ai = require_menu("ai")
+
+# ── Mode perbaikan (saklar global admin, panel Menu Control) ─────────
+# Disimpan di app_config.config['asisten_perbaikan'] (data/ bind-mount —
+# selamat dari redeploy). ADMIN KEBAL: pemilik tetap bisa menguji asisten
+# selagi user lain melihat popup "sedang perbaikan". Guard dipasang di SEMUA
+# endpoint pemakaian (chat/stream/image/sheet), bukan hanya UI — popup tanpa
+# guard server bisa dilewati via URL/API langsung.
+_PERBAIKAN_MSG = ("Asisten AI sedang dalam perbaikan. Silakan coba lagi nanti — "
+                  "fitur lain aplikasi tetap berjalan normal.")
+
+
+def _perbaikan_untuk(user: dict) -> bool:
+    if (user.get("role") or "").lower() == "admin":
+        return False
+    try:
+        return bool((app_config.load().get("config") or {}).get("asisten_perbaikan"))
+    except Exception:                       # config rusak tak boleh mematikan asisten
+        return False
+
+
+def _tolak_bila_perbaikan(user: dict) -> None:
+    if _perbaikan_untuk(user):
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, _PERBAIKAN_MSG)
 
 _MAX_PHOTO_BYTES = 12 * 1024 * 1024  # 12 MB
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -49,14 +72,18 @@ class FeedbackRequest(BaseModel):
 @router.get("/status")
 def ai_status(user: dict = Depends(get_current_user)):
     """Asisten siap dipakai user ini? `available` False juga bila menu 'ai'
-    dimatikan admin untuk akun ini (halaman /asisten memakai ini untuk menutup diri)."""
+    dimatikan admin untuk akun ini ATAU mode perbaikan menyala (halaman
+    /asisten & aplikasi memakai ini untuk menutup diri + popup perbaikan)."""
     from ..services import permissions
     allowed = "ai" in permissions.effective("menu", user["username"], user.get("role", "user"))
-    return {"available": get_settings().ai_configured and allowed, "allowed": allowed}
+    perbaikan = _perbaikan_untuk(user)
+    return {"available": get_settings().ai_configured and allowed and not perbaikan,
+            "allowed": allowed, "perbaikan": perbaikan}
 
 
 @router.post("/chat", dependencies=[Depends(limit("ai_chat", 15, 60))])
 def ai_chat(body: AIChatRequest, user: dict = Depends(require_ai)):
+    _tolak_bila_perbaikan(user)
     history = [{"role": m.role, "content": m.content} for m in body.messages]
     if not any(m["role"] == "user" and m["content"].strip() for m in history):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pesan kosong.")
@@ -79,6 +106,7 @@ def ai_chat_stream(body: AIChatRequest, user: dict = Depends(require_ai)):
     event 'done' berisi hasil AKHIR (jawaban sudah disaring guard — tak ada token
     mentah/PN tak-terverifikasi yang di-stream). chat() dijalankan di thread; label
     progress dialirkan lewat queue. /chat lama tetap ada (foto/sheet/klien non-stream)."""
+    _tolak_bila_perbaikan(user)
     history = [{"role": m.role, "content": m.content} for m in body.messages]
     if not any(m["role"] == "user" and m["content"].strip() for m in history):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pesan kosong.")
@@ -219,6 +247,7 @@ async def ai_chat_image(
 ):
     """Chat dengan FOTO: foto dikenali via Cari-by-Foto (DINOv2) → kandidat Part Number
     disuntikkan ke Asisten AI, lalu AI cek stok/harga/unit dan menjelaskan."""
+    _tolak_bila_perbaikan(user)
     try:
         raw = json.loads(messages or "[]")
     except Exception:
@@ -275,6 +304,7 @@ async def ai_chat_sheet(
 
     Isi file TIDAK pernah masuk ke system prompt — hanya lewat hasil tool, agar
     kalimat di dalam sel tak bisa menyetir asisten (prompt injection)."""
+    _tolak_bila_perbaikan(user)
     try:
         raw = json.loads(messages or "[]")
     except Exception:

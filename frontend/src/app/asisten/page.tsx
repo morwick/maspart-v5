@@ -178,6 +178,11 @@ export default function AsistenPage() {
   const [error, setError] = useState<string | null>(null);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [allowed, setAllowed] = useState(true);   // menu 'ai' dimatikan admin? (Menu Control)
+  // Mode perbaikan global (Menu Control → Asisten AI). Server yang memutuskan
+  // (admin dikecualikan di sana); popup tampil sekali sampai ditutup, input
+  // tetap terkunci karena available=false.
+  const [perbaikan, setPerbaikan] = useState(false);
+  const [popupPerbaikan, setPopupPerbaikan] = useState(false);
   // File yang sudah DIPILIH tapi BELUM dikirim — user mengetik dulu maunya apa
   // ("isikan stok"), baru tekan Kirim. Gaya Claude.
   const [pendingSheet, setPendingSheet] = useState<File | null>(null);
@@ -201,6 +206,10 @@ export default function AsistenPage() {
       .then((s) => {
         setAvailable(s.available);
         setAllowed(s.allowed !== false);
+        if (s.perbaikan === true) {
+          setPerbaikan(true);
+          setPopupPerbaikan(true);
+        }
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) {
@@ -492,11 +501,44 @@ export default function AsistenPage() {
       <div className="flex h-full w-full flex-col">
         {available === false && (
           <div className="alert alert-error" style={{ margin: 12 }}>
-            {allowed ? (
+            {perbaikan ? (
+              <>🔧 Asisten AI sedang dalam perbaikan. Silakan coba lagi nanti.</>
+            ) : allowed ? (
               <>Asisten AI belum aktif. Set <code>DEEPSEEK_API_KEY</code> di <code>backend/.env</code> lalu restart backend.</>
             ) : (
               <>Asisten AI dimatikan untuk akun ini oleh admin (Menu Control).</>
             )}
+          </div>
+        )}
+
+        {/* Popup mode perbaikan — muncul saat halaman dibuka; input tetap
+            terkunci setelah ditutup (available=false dari server). */}
+        {popupPerbaikan && (
+          <div
+            style={{
+              position: "fixed", inset: 0, zIndex: 100,
+              background: "rgba(0,0,0,0.55)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="w-[min(92vw,380px)] rounded-2xl bg-white p-6 text-center shadow-2xl">
+              <div className="mb-2 text-4xl">🔧</div>
+              <h3 className="mb-1 text-base font-semibold text-zinc-900">
+                Asisten AI sedang perbaikan
+              </h3>
+              <p className="mb-4 text-sm text-zinc-600">
+                Kami sedang melakukan pemeliharaan. Silakan coba lagi nanti —
+                fitur lain aplikasi tetap berjalan normal.
+              </p>
+              <button
+                onClick={() => setPopupPerbaikan(false)}
+                className="w-full rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+              >
+                Mengerti
+              </button>
+            </div>
           </div>
         )}
 
@@ -567,7 +609,9 @@ export default function AsistenPage() {
                 }}
               >
                 <span className="status-dot" />
-                {available === false ? "Nonaktif" : "Online · terhubung ke data live"}
+                {available === false
+                  ? (perbaikan ? "Sedang perbaikan" : "Nonaktif")
+                  : "Online · terhubung ke data live"}
               </div>
             </div>
             {msgs.length > 0 && (

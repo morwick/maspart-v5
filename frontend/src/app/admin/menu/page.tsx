@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import {
   ApiError,
+  getAdminAppConfig,
   getPermOverview,
   resetPerm,
+  saveAdminAppConfig,
   setPerm,
   type PermKind,
   type PermOverview,
@@ -79,6 +81,7 @@ export default function AdminMenuPage() {
           // yang sama dengan tab Kolom (centang di sini = centang di sana),
           // blok kemampuan = kind "asisten".
           <>
+            <MaintenanceToggle />
             <KindSection kind="column" title="Kolom Harga & Stok (sumber sama dengan tab Kolom)" />
             <KindSection kind="asisten" title="Kemampuan Asisten AI" />
           </>
@@ -87,6 +90,76 @@ export default function AdminMenuPage() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+/** Saklar GLOBAL "Asisten AI sedang perbaikan" — disimpan di app-config
+ *  (config.asisten_perbaikan), bukan izin per-akun: satu centang = semua user
+ *  non-admin melihat popup perbaikan & endpoint chat ditolak server (503).
+ *  Admin tetap bisa memakai asisten untuk menguji selagi mode ini menyala. */
+function MaintenanceToggle() {
+  const [aktif, setAktif] = useState<boolean | null>(null); // null = memuat
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
+    getAdminAppConfig(token)
+      .then((c) => setAktif(c.config?.asisten_perbaikan === true))
+      .catch(() => setErr("Gagal memuat status mode perbaikan."));
+  }, []);
+
+  async function toggle() {
+    const token = getToken();
+    if (!token || aktif === null || busy) return;
+    const baru = !aktif;
+    setBusy(true);
+    setErr(null);
+    try {
+      // Kirim config UTUH hasil merge — PUT app-config mengganti seluruh objek
+      // config, flag lain (chip saran, dll.) tidak boleh ikut terhapus.
+      const cur = await getAdminAppConfig(token);
+      await saveAdminAppConfig(token, {
+        config: { ...cur.config, asisten_perbaikan: baru },
+      });
+      setAktif(baru);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Gagal menyimpan.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className={`mb-4 rounded-xl border p-4 ${
+        aktif ? "border-red-300 bg-red-50" : "border-zinc-200 bg-white"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">
+            🔧 Mode Perbaikan Asisten AI {aktif ? "— SEDANG AKTIF" : ""}
+          </div>
+          <p className="mt-0.5 text-xs text-zinc-500">
+            Centang = semua user (kecuali admin) melihat popup “Asisten AI sedang
+            perbaikan” dan tidak bisa mengirim chat. Berlaku juga di aplikasi mobile.
+          </p>
+          {err && <p className="mt-1 text-xs text-red-600">{err}</p>}
+        </div>
+        <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm font-medium">
+          <input
+            type="checkbox"
+            checked={aktif === true}
+            disabled={aktif === null || busy}
+            onChange={toggle}
+            className="h-4 w-4 accent-red-600"
+          />
+          Sedang perbaikan
+        </label>
+      </div>
+    </div>
   );
 }
 
