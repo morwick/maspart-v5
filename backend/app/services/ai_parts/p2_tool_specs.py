@@ -1070,6 +1070,73 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         })
 
+    # Telematics / GPS armada (Sinotruk Fleet Service) — ADMIN-ONLY (bukan key
+    # Menu Control): pelacakan real-time + operasi tulis ganti nama.
+    if _is_admin(user):
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "lihat_unit_armada",
+                "description": (
+                    "⭐ LACAK ARMADA via GPS/TELEMATICS (Sinotruk Fleet Service): daftar "
+                    "unit + posisi & status real-time (Jalan/Berhenti/Offline), km, level "
+                    "BBM, dan flag RUSAK. Tanpa filter = ringkasan armada (total unit, "
+                    "online%, jumlah per FLEET, jumlah rusak). Filter 'fleet' untuk per "
+                    "armada; 'hanya_rusak' untuk unit bermasalah. ⛔ Ini data GPS live — "
+                    "BUKAN spesifikasi katalog (pakai cek_kendaraan) & BUKAN populasi "
+                    "internal (cek_populasi)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fleet": {"type": "string", "description": "Opsional: nama fleet/organisasi (mis. MAS, JNT). Kosong = semua."},
+                        "status": {"type": "string", "description": "Opsional filter status: jalan / berhenti / offline."},
+                        "hanya_rusak": {"type": "boolean", "description": "Opsional: hanya unit yang ditandai rusak."},
+                    },
+                },
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "excel_unit_armada",
+                "description": (
+                    "EXPORT EXCEL daftar unit armada (semua unit atau per fleet) — LENGKAP "
+                    "dengan Frame, VIN, model, engine, gearbox, km, fleet, status GPS, BBM, "
+                    "flag rusak. Pakai saat user minta 'excel semua unit' / 'daftar unit "
+                    "per fleet dalam Excel'. Kolom Fleet membedakan bila tanpa filter."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fleet": {"type": "string", "description": "Opsional: nama fleet. Kosong = semua unit (kolom Fleet membedakan)."},
+                    },
+                },
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "ganti_nama_unit",
+                "description": (
+                    "⚠️ UBAH NAMA/LABEL unit di server Sinotruk (OPERASI TULIS, PERMANEN). "
+                    "WAJIB 2 langkah: panggil DULU tanpa konfirmasi → tampilkan pratinjau "
+                    "(nama lama→baru) dan MINTA PERSETUJUAN user; hanya setelah user setuju "
+                    "panggil lagi dengan konfirmasi=true untuk eksekusi. ⛔ JANGAN pernah "
+                    "langsung konfirmasi=true tanpa user menyetujui."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cjh": {"type": "string", "description": "Frame/cjh (atau VIN) unit yang diganti namanya."},
+                        "nama_baru": {"type": "string", "description": "Nama/label baru untuk unit."},
+                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau. Default false = pratinjau."},
+                    },
+                    "required": ["cjh", "nama_baru"],
+                },
+            },
+        })
+
     # Populasi Unit — data armada/unit terdaftar. HANYA admin & akun 'mas'
     # (SEE_ALL). User lain (cabang/biasa/pembeli) TIDAK diberi tool ini.
     if _can_populasi(user):

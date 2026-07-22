@@ -106,6 +106,17 @@ class Settings(BaseSettings):
     def ai_configured(self) -> bool:
         return bool(self.deepseek_api_key)
 
+    # ── Telematics/GPS armada (Sinotruk Fleet Service — www.sg.sinotruksfs.com) ──
+    # Portal pelacakan GPS/IoT armada, TERPISAH dari SIMS & EPC (server, auth,
+    # kredensial berbeda). Login RSA (services/telematics.py). Diisi di UI Coolify
+    # (⛔ jangan .env langsung — ditimpa Coolify); password TIDAK di-commit.
+    telematics_username: str = ""
+    telematics_password: str = ""
+
+    @property
+    def telematics_configured(self) -> bool:
+        return bool(self.telematics_username and self.telematics_password)
+
     @property
     def midtrans_app_base(self) -> str:
         """Base URL Snap (buat transaksi) — app.* host."""

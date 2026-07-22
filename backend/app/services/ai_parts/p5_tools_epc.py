@@ -2195,3 +2195,146 @@ def _repair_kit_mesin_impl(args: dict, user: dict) -> dict:
 _EXCEL_MAX_ROWS = 1000
 
 
+# ═══════════════════════════════════════════════════════════════════════
+#  TELEMATICS / GPS ARMADA (Sinotruk Fleet Service) — 2026-07-22
+#  ⛔ ADMIN-ONLY (bukan key Menu Control — sesuai permintaan pemilik, tak bisa
+#  didelegasikan). Data GPS real-time, BUKAN spesifikasi EPC / populasi.
+#  ganti_nama_unit = satu-satunya operasi TULIS: wajib konfirmasi 2 langkah.
+# ═══════════════════════════════════════════════════════════════════════
+_TELE_DENIED = {"error": "Fitur pelacakan armada hanya untuk admin."}
+_TELE_OFF = {"error": "Koneksi telematics belum dikonfigurasi di server "
+                      "(kredensial TELEMATICS_* belum diisi)."}
+_TELE_MAX_TABEL = 60   # baris unit yang disajikan ke model (Excel = lengkap)
+
+
+def _t_lihat_unit_armada(args: dict, user: dict) -> dict:
+    """Daftar/ringkasan unit armada + status GPS live. Mencakup semua unit &
+    per fleet (param `fleet`)."""
+    if not _is_admin(user):
+        return dict(_TELE_DENIED)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    fleet = (args.get("fleet") or "").strip()
+    status_f = (args.get("status") or "").strip().lower()
+    hanya_rusak = bool(args.get("hanya_rusak"))
+
+    d = telematics.semua_unit(fleet=fleet)
+    if d is None:
+        return {"error": "Telematics tidak merespons — coba lagi sebentar lagi."}
+    recs = d.get("records") or []
+    if not recs:
+        return {"found": False,
+                "catatan": (f"Tidak ada unit untuk fleet '{fleet}'." if fleet
+                            else "Tidak ada unit terdaftar di telematics.")}
+    loc = telematics.lokasi_semua()
+    unit = [telematics.rangkum_unit(r, loc.get(r.get("cjh"))) for r in recs]
+    if status_f:
+        unit = [u for u in unit
+                if status_f in (str(u.get("status_gps") or "").lower())]
+    if hanya_rusak:
+        unit = [u for u in unit if u.get("rusak")]
+
+    out: dict = {
+        "found": True,
+        "total_cocok": len(unit),
+        "total_armada": d.get("total"),
+        "fleet_filter": fleet or None,
+    }
+    if not fleet and not status_f and not hanya_rusak:
+        # Tampilan ringkasan armada penuh: breakdown per fleet + hitung rusak.
+        out["per_fleet"] = telematics.fleet_breakdown(recs)
+        out["jumlah_rusak"] = sum(1 for u in unit if u.get("rusak"))
+    dipotong = len(unit) > _TELE_MAX_TABEL
+    out["unit"] = unit[:_TELE_MAX_TABEL]
+    out["catatan"] = (
+        "Data GPS/telematics armada (Sinotruk Fleet Service) — real-time posisi & "
+        "status, BUKAN spesifikasi katalog EPC (untuk itu pakai cek_kendaraan) & "
+        "BUKAN populasi internal (cek_populasi). 'rusak'=unit ditandai bermasalah "
+        "oleh sistem. km/BBM dari GPS."
+        + (f" ⚠️ {len(unit)} unit cocok, hanya {_TELE_MAX_TABEL} ditampilkan — "
+           "untuk daftar LENGKAP tawarkan excel_unit_armada." if dipotong else "")
+    )
+    return out
+
+
+def _t_ganti_nama_unit(args: dict, user: dict) -> dict:
+    """⚠️ WRITE (2 langkah): ubah nama/label unit di server Sinotruk."""
+    if not _is_admin(user):
+        return dict(_TELE_DENIED)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    target = (args.get("cjh") or args.get("unit") or "").strip()
+    nama_baru = (args.get("nama_baru") or args.get("nama") or "").strip()
+    if not target or not nama_baru:
+        return {"error": "Sebutkan unit (frame/cjh) DAN nama baru."}
+    rec = telematics.cari_unit(target)
+    if not rec:
+        return {"found": False,
+                "catatan": f"Unit '{target}' tidak ditemukan di telematics. Cek ulang frame/VIN."}
+    nama_lama = (rec.get("carNumber") or "").strip() or "(belum ada nama)"
+    cjh = rec.get("cjh")
+    if not args.get("konfirmasi"):
+        # LANGKAH 1 — pratinjau, JANGAN tulis. Model wajib minta persetujuan user.
+        return {
+            "perlu_konfirmasi": True,
+            "pratinjau": {
+                "frame": cjh, "model": rec.get("model"),
+                "fleet": telematics._fleet_names(rec),
+                "nama_sekarang": nama_lama, "nama_baru": nama_baru,
+            },
+            "catatan": (f"⚠️ KONFIRMASI DULU ke user: ubah nama unit {cjh} "
+                        f"({rec.get('model')}) dari '{nama_lama}' menjadi "
+                        f"'{nama_baru}'? Operasi ini MENGUBAH data di server Sinotruk "
+                        "dan permanen. JANGAN eksekusi sampai user menyetujui — bila "
+                        "setuju, panggil ganti_nama_unit lagi dengan konfirmasi=true."),
+        }
+    # LANGKAH 2 — user sudah setuju → eksekusi.
+    hasil = telematics.ganti_nama(cjh, nama_baru)
+    if hasil is None:
+        return {"found": False,
+                "catatan": f"Gagal mengubah nama unit {cjh} — server telematics menolak/timeout. "
+                           "Sampaikan jujur, jangan klaim berhasil."}
+    return {"found": True, "berhasil": True, "frame": cjh,
+            "nama_lama": nama_lama, "nama_baru": (hasil.get("carNumber") or nama_baru),
+            "catatan": f"✅ Nama unit {cjh} berhasil diubah menjadi "
+                       f"'{hasil.get('carNumber') or nama_baru}'."}
+
+
+def _t_excel_unit_armada(args: dict, user: dict) -> dict:
+    """EXPORT EXCEL daftar unit armada (semua / per fleet) dibangun DI SERVER."""
+    if not _is_admin(user):
+        return dict(_TELE_DENIED)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    fleet = (args.get("fleet") or "").strip()
+    d = telematics.semua_unit(fleet=fleet)
+    if d is None:
+        return {"error": "Telematics tidak merespons — coba lagi sebentar lagi."}
+    recs = d.get("records") or []
+    if not recs:
+        return {"found": False, "catatan": f"Tidak ada unit untuk fleet '{fleet}'." if fleet
+                else "Tidak ada unit terdaftar."}
+    loc = telematics.lokasi_semua()
+    kolom = ["No", "Frame", "VIN", "Nama", "Model", "Brand", "Engine",
+             "Gearbox", "Penggerak", "Ban", "KM", "Fleet", "Status GPS",
+             "BBM %", "Rusak"]
+    baris: list[list] = []
+    for i, r in enumerate(recs[:_EXCEL_MAX_ROWS], start=1):
+        u = telematics.rangkum_unit(r, loc.get(r.get("cjh")))
+        baris.append([
+            str(i), u.get("frame") or "", u.get("vin") or "", u.get("nama") or "",
+            u.get("model") or "", u.get("brand") or "", u.get("engine") or "",
+            u.get("gearbox") or "", u.get("penggerak") or "", u.get("ban") or "",
+            ai_export.ke_angka(u.get("km") or ""), ", ".join(u.get("fleet") or []),
+            u.get("status_gps") or "", ai_export.ke_angka(u.get("bbm_persen") if u.get("bbm_persen") is not None else ""),
+            "Ya" if u.get("rusak") else "",
+        ])
+    judul = "Unit Armada" + (f" — {fleet}" if fleet else " (semua)")
+    export_id, filename = ai_export.stash_export(judul, kolom, baris)
+    return {"found": True, "export_id": export_id, "filename": filename,
+            "judul": judul, "jumlah_baris": len(baris), "fleet": fleet or None,
+            "catatan": ("File Excel armada siap — kartu unduh muncul OTOMATIS di bawah. "
+                        "Jawab SINGKAT (judul + jumlah unit + fleet bila ada). "
+                        "⛔ JANGAN tulis ulang isi tabel & JANGAN membuat link sendiri.")}
+
+
