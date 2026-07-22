@@ -309,6 +309,7 @@ _TOOLS_GAMBAR_INLINE = frozenset({
     "gambar_exploded", "gambar_exploded_mesin", "uraikan_mesin", "uraikan_assembly",
     "part_aus_dari_rangka", "diagram_wiring", "cari_manual",
     "cari_pengetahuan", "buka_pengetahuan",
+    "diagnosa",   # fan-out pengetahuan_internal ikut membawa gambar (18451fd)
 })
 
 # Budget output lebih besar untuk panggilan yang WAJIB menulis jawaban (bukan ronde

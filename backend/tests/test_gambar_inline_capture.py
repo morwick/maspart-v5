@@ -19,6 +19,13 @@ def test_tool_pengetahuan_termasuk():
     assert "cari_pengetahuan" in ai._TOOLS_GAMBAR_INLINE
 
 
+def test_tool_diagnosa_termasuk():
+    """Fan-out pengetahuan_internal (18451fd) MENERUSKAN gambar hasil
+    _t_cari_pengetahuan tanpa memanggil stash_raw sendiri — detektor sumber
+    di bawah tak menangkapnya, jadi dikunci eksplisit di sini."""
+    assert "diagnosa" in ai._TOOLS_GAMBAR_INLINE
+
+
 def test_tool_bergambar_lama_tidak_hilang_saat_refactor():
     """Regresi: pengangkatan keluar dari rantai elif tak boleh menjatuhkan
     satu pun tool yang sebelumnya sudah menampilkan gambar."""
