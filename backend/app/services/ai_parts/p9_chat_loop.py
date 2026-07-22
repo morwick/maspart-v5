@@ -779,6 +779,9 @@ _TOOL_LABEL = {
     "cek_garansi": "Mengecek garansi unit",
     "riwayat_klaim": "Membuka riwayat klaim",
     "detail_klaim": "Membuka detail klaim",
+    "sheet_garansi_massal": "Mengecek garansi massal",
+    "excel_riwayat_klaim": "Menyiapkan Excel riwayat klaim",
+    "rekap_klaim": "Merekap klaim garansi",
     "lihat_unit_armada": "Melacak posisi armada",
     "ganti_nama_unit": "Mengganti nama unit",
     "excel_unit_armada": "Menyiapkan Excel armada",
@@ -927,7 +930,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                     "katalog_kategori", "katalog_mesin", "banding_rangka_massal",
                     "sheet_isi_kolom", "sheet_isi_part_number", "sheet_cek_qty",
                     "sheet_isi_foto", "buat_penawaran",
-                    "excel_unit_armada") and result.get("found"):
+                    "excel_unit_armada", "sheet_garansi_massal",
+                    "excel_riwayat_klaim") and result.get("found"):
             item = {"id": result.get("export_id"), "filename": result.get("filename"),
                     "judul": result.get("judul"), "jumlah_baris": result.get("jumlah_baris")}
             if item["id"] and item not in excel_exports:

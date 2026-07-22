@@ -221,6 +221,33 @@ def daftar_klaim(vin: str = "", ro_no: str = "", halaman: int = 1,
             "klaim": rows}
 
 
+_TTL_SEMUA = 600.0     # daftar-penuh klaim (paginasi mahal) — cache 10 menit
+
+
+def semua_klaim(vin: str = "", maks_halaman: int = 40) -> dict | None:
+    """SELURUH klaim (paginasi queryRepairOrder digabung) — untuk Excel & rekap.
+    vin opsional (frame). Cache 10 menit per kunci. Cap `maks_halaman`×50 baris."""
+    frame = frame_dari_rangka(vin) if vin else ""
+    key = f"semua:{frame}:{maks_halaman}"
+
+    def _fetch():
+        semua: list[dict] = []
+        total = None
+        for hal in range(1, maks_halaman + 1):
+            d = daftar_klaim(vin=frame, halaman=hal, page_size=50)
+            if not d:
+                break
+            total = d.get("total")
+            rows = d.get("klaim") or []
+            semua.extend(rows)
+            if not rows or (total and len(semua) >= total):
+                break
+        return {"total": total if total is not None else len(semua),
+                "klaim": semua}
+
+    return _cached(key, _TTL_SEMUA, _fetch)
+
+
 def detail_wo(ro_id: str) -> dict | None:
     """Isi lengkap satu WO: part, jasa, oli, biaya (repairOrder/detail)."""
     def _fetch():

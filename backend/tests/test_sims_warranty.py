@@ -307,3 +307,110 @@ def test_handler_lapis_ketiga_fail_closed(monkeypatch):
     monkeypatch.setattr(ai.sims_warranty, "available", lambda: True)
     for fn in (ai._t_cek_garansi, ai._t_riwayat_klaim, ai._t_detail_klaim):
         assert "error" in fn({"rangka": "X", "no_wo": "Y"}, STAF)
+
+
+# ── Garansi tambahan (2026-07-22): semua_klaim, cek massal, Excel, rekap ──
+_KLAIM_HAL = [
+    {"total": 3, "klaim": [
+        {"no_wo": "R1", "frame": "SJ100001", "tanggal": "2026-07-01", "km": 100,
+         "gejala": "transmisi keras", "tindakan": "cek", "status": "Selesai",
+         "status_code": "s-ro-status-js", "durasi_jam": 2.0, "pelapor": "A", "mekanik": "M"},
+        {"no_wo": "R2", "frame": "SJ100002", "tanggal": "2026-07-02", "km": 200,
+         "gejala": "AC bocor", "tindakan": "ganti", "status": "Kerja ditugaskan",
+         "status_code": "s-ro-status-pg", "durasi_jam": 4.0, "pelapor": "B", "mekanik": "N"}]},
+    {"total": 3, "klaim": [
+        {"no_wo": "R3", "frame": "SJ100003", "tanggal": "2026-07-03", "km": 300,
+         "gejala": "transmisi keras", "tindakan": "cek", "status": "Selesai",
+         "status_code": "s-ro-status-js", "durasi_jam": 6.0, "pelapor": "C", "mekanik": "O"}]},
+]
+
+
+def test_semua_klaim_paginasi_berhenti_di_total(monkeypatch):
+    w._CACHE.clear()
+    panggil = {"n": 0}
+
+    def fake_daftar(vin="", halaman=1, page_size=50):
+        panggil["n"] += 1
+        return _KLAIM_HAL[halaman - 1] if halaman <= len(_KLAIM_HAL) else {"total": 3, "klaim": []}
+    monkeypatch.setattr(w, "daftar_klaim", fake_daftar)
+    d = w.semua_klaim()
+    assert d["total"] == 3 and len(d["klaim"]) == 3
+    assert panggil["n"] == 2                      # berhenti saat len>=total
+    w._CACHE.clear()
+
+
+@pytest.fixture
+def klaim_penuh(monkeypatch):
+    monkeypatch.setattr(ai, "_boleh_ai", lambda user, key: True)  # admin/izin
+    monkeypatch.setattr(ai.sims_warranty, "available", lambda: True)
+    all_rows = [r for h in _KLAIM_HAL for r in h["klaim"]]
+    monkeypatch.setattr(ai.sims_warranty, "semua_klaim",
+                        lambda vin="": {"total": 3, "klaim": all_rows})
+
+
+def test_excel_riwayat_klaim(klaim_penuh, monkeypatch):
+    monkeypatch.setattr(ai.ai_export, "stash_export",
+                        lambda judul, kolom, baris: ("EXP", "riwayat.xlsx"))
+    r = ai._t_excel_riwayat_klaim({}, ADMIN)
+    assert r["found"] and r["export_id"] == "EXP" and r["jumlah_baris"] == 3
+    assert list(r.keys())[-1] == "catatan"
+
+
+def test_excel_riwayat_klaim_filter_status(klaim_penuh, monkeypatch):
+    monkeypatch.setattr(ai.ai_export, "stash_export",
+                        lambda judul, kolom, baris: ("EXP", "riwayat.xlsx"))
+    r = ai._t_excel_riwayat_klaim({"status": "selesai"}, ADMIN)
+    assert r["jumlah_baris"] == 2                 # hanya status Selesai
+
+
+def test_rekap_klaim(klaim_penuh):
+    r = ai._t_rekap_klaim({}, ADMIN)
+    assert r["total_klaim"] == 3
+    ps = {x["status"]: x["jumlah"] for x in r["per_status"]}
+    assert ps["Selesai"] == 2 and ps["Kerja ditugaskan"] == 1
+    top = r["gejala_tersering"][0]
+    assert top["gejala"] == "transmisi keras" and top["jumlah"] == 2
+    assert r["rata_durasi_jam"] == 4.0
+    assert "TIDAK diagregasi" in r["catatan"]
+
+
+def test_sheet_garansi_massal(monkeypatch):
+    monkeypatch.setattr(ai, "_boleh_ai", lambda user, key: True)
+    monkeypatch.setattr(ai.sims_warranty, "available", lambda: True)
+    monkeypatch.setattr(ai.ai_sheet, "get_sheet", lambda sid, un: {
+        "headers": ["No Rangka"], "_body": [["SJ346555"], ["XX000000"]]})
+
+    def fake_info(rk):
+        if rk == "SJ346555":
+            return {"frame": "SJ346555", "unit": "HOWO NX", "brand": "HOWO",
+                    "emisi": "Euro II",
+                    "garansi": {"mulai": "2025-09-06", "berakhir": "2026-09-06",
+                                "masih_aktif": True, "sisa_hari": 45, "persen_terpakai": 87.5},
+                    "komponen": {"mesin": {"no_seri": "E1"}, "gearbox": {"no_seri": "G1"}}}
+        return None
+    monkeypatch.setattr(ai.sims_warranty, "info_unit", fake_info)
+    monkeypatch.setattr(ai.sims_warranty, "frame_dari_rangka",
+                        lambda x: x[-8:] if len(x) >= 17 else x)
+    monkeypatch.setattr(ai.ai_export, "stash_export",
+                        lambda judul, kolom, baris: ("EXP", "garansi.xlsx"))
+    r = ai._t_sheet_garansi_massal({"_sheet_id": "s1"}, ADMIN)
+    assert r["found"] and r["jumlah_baris"] == 2
+    assert r["ketemu"] == 1 and r["tak_ada"] == 1
+    assert list(r.keys())[-1] == "catatan"
+
+
+def test_garansi_tambahan_gate(monkeypatch):
+    """Ketiga tool baru menolak yang tak punya izin ai_garansi."""
+    monkeypatch.setattr(ai, "_boleh_ai", lambda user, key: False)
+    monkeypatch.setattr(ai.sims_warranty, "available", lambda: True)
+    for fn in (ai._t_excel_riwayat_klaim, ai._t_rekap_klaim, ai._t_sheet_garansi_massal):
+        assert "error" in fn({"_sheet_id": "s"}, STAF)
+
+
+def test_spec_garansi_tambahan_admin_dan_sheet():
+    na = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "s1")}
+    assert {"excel_riwayat_klaim", "rekap_klaim", "sheet_garansi_massal"} <= na
+    # tanpa sheet_id, sheet_garansi_massal tidak muncul
+    na_ns = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "")}
+    assert "sheet_garansi_massal" not in na_ns
+    assert {"excel_riwayat_klaim", "rekap_klaim"} <= na_ns

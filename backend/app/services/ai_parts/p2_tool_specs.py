@@ -1069,6 +1069,45 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 },
             },
         })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "excel_riwayat_klaim",
+                "description": (
+                    "EXPORT EXCEL daftar riwayat KLAIM garansi (semua atau per unit/status). "
+                    "Pakai saat user minta 'excel riwayat klaim', 'daftar klaim garansi dalam "
+                    "Excel', 'klaim unit X ke Excel'. Kolom: no WO, unit, tanggal, km, gejala, "
+                    "tindakan, status, durasi, pelapor. (Nilai CNY tidak di daftar — pakai "
+                    "detail_klaim untuk nilai per WO.)"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Opsional: nomor rangka/VIN untuk hanya klaim unit itu."},
+                        "status": {"type": "string", "description": "Opsional filter status (mis. selesai, pending, dibatalkan)."},
+                    },
+                },
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "rekap_klaim",
+                "description": (
+                    "REKAP/STATISTIK klaim garansi armada: total klaim, jumlah per STATUS "
+                    "(selesai/pending/dibatalkan/dst), GEJALA tersering, rentang tanggal, "
+                    "rata-rata durasi. Pakai untuk 'berapa klaim selesai/pending', 'kerusakan "
+                    "apa yang paling sering', 'ringkasan klaim garansi'. (Nilai CNY total tidak "
+                    "dihitung — untuk nilai per klaim pakai detail_klaim.)"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Opsional: rekap hanya untuk satu unit (VIN/frame)."},
+                    },
+                },
+            },
+        })
 
     # Telematics / GPS armada (Sinotruk Fleet Service) — ADMIN-ONLY (bukan key
     # Menu Control): pelacakan real-time + operasi tulis ganti nama.
@@ -1854,6 +1893,27 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 },
             },
         })
+        # Cek garansi MASSAL dari Excel (kolom VIN/rangka) → Excel hasil.
+        # Gerbang ai_garansi (sama dg tool garansi lain), READ-only.
+        if _can_garansi(user):
+            specs.append({
+                "type": "function",
+                "function": {
+                    "name": "sheet_garansi_massal",
+                    "description": (
+                        "CEK STATUS GARANSI BANYAK unit sekaligus dari Excel lampiran (kolom "
+                        "nomor rangka/VIN) → Excel hasil (aktif/sisa hari/% terpakai + spek "
+                        "per unit). Pakai saat user minta 'cek garansi semua unit di file ini', "
+                        "'audit garansi armada dari Excel'."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "kolom_rangka": {"type": "string", "description": "Kolom nomor rangka/VIN. Kosongkan bila terdeteksi otomatis."},
+                        },
+                    },
+                },
+            })
         # Isi nama unit MASSAL ke telematics dari Excel (frame → nama). ADMIN-ONLY
         # + operasi TULIS 2 langkah (pratinjau lalu konfirmasi).
         if _is_admin(user):

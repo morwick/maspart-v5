@@ -1415,3 +1415,170 @@ def _t_detail_klaim(args: dict, user: dict) -> dict:
     return out
 
 
+# ── Garansi tambahan (2026-07-22): cek massal, Excel riwayat, rekap ──
+_GARANSI_MAKS_MASSAL = 200     # baris cek garansi massal per proses
+_GARANSI_MAKS_EXCEL = 2000     # baris export riwayat klaim
+
+
+def _t_sheet_garansi_massal(args: dict, user: dict) -> dict:
+    """Cek status garansi BANYAK unit dari Excel (kolom VIN/rangka) → Excel hasil."""
+    if not _can_garansi(user):
+        return dict(_GARANSI_DENIED)
+    if not sims_warranty.available():
+        return {"error": "Koneksi SIMS belum siap di server."}
+    parsed = ai_sheet.get_sheet(args.get("_sheet_id", ""), user.get("username", ""))
+    if not parsed:
+        return {"found": False, "error": "Tidak ada file Excel terlampir (atau kedaluwarsa). "
+                                         "Minta user mengunggah Excel berisi kolom nomor rangka/VIN."}
+    headers = parsed.get("headers") or []
+    body = parsed.get("_body") or []
+    minta = (args.get("kolom_rangka") or "").strip()
+    i_frame = (ai_sheet._cari_kolom(headers, minta) if minta else None)
+    if i_frame is None:
+        for k in ("no rangka", "rangka", "vin", "frame", "chassis"):
+            i_frame = ai_sheet._cari_kolom(headers, k)
+            if i_frame is not None:
+                break
+    if i_frame is None:
+        return {"found": False,
+                "catatan": f"Kolom nomor rangka/VIN tidak terdeteksi (header: {headers}). "
+                           "Minta user menyebut nama kolomnya."}
+
+    frames: list[str] = []
+    for r in body:
+        v = (r[i_frame] if i_frame < len(r) else "").strip()
+        if v:
+            frames.append(v)
+    frames = list(dict.fromkeys(frames))[:_GARANSI_MAKS_MASSAL]
+    if not frames:
+        return {"found": False, "catatan": "Tidak ada nomor rangka di Excel."}
+
+    kolom = ["No", "Frame", "Model", "Brand", "Emisi", "Garansi Mulai",
+             "Garansi Berakhir", "Masih Aktif", "Sisa Hari", "% Terpakai",
+             "No Mesin", "No Gearbox"]
+    baris: list[list] = []
+    ketemu = 0
+    for i, rk in enumerate(frames, start=1):
+        info = sims_warranty.info_unit(rk)
+        if not info:
+            baris.append([str(i), sims_warranty.frame_dari_rangka(rk),
+                          "TIDAK ADA DI SIMS", "", "", "", "", "", "", "", "", ""])
+            continue
+        ketemu += 1
+        g = info.get("garansi") or {}
+        komp = info.get("komponen") or {}
+        aktif = ("Ya" if g.get("masih_aktif") else
+                 "Tidak" if g.get("masih_aktif") is False else "?")
+        baris.append([
+            str(i), info.get("frame") or "", info.get("unit") or "",
+            info.get("brand") or "", info.get("emisi") or "",
+            g.get("mulai") or "", g.get("berakhir") or "", aktif,
+            ai_export.ke_angka(g.get("sisa_hari") if g.get("sisa_hari") is not None else ""),
+            ai_export.ke_angka(g.get("persen_terpakai") if g.get("persen_terpakai") is not None else ""),
+            (komp.get("mesin") or {}).get("no_seri") or "",
+            (komp.get("gearbox") or {}).get("no_seri") or "",
+        ])
+    judul = f"Status Garansi ({len(frames)} unit)"
+    export_id, filename = ai_export.stash_export(judul, kolom, baris)
+    return {"found": True, "export_id": export_id, "filename": filename, "judul": judul,
+            "jumlah_baris": len(baris), "ketemu": ketemu, "tak_ada": len(frames) - ketemu,
+            "catatan": ("File Excel status garansi siap — kartu unduh muncul OTOMATIS di bawah. "
+                        f"Jawab SINGKAT ({len(frames)} unit dicek, {ketemu} ketemu, "
+                        f"{len(frames) - ketemu} tak ada di SIMS). ⛔ JANGAN tulis ulang tabel & "
+                        "JANGAN buat link sendiri.")}
+
+
+def _t_excel_riwayat_klaim(args: dict, user: dict) -> dict:
+    """Export daftar klaim garansi ke Excel (opsional filter unit/status)."""
+    if not _can_garansi(user):
+        return dict(_GARANSI_DENIED)
+    if not sims_warranty.available():
+        return {"error": "Koneksi SIMS belum siap di server."}
+    rangka = (args.get("rangka") or args.get("vin") or "").strip()
+    status_f = (args.get("status") or "").strip().lower()
+    d = sims_warranty.semua_klaim(vin=rangka)
+    if d is None:
+        return {"error": "SIMS tidak merespons — coba lagi sebentar lagi."}
+    klaim = d.get("klaim") or []
+    if status_f:
+        klaim = [k for k in klaim if status_f in (k.get("status") or "").lower()]
+    if not klaim:
+        return {"found": False, "catatan": "Tidak ada klaim yang cocok dengan filter."}
+    klaim = klaim[:_GARANSI_MAKS_EXCEL]
+
+    kolom = ["No", "No WO", "Frame", "Tanggal", "KM", "Gejala", "Tindakan",
+             "Status", "Durasi (jam)", "Pelapor", "Mekanik", "Tanggal Audit"]
+    baris = []
+    for i, k in enumerate(klaim, start=1):
+        baris.append([
+            str(i), k.get("no_wo") or "", k.get("frame") or "", k.get("tanggal") or "",
+            ai_export.ke_angka(k.get("km") if k.get("km") is not None else ""),
+            k.get("gejala") or "", k.get("tindakan") or "", k.get("status") or "",
+            ai_export.ke_angka(k.get("durasi_jam") if k.get("durasi_jam") is not None else ""),
+            k.get("pelapor") or "", k.get("mekanik") or "", k.get("tanggal_audit") or "",
+        ])
+    judul = "Riwayat Klaim" + (f" — {rangka}" if rangka else " (semua)")
+    export_id, filename = ai_export.stash_export(judul, kolom, baris)
+    return {"found": True, "export_id": export_id, "filename": filename, "judul": judul,
+            "jumlah_baris": len(baris), "total_klaim": d.get("total"),
+            "catatan": ("File Excel riwayat klaim siap — kartu unduh muncul OTOMATIS di bawah. "
+                        "Jawab SINGKAT (judul + jumlah klaim). Nilai CNY tidak ada di daftar ini "
+                        "(pakai detail_klaim untuk nilai per WO). ⛔ JANGAN tulis ulang tabel.")}
+
+
+def _t_rekap_klaim(args: dict, user: dict) -> dict:
+    """Ringkasan/statistik klaim garansi (per status, per model, gejala tersering)."""
+    if not _can_garansi(user):
+        return dict(_GARANSI_DENIED)
+    if not sims_warranty.available():
+        return {"error": "Koneksi SIMS belum siap di server."}
+    rangka = (args.get("rangka") or args.get("vin") or "").strip()
+    d = sims_warranty.semua_klaim(vin=rangka)
+    if d is None:
+        return {"error": "SIMS tidak merespons — coba lagi sebentar lagi."}
+    klaim = d.get("klaim") or []
+    if not klaim:
+        return {"found": False, "catatan": "Tidak ada klaim untuk direkap."}
+
+    from collections import Counter
+    per_status: Counter = Counter()
+    per_model: Counter = Counter()
+    gejala: Counter = Counter()
+    durasi: list[float] = []
+    tanggal: list[str] = []
+    for k in klaim:
+        per_status[k.get("status") or "?"] += 1
+        g = (k.get("gejala") or "").strip()
+        if g:
+            gejala[g.lower()] += 1
+        dj = k.get("durasi_jam")
+        if isinstance(dj, (int, float)):
+            durasi.append(float(dj))
+        if k.get("tanggal"):
+            tanggal.append(k["tanggal"])
+        # model dari daftar_klaim tidak ada 'model' langsung; frame → grup awal
+        fr = (k.get("frame") or "")[:2]
+        if fr:
+            per_model[fr] += 1
+
+    out = {
+        "found": True,
+        "total_klaim": d.get("total"),
+        "rentang_tanggal": ({"dari": min(tanggal), "sampai": max(tanggal)}
+                            if tanggal else None),
+        "per_status": [{"status": s, "jumlah": n}
+                       for s, n in per_status.most_common()],
+        "gejala_tersering": [{"gejala": g, "jumlah": n}
+                             for g, n in gejala.most_common(15)],
+        "rata_durasi_jam": (round(sum(durasi) / len(durasi), 1) if durasi else None),
+        "unit_dari_rangka": rangka or None,
+    }
+    out["catatan"] = (
+        "Rekap klaim garansi SIMS DMS armada. Angka dari daftar klaim (queryRepairOrder). "
+        "⚠️ NILAI/biaya CNY TIDAK diagregasi di sini (perlu buka tiap WO — terlalu lambat "
+        "untuk ribuan klaim); untuk nilai per klaim pakai detail_klaim. 'gejala_tersering' "
+        "= teks keluhan apa adanya (belum dikelompokkan makna). Sajikan ringkas & jujur."
+    )
+    return out
+
+
