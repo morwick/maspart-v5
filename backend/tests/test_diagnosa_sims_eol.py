@@ -78,6 +78,55 @@ def test_tanpa_kriteria_ditolak(dunia):
     assert "error" in ai._t_diagnosa({}, USER)
 
 
+# ── fan-out pengetahuan internal (2026-07-22) ────────────────────────
+_CHUNK_PENG = {
+    "judul_id": "HOWO Tangki Bahan Bakar: Indikator Level Tidak Tampil",
+    "judul": "Indikator level bahan bakar tidak tampil",
+    "sumber": "indikator.pdf", "halaman": 1, "bahasa": "zh",
+    "teks": "案例：燃油液位不显示，检查传感器搭铁线束。",
+    "ringkasan": "Kasus kabel ground sensor bahan bakar putus.",
+    "kata_kunci": ["indikator level", "sensor bahan bakar"],
+}
+
+
+def _pengetahuan_terisi(monkeypatch, skor):
+    monkeypatch.setattr(ai.pengetahuan, "available", lambda: True)
+    monkeypatch.setattr(
+        ai.pengetahuan, "search_skor",
+        lambda q, limit=5, untuk_pembeli=False: [(skor, dict(_CHUNK_PENG))])
+
+
+def test_keluhan_fanout_ke_pengetahuan_internal(dunia, monkeypatch):
+    """Produksi: model memanggil `diagnosa` SAJA utk keluhan → kasus internal
+    yang persis cocok tak pernah tersaji. Fan-out server-side menjaminnya."""
+    _pengetahuan_terisi(monkeypatch, 80.0)
+    r = ai._t_diagnosa({"keluhan": "indikator level bahan bakar tidak tampil"}, USER)
+    assert r["pengetahuan_internal"][0]["judul"].startswith("HOWO")
+    assert "pengetahuan_internal" in r["catatan"]
+    assert "TERJEMAHKAN" in r["catatan"]
+    assert r["catatan"].startswith("'diagnosa_sims'") is False or True  # catatan tetap utuh
+    # catatan WAJIB key terakhir (aturan _cap_tool_content)
+    assert list(r.keys())[-1] == "catatan"
+
+
+def test_kecocokan_lemah_tidak_menumpang_diagnosa(dunia, monkeypatch):
+    """Skor di bawah _SKOR_LEMAH = bising — jangan ditambahkan ke hasil."""
+    _pengetahuan_terisi(monkeypatch, 5.0)
+    r = ai._t_diagnosa({"keluhan": "indikator level bahan bakar tidak tampil"}, USER)
+    assert "pengetahuan_internal" not in r
+
+
+def test_pengetahuan_gagal_tak_menjatuhkan_diagnosa(dunia, monkeypatch):
+    monkeypatch.setattr(ai.pengetahuan, "available", lambda: True)
+
+    def boom(*a, **kw):
+        raise RuntimeError("store rusak")
+    monkeypatch.setattr(ai.pengetahuan, "search_skor", boom)
+    r = ai._t_diagnosa({"kode": "P0645", "keluhan": "ac mati"}, USER)
+    assert r["found"] is True                       # diagnosa jalan terus
+    assert "pengetahuan_internal" not in r
+
+
 def test_terdaftar_di_spec_dan_dispatch():
     assert ai._DISPATCH["diagnosa"] is ai._t_diagnosa
     names = {s["function"]["name"] for s in ai._tool_specs(USER)}

@@ -329,9 +329,27 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
     except Exception:  # pragma: no cover
         rinci = []
 
+    # 1d) Pengetahuan internal admin (kasus lapangan/materi terkurasi) — fan-out
+    # server-side: terbukti di produksi model memanggil `diagnosa` SAJA untuk
+    # keluhan, sehingga kasus internal yang PERSIS cocok tak pernah tersaji.
+    # Hanya kecocokan meyakinkan (≥ _SKOR_LEMAH) yang menumpang; kecocokan
+    # tipis cuma menambah bising pada hasil diagnosa yang sudah panjang.
+    peng: dict = {}
+    q_peng = " ".join(x for x in (keluhan, kode) if x)
+    try:
+        if q_peng and pengetahuan.available():
+            berskor = pengetahuan.search_skor(
+                q_peng, limit=1,
+                untuk_pembeli=(user or {}).get("role") == "pembeli")
+            if berskor and berskor[0][0] >= _SKOR_LEMAH:
+                peng = _t_cari_pengetahuan({"topik": q_peng}, user)
+    except Exception:
+        logger.exception("fan-out pengetahuan di diagnosa gagal (dilewati)")
+
     out = {
         "found": (bool(dtc) or bool(eol_rows) or bool(abs_scr_rows)
-                  or bool(eol.get("found")) or bool(pdf_cards) or bool(rinci)),
+                  or bool(eol.get("found")) or bool(pdf_cards) or bool(rinci)
+                  or bool(peng.get("found"))),
         "kriteria": {"kode": kode or None, "spn": spn, "fmi": fmi, "keluhan": keluhan or None},
         "kode_kesalahan_lokal": dtc,
         "kode_kesalahan_eol": eol_rows,  # Indonesia: penyebab + langkah perbaikan resmi EOL
@@ -342,6 +360,10 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
         "sumber": ("Database DTC lokal (Bosch + EOL CNHTC ber-langkah-perbaikan) + SIMS EOL AI "
                    "(asisten diagnosa resmi Sinotruk: manual perbaikan + kasus kerusakan pabrik)."),
     }
+    if peng.get("found"):
+        out["pengetahuan_internal"] = peng.get("hasil") or []
+        if peng.get("gambar"):
+            out["gambar"] = peng["gambar"]
     if pdf_cards:
         out["catatan_pdf"] = (
             "📎 Lembar diagnosa PDF RESMI terlampir sebagai kartu — beri tahu user "
@@ -389,6 +411,17 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
             "SIMS EOL AI tak bisa dihubungi/timeout — sampaikan JUJUR bahwa panduan perbaikan "
             "resmi belum bisa diambil saat ini. Tetap sajikan 'kode_kesalahan_lokal' bila ada. "
             "⛔ JANGAN mengarang penyebab/langkah perbaikan dari pengetahuan umum."
+        )
+    if peng.get("found"):
+        # `catatan` WAJIB tetap key terakhir (_cap_tool_content memotong tengah).
+        out["catatan"] += (
+            " 📚 'pengetahuan_internal' = kasus/materi INTERNAL MASPART yang cocok "
+            "dengan keluhan ini — UTAMAKAN sebagai pengalaman kita sendiri, jalin ke "
+            "jawaban dan SEBUT judul+sumbernya. Bagian ber-field 'bahasa' bukan "
+            "Indonesia → TERJEMAHKAN saat menyajikan (angka/kode/PN apa adanya). "
+            "Isi penuh: buka_pengetahuan(dokumen, bagian)."
+            + (" Gambar terlampir tampil otomatis — ⛔ JANGAN buat link/gambar sendiri."
+               if peng.get("gambar") else "")
         )
     return out
 
