@@ -3,11 +3,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { clearSession, getUser } from "@/lib/auth";
+import { clearSession, getUser, setLogoutReason } from "@/lib/auth";
 import { clearPerms, ensurePerms } from "@/lib/perms";
 import { cartCount, onCartChange } from "@/lib/cart";
 import { getBranchOrdersCount } from "@/lib/api";
 import { getToken } from "@/lib/auth";
+
+// Auto-logout saat idle: keluar otomatis bila tak ada aktivitas selama ini.
+const IDLE_LOGOUT_MS = 5 * 60 * 1000; // 5 menit
 import ThemeToggle from "./ThemeToggle";
 import CommandPalette, { type PaletteItem } from "./CommandPalette";
 
@@ -186,6 +189,37 @@ export default function AppShell({
       clearInterval(id);
     };
   }, [branchLabel, active]);
+
+  // Auto-logout idle: setelah IDLE_LOGOUT_MS tanpa aktivitas → sesi dibersihkan
+  // & user dikembalikan ke login. Timer di-reset tiap interaksi (gerak mouse,
+  // ketik, klik, scroll, sentuh) dan saat tab kembali terlihat. Berlaku SEMUA
+  // peran termasuk admin. Token JWT tetap punya kedaluwarsanya sendiri di server;
+  // ini lapisan kenyamanan/keamanan sisi klien.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const keluar = () => {
+      setLogoutReason("Sesi berakhir otomatis karena 5 menit tidak ada aktivitas.");
+      clearSession();
+      clearPerms();
+      router.replace("/login");
+    };
+    const reset = () => {
+      clearTimeout(timer);
+      timer = setTimeout(keluar, IDLE_LOGOUT_MS);
+    };
+    const evs = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "click"];
+    evs.forEach((e) => window.addEventListener(e, reset, { passive: true }));
+    const onVis = () => {
+      if (document.visibilityState === "visible") reset();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    reset();
+    return () => {
+      clearTimeout(timer);
+      evs.forEach((e) => window.removeEventListener(e, reset));
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [router]);
 
   // ⌘K / Ctrl+K membuka command palette.
   useEffect(() => {
