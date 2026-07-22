@@ -255,3 +255,79 @@ def test_telematics_off_pesan_jujur(monkeypatch):
     monkeypatch.setattr(ai.telematics, "available", lambda: False)
     r = ai._t_lihat_unit_armada({}, ADMIN)
     assert "belum dikonfigurasi" in r["error"]
+
+
+# ── isi nama massal dari Excel (sheet_isi_nama_telematik) ────────────
+_SHEET = {
+    "headers": ["No Rangka", "Nama"],
+    "_body": [
+        ["SJ398957", "JNT - B 9542 UEY"],   # sudah sama
+        ["SJ398958", "Nama Baru A"],         # berubah
+        ["PC531850", "Truk C7H"],            # berubah (kosong→ada)
+        ["XX000000", "Unit Hantu"],          # tak ada di telematics
+    ],
+}
+_TELE_RECS = [
+    {"cjh": "SJ398957", "vin": "V1", "carNumber": "JNT - B 9542 UEY",
+     "organizations": [{"id": 625, "organizationName": "JNT"}]},
+    {"cjh": "SJ398958", "vin": "V2", "carNumber": "Lama B",
+     "organizations": [{"id": 625, "organizationName": "JNT"}]},
+    {"cjh": "PC531850", "vin": "V3", "carNumber": None,
+     "organizations": [{"id": 623, "organizationName": "MAS"}]},
+]
+
+
+@pytest.fixture
+def massal_on(monkeypatch):
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.ai_sheet, "get_sheet", lambda sid, un: dict(_SHEET))
+    monkeypatch.setattr(ai.telematics, "semua_unit",
+                        lambda fleet="": {"total": 3, "records": _TELE_RECS})
+    tulis = []
+    monkeypatch.setattr(ai.telematics, "ganti_nama",
+                        lambda cjh, nama: (tulis.append((cjh, nama)) or {"cjh": cjh, "carNumber": nama}))
+    return tulis
+
+
+def test_isi_nama_massal_pratinjau_tak_menulis(massal_on):
+    r = ai._t_sheet_isi_nama_telematik({"_sheet_id": "s1"}, ADMIN)
+    assert r["perlu_konfirmasi"] is True
+    assert r["ringkasan"] == {"total_baris": 4, "akan_berubah": 2,
+                              "sudah_sama": 1, "tak_ada_di_telematics": 1}
+    assert massal_on == []                         # BELUM menulis
+    assert "KONFIRMASI" in r["catatan"]
+
+
+def test_isi_nama_massal_terapkan_hanya_berubah(massal_on):
+    r = ai._t_sheet_isi_nama_telematik({"_sheet_id": "s1", "konfirmasi": True}, ADMIN)
+    assert r["selesai"] and r["diterapkan"] == 2
+    assert r["dilewati_sama"] == 1 and r["dilewati_tak_ada"] == 1
+    # hanya 2 yang berbeda ditulis; yang sudah sama & tak ada TIDAK
+    assert set(massal_on) == {("SJ398958", "Nama Baru A"), ("PC531850", "Truk C7H")}
+
+
+def test_isi_nama_massal_admin_only(massal_on):
+    r = ai._t_sheet_isi_nama_telematik({"_sheet_id": "s1", "konfirmasi": True}, STAF)
+    assert "error" in r and massal_on == []        # non-admin tak menulis
+
+
+def test_isi_nama_massal_tanpa_lampiran(monkeypatch):
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.ai_sheet, "get_sheet", lambda sid, un: None)
+    r = ai._t_sheet_isi_nama_telematik({"_sheet_id": ""}, ADMIN)
+    assert r["found"] is False and "terlampir" in r["error"]
+
+
+def test_isi_nama_massal_kolom_tak_terdeteksi(monkeypatch):
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.ai_sheet, "get_sheet", lambda sid, un: {
+        "headers": ["Kolom X", "Kolom Y"], "_body": [["a", "b"]]})
+    r = ai._t_sheet_isi_nama_telematik({"_sheet_id": "s1"}, ADMIN)
+    assert r["found"] is False and "tidak terdeteksi" in r["catatan"]
+
+
+def test_spec_isi_nama_massal_admin_only_saat_ada_sheet():
+    na = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "sheet-1")}
+    ns = {s["function"]["name"] for s in ai._tool_specs(STAF, "sheet-1")}
+    assert "sheet_isi_nama_telematik" in na
+    assert "sheet_isi_nama_telematik" not in ns

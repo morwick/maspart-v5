@@ -782,6 +782,7 @@ _TOOL_LABEL = {
     "lihat_unit_armada": "Melacak posisi armada",
     "ganti_nama_unit": "Mengganti nama unit",
     "excel_unit_armada": "Menyiapkan Excel armada",
+    "sheet_isi_nama_telematik": "Mengisi nama unit ke telematics",
     "katalog_kategori": "Menyiapkan katalog bergambar",
     "katalog_mesin": "Menyiapkan katalog mesin",
     "gambar_exploded": "Mengambil gambar exploded view",

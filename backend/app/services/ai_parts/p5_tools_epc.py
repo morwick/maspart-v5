@@ -2361,3 +2361,114 @@ def _t_excel_unit_armada(args: dict, user: dict) -> dict:
                         "⛔ JANGAN tulis ulang isi tabel & JANGAN membuat link sendiri.")}
 
 
+_TELE_MAX_RENAME = 500     # pagar batas baris rename massal per giliran
+
+
+def _t_sheet_isi_nama_telematik(args: dict, user: dict) -> dict:
+    """Isi NAMA unit MASSAL ke telematics dari Excel (frame→nama). ADMIN-ONLY,
+    TULIS 2 langkah (pratinjau lalu konfirmasi)."""
+    if not _is_admin(user):
+        return dict(_TELE_DENIED)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    parsed = ai_sheet.get_sheet(args.get("_sheet_id", ""), user.get("username", ""))
+    if not parsed:
+        return {"found": False, "error": "Tidak ada file Excel terlampir (atau kedaluwarsa). "
+                                         "Minta user mengunggah Excel berisi kolom nomor rangka & nama."}
+    headers = parsed.get("headers") or []
+    body = parsed.get("_body") or []
+
+    # Kolom rangka & nama: dari arahan user, atau deteksi header umum.
+    def _kolom(minta: str, kandidat: list[str]) -> int | None:
+        if (minta or "").strip():
+            return ai_sheet._cari_kolom(headers, minta)
+        for k in kandidat:
+            i = ai_sheet._cari_kolom(headers, k)
+            if i is not None:
+                return i
+        return None
+    i_frame = _kolom(args.get("kolom_rangka"), ["no rangka", "rangka", "frame", "chassis", "cjh", "vin"])
+    i_nama = _kolom(args.get("kolom_nama"), ["nama", "name", "label", "carnumber", "nomor lambung"])
+    if i_frame is None or i_nama is None:
+        return {"found": False,
+                "catatan": ("Kolom nomor rangka dan/atau nama tidak terdeteksi di Excel "
+                            f"(header: {headers}). Minta user menyebut nama kolomnya.")}
+
+    # Pasangan (frame, nama) dari file.
+    pasangan: list[tuple[str, str]] = []
+    for r in body:
+        frame = (r[i_frame] if i_frame < len(r) else "").strip()
+        nama = (r[i_nama] if i_nama < len(r) else "").strip()
+        if frame and nama:
+            pasangan.append((frame, nama))
+    if not pasangan:
+        return {"found": False, "catatan": "Tidak ada baris berisi rangka + nama di Excel."}
+    if len(pasangan) > _TELE_MAX_RENAME:
+        return {"found": False,
+                "catatan": f"Terlalu banyak baris ({len(pasangan)}) — batas {_TELE_MAX_RENAME} "
+                           "per proses. Pecah filenya."}
+
+    # Peta unit telematics (SEKALI tarik) — cocok via cjh atau vin.
+    d = telematics.semua_unit()
+    if d is None:
+        return {"error": "Telematics tidak merespons — coba lagi sebentar lagi."}
+    peta: dict[str, dict] = {}
+    for rec in (d.get("records") or []):
+        for k in (rec.get("cjh"), rec.get("vin")):
+            if k:
+                peta.setdefault(k.strip().upper(), rec)
+
+    berubah: list[dict] = []
+    sama = 0
+    tak_ada: list[str] = []
+    for frame, nama in pasangan:
+        rec = peta.get(frame.strip().upper())
+        if not rec:
+            tak_ada.append(frame)
+            continue
+        cur = (rec.get("carNumber") or "").strip()
+        if cur == nama:
+            sama += 1
+        else:
+            berubah.append({"cjh": rec.get("cjh"), "nama_lama": cur or "(kosong)",
+                            "nama_baru": nama})
+
+    if not args.get("konfirmasi"):
+        # LANGKAH 1 — pratinjau, TIDAK menulis.
+        return {
+            "perlu_konfirmasi": bool(berubah),
+            "ringkasan": {"total_baris": len(pasangan), "akan_berubah": len(berubah),
+                          "sudah_sama": sama, "tak_ada_di_telematics": len(tak_ada)},
+            "contoh_perubahan": berubah[:15],
+            "contoh_tak_ada": tak_ada[:15],
+            "catatan": (
+                (f"⚠️ KONFIRMASI DULU ke user: terapkan {len(berubah)} perubahan nama ke "
+                 "telematics (server Sinotruk, PERMANEN)? "
+                 f"{sama} sudah sama (dilewati), {len(tak_ada)} frame tak ada di telematics "
+                 "(dilewati). Bila user setuju, panggil sheet_isi_nama_telematik lagi dengan "
+                 "konfirmasi=true.")
+                if berubah else
+                (f"Tidak ada yang perlu diubah: {sama} unit sudah bernama sesuai Excel, "
+                 f"{len(tak_ada)} frame tak ada di telematics. Sampaikan apa adanya.")
+            ),
+        }
+
+    # LANGKAH 2 — user setuju → terapkan hanya yang BERUBAH.
+    berhasil = 0
+    gagal: list[str] = []
+    for item in berubah:
+        res = telematics.ganti_nama(item["cjh"], item["nama_baru"])
+        if res is not None:
+            berhasil += 1
+        else:
+            gagal.append(item["cjh"])
+    return {
+        "found": True, "selesai": True,
+        "diterapkan": berhasil, "gagal": len(gagal), "dilewati_sama": sama,
+        "dilewati_tak_ada": len(tak_ada), "contoh_gagal": gagal[:10],
+        "catatan": (f"✅ {berhasil} nama unit diterapkan ke telematics"
+                    + (f", {len(gagal)} gagal (server menolak — sampaikan jujur)" if gagal else "")
+                    + f". {sama} sudah sama & {len(tak_ada)} tak ada di telematics dilewati."),
+    }
+
+

@@ -1783,6 +1783,33 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 },
             },
         })
+        # Isi nama unit MASSAL ke telematics dari Excel (frame → nama). ADMIN-ONLY
+        # + operasi TULIS 2 langkah (pratinjau lalu konfirmasi).
+        if _is_admin(user):
+            specs.append({
+                "type": "function",
+                "function": {
+                    "name": "sheet_isi_nama_telematik",
+                    "description": (
+                        "ISI NAMA UNIT MASSAL ke telematics/GPS dari file Excel yang "
+                        "dilampirkan (kolom nomor rangka + kolom nama). ⚠️ OPERASI TULIS "
+                        "ke server Sinotruk, PERMANEN & massal. WAJIB 2 langkah: panggil "
+                        "DULU tanpa konfirmasi → tampilkan PRATINJAU (berapa unit akan "
+                        "berubah: nama lama→baru, berapa sudah sama, berapa frame tak ada "
+                        "di telematics) dan MINTA PERSETUJUAN user; hanya setelah user "
+                        "setuju panggil lagi konfirmasi=true untuk menerapkan. ⛔ JANGAN "
+                        "langsung konfirmasi=true."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "kolom_rangka": {"type": "string", "description": "Kolom nomor rangka/frame. Kosongkan bila terdeteksi otomatis."},
+                            "kolom_nama": {"type": "string", "description": "Kolom nama/label baru. Kosongkan bila terdeteksi otomatis."},
+                            "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau. Default false = pratinjau."},
+                        },
+                    },
+                },
+            })
 
     # ── Gating pembeli (rombakan 3b 2026-07-17): tool INTERNAL tidak
     # ditawarkan ke akun pembeli — hemat token spec + model tak tergoda
