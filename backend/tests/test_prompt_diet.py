@@ -50,6 +50,24 @@ def test_prompt_statik_tanpa_kamus_penuh_tapi_masih_ber_domain():
     assert len(sp) < 75_000
 
 
+def test_aturan_teruskan_mentah_berlaku_semua_tool_pencarian():
+    """Kasus produksi 'cucuk per' (2026-07-22): aturan lama hanya menyebut
+    cari_part → model merasa bebas menerjemahkan sendiri utk cari_part_di_unit
+    ('cucuk per' ditebak 'cross joint', padahal kamus tahu itu 'spring pin').
+    Kunci: larangan pra-terjemah + penyebutan tool per-unit."""
+    sp = A._system_prompt(ADMIN)
+    assert "cari_part_di_unit, part_aus_dari_rangka" in sp
+    assert "JANGAN" in sp and "SEBELUM mencoba istilah mentahnya" in sp
+
+
+def test_spec_kata_kunci_melarang_pra_terjemah():
+    specs = A._tool_specs(ADMIN, sheet_id="")
+    spec = next(s for s in specs
+                if s.get("function", {}).get("name") == "cari_part_di_unit")
+    desc = spec["function"]["parameters"]["properties"]["kata_kunci"]["description"]
+    assert "APA ADANYA" in desc and "JANGAN terjemahkan" in desc
+
+
 _ENTRIES = [
     {"grup": "kopling", "triggers": ["kampas kopling"], "keywords": ["clutch disc"]},
     {"grup": "rem", "triggers": ["kampas rem"], "keywords": ["brake lining", "friction plate"]},

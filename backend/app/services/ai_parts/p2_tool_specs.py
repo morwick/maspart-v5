@@ -582,7 +582,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "type": "object",
                     "properties": {
                         "rangka": {"type": "string", "description": "Nomor rangka/VIN unit."},
-                        "kata_kunci": {"type": "string", "description": "Nama part yang dicari (istilah lapangan Indonesia / Inggris / PN) — mis. 'kampas rem', 'cross joint', 'filter oli'."},
+                        "kata_kunci": {"type": "string", "description": "Nama part yang dicari — KIRIM istilah user APA ADANYA (kamus sinonim lapangan diterapkan otomatis di server; ⛔ JANGAN terjemahkan/tebak padanan Inggris sendiri sebelum mencoba mentahnya). Istilah Indonesia/Inggris/PN sama-sama boleh — mis. 'kampas rem', 'filter oli'."},
                         "teliti": {"type": "boolean", "description": "true = sisir SEMUA baris part list pohon unit (lambat pencarian pertama, cakupan penuh). Pakai saat hasil mode cepat tidak memuat part yang diminta."},
                     },
                     "required": ["rangka", "kata_kunci"],

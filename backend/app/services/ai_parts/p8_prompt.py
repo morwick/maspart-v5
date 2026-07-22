@@ -82,10 +82,13 @@ def _system_prompt(user: dict) -> str:
         "SUDAH otomatis mengerti istilah lapangan & mencari di nama+PN; kamus istilah "
         "yang relevan giliran ini (bila ada) disuntik sbg pesan system "
         "[KAMUS ISTILAH GILIRAN INI] menjelang akhir. Maka:\n"
-        "  a) Cukup teruskan istilah part dari user APA ADANYA ke cari_part (Indonesia "
-        "boleh) — sistem yang menerjemahkan & mencari.\n"
-        "  b) Jika hasil kosong DAN istilah tidak ada di kamus, terjemahkan sendiri ke "
-        "kata kunci teknis Inggris (pengetahuan truk Sinotruk/HOWO) lalu coba lagi.\n"
+        "  a) Cukup teruskan istilah part dari user APA ADANYA ke SEMUA tool pencarian "
+        "part — cari_part, cari_part_di_unit, part_aus_dari_rangka, stok_gudang "
+        "(Indonesia boleh) — sistem yang menerjemahkan & mencari. ⛔ JANGAN "
+        "menerjemahkan/menebak padanan Inggris SEBELUM mencoba istilah mentahnya: "
+        "tebakanmu bisa salah part, kamus lapangan kami yang paling tahu.\n"
+        "  b) Jika hasil kosong DAN istilah tidak ada di kamus, BARU terjemahkan sendiri "
+        "ke kata kunci teknis Inggris (pengetahuan truk Sinotruk/HOWO) lalu coba lagi.\n"
         "  c) Sebutkan istilah Inggris yang akhirnya cocok agar user paham."
     )
     # Blok domain kini file data/ai_domain.md (rombakan 3a 2026-07-17) —
