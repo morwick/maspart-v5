@@ -75,7 +75,10 @@ def test_login_flow_rsa_dan_header_tanpa_bearer(cfg_on, monkeypatch):
     assert any("getPublicKey" in c[0] for c in calls)
 
 
-def test_relogin_saat_token_basi(cfg_on, monkeypatch):
+@pytest.mark.parametrize("kode_basi", [401, 350])
+def test_relogin_saat_token_basi(cfg_on, monkeypatch, kode_basi):
+    """Re-login pada 401 (umum) DAN 350 (telematics 'session invalid',
+    single-session) — produksi 2026-07-22 gagal karena 350 tak ditangani."""
     monkeypatch.setattr(t, "_rsa_encrypt", lambda pk, pw: "ENC")
     seq = {"n": 0}
 
@@ -93,7 +96,7 @@ def test_relogin_saat_token_basi(cfg_on, monkeypatch):
             return R({"code": 200, "data": {"tokenKey": f"TOK{seq['n']}"}})
         seq["n"] += 1
         if seq["n"] == 1:
-            return R({"code": 401, "message": "expired"})   # token basi
+            return R({"code": kode_basi, "message": "session invalid"})
         return R({"code": 200, "data": [1, 2]})
     monkeypatch.setattr(t.requests, "post", fake_post)
     assert t._post("/api/y", {}) == [1, 2]                   # sukses setelah re-login

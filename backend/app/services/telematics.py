@@ -43,6 +43,10 @@ _lock = threading.Lock()
 _token: str | None = None
 _token_exp = 0.0
 _SESSION_TTL = 55 * 60      # token portal hidup 1 jam → segarkan sebelum itu
+# Kode respons yang berarti "token basi, login ulang". Portal ini SINGLE-SESSION:
+# login baru membatalkan token lama → sesi lain (probe/paralel) memicu 350.
+# ⛔ Bukan hanya 401 (SIMS) — telematics pakai 350 "Login session invalid".
+_KODE_RELOGIN = {350, 401, 403}
 
 
 def available() -> bool:
@@ -94,12 +98,14 @@ def _post(path: str, data: dict) -> dict | list | None:
         return requests.post(f"{_BASE}{path}", data=data,
                              headers={"Authorization": _get_token()},
                              timeout=_TIMEOUT)
+    def _basi(resp, body) -> bool:
+        return (resp.status_code in (401, 403)
+                or (isinstance(body, dict) and body.get("code") in _KODE_RELOGIN))
     try:
         r = _once()
         body = r.json() if r.status_code < 400 else {}
-        if r.status_code in (401, 403) or (isinstance(body, dict)
-                                           and body.get("code") == 401):
-            _get_token(force=True)          # token kedaluwarsa → login ulang
+        if _basi(r, body):
+            _get_token(force=True)          # token kedaluwarsa/invalid → login ulang
             r = _once()
             body = r.json() if r.status_code < 400 else {}
         if r.status_code >= 400:
