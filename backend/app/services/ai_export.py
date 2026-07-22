@@ -354,6 +354,38 @@ _NUM_HEAD_RE = re.compile(
 # uang hanya mematikan sabuk pengaman anti-PN — jadi default-nya non-uang.
 _UANG_HEAD_RE = re.compile(r"\b(harga|price|rp|idr|cny|amount|nilai)\b", re.IGNORECASE)
 
+# Format angka PINTAR per-kolom (2026-07-22): tampilan mengikuti JENIS kolom,
+# nilai sel tetap int/float asli (SUM/rumus user tetap jalan). Urutan cek:
+# persen → berat → uang(CNY/USD/Rp) → default.
+_PERSEN_HEAD_RE = re.compile(r"(%|persen|terpakai)", re.IGNORECASE)
+_BERAT_HEAD_RE = re.compile(r"\b(berat|weight|kg)\b", re.IGNORECASE)
+# Dicek HANYA setelah _UANG_HEAD_RE cocok (sudah pasti kolom uang) → substring
+# cukup; \b gagal untuk nama ber-underscore spt 'total_cny'.
+_CNY_HEAD_RE = re.compile(r"cny|rmb|yuan|¥", re.IGNORECASE)
+_USD_HEAD_RE = re.compile(r"usd|\$", re.IGNORECASE)
+_FMT_DEFAULT = "#,##0"
+
+
+def num_format(header: str) -> str:
+    """Format tampilan sel angka untuk sebuah kolom, dari NAMA header-nya.
+    Nilai sel TIDAK diubah — hanya number_format Excel (kosmetik)."""
+    # underscore → spasi agar batas kata (\b) tembus di nama snake_case
+    # ('total_cny' → 'total cny' → \bcny\b cocok).
+    s = re.sub(r"_+", " ", header or "")
+    if _PERSEN_HEAD_RE.search(s):
+        # Nilai kita literal (mis. 87.5) → tempel '%' sbg literal, JANGAN pakai
+        # '0.0%' (Excel mengalikan 100 → salah).
+        return '0.0"%"'
+    if _BERAT_HEAD_RE.search(s):
+        return '#,##0" kg"'
+    if _UANG_HEAD_RE.search(s):
+        if _CNY_HEAD_RE.search(s):
+            return '#,##0.00" CNY"'   # CNY kerap berdesimal (7804.81)
+        if _USD_HEAD_RE.search(s):
+            return '"$"#,##0.00'
+        return '"Rp"#,##0'            # rupiah = mata uang utama app
+    return _FMT_DEFAULT
+
 _KOSONG_ANGKA = {"", "-", "—", "–", "n/a", "na", "tidak ada"}
 _MATA_UANG_RE = re.compile(r"^(?:rp\.?|idr|cny|usd|\$|¥)\s*", re.IGNORECASE)
 _RIBUAN_RE = re.compile(r"^-?\d{1,3}(?:\.\d{3})+$")      # 1.500.000
@@ -379,6 +411,8 @@ def kolom_angka(kolom: list[str]) -> dict[int, bool]:
             continue
         if _NUM_HEAD_RE.search(s):
             out[i] = bool(_UANG_HEAD_RE.search(s))
+        elif _PERSEN_HEAD_RE.search(s):
+            out[i] = False        # persen = angka (non-uang) → koersi "87,5"→87.5
     return out
 
 
@@ -562,10 +596,12 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
         c.alignment = _CENTER
         c.border = _BORDER
         ws.column_dimensions[get_column_letter(j)].width = w
-    # Kolom Harga/Stok/Qty/Berat ditulis sebagai ANGKA (lihat _NUM_FMT & ke_angka)
-    # supaya rumus Excel user jalan. _safe() dipanggil SETELAH koersi: string yang
-    # tidak jadi angka tetap dapat guard formula-injection, angka dilewatkan utuh.
+    # Kolom Harga/Stok/Qty/Berat ditulis sebagai ANGKA (lihat ke_angka) supaya
+    # rumus Excel user jalan. _safe() dipanggil SETELAH koersi: string yang tidak
+    # jadi angka tetap dapat guard formula-injection, angka dilewatkan utuh.
+    # Format tampilan angka PINTAR per-kolom (persen/berat/uang) dari nama header.
     num_cols = kolom_angka(kolom)
+    col_fmts = [num_format(h) for h in kolom]
     r = start + 1
     for i, row in enumerate(baris):
         for j in range(1, len(kolom) + 1):
@@ -577,8 +613,7 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
             angka = isinstance(c.value, (int, float)) and not isinstance(c.value, bool)
             if angka:
                 c.alignment = _RIGHT
-                if _NUM_FMT:
-                    c.number_format = _NUM_FMT
+                c.number_format = col_fmts[j - 1]
             else:
                 c.alignment = _CENTER if j == 1 or j in mono_cols else _LEFT
             c.font = _MONO if j in mono_cols else _INK
@@ -625,6 +660,7 @@ def sheet_status_excel(b: dict) -> tuple[bytes | None, str]:
         c.border = _BORDER
         ws.column_dimensions[get_column_letter(j)].width = w
     num_cols = kolom_angka(kolom)     # sama seperti generic_excel — lihat ke_angka
+    col_fmts = [num_format(h) for h in kolom]   # format tampilan pintar per-kolom
     r = start + 1
     for i, row in enumerate(baris):
         fill = _STATUS_FILL.get(status[i] if i < len(status) else "")
@@ -637,8 +673,7 @@ def sheet_status_excel(b: dict) -> tuple[bytes | None, str]:
             angka = isinstance(c.value, (int, float)) and not isinstance(c.value, bool)
             if angka:
                 c.alignment = _RIGHT
-                if _NUM_FMT:
-                    c.number_format = _NUM_FMT
+                c.number_format = col_fmts[j - 1]
             else:
                 c.alignment = _CENTER if j == 1 or j in mono_cols else _LEFT
             c.font = _MONO if j in mono_cols else _INK

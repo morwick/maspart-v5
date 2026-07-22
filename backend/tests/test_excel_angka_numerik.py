@@ -46,11 +46,15 @@ def test_kolom_harga_jadi_int():
 
 def test_sel_angka_pakai_format_pemisah_ribuan():
     """Tampilan bertitik (pemisah ribuan) TANPA mengubah nilai — SUM tetap jalan
-    karena selnya tetap numerik. Kunci: NILAI int, FORMAT '#,##0'."""
-    ws = _bangun(["Harga"], [["Rp 1.500.000"]])
-    c = _sel(ws, "Harga")
-    assert c.value == 1500000 and c.data_type == "n"   # nilai tetap angka murni
-    assert c.number_format == X._NUM_FMT               # tampilan bertitik
+    karena selnya tetap numerik. Kolom NON-uang → format polos '#,##0'."""
+    ws = _bangun(["Qty"], [["1.500"]])
+    c = _sel(ws, "Qty")
+    assert c.value == 1500 and c.data_type == "n"      # nilai tetap angka murni
+    assert c.number_format == "#,##0"                  # tampilan bertitik polos
+    # Kolom uang kini bersimbol Rp (nilai tetap int → SUM jalan).
+    ws2 = _bangun(["Harga"], [["Rp 1.500.000"]])
+    ch = _sel(ws2, "Harga")
+    assert ch.value == 1500000 and ch.number_format == '"Rp"#,##0'
 
 
 def test_sel_teks_tidak_kena_number_format():
@@ -150,3 +154,53 @@ def test_sheet_status_excel_harga_int_ringkasan_tetap_rp():
             for r in range(1, ws.max_row + 1) for c in range(1, ws.max_column + 1)]
     assert any(isinstance(v, str) and v.startswith("Rp ") for v in teks), \
         "blok RINGKASAN harus tetap 'Rp …'"
+
+
+# ── Format angka PINTAR per-kolom (2026-07-22) ───────────────────────
+def test_num_format_per_jenis_kolom():
+    """Format tampilan mengikuti jenis kolom dari nama header."""
+    assert X.num_format("% Terpakai") == '0.0"%"'
+    assert X.num_format("persen_terpakai") == '0.0"%"'
+    assert X.num_format("Harga") == '"Rp"#,##0'
+    assert X.num_format("Total Harga") == '"Rp"#,##0'
+    assert X.num_format("Harga (CNY)") == '#,##0.00" CNY"'
+    assert X.num_format("total_cny") == '#,##0.00" CNY"'
+    assert X.num_format("Nilai USD") == '"$"#,##0.00'
+    assert X.num_format("Berat") == '#,##0" kg"'
+    assert X.num_format("Berat (kg)") == '#,##0" kg"'
+    # non-uang/non-persen → default polos
+    assert X.num_format("Qty") == "#,##0"
+    assert X.num_format("Stok Total") == "#,##0"
+    assert X.num_format("KM") == "#,##0"
+    assert X.num_format("Sisa Hari") == "#,##0"
+
+
+def test_generic_excel_number_format_terpasang_per_kolom():
+    """Workbook nyata: number_format tiap kolom sesuai jenis, nilai tetap angka."""
+    ws = _bangun(["No", "Harga", "% Terpakai", "Berat", "Qty"],
+                 [["1", "Rp 720.000", "87,5", "1.301", "5"]])
+    assert _sel(ws, "Harga").number_format == '"Rp"#,##0'
+    assert _sel(ws, "Harga").value == 720000
+    p = _sel(ws, "% Terpakai")
+    assert p.number_format == '0.0"%"'
+    assert p.value == 87.5                     # literal 87.5 (BUKAN 0.875/8750)
+    assert _sel(ws, "Berat").number_format == '#,##0" kg"'
+    assert _sel(ws, "Qty").number_format == "#,##0"
+
+
+def test_persen_tidak_dikali_seratus():
+    """Regresi: format '0.0%' Excel mengali 100 — kita pakai literal '%'."""
+    ws = _bangun(["% Terpakai"], [[87.5]])
+    c = _sel(ws, "% Terpakai")
+    assert c.value == 87.5 and '%' in c.number_format and c.number_format != "0.0%"
+
+
+def test_sheet_status_excel_pakai_format_pintar():
+    data, _f = X.sheet_status_excel({
+        "judul": "Uji", "kolom": ["Part Number", "Harga", "% Terpakai"],
+        "baris": [["WG9925520270", "Rp 1.500.000", "50"]],
+        "status": [""], "ringkasan": [],
+    })
+    ws = load_workbook(io.BytesIO(data)).active
+    assert _sel(ws, "Harga").number_format == '"Rp"#,##0'
+    assert _sel(ws, "% Terpakai").number_format == '0.0"%"'
