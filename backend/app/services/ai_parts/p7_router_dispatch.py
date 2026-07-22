@@ -107,6 +107,7 @@ _DISPATCH = {
     "cek_populasi": _t_cek_populasi,
     "banding_part_armada": _t_banding_part_armada,
     "detail_part": _t_detail_part,
+    "cek_massal_part": _t_cek_massal_part,
     "stok_accurate": _t_stok_accurate,
     "harga_sims": _t_harga_sims,
     "info_aplikasi": _t_info_aplikasi,

@@ -76,6 +76,31 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "cek_massal_part",
+                "description": (
+                    "⭐ CEK BANYAK Part Number SEKALIGUS dalam SATU panggilan — nama + stok "
+                    "(total & per gudang) + harga tiap PN dari indeks Accurate. WAJIB pakai "
+                    "ini saat user menyebut/menempel ≥3 PN ('cek PN ini semua', daftar PN) "
+                    "— ⛔ JANGAN memanggil detail_part berulang (boros & lambat). PN yang "
+                    "tidak ada ditandai jujur. Set excel=true untuk file Excel unduhan. "
+                    "Hasil bisa langsung dijadikan penawaran (buat_penawaran) bila user mau."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "daftar_pn": {
+                            "type": "array", "items": {"type": "string"},
+                            "description": "Daftar Part Number (boleh juga satu string dipisah baris/koma).",
+                        },
+                        "excel": {"type": "boolean", "description": "true → hasil juga jadi file Excel unduhan."},
+                    },
+                    "required": ["daftar_pn"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "stok_accurate",
                 "description": (
                     "Stok dari sistem akunting/ERP Accurate untuk satu Part Number persis "

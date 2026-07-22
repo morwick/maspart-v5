@@ -665,6 +665,102 @@ def _t_detail_part(args: dict, user: dict) -> dict:
     return result
 
 
+_MAX_MASSAL_PN = 100
+
+
+def _parse_daftar_pn(v) -> list[str]:
+    """daftar_pn (list ATAU string dipisah baris/koma/spasi/titik-koma) → PN
+    uppercase, dedup, urut asli. PN = INPUT user (bukan buatan model)."""
+    if isinstance(v, (list, tuple)):
+        toks = [str(x) for x in v]
+    else:
+        toks = re.split(r"[\s,;]+", str(v or ""))
+    out: list[str] = []
+    for t in toks:
+        p = t.strip().upper()
+        if len(p) >= 4 and p not in out:      # PN pendek/sampah dibuang
+            out.append(p)
+    return out
+
+
+def _t_cek_massal_part(args: dict, user: dict) -> dict:
+    """CEK BANYAK PART sekaligus (1 panggilan) — nama + stok + harga per PN dari
+    indeks Accurate. Ganti pemanggilan detail_part berulang (hemat token & cepat).
+    PN = daftar dari user; yang tak ada di indeks ditandai jujur."""
+    pns = _parse_daftar_pn(args.get("daftar_pn") or args.get("pns") or args.get("part_numbers"))
+    if not pns:
+        return {"error": "Sebutkan daftar Part Number (pisah baris/koma)."}
+    dipotong = len(pns) > _MAX_MASSAL_PN
+    pns = pns[:_MAX_MASSAL_PN]
+
+    boleh_harga = _boleh_harga(user)
+    boleh_stok = _boleh_stok(user) and user.get("role") != "pembeli"
+    rows = part_index.rows_for_pns(pns)          # {PN: baris} pemaaf suffix varian
+    snap = accurate.snapshot() if boleh_harga else {}
+
+    part: list[dict] = []
+    tak_ada: list[str] = []
+    for pn in pns:
+        r = rows.get(pn)
+        nama = (r or {}).get("part_name") or ""
+        item: dict = {"pn": pn, "nama": nama}
+        ada = bool(r)
+        if boleh_stok:
+            try:
+                total, rinci = _rincian_gudang_str(pn)
+            except Exception:
+                total, rinci = 0, ""
+            item["stok_total"] = total
+            if rinci:
+                item["stok_per_gudang"] = rinci
+            ada = ada or total > 0
+        if boleh_harga:
+            e = snap.get(accurate.index_key(pn))
+            hg = (e or {}).get("harga")
+            if hg:
+                item["harga"] = int(hg)
+                ada = ada or True
+        if not ada:
+            tak_ada.append(pn)
+            item["catatan_pn"] = "tidak ditemukan di indeks (cek ejaan / mungkin non-katalog)"
+        part.append(item)
+
+    ketemu = len(pns) - len(tak_ada)
+    out: dict = {"found": ketemu > 0, "jumlah": len(pns), "ketemu": ketemu,
+                 "tak_ada": len(tak_ada), "part": part}
+
+    if args.get("excel"):
+        kolom = ["No", "Part Number", "Nama"]
+        if boleh_stok:
+            kolom += ["Stok Total", "Stok per Gudang"]
+        if boleh_harga:
+            kolom += ["Harga"]
+        baris: list[list] = []
+        for i, it in enumerate(part, start=1):
+            row = [str(i), it["pn"], it.get("nama") or ""]
+            if boleh_stok:
+                row += [ai_export.ke_angka(it.get("stok_total") if it.get("stok_total") is not None else ""),
+                        it.get("stok_per_gudang") or ""]
+            if boleh_harga:
+                row += [it.get("harga") if it.get("harga") is not None else "—"]
+            baris.append(row)
+        export_id, filename = ai_export.stash_export(f"Cek {len(pns)} Part", kolom, baris)
+        out["export_id"] = export_id
+        out["filename"] = filename
+        out["jumlah_baris"] = len(baris)
+
+    catatan = (f"Cek massal {len(pns)} PN dalam SATU panggilan (⛔ JANGAN detail_part "
+               f"berulang). {ketemu} ketemu, {len(tak_ada)} tidak ada — sebut jujur yang "
+               "tak ada. Stok/harga dari indeks Accurate. Bila user MAU dijadikan "
+               "penawaran, panggil buat_penawaran dengan PN + qty ini (sudah grounded).")
+    if dipotong:
+        catatan = f"⚠️ Daftar dipotong ke {_MAX_MASSAL_PN} PN pertama. " + catatan
+    if out.get("export_id"):
+        catatan += " File Excel siap — kartu unduh muncul OTOMATIS; JANGAN tulis ulang tabel."
+    out["catatan"] = catatan
+    return out
+
+
 _MAX_TERTAHAN_ROWS = 40
 
 
