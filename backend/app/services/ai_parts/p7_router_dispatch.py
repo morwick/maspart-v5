@@ -128,6 +128,8 @@ _DISPATCH = {
     "sheet_isi_nama_telematik": _t_sheet_isi_nama_telematik,
     "daftarkan_unit": _t_daftarkan_unit,
     "sheet_daftar_unit": _t_sheet_daftar_unit,
+    "masukkan_unit_fleet": _t_masukkan_unit_fleet,
+    "sheet_masukkan_fleet": _t_sheet_masukkan_fleet,
     "diagram_wiring": _t_diagram_wiring,
     "cari_manual": _t_cari_manual,
     "cari_pengetahuan": _t_cari_pengetahuan,

@@ -129,6 +129,32 @@ def _post(path: str, data: dict) -> dict | list | None:
         return None
 
 
+def _post_json(path: str, obj) -> dict | None:
+    """Seperti _post tapi body JSON (endpoint organization pakai JSON, bukan
+    form). Kembalikan BODY PENUH (dgn `code`) — sebagian endpoint sukses tanpa
+    field `data`. None bila gagal/HTTP≥400. Retry sekali saat token basi."""
+    def _once() -> requests.Response:
+        return requests.post(f"{_BASE}{path}", json=obj,
+                             headers={"Authorization": _get_token()},
+                             timeout=_TIMEOUT)
+    try:
+        r = _once()
+        body = r.json() if r.status_code < 400 else {}
+        basi = (r.status_code in (401, 403)
+                or (isinstance(body, dict) and body.get("code") in _KODE_RELOGIN))
+        if basi:
+            _get_token(force=True)
+            r = _once()
+            body = r.json() if r.status_code < 400 else {}
+        if r.status_code >= 400:
+            logger.info("telematics %s -> HTTP %s", path, r.status_code)
+            return None
+        return body if isinstance(body, dict) else None
+    except requests.RequestException as e:
+        logger.info("telematics %s gagal: %s", path, e)
+        return None
+
+
 # ── API publik ───────────────────────────────────────────────────────
 def dashboard(organization_id, tanggal: str) -> dict | None:
     d = _post("/api/fleetOperationReport/queryDataPanel",
@@ -230,6 +256,61 @@ def ganti_nama(cjh: str, nama: str) -> dict | None:
     d = _post("/api/vehicleManage/updateCarNumber",
               {"cjh": cjh, "carNumber": nama})
     return d if isinstance(d, dict) else None
+
+
+def _org_tree() -> dict | None:
+    """Pohon organisasi/fleet (queryOrganization). Node akar = org login."""
+    d = _post("/api/organization/queryOrganization", {})
+    return d if isinstance(d, dict) else None
+
+
+def daftar_fleet() -> list[dict]:
+    """Ratakan pohon → [{id, nama, parent_id, jumlah_unit}] (akar diikutkan)."""
+    root = _org_tree()
+    out: list[dict] = []
+    def walk(node):
+        org = (node or {}).get("organization") or {}
+        if org.get("id"):
+            out.append({"id": org["id"], "nama": org.get("organizationName"),
+                        "parent_id": org.get("parentId"),
+                        "jumlah_unit": node.get("vehicleNum")})
+        for c in (node.get("children") or []):
+            walk(c)
+    if root:
+        walk(root)
+    return out
+
+
+def cari_fleet(nama_atau_id) -> dict | None:
+    """Resolve fleet dari id (angka) atau NAMA (cocok persis dulu, lalu
+    sebagian). Return {id, nama} atau None. >1 cocok sebagian → None + ambigu
+    (pemanggil beri tahu user)."""
+    q = str(nama_atau_id or "").strip()
+    if not q:
+        return None
+    fleets = daftar_fleet()
+    if q.isdigit():
+        f = next((x for x in fleets if str(x["id"]) == q), None)
+        return {"id": f["id"], "nama": f["nama"]} if f else None
+    ql = q.lower()
+    persis = [x for x in fleets if (x["nama"] or "").strip().lower() == ql]
+    if persis:
+        return {"id": persis[0]["id"], "nama": persis[0]["nama"]}
+    sub = [x for x in fleets if ql in (x["nama"] or "").lower()]
+    if len(sub) == 1:
+        return {"id": sub[0]["id"], "nama": sub[0]["nama"]}
+    if len(sub) > 1:
+        return {"ambigu": [x["nama"] for x in sub[:10]]}
+    return None
+
+
+def masukkan_ke_fleet(target_org_id: int, cars: list[dict]) -> bool:
+    """⚠️ WRITE: pindahkan unit ke fleet target (updateVehicleOrganization).
+    cars = [{cjh, organizationIds:[org unit SAAT INI]}]. Resp sukses = code 200
+    'Operate Success' (tanpa data)."""
+    b = _post_json("/api/organization/updateVehicleOrganization",
+                   {"targetOrgId": int(target_org_id), "updatedCars": cars})
+    return isinstance(b, dict) and b.get("code") == 200
 
 
 def daftarkan(sbh: str, vin: str, mileage=0, euro2: bool = False) -> dict | None:

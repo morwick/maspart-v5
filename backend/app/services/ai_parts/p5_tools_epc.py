@@ -2617,3 +2617,143 @@ def _t_sheet_daftar_unit(args: dict, user: dict) -> dict:
                         + f". {sudah} sudah terdaftar dilewati.")}
 
 
+def _org_ids(rec: dict) -> list[int]:
+    return [o["id"] for o in (rec.get("organizations") or []) if o.get("id")]
+
+
+def _t_masukkan_unit_fleet(args: dict, user: dict) -> dict:
+    """⚠️ WRITE (2 langkah): masukkan/pindahkan SATU unit ke fleet."""
+    if not _is_admin(user):
+        return dict(_TELE_DENIED)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    unit = (args.get("unit") or args.get("cjh") or args.get("vin") or "").strip()
+    fleet = (args.get("fleet") or args.get("organisasi") or "").strip()
+    if not unit or not fleet:
+        return {"error": "Sebutkan unit (frame/VIN) DAN fleet tujuan."}
+    rec = telematics.cari_unit(unit)
+    if not rec:
+        return {"found": False, "catatan": f"Unit '{unit}' tidak ditemukan di telematics."}
+    tgt = telematics.cari_fleet(fleet)
+    if not tgt:
+        return {"found": False, "catatan": f"Fleet '{fleet}' tidak ditemukan. Sebutkan nama fleet yang ada."}
+    if tgt.get("ambigu"):
+        return {"found": False, "ambigu": tgt["ambigu"],
+                "catatan": f"Nama fleet '{fleet}' cocok ke beberapa: {tgt['ambigu']}. Minta user pertegas."}
+    cjh = rec.get("cjh")
+    org_lama = [o.get("organizationName") for o in (rec.get("organizations") or [])]
+
+    if not args.get("konfirmasi"):
+        return {"perlu_konfirmasi": True,
+                "pratinjau": {"unit": cjh, "model": rec.get("model"),
+                              "fleet_sekarang": org_lama,
+                              "fleet_tujuan": tgt["nama"]},
+                "catatan": (f"⚠️ KONFIRMASI DULU ke user: masukkan unit {cjh} "
+                            f"({rec.get('model')}) ke fleet '{tgt['nama']}'? "
+                            "Ini mengubah pengelompokan di server Sinotruk. Bila setuju, "
+                            "panggil masukkan_unit_fleet lagi dengan konfirmasi=true.")}
+    ok = telematics.masukkan_ke_fleet(tgt["id"],
+                                      [{"cjh": cjh, "organizationIds": _org_ids(rec)}])
+    if not ok:
+        return {"found": False,
+                "catatan": f"Gagal memasukkan unit {cjh} ke fleet '{tgt['nama']}' "
+                           "(server menolak/timeout). Sampaikan jujur."}
+    return {"found": True, "berhasil": True, "unit": cjh, "fleet": tgt["nama"],
+            "catatan": f"✅ Unit {cjh} berhasil dimasukkan ke fleet '{tgt['nama']}'."}
+
+
+def _t_sheet_masukkan_fleet(args: dict, user: dict) -> dict:
+    """⚠️ WRITE (2 langkah): masukkan unit ke fleet MASSAL dari Excel (unit → fleet)."""
+    if not _is_admin(user):
+        return dict(_TELE_DENIED)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    parsed = ai_sheet.get_sheet(args.get("_sheet_id", ""), user.get("username", ""))
+    if not parsed:
+        return {"found": False, "error": "Tidak ada file Excel terlampir (atau kedaluwarsa). "
+                                         "Minta user mengunggah Excel berisi kolom unit & fleet."}
+    headers = parsed.get("headers") or []
+    body = parsed.get("_body") or []
+
+    def _kolom(minta, kandidat):
+        if (minta or "").strip():
+            return ai_sheet._cari_kolom(headers, minta)
+        for k in kandidat:
+            i = ai_sheet._cari_kolom(headers, k)
+            if i is not None:
+                return i
+        return None
+    i_unit = _kolom(args.get("kolom_unit"), ["no rangka", "rangka", "unit", "frame", "cjh", "vin"])
+    i_fleet = _kolom(args.get("kolom_fleet"), ["fleet", "organisasi", "organization", "grup", "group"])
+    if i_unit is None or i_fleet is None:
+        return {"found": False,
+                "catatan": (f"Kolom unit dan/atau fleet tidak terdeteksi (header: {headers}). "
+                            "Minta user menyebut nama kolomnya.")}
+
+    pasangan = []
+    for r in body:
+        u = (r[i_unit] if i_unit < len(r) else "").strip()
+        f = (r[i_fleet] if i_fleet < len(r) else "").strip()
+        if u and f:
+            pasangan.append((u, f))
+    if not pasangan:
+        return {"found": False, "catatan": "Tidak ada baris berisi unit + fleet di Excel."}
+    if len(pasangan) > _TELE_MAX_RENAME:
+        return {"found": False, "catatan": f"Terlalu banyak baris ({len(pasangan)}) — batas {_TELE_MAX_RENAME}."}
+
+    # Peta unit & fleet ditarik SEKALI.
+    d = telematics.semua_unit()
+    peta_unit = {}
+    for rec in ((d or {}).get("records") or []):
+        for k in (rec.get("cjh"), rec.get("vin")):
+            if k:
+                peta_unit.setdefault(k.strip().upper(), rec)
+    fleets = telematics.daftar_fleet()
+    peta_fleet = {}
+    for x in fleets:
+        if x.get("nama"):
+            peta_fleet.setdefault(x["nama"].strip().lower(), x)
+
+    rencana = []          # (rec, fleet_dict)
+    unit_hilang, fleet_hilang = [], []
+    for u, f in pasangan:
+        rec = peta_unit.get(u.strip().upper())
+        if not rec:
+            unit_hilang.append(u); continue
+        fl = peta_fleet.get(f.strip().lower())
+        if not fl:
+            fleet_hilang.append(f); continue
+        rencana.append((rec, fl))
+
+    if not args.get("konfirmasi"):
+        return {"perlu_konfirmasi": bool(rencana),
+                "ringkasan": {"total_baris": len(pasangan), "akan_dipindah": len(rencana),
+                              "unit_tak_ada": len(unit_hilang), "fleet_tak_ada": len(fleet_hilang)},
+                "contoh": [{"unit": rec.get("cjh"), "fleet": fl["nama"]} for rec, fl in rencana[:15]],
+                "contoh_fleet_tak_ada": list(dict.fromkeys(fleet_hilang))[:10],
+                "catatan": ((f"⚠️ KONFIRMASI DULU ke user: pindahkan {len(rencana)} unit ke fleet "
+                             "masing-masing (server Sinotruk)? "
+                             f"{len(unit_hilang)} unit & {len(fleet_hilang)} fleet tak ditemukan (dilewati). "
+                             "Bila setuju, panggil sheet_masukkan_fleet lagi dengan konfirmasi=true.")
+                            if rencana else
+                            "Tidak ada yang bisa dipindah: unit/fleet di Excel tak cocok dengan telematics.")}
+    # Terapkan — kelompokkan per fleet tujuan (1 panggilan per fleet).
+    per_fleet: dict = {}
+    for rec, fl in rencana:
+        per_fleet.setdefault(fl["id"], {"nama": fl["nama"], "cars": []})["cars"].append(
+            {"cjh": rec.get("cjh"), "organizationIds": _org_ids(rec)})
+    berhasil = 0
+    gagal_fleet = []
+    for fid, grp in per_fleet.items():
+        if telematics.masukkan_ke_fleet(fid, grp["cars"]):
+            berhasil += len(grp["cars"])
+        else:
+            gagal_fleet.append(grp["nama"])
+    return {"found": True, "selesai": True, "dipindah": berhasil,
+            "fleet_gagal": gagal_fleet[:10], "dilewati_unit_tak_ada": len(unit_hilang),
+            "dilewati_fleet_tak_ada": len(fleet_hilang),
+            "catatan": (f"✅ {berhasil} unit dipindah ke fleet-nya"
+                        + (f"; fleet gagal: {gagal_fleet}" if gagal_fleet else "")
+                        + f". Dilewati: {len(unit_hilang)} unit & {len(fleet_hilang)} fleet tak ditemukan.")}
+
+

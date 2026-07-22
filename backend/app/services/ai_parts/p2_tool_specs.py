@@ -1164,6 +1164,28 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 },
             },
         })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "masukkan_unit_fleet",
+                "description": (
+                    "⚠️ MASUKKAN/PINDAHKAN unit ke FLEET (organisasi) di telematics Sinotruk "
+                    "(OPERASI TULIS). Butuh unit (frame/VIN) + nama fleet tujuan. WAJIB 2 "
+                    "langkah: tanpa konfirmasi → pratinjau (fleet sekarang → fleet tujuan) & "
+                    "MINTA PERSETUJUAN; setelah user setuju baru konfirmasi=true. Untuk "
+                    "BANYAK unit dari Excel pakai sheet_masukkan_fleet."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "unit": {"type": "string", "description": "Frame/cjh atau VIN unit."},
+                        "fleet": {"type": "string", "description": "Nama fleet/organisasi tujuan (mis. JNT, PALEMBANG)."},
+                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau."},
+                    },
+                    "required": ["unit", "fleet"],
+                },
+            },
+        })
 
     # Populasi Unit — data armada/unit terdaftar. HANYA admin & akun 'mas'
     # (SEE_ALL). User lain (cabang/biasa/pembeli) TIDAK diberi tool ini.
@@ -1855,6 +1877,27 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                             "kolom_sbh": {"type": "string", "description": "Kolom serial perangkat GPS (sbh). Kosongkan bila terdeteksi otomatis."},
                             "kolom_km": {"type": "string", "description": "Opsional: kolom kilometer awal."},
                             "kolom_euro2": {"type": "string", "description": "Opsional: kolom penanda Euro 2."},
+                            "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau. Default false = pratinjau."},
+                        },
+                    },
+                },
+            })
+            specs.append({
+                "type": "function",
+                "function": {
+                    "name": "sheet_masukkan_fleet",
+                    "description": (
+                        "MASUKKAN unit ke FLEET MASSAL dari Excel lampiran (kolom unit "
+                        "frame/VIN + kolom nama fleet). ⚠️ OPERASI TULIS. WAJIB 2 langkah: "
+                        "tanpa konfirmasi → PRATINJAU (berapa unit akan dipindah, berapa "
+                        "unit/fleet tak ditemukan) & MINTA PERSETUJUAN; setelah setuju baru "
+                        "konfirmasi=true. ⛔ JANGAN langsung konfirmasi=true."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "kolom_unit": {"type": "string", "description": "Kolom unit (frame/VIN). Kosongkan bila terdeteksi otomatis."},
+                            "kolom_fleet": {"type": "string", "description": "Kolom nama fleet tujuan. Kosongkan bila terdeteksi otomatis."},
                             "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau. Default false = pratinjau."},
                         },
                     },

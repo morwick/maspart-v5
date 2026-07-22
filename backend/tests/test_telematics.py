@@ -432,3 +432,99 @@ def test_spec_daftar_unit_admin_only():
     assert "daftarkan_unit" in na and "daftarkan_unit" not in ns
     na_sheet = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "s1")}
     assert "sheet_daftar_unit" in na_sheet
+
+
+# ── masukkan unit ke FLEET (updateVehicleOrganization) ───────────────
+_REC_FLEET = {"cjh": "NJ248278", "vin": "VNJ", "model": "HOWO",
+              "organizations": [{"id": 623, "organizationName": "MAS"}]}
+_FLEETS = [{"id": 623, "nama": "MAS", "parent_id": 1687},
+           {"id": 625, "nama": "JNT", "parent_id": 623},
+           {"id": 2313, "nama": "MITRAANGKUTAN", "parent_id": 623}]
+
+
+@pytest.fixture
+def fleet_on(monkeypatch):
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.telematics, "cari_unit",
+                        lambda q: dict(_REC_FLEET) if q else None)
+    monkeypatch.setattr(ai.telematics, "cari_fleet", lambda q: (
+        {"id": 2313, "nama": "MITRAANGKUTAN"}
+        if str(q).lower() in ("mitraangkutan", "2313") else None))
+    tulis = []
+    monkeypatch.setattr(ai.telematics, "masukkan_ke_fleet",
+                        lambda tid, cars: (tulis.append((tid, cars)) or True))
+    return tulis
+
+
+def test_masukkan_fleet_langkah1_pratinjau_tak_menulis(fleet_on):
+    r = ai._t_masukkan_unit_fleet({"unit": "NJ248278", "fleet": "MITRAANGKUTAN"}, ADMIN)
+    assert r["perlu_konfirmasi"] is True
+    assert r["pratinjau"]["fleet_tujuan"] == "MITRAANGKUTAN"
+    assert r["pratinjau"]["fleet_sekarang"] == ["MAS"]
+    assert fleet_on == []
+
+
+def test_masukkan_fleet_langkah2_eksekusi(fleet_on):
+    r = ai._t_masukkan_unit_fleet(
+        {"unit": "NJ248278", "fleet": "MITRAANGKUTAN", "konfirmasi": True}, ADMIN)
+    assert r.get("berhasil") is True
+    assert fleet_on == [(2313, [{"cjh": "NJ248278", "organizationIds": [623]}])]
+
+
+def test_masukkan_fleet_fleet_tak_ada(fleet_on):
+    r = ai._t_masukkan_unit_fleet(
+        {"unit": "NJ248278", "fleet": "TIDAKADA", "konfirmasi": True}, ADMIN)
+    assert r["found"] is False and fleet_on == []
+
+
+def test_masukkan_fleet_admin_only(fleet_on):
+    r = ai._t_masukkan_unit_fleet(
+        {"unit": "X", "fleet": "MITRAANGKUTAN", "konfirmasi": True}, STAF)
+    assert "error" in r and fleet_on == []
+
+
+# ── masukkan fleet MASSAL dari Excel ─────────────────────────────────
+@pytest.fixture
+def fleet_massal_on(monkeypatch):
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.ai_sheet, "get_sheet", lambda sid, un: {
+        "headers": ["No Rangka", "Fleet"],
+        "_body": [["NJ248278", "MITRAANGKUTAN"],   # ok
+                  ["PC531850", "JNT"],              # ok
+                  ["ZZ999999", "MITRAANGKUTAN"],    # unit tak ada
+                  ["NJ248278", "FLEETHANTU"]]})     # fleet tak ada
+    recs = [{"cjh": "NJ248278", "vin": "V1", "organizations": [{"id": 623, "organizationName": "MAS"}]},
+            {"cjh": "PC531850", "vin": "V2", "organizations": [{"id": 623, "organizationName": "MAS"}]}]
+    monkeypatch.setattr(ai.telematics, "semua_unit", lambda fleet="": {"records": recs})
+    monkeypatch.setattr(ai.telematics, "daftar_fleet", lambda: _FLEETS)
+    tulis = []
+    monkeypatch.setattr(ai.telematics, "masukkan_ke_fleet",
+                        lambda tid, cars: (tulis.append((tid, len(cars))) or True))
+    return tulis
+
+
+def test_sheet_fleet_pratinjau(fleet_massal_on):
+    r = ai._t_sheet_masukkan_fleet({"_sheet_id": "s1"}, ADMIN)
+    assert r["perlu_konfirmasi"] is True
+    assert r["ringkasan"] == {"total_baris": 4, "akan_dipindah": 2,
+                              "unit_tak_ada": 1, "fleet_tak_ada": 1}
+    assert fleet_massal_on == []
+
+
+def test_sheet_fleet_eksekusi_per_fleet(fleet_massal_on):
+    r = ai._t_sheet_masukkan_fleet({"_sheet_id": "s1", "konfirmasi": True}, ADMIN)
+    assert r["selesai"] and r["dipindah"] == 2
+    # 2 fleet berbeda → 2 panggilan (masing-masing 1 unit)
+    assert sorted(fleet_massal_on) == [(625, 1), (2313, 1)]
+
+
+def test_sheet_fleet_admin_only(fleet_massal_on):
+    r = ai._t_sheet_masukkan_fleet({"_sheet_id": "s1", "konfirmasi": True}, STAF)
+    assert "error" in r and fleet_massal_on == []
+
+
+def test_spec_masukkan_fleet_admin_only():
+    na = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "s1")}
+    ns = {s["function"]["name"] for s in ai._tool_specs(STAF, "s1")}
+    assert "masukkan_unit_fleet" in na and "sheet_masukkan_fleet" in na
+    assert "masukkan_unit_fleet" not in ns and "sheet_masukkan_fleet" not in ns
