@@ -1078,17 +1078,19 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "lihat_unit_armada",
                 "description": (
-                    "⭐ LACAK ARMADA via GPS/TELEMATICS (Sinotruk Fleet Service): daftar "
-                    "unit + posisi & status real-time (Jalan/Berhenti/Offline), km, level "
-                    "BBM, dan flag RUSAK. Tanpa filter = ringkasan armada (total unit, "
-                    "online%, jumlah per FLEET, jumlah rusak). Filter 'fleet' untuk per "
-                    "armada; 'hanya_rusak' untuk unit bermasalah. ⛔ Ini data GPS live — "
-                    "BUKAN spesifikasi katalog (pakai cek_kendaraan) & BUKAN populasi "
-                    "internal (cek_populasi)."
+                    "⭐ LACAK ARMADA via GPS/TELEMATICS (Sinotruk Fleet Service): posisi & "
+                    "status real-time (Jalan/Berhenti/Offline), km, level BBM, flag RUSAK. "
+                    "Tiga mode: (1) param 'unit' = SATU unit dari frame/VIN → detail + "
+                    "NAMA/label-nya (pakai untuk 'cek nama unit X', 'unit X di fleet "
+                    "mana'); (2) tanpa filter = ringkasan armada (total, online%, per FLEET, "
+                    "jumlah rusak); (3) filter 'fleet'/'status'/'hanya_rusak'. ⛔ Data GPS "
+                    "live — BUKAN spesifikasi katalog (cek_kendaraan) & BUKAN populasi "
+                    "(cek_populasi)."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
+                        "unit": {"type": "string", "description": "Opsional: frame/VIN SATU unit untuk cek detail & namanya (mis. SJ398956)."},
                         "fleet": {"type": "string", "description": "Opsional: nama fleet/organisasi (mis. MAS, JNT). Kosong = semua."},
                         "status": {"type": "string", "description": "Opsional filter status: jalan / berhenti / offline."},
                         "hanya_rusak": {"type": "boolean", "description": "Opsional: hanya unit yang ditandai rusak."},

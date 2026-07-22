@@ -2208,12 +2208,35 @@ _TELE_MAX_TABEL = 60   # baris unit yang disajikan ke model (Excel = lengkap)
 
 
 def _t_lihat_unit_armada(args: dict, user: dict) -> dict:
-    """Daftar/ringkasan unit armada + status GPS live. Mencakup semua unit &
-    per fleet (param `fleet`)."""
+    """Daftar/ringkasan unit armada + status GPS live. Mencakup: SATU unit
+    (param `unit` = frame/VIN → termasuk NAMANYA), semua unit, atau per fleet."""
     if not _is_admin(user):
         return dict(_TELE_DENIED)
     if not telematics.available():
         return dict(_TELE_OFF)
+
+    # Lookup SATU unit spesifik (frame/cjh/VIN/nama) — jawab "cek nama unit X",
+    # "unit X ada di fleet mana". Tanpa ini model menebak dari daftar cap-60.
+    target = (args.get("unit") or args.get("frame") or args.get("cjh")
+              or args.get("vin") or "").strip()
+    if target:
+        rec = telematics.cari_unit(target)
+        if not rec:
+            return {"found": False, "dicari": target,
+                    "catatan": (f"Unit '{target}' tidak ditemukan di daftar telematics/GPS. "
+                                "Sampaikan jujur; unit mungkin belum dipasang perangkat GPS. "
+                                "Jangan mengarang nama/status.")}
+        loc = telematics.lokasi_semua()
+        u = telematics.rangkum_unit(rec, loc.get(rec.get("cjh")))
+        return {
+            "found": True, "unit": u,
+            "nama": u.get("nama") or "(belum diberi nama/label)",
+            "catatan": ("Data GPS/telematics 1 unit. 'nama' = label/carNumber di "
+                        "telematics (bisa berbeda dari nopol). Sebut apa adanya; "
+                        "'(belum diberi nama)' bila kosong. Untuk mengubahnya pakai "
+                        "ganti_nama_unit (butuh konfirmasi)."),
+        }
+
     fleet = (args.get("fleet") or "").strip()
     status_f = (args.get("status") or "").strip().lower()
     hanya_rusak = bool(args.get("hanya_rusak"))

@@ -159,6 +159,26 @@ def test_lihat_unit_armada_admin_only(tele_on):
         assert "error" in ai._t_lihat_unit_armada({}, u)
 
 
+def test_lihat_unit_lookup_satu_unit_nama(tele_on, monkeypatch):
+    """Produksi: 'cek nama SJ398956' dijawab 'tidak ada' padahal unitnya ADA —
+    lihat_unit_armada tak punya lookup per-frame (cuma daftar cap-60). Param
+    'unit' menjawab nama unit spesifik."""
+    rec = {**_UNIT2, "cjh": "SJ398956", "carNumber": "JNT-B 9526 UEY"}
+    monkeypatch.setattr(ai.telematics, "cari_unit",
+                        lambda q: rec if q == "SJ398956" else None)
+    r = ai._t_lihat_unit_armada({"unit": "SJ398956"}, ADMIN)
+    assert r["found"] is True
+    assert r["nama"] == "JNT-B 9526 UEY"
+    assert r["unit"]["frame"] == "SJ398956"
+    assert list(r.keys())[-1] == "catatan"
+
+
+def test_lihat_unit_lookup_tak_ada_jujur(tele_on, monkeypatch):
+    monkeypatch.setattr(ai.telematics, "cari_unit", lambda q: None)
+    r = ai._t_lihat_unit_armada({"unit": "XX000000"}, ADMIN)
+    assert r["found"] is False and "tidak ditemukan" in r["catatan"].lower()
+
+
 # ── tool: ganti_nama_unit (2 langkah) ────────────────────────────────
 @pytest.fixture
 def rename_on(monkeypatch):
