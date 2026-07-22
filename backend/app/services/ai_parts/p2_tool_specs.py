@@ -1186,6 +1186,29 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 },
             },
         })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "buat_fleet",
+                "description": (
+                    "⚠️ BUAT FLEET/organisasi BARU di telematics Sinotruk (OPERASI TULIS, "
+                    "menambah struktur). Butuh nama fleet; opsional 'induk' (fleet induk, "
+                    "default organisasi utama). WAJIB 2 langkah: tanpa konfirmasi → "
+                    "pratinjau (nama + induk + apakah sudah ada) & MINTA PERSETUJUAN; "
+                    "setelah user setuju baru konfirmasi=true. Setelah fleet dibuat, unit "
+                    "dimasukkan lewat masukkan_unit_fleet."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "nama": {"type": "string", "description": "Nama fleet baru."},
+                        "induk": {"type": "string", "description": "Opsional: nama fleet induk. Kosong = organisasi utama (akar)."},
+                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau."},
+                    },
+                    "required": ["nama"],
+                },
+            },
+        })
 
     # Populasi Unit — data armada/unit terdaftar. HANYA admin & akun 'mas'
     # (SEE_ALL). User lain (cabang/biasa/pembeli) TIDAK diberi tool ini.

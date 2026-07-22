@@ -528,3 +528,95 @@ def test_spec_masukkan_fleet_admin_only():
     ns = {s["function"]["name"] for s in ai._tool_specs(STAF, "s1")}
     assert "masukkan_unit_fleet" in na and "sheet_masukkan_fleet" in na
     assert "masukkan_unit_fleet" not in ns and "sheet_masukkan_fleet" not in ns
+
+
+# ── BUAT fleet baru (adjustOrganization) ─────────────────────────────
+def test_to_adjust_transform_schema():
+    """queryOrganization node → adjustOrganization node (change=unchanged)."""
+    node = {"organization": {"id": 625, "organizationName": "JNT", "parentId": 623,
+                             "organizationType": 0, "locked": False},
+            "isOnceUnlock": False, "isLockedPid": False, "canBeUnlock": True,
+            "children": []}
+    a = t._to_adjust(node)
+    assert a["id"] == 625 and a["change"] == "unchanged"
+    nn = a["detail"]["newNode"]
+    assert nn == {"id": 625, "pid": 623, "label": "JNT", "organizationType": 0,
+                  "isLockedPid": False, "isOnceUnlock": False, "isLocked": False,
+                  "canBeUnlock": True}
+    assert a["detail"]["oldNode"] == nn
+
+
+def test_buat_fleet_service_kirim_tree_diff(cfg_on, monkeypatch):
+    tree = {"organization": {"id": 623, "organizationName": "MAS", "parentId": 1687,
+                             "organizationType": 0, "locked": False},
+            "isOnceUnlock": False, "isLockedPid": None, "canBeUnlock": True,
+            "children": [{"organization": {"id": 625, "organizationName": "JNT",
+                          "parentId": 623, "organizationType": 0, "locked": False},
+                          "isOnceUnlock": False, "isLockedPid": False,
+                          "canBeUnlock": True, "children": []}]}
+    monkeypatch.setattr(t, "_org_tree", lambda: tree)
+    monkeypatch.setattr(t, "daftar_fleet", lambda: [
+        {"id": 9001, "nama": "MITRAANGKUTAN", "parent_id": 623}])
+    kirim = {}
+
+    def fake_json(path, obj):
+        kirim["path"] = path
+        kirim["obj"] = obj
+        return {"code": 200, "message": "ok"}
+    monkeypatch.setattr(t, "_post_json", fake_json)
+    r = t.buat_fleet("MITRAANGKUTAN")           # induk default = akar 623
+    assert r == {"id": 9001, "nama": "MITRAANGKUTAN", "parent_id": 623}
+    assert kirim["path"].endswith("adjustOrganization")
+    # node baru 'added' tersisip di bawah 623 dgn id negatif
+    added = kirim["obj"]["children"][-1]
+    assert added["change"] == "added"
+    assert added["detail"]["newNode"]["label"] == "MITRAANGKUTAN"
+    assert added["detail"]["newNode"]["pid"] == 623
+    assert added["id"] < 0
+    # node lama tetap 'unchanged'
+    assert kirim["obj"]["change"] == "unchanged"
+
+
+@pytest.fixture
+def buat_on(monkeypatch):
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.telematics, "cari_fleet", lambda q: (
+        {"id": 623, "nama": "MAS"} if str(q).lower() == "mas" else None))
+    monkeypatch.setattr(ai.telematics, "daftar_fleet", lambda: [
+        {"id": 623, "nama": "MAS", "parent_id": 1687}])
+    dibuat = []
+    monkeypatch.setattr(ai.telematics, "buat_fleet",
+                        lambda nama, pid=None: (dibuat.append((nama, pid)) or
+                                                {"id": 9002, "nama": nama, "parent_id": pid}))
+    return dibuat
+
+
+def test_buat_fleet_langkah1_pratinjau_tak_menulis(buat_on):
+    r = ai._t_buat_fleet({"nama": "CABANG BARU"}, ADMIN)
+    assert r["perlu_konfirmasi"] is True
+    assert r["pratinjau"]["nama_fleet"] == "CABANG BARU"
+    assert r["pratinjau"]["sudah_ada"] is False
+    assert buat_on == []
+
+
+def test_buat_fleet_langkah2_eksekusi(buat_on):
+    r = ai._t_buat_fleet({"nama": "CABANG BARU", "induk": "MAS", "konfirmasi": True}, ADMIN)
+    assert r.get("berhasil") is True and r["id_fleet"] == 9002
+    assert buat_on == [("CABANG BARU", 623)]
+
+
+def test_buat_fleet_sudah_ada_diperingatkan(buat_on):
+    r = ai._t_buat_fleet({"nama": "MAS"}, ADMIN)   # MAS sudah ada
+    assert r["pratinjau"]["sudah_ada"] is True
+    assert "SUDAH ADA" in r["catatan"]
+
+
+def test_buat_fleet_admin_only(buat_on):
+    r = ai._t_buat_fleet({"nama": "X", "konfirmasi": True}, STAF)
+    assert "error" in r and buat_on == []
+
+
+def test_spec_buat_fleet_admin_only():
+    na = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "")}
+    ns = {s["function"]["name"] for s in ai._tool_specs(STAF, "")}
+    assert "buat_fleet" in na and "buat_fleet" not in ns

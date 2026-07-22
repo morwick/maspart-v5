@@ -787,6 +787,7 @@ _TOOL_LABEL = {
     "sheet_daftar_unit": "Mendaftarkan unit massal ke telematics",
     "masukkan_unit_fleet": "Memasukkan unit ke fleet",
     "sheet_masukkan_fleet": "Memasukkan unit ke fleet (massal)",
+    "buat_fleet": "Membuat fleet baru",
     "katalog_kategori": "Menyiapkan katalog bergambar",
     "katalog_mesin": "Menyiapkan katalog mesin",
     "gambar_exploded": "Mengambil gambar exploded view",

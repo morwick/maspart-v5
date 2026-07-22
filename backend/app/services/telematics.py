@@ -304,6 +304,61 @@ def cari_fleet(nama_atau_id) -> dict | None:
     return None
 
 
+_TEMP_ID = -14622824    # id sementara node baru (server beri id asli); negatif
+
+
+def _to_adjust(node: dict) -> dict:
+    """Node queryOrganization → node adjustOrganization (change='unchanged').
+    Skema newNode dari HAR: id/pid/label/organizationType + isLockedPid/
+    isOnceUnlock/isLocked/canBeUnlock."""
+    org = node.get("organization") or {}
+    nn = {
+        "id": org.get("id"), "pid": org.get("parentId"),
+        "label": org.get("organizationName"),
+        "organizationType": org.get("organizationType"),
+        "isLockedPid": node.get("isLockedPid"),
+        "isOnceUnlock": node.get("isOnceUnlock"),
+        "isLocked": org.get("locked"),
+        "canBeUnlock": node.get("canBeUnlock"),
+    }
+    return {"id": org.get("id"), "change": "unchanged",
+            "detail": {"newNode": nn, "oldNode": dict(nn)},
+            "children": [_to_adjust(c) for c in (node.get("children") or [])]}
+
+
+def buat_fleet(nama: str, parent_id=None) -> dict | None:
+    """⚠️ WRITE: buat fleet/organisasi baru (adjustOrganization, tree-diff).
+    Kirim SELURUH pohon (semua 'unchanged') + node baru 'added' di bawah
+    `parent_id` (default = org akar/login). Return {id, nama, parent_id} bila
+    sukses (id = id asli hasil server), None bila gagal."""
+    root = _org_tree()
+    if not root:
+        return None
+    if parent_id is None:
+        parent_id = (root.get("organization") or {}).get("id")
+    adj = _to_adjust(root)
+    added = {"id": _TEMP_ID, "change": "added",
+             "detail": {"newNode": {"id": _TEMP_ID, "pid": parent_id,
+                                    "label": nama, "organizationType": 0}},
+             "children": []}
+
+    def attach(n: dict) -> bool:
+        if n.get("id") == parent_id:
+            n.setdefault("children", []).append(added)
+            return True
+        return any(attach(c) for c in n.get("children") or [])
+    if not attach(adj):
+        return None                       # parent tak ditemukan di pohon
+    b = _post_json("/api/organization/adjustOrganization", adj)
+    if not (isinstance(b, dict) and b.get("code") == 200):
+        return None
+    # id asli: cari fleet ber-nama sama di bawah parent (dari pohon terbaru).
+    baru = next((f for f in daftar_fleet()
+                 if (f.get("nama") or "").strip().lower() == nama.strip().lower()
+                 and f.get("parent_id") == parent_id), None)
+    return {"id": (baru or {}).get("id"), "nama": nama, "parent_id": parent_id}
+
+
 def masukkan_ke_fleet(target_org_id: int, cars: list[dict]) -> bool:
     """⚠️ WRITE: pindahkan unit ke fleet target (updateVehicleOrganization).
     cars = [{cjh, organizationIds:[org unit SAAT INI]}]. Resp sukses = code 200

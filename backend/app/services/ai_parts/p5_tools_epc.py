@@ -2621,6 +2621,55 @@ def _org_ids(rec: dict) -> list[int]:
     return [o["id"] for o in (rec.get("organizations") or []) if o.get("id")]
 
 
+def _t_buat_fleet(args: dict, user: dict) -> dict:
+    """⚠️ WRITE (2 langkah): buat FLEET/organisasi baru di telematics."""
+    if not _is_admin(user):
+        return dict(_TELE_DENIED)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    nama = (args.get("nama") or args.get("fleet") or "").strip()
+    if not nama:
+        return {"error": "Sebutkan nama fleet yang mau dibuat."}
+    induk = (args.get("induk") or args.get("parent") or "").strip()
+    parent = None
+    if induk:
+        parent = telematics.cari_fleet(induk)
+        if not parent:
+            return {"found": False, "catatan": f"Fleet induk '{induk}' tidak ditemukan."}
+        if parent.get("ambigu"):
+            return {"found": False, "ambigu": parent["ambigu"],
+                    "catatan": f"Nama induk '{induk}' cocok ke beberapa: {parent['ambigu']}. Pertegas."}
+    # Cek nama fleet sudah ada (di bawah induk yang sama, atau di mana pun bila induk kosong).
+    pid = (parent or {}).get("id")
+    fleets = telematics.daftar_fleet()
+    duplikat = [f for f in fleets if (f.get("nama") or "").strip().lower() == nama.lower()
+                and (pid is None or f.get("parent_id") == pid)]
+
+    if not args.get("konfirmasi"):
+        return {"perlu_konfirmasi": True,
+                "pratinjau": {"nama_fleet": nama,
+                              "induk": (parent or {}).get("nama") or "(akar/utama)",
+                              "sudah_ada": bool(duplikat)},
+                "catatan": (
+                    (f"⚠️ Fleet bernama '{nama}' SUDAH ADA — membuat lagi akan duplikat. "
+                     "Konfirmasi ke user apakah tetap lanjut."
+                     if duplikat else
+                     f"⚠️ KONFIRMASI DULU ke user: buat fleet baru '{nama}' di bawah "
+                     f"'{(parent or {}).get('nama') or 'organisasi utama'}'? Ini menambah "
+                     "struktur di server Sinotruk.")
+                    + " Bila setuju, panggil buat_fleet lagi dengan konfirmasi=true."),
+                }
+    hasil = telematics.buat_fleet(nama, pid)
+    if not hasil:
+        return {"found": False,
+                "catatan": f"Gagal membuat fleet '{nama}' (server menolak/timeout). Sampaikan jujur."}
+    return {"found": True, "berhasil": True, "fleet": nama,
+            "id_fleet": hasil.get("id"), "induk": (parent or {}).get("nama") or "utama",
+            "catatan": f"✅ Fleet '{nama}' berhasil dibuat"
+                       + (f" (id {hasil['id']})" if hasil.get("id") else "")
+                       + ". Unit bisa dimasukkan via masukkan_unit_fleet / sheet_masukkan_fleet."}
+
+
 def _t_masukkan_unit_fleet(args: dict, user: dict) -> dict:
     """⚠️ WRITE (2 langkah): masukkan/pindahkan SATU unit ke fleet."""
     if not _is_admin(user):
