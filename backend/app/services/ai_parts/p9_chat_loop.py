@@ -119,13 +119,14 @@ _PNLIKE_RE = re.compile(r"[A-Z0-9][A-Z0-9/+.\-]{6,}")
 
 
 def _recent_part_numbers(history: list[dict], max_pn: int = 12, max_msgs: int = 3) -> list[str]:
-    """Ambil Part Number dari sampai `max_msgs` pesan ASSISTANT ber-PN TERAKHIR
-    (recent-first, dedup) — 'memori konteks' lebih luas: rujukan 'itu/harganya?'
-    bisa merujuk part yang disebut beberapa jawaban lalu, bukan hanya yang terakhir."""
+    """Ambil Part Number dari sampai `max_msgs` pesan ber-PN TERAKHIR (recent-first,
+    dedup) — 'memori konteks': rujukan 'itu/harganya?' bisa merujuk part yang
+    disebut beberapa pesan lalu. Scan user DAN assistant: PN yang DIKETIK user
+    ('cek WG9925520270') tetap teringat walau jawaban asisten tak mengulanginya."""
     pns: list[str] = []
     seen_msgs = 0
     for m in reversed(history or []):
-        if (m or {}).get("role") != "assistant":
+        if (m or {}).get("role") not in ("assistant", "user"):
             continue
         this: list[str] = []
         for tok in _PNLIKE_RE.findall((m.get("content") or "").upper()):
@@ -142,6 +143,26 @@ def _recent_part_numbers(history: list[dict], max_pn: int = 12, max_msgs: int = 
             if seen_msgs >= max_msgs or len(pns) >= max_pn:
                 break
     return pns[:max_pn]
+
+
+# Nomor WO/klaim garansi (roNo, mis. RIDZ0052607123): R + ≥3 huruf + ≥7 digit.
+# Ambang ini menjauhkannya dari PN (huruf-angka berselang) & frame (2h+6a).
+_WO_RE = re.compile(r"\bR[A-Z]{2,4}\d{7,}\b")
+
+
+def _recent_wo(history: list[dict], max_n: int = 3) -> list[str]:
+    """No WO/klaim yang PALING BARU disebut (user/assistant) — 'klaim aktif' untuk
+    follow-up 'detail klaim itu'/'statusnya' tanpa user mengulang nomor WO."""
+    out: list[str] = []
+    for m in reversed(history or []):
+        if (m or {}).get("role") not in ("assistant", "user"):
+            continue
+        for tok in _WO_RE.findall((m.get("content") or "").upper()):
+            if tok not in out:
+                out.append(tok)
+        if len(out) >= max_n:
+            break
+    return out[:max_n]
 
 
 # VIN China (17 char, mulai 'L', tanpa I/O/Q) & frame number 8 char (2 huruf+6 angka,
@@ -241,6 +262,7 @@ def _active_context_block(history: list[dict]) -> str:
     prompt-cache DeepSeek tetap kena (input jauh lebih murah)."""
     pns = _recent_part_numbers(history)
     rangka = _recent_rangka(history)
+    wo = _recent_wo(history)
     lines = ["KONTEKS AKTIF (rujukan untuk pesan terakhir user — data yang BARU dibahas):"]
     if rangka:
         lines.append(
@@ -262,6 +284,13 @@ def _active_context_block(history: list[dict]) -> str:
             "tak langsung ('itu', 'yang pertama', 'harganya?', 'stoknya?'), gunakan daftar "
             "ini dan panggil detail_part/harga_sims untuk PN yang dimaksud — JANGAN minta "
             "user mengulang nomor part."
+        )
+    if wo:
+        lines.append(
+            "- Nomor WO/klaim garansi AKTIF: " + ", ".join(wo) + ". Bila user merujuk "
+            "tak langsung ('klaim itu', 'detailnya', 'statusnya sampai mana', 'yang "
+            "pertama'), pakai detail_klaim/riwayat_klaim untuk WO ini — JANGAN minta "
+            "user mengulang nomor WO."
         )
     return "\n".join(lines)
 

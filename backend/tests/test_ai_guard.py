@@ -129,8 +129,47 @@ def test_recent_part_numbers_batas_3_pesan_dan_cap():
     hist = [{"role": "assistant", "content": f"PN AZ160000{i:04d}"} for i in range(6)]
     pns = ai._recent_part_numbers(hist)
     assert len(pns) <= 12
-    # hanya 3 pesan assistant TERAKHIR yang dipanen (recent-first)
+    # hanya 3 pesan TERAKHIR yang dipanen (recent-first)
     assert "AZ1600000005" in pns and "AZ1600000000" not in pns
+
+
+def test_recent_part_numbers_dari_pesan_user():
+    """PN yang DIKETIK user tetap teringat walau jawaban asisten singkat."""
+    hist = [
+        {"role": "user", "content": "cek WG9925520270"},
+        {"role": "assistant", "content": "Ready, stok cukup."},   # tak echo PN
+        {"role": "user", "content": "harganya?"},
+    ]
+    assert "WG9925520270" in ai._recent_part_numbers(hist)
+
+
+# ── P9.2: memori konteks WO/klaim garansi ────────────────────────────
+def test_recent_wo_ekstrak():
+    hist = [
+        {"role": "user", "content": "riwayat klaim ST131522"},
+        {"role": "assistant", "content": "Ada klaim RIDZ0052607121 (pompa) dan RIDZ0052607099."},
+        {"role": "user", "content": "detail yang pertama"},
+    ]
+    wo = ai._recent_wo(hist)
+    assert "RIDZ0052607121" in wo and "RIDZ0052607099" in wo
+
+
+def test_recent_wo_tak_bentrok_pn_dan_frame():
+    hist = [{"role": "assistant",
+             "content": "PN WG9925520270 frame RT110061 unit SJ346555"}]
+    assert ai._recent_wo(hist) == []
+
+
+def test_active_context_block_baris_wo():
+    hist = [{"role": "assistant", "content": "Klaim RIDZ0052607121 status Selesai."},
+            {"role": "user", "content": "detailnya?"}]
+    blk = ai._active_context_block(hist)
+    assert "WO/klaim garansi AKTIF" in blk and "RIDZ0052607121" in blk
+
+
+def test_active_context_block_tanpa_wo():
+    blk = ai._active_context_block([{"role": "user", "content": "cari rem depan"}])
+    assert "WO/klaim" not in blk
 
 
 # ── P9.2: _rangka_candidates buang PN katalog/kode unit yang mirip frame ─────
