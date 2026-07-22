@@ -222,7 +222,8 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "INLINE + kartu PDF sumber. Pakai utk 'cara servis panel tft', 'arti "
                     "lampu X di dashboard', 'nilai sensor tekanan oli', 'cara cek gejala "
                     "cruise control macet'. Untuk KODE error SPN/FMI/P pakai cari_kode_kesalahan; "
-                    "utk diagram/pin pakai diagram_wiring."
+                    "utk diagram/pin pakai diagram_wiring; untuk DIAGNOSA penyebab & langkah "
+                    "PERBAIKAN gejala kompleks (asisten pabrik) pakai diagnosa."
                 ),
                 "parameters": {
                     "type": "object",
@@ -280,7 +281,9 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "⚠️ Bila SIMS menyatakan pengetahuannya belum memuat topik itu, sampaikan "
                     "JUJUR — ⛔ JANGAN mengarang penyebab/langkah dari pengetahuan umum. "
                     "Bila jawabannya menyebut komponen yang perlu diganti DAN user menyebut "
-                    "nomor rangka, lanjutkan dengan cari_part_di_unit → PN + stok + harga."
+                    "nomor rangka, lanjutkan dengan cari_part_di_unit → PN + stok + harga. "
+                    "(Untuk ISI MANUAL statis — arti lampu indikator, nilai/kalibrasi sensor, "
+                    "tabel, langkah baca-manual — pakai cari_manual, BUKAN diagnosa.)"
                 ),
                 "parameters": {
                     "type": "object",
@@ -458,7 +461,11 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "berdasarkan Part Number assy-nya — transmisi/gearbox, kopling, gardan/"
                     "axle, mesin, kabin. Beda dari repair_kit_transmisi (yang hanya seal/"
                     "bearing servis) — ini SELURUH part penyusun assembly. Pakai untuk 'apa "
-                    "saja isi dalam HW19709XST201136', 'komponen gardan PN ini'."
+                    "saja isi dalam HW19709XST201136', 'komponen gardan PN ini'. "
+                    "⛔ PAKAI uraikan_assembly (BUKAN ini) bila: user menyebut NOMOR RANGKA/"
+                    "VIN, butuh STOK/HARGA komponen, atau menyebut assembly via NAMA/istilah "
+                    "lapangan (v-stay/thrust rod/tie rod). isi_assy = komposisi KATALOG dari "
+                    "PN assy, TANPA konteks unit & tanpa stok/harga."
                 ),
                 "parameters": {
                     "type": "object",
@@ -498,10 +505,13 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "isi_kategori",
                 "description": (
-                    "Daftar part satu KATEGORI untuk SATU UNIT truk (isi sheet kategori). "
-                    "Kategori: kabin, mesin, kopling, transmisi, gardan/axle, kelistrikan, "
-                    "rem, sasis, karoseri, dll. Contoh: 'part REM apa saja di NX400?', "
-                    "'komponen kelistrikan V7X400'."
+                    "Daftar part satu KATEGORI per-MODEL truk dari sheet katalog (mis. "
+                    "'NX400 6X4') — perkiraan per-model, BUKAN per-unit. ⛔ Bila user "
+                    "menyebut NOMOR RANGKA/VIN (part PASTI unit itu), pakai part_aus_dari_"
+                    "rangka / cari_part_di_unit / bom_dari_rangka; untuk KATALOG bergambar "
+                    "unit → katalog_kategori. Kategori: kabin, mesin, kopling, transmisi, "
+                    "gardan/axle, kelistrikan, rem, sasis, karoseri, dll. Contoh: 'part REM "
+                    "apa saja di NX400?', 'komponen kelistrikan V7X400'."
                 ),
                 "parameters": {
                     "type": "object",
@@ -772,7 +782,8 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "(mis. 'v stay', 'thrust rod', 'tie rod'). Mengembalikan tiap komponen + qty + "
                     "stok/harga lokal. ⛔ JANGAN menjawab pertanyaan komponen-dalam-assembly dengan "
                     "PN assembly-nya sendiri — pakai tool ini untuk mendapat komponen aslinya. "
-                    "Butuh NOMOR RANGKA (per-VIN). "
+                    "Butuh NOMOR RANGKA (per-VIN). (Tanpa rangka & hanya butuh komposisi "
+                    "katalog dari PN assy tanpa stok/harga → isi_assy.) "
                     "DUA SISI dalam satu tool (param 'sumber'): 'atlas' (default) = EPC Parts "
                     "Atlas Sinotruk/HOWO/SITRAK; 'mesin' = EPC WEICHAI utk PART MESIN unit "
                     "bermesin Weichai (WP12/WP13): part internal (blok, kruk as, piston, ring, "
