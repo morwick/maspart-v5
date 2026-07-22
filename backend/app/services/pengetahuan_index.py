@@ -291,12 +291,27 @@ def _validasi_pengayaan(item: dict, chunk: dict) -> dict:
     return out
 
 
+# Perintah di UJUNG pesan user, bukan hanya di system prompt: terbukti di
+# produksi DeepSeek mengabaikan instruksi bahasa di system prompt bila payload
+# user murni JSON Mandarin (ikut bahasa payload) — dua putaran gagal semua.
+# Probe dengan perintah di ujung pesan user: jawaban Indonesia sempurna.
+_PERINTAH_USER = (
+    "\n\nBuat judul_id, kata_kunci, dan ringkasan untuk TIAP potongan di atas. "
+    "WAJIB 100% Bahasa Indonesia meski potongan berbahasa China/Inggris/Jepang "
+    "— TERJEMAHKAN istilahnya; nomor part/kode apa adanya.")
+_PERINTAH_TEGUR = (
+    " Contoh terjemahan istilah: 缓速器=retarder, 变速箱=gearbox/transmisi, "
+    "故障=kerusakan, 诊断=diagnosa, 发动机=mesin/engine.")
+
+
 def _llm_batch(batch: list[dict], tegur: bool = False) -> dict[str, dict]:
     s = get_settings()
     muatan = [{"id": c["id"],
                "isi": (c.get("teks") or "")[:1200],
                "tabel": (c.get("tabel") or [])[:4]} for c in batch]
     sistem = _PROMPT_SISTEM + (" " + _PROMPT_TEGUR if tegur else "")
+    user = (json.dumps({"chunk": muatan}, ensure_ascii=False)
+            + _PERINTAH_USER + (_PERINTAH_TEGUR if tegur else ""))
     r = requests.post(
         f"{s.deepseek_base_url.rstrip('/')}/chat/completions",
         headers={"Authorization": f"Bearer {s.deepseek_api_key}",
@@ -305,7 +320,7 @@ def _llm_batch(batch: list[dict], tegur: bool = False) -> dict[str, dict]:
             "model": s.deepseek_model,
             "messages": [
                 {"role": "system", "content": sistem},
-                {"role": "user", "content": json.dumps({"chunk": muatan}, ensure_ascii=False)},
+                {"role": "user", "content": user},
             ],
             "temperature": 0.0,
             "max_tokens": 2000,

@@ -343,6 +343,12 @@ def _aktifkan_llm(monkeypatch):
     monkeypatch.setattr(idx, "get_settings", lambda: _Settings(True))
 
 
+def _muatan(kw):
+    """Payload chunk dari pesan user — JSON diikuti perintah bahasa (teks)."""
+    isi = kw["json"]["messages"][1]["content"]
+    return json.loads(isi[: isi.rindex("}") + 1])
+
+
 class _Resp:
     status_code = 200
 
@@ -358,7 +364,7 @@ def test_pengayaan_llm_terpakai(monkeypatch):
     dok = pengetahuan.add_dokumen("Garansi", teks_admin="Klaim garansi maksimal 30 hari.")
 
     def fake_post(url, **kw):
-        kirim = json.loads(kw["json"]["messages"][1]["content"])
+        kirim = _muatan(kw)
         cid = kirim["chunk"][0]["id"]
         return _Resp({"chunk": [{"id": cid, "judul_id": "Syarat klaim garansi",
                                  "kata_kunci": ["garansi", "klaim"],
@@ -408,6 +414,22 @@ def test_kata_kunci_berangka_fiktif_dibuang():
     assert "garansi" in upd["kata_kunci"]
 
 
+def test_perintah_bahasa_ada_di_pesan_user(monkeypatch):
+    """Instruksi bahasa WAJIB di ujung pesan user — di system prompt saja
+    terbukti diabaikan DeepSeek saat payload-nya JSON Mandarin (produksi)."""
+    _aktifkan_llm(monkeypatch)
+    tangkap = {}
+
+    def fake_post(url, **kw):
+        tangkap["user"] = kw["json"]["messages"][1]["content"]
+        return _Resp({"chunk": []})
+    monkeypatch.setattr(idx.requests, "post", fake_post)
+    idx._llm_batch([{"id": "x#0000", "teks": "isi"}])
+    assert tangkap["user"].rstrip().endswith(idx._PERINTAH_USER.strip())
+    idx._llm_batch([{"id": "x#0000", "teks": "isi"}], tegur=True)
+    assert idx._PERINTAH_TEGUR.strip() in tangkap["user"]
+
+
 def test_validasi_pengayaan_membuang_field_cjk():
     """Pagar bahasa per-field: pengayaan Mandarin tak boleh masuk indeks."""
     chunk = {"teks": "电控模块连接失败，点击启动测试。", "tabel": []}
@@ -428,7 +450,7 @@ def test_pengayaan_mandarin_diulang_dengan_teguran(monkeypatch):
     panggilan = []
 
     def fake_post(url, **kw):
-        kirim = json.loads(kw["json"]["messages"][1]["content"])
+        kirim = _muatan(kw)
         cid = kirim["chunk"][0]["id"]
         sistem = kw["json"]["messages"][0]["content"]
         panggilan.append("tegur" if idx._PROMPT_TEGUR in sistem else "biasa")
@@ -457,7 +479,7 @@ def test_pengayaan_tetap_asing_jatuh_ke_fallback_dan_dilaporkan(monkeypatch):
         "EOL", teks_admin="电控模块连接失败，点击启动测试即可重连。")
 
     def fake_post(url, **kw):
-        kirim = json.loads(kw["json"]["messages"][1]["content"])
+        kirim = _muatan(kw)
         cid = kirim["chunk"][0]["id"]
         return _Resp({"chunk": [{"id": cid, "judul_id": "电控模块连接失败处理",
                                  "kata_kunci": ["ECU未连接", "启动测试"],
@@ -484,7 +506,7 @@ def test_pengayaan_indonesia_tidak_kena_putaran_ulang(monkeypatch):
 
     def fake_post(url, **kw):
         dipanggil["n"] += 1
-        kirim = json.loads(kw["json"]["messages"][1]["content"])
+        kirim = _muatan(kw)
         cid = kirim["chunk"][0]["id"]
         return _Resp({"chunk": [{"id": cid, "judul_id": "Syarat klaim garansi",
                                  "kata_kunci": ["garansi"],
