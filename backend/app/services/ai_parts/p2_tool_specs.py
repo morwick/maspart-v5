@@ -1000,6 +1000,76 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         })
 
+    # Garansi & Klaim SIMS (DMS) — gerbang Menu Control 'ai_garansi':
+    # admin selalu; staf bila dicentang; pembeli tidak pernah (fail-closed).
+    if _can_garansi(user):
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "cek_garansi",
+                "description": (
+                    "⭐ CEK STATUS GARANSI satu unit dari NOMOR RANGKA (SIMS DMS resmi "
+                    "Sinotruk, data pabrik per-unit): masa garansi CNHTC & dealer, "
+                    "MASIH AKTIF atau tidak + sisa hari, % masa terpakai, spesifikasi "
+                    "(model, Euro, tipe pakai, tanggal jual/keluar pabrik), NOMOR SERI "
+                    "ASLI komponen (mesin/gearbox/gardan depan-tengah-belakang) beserta "
+                    "modelnya, dan jumlah servis per komponen. Terima VIN penuh maupun "
+                    "frame number — konversi otomatis di server."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number — KIRIM APA ADANYA dari user."},
+                    },
+                    "required": ["rangka"],
+                },
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "riwayat_klaim",
+                "description": (
+                    "DAFTAR WORK ORDER KLAIM GARANSI (SIMS DMS dealer): per unit "
+                    "(rangka), per nomor WO, atau terbaru bila tanpa filter. Tiap baris: "
+                    "no WO, tanggal, km saat rusak, GEJALA kerusakan, tindakan, status "
+                    "pekerjaan (label Indonesia), nopol, pelapor, durasi jam. Pakai untuk "
+                    "'unit X pernah klaim apa saja', 'klaim garansi terbaru', 'status WO "
+                    "RIDZxxx sampai mana'. Untuk isi lengkap satu WO pakai detail_klaim."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Opsional: nomor rangka unit (VIN/frame)."},
+                        "no_wo": {"type": "string", "description": "Opsional: nomor work order persis (mis. RIDZ0052607123)."},
+                        "halaman": {"type": "integer", "description": "Halaman hasil (default 1)."},
+                    },
+                },
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "detail_klaim",
+                "description": (
+                    "ISI LENGKAP SATU work order klaim garansi dari nomor WO: PART yang "
+                    "diklaim (PN, nama, qty, harga CNY, jenis ganti/perbaiki, penanggung "
+                    "jawab), JASA (kode, jam kuota, tarif, total), total biaya per tahap "
+                    "audit, ALUR PERSETUJUAN (tahap kini + sedang menunggu siapa), "
+                    "kebijakan tarif garansi, dan FOTO klaim (kerusakan/pembongkaran/unit) "
+                    "yang tampil inline. Pakai saat user menyebut nomor WO / minta detail "
+                    "satu klaim dari hasil riwayat_klaim."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "no_wo": {"type": "string", "description": "Nomor work order (mis. RIDZ0052607123)."},
+                    },
+                    "required": ["no_wo"],
+                },
+            },
+        })
+
     # Populasi Unit — data armada/unit terdaftar. HANYA admin & akun 'mas'
     # (SEE_ALL). User lain (cabang/biasa/pembeli) TIDAK diberi tool ini.
     if _can_populasi(user):

@@ -1,0 +1,309 @@
+"""Garansi & Klaim SIMS (DMS repair order) — service + 3 tool asisten + gerbang.
+
+Sumber kebenaran: HAR simscloud dibedah 2026-07-22 + probe live (memory
+sims-repair-order-har). Jebakan yang dikunci di sini:
+- chassisNo WAJIB frame 8-char; VIN 17-char → ekstrak 8 char terakhir.
+- Status pekerjaan: kamus label Indonesia hasil pemetaan rigor; kswx/wg
+  BELUM terkonfirmasi dan labelnya harus jujur bilang begitu.
+- parts kosong utk WO belum dikerjakan = normal (catatan menjelaskan).
+- Gerbang Menu Control 'ai_garansi': admin selalu, staf per-centang,
+  pembeli TIDAK PERNAH (fail-closed).
+"""
+from datetime import datetime, timezone
+
+import pytest
+
+import app.services.sims_warranty as w
+from app.services import ai_assistant as ai
+
+ADMIN = {"username": "admin", "role": "admin"}
+STAF = {"username": "budi", "role": "user"}
+PEMBELI = {"username": "toko1", "role": "pembeli"}
+
+
+# ── frame & label ────────────────────────────────────────────────────
+def test_frame_dari_rangka():
+    assert w.frame_dari_rangka("LZZ1ELSF7SJ392741") == "SJ392741"   # VIN 17 → 8
+    assert w.frame_dari_rangka("SJ346555") == "SJ346555"            # frame utuh
+    assert w.frame_dari_rangka(" sj346555 ") == "SJ346555"          # spasi+huruf kecil
+    assert w.frame_dari_rangka("RT110061") == "RT110061"
+    assert w.frame_dari_rangka("") == ""
+
+
+def test_status_label_terpetakan():
+    assert w.status_label("s-ro-status-js") == "Selesai"
+    assert w.status_label("s-ro-status-kd") == "Order dibuka"
+    assert w.status_label("s-ro-status-pg") == "Kerja ditugaskan"
+    assert w.status_label("s-ro-status-zj") == "Inspeksi akhir"
+    assert "Kantor Perwakilan" in w.status_label("s-ro-status-dbcfwjl")
+    assert "Regional" in w.status_label("s-ro-status-dqfwjl")
+    assert "Dibatalkan" in w.status_label("s-ro-status-zf")
+    # dua kode belum pernah terlihat → label wajib jujur belum pasti
+    assert "belum terkonfirmasi" in w.status_label("s-ro-status-kswx")
+    assert "belum terkonfirmasi" in w.status_label("s-ro-status-wg")
+    assert w.status_label("kode-aneh") == "kode-aneh"   # tak dikenal → apa adanya
+
+
+# ── service (HTTP dipalsukan) ────────────────────────────────────────
+class _Resp:
+    def __init__(self, status=200, payload=None, ct="application/json"):
+        self.status_code = status
+        self._p = payload
+        self.headers = {"Content-Type": ct}
+        self.content = b"\xff\xd8jpeg" if ct.startswith("image") else b"{}"
+
+    def json(self):
+        return self._p
+
+
+_UNIT = {
+    "chassisNo": "SJ346555", "brandName": "HOWO", "seriesName": "NX",
+    "driveMode": "8×4", "modelCode": "ZZ3317V486JB1R", "discharge": "Euro II",
+    "useType": "Dump truck", "dealerName": "PT MAS",
+    "departureDate": "2025-07-28T23:24:54Z", "saleDate": "2025-09-06T00:00:00Z",
+    "orderNo": "CYAJ24110049",
+    "warrantyStartDate": "2025-09-06T00:00:00Z",
+    "latestEndDate": "2026-09-06T00:00:00Z",
+    "cnhtcLatestEndDate": "2026-09-06T00:00:00Z",
+    "warrantyTimePercentage": 87.4546,
+    "engineNo": "1424L071706", "engineModelCode": "WP12S400E201",
+    "gearboxNo": "241217002907", "gearboxModelCode": "HW19709XST",
+    "axleFrontNo": "80241", "axleFrontModelCode": "VGD95",
+    "axleMidNo": "40241", "axleMidModelCode": "MCP16ZG",
+    "axlxAftNo": "40242", "axlxAftModelCode": "MCP16ZG",
+    "engineMaintNum": 0, "gearboxMaintNum": 1, "bridgeMaintNum": 0,
+    "chassisMaintNum": 2,
+}
+
+
+@pytest.fixture(autouse=True)
+def _bersih_cache():
+    w._CACHE.clear()
+    yield
+    w._CACHE.clear()
+
+
+@pytest.fixture
+def http(monkeypatch):
+    """Palsukan requests.get service + bekukan jam."""
+    monkeypatch.setattr(w, "_headers", lambda: {})
+    monkeypatch.setattr(w, "_sekarang",
+                        lambda: datetime(2026, 7, 22, tzinfo=timezone.utc))
+    kotak = {"n": 0, "resp": None, "urls": []}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        kotak["n"] += 1
+        kotak["urls"].append((url, dict(params or {})))
+        r = kotak["resp"]
+        return r(url, params) if callable(r) else r
+    monkeypatch.setattr(w.requests, "get", fake_get)
+    return kotak
+
+
+def test_info_unit_parsing_dan_sisa_hari(http):
+    http["resp"] = _Resp(200, {"msg": "ok", "code": 0, "data": dict(_UNIT)})
+    info = w.info_unit("LZZ1ELSF7SJ346555X")[  # VIN-ish panjang → frame
+        "garansi"] if False else w.info_unit("SJ346555")
+    assert info["unit"] == "HOWO NX 8×4"
+    g = info["garansi"]
+    assert g["berakhir"] == "2026-09-06"
+    assert g["sisa_hari"] == 46           # 2026-07-22 → 2026-09-06 (jam beku)
+    assert g["masih_aktif"] is True
+    assert g["persen_terpakai"] == 87.5
+    assert info["komponen"]["gearbox"]["no_seri"] == "241217002907"
+    assert info["jumlah_servis"]["sasis"] == 2
+    # param HTTP: chassisNo = FRAME (bukan VIN)
+    assert http["urls"][0][1]["chassisNo"] == "SJ346555"
+
+
+def test_info_unit_cache_per_frame(http):
+    http["resp"] = _Resp(200, {"data": dict(_UNIT)})
+    w.info_unit("SJ346555")
+    w.info_unit("SJ346555")
+    assert http["n"] == 1                 # panggilan kedua dari cache
+
+
+def test_info_unit_garansi_lewat(http):
+    d = dict(_UNIT, latestEndDate="2026-07-01T00:00:00Z",
+             cnhtcLatestEndDate="2026-07-01T00:00:00Z")
+    http["resp"] = _Resp(200, {"data": d})
+    g = w.info_unit("SJ346555")["garansi"]
+    assert g["masih_aktif"] is False and g["sisa_hari"] < 0
+
+
+def test_get_retry_saat_token_basi(http, monkeypatch):
+    import sims_fetcher as sf
+    direset = {"n": 0}
+    monkeypatch.setattr(sf, "_reset_token", lambda: direset.__setitem__("n", 1))
+
+    def resp(url, params):
+        return _Resp(401) if http["n"] == 1 else _Resp(200, {"data": dict(_UNIT)})
+    http["resp"] = resp
+    assert w.info_unit("SJ346555")
+    assert direset["n"] == 1 and http["n"] == 2
+
+
+def test_daftar_klaim_mapping(http):
+    http["resp"] = _Resp(200, {
+        "totalCount": 1979, "currentPage": 1,
+        "records": [{"roId": "1", "roNo": "RIDZ0052607123", "vin": "SJ394896",
+                     "createTime": "2026-07-22T02:59:52Z", "mileage": 32583,
+                     "faultContent": "transmisi keras", "handleMethod": "check",
+                     "remark": "B 9826 UEY", "statusCode": "s-ro-status-pg",
+                     "orderDuration": 3.5, "reportName": "Leani",
+                     "majorRepairName": "PT MAS", "roAuditTime": None}]})
+    d = w.daftar_klaim(vin="LZZ1ELSF7SJ394896")
+    assert d["total"] == 1979
+    k = d["klaim"][0]
+    assert k["status"] == "Kerja ditugaskan"      # label Indonesia
+    assert k["km"] == 32583 and k["no_wo"] == "RIDZ0052607123"
+    assert http["urls"][0][1]["vin"] == "SJ394896"  # frame, bukan VIN-17
+
+
+def test_jejak_audit_kosong_aman(http):
+    http["resp"] = _Resp(200, {"msg": "ok", "code": 0, "data": []})
+    assert w.jejak_audit("123") == []
+
+
+def test_foto_bytes_json_bukan_gambar(http, monkeypatch):
+    import sims_fetcher as sf
+    monkeypatch.setattr(sf, "_get_token", lambda: "Bearer abc.def")
+    http["resp"] = _Resp(200, {"msg": "err"}, ct="application/json")
+    assert w.foto_bytes("f1") is None     # balasan error JSON ≠ foto
+    # security-token = JWT tanpa prefix Bearer
+    assert http["urls"][0][1]["security-token"] == "abc.def"
+
+
+# ── tool + gerbang ───────────────────────────────────────────────────
+@pytest.fixture
+def dunia(monkeypatch):
+    monkeypatch.setattr(ai.sims_warranty, "available", lambda: True)
+    monkeypatch.setattr(ai, "_boleh_ai", lambda user, key: False)
+    return monkeypatch
+
+
+def test_tool_cek_garansi_admin(dunia, monkeypatch):
+    monkeypatch.setattr(ai.sims_warranty, "info_unit", lambda r: {
+        "frame": "SJ346555", "unit": "HOWO NX 8×4",
+        "garansi": {"berakhir": "2026-09-06", "masih_aktif": True,
+                    "sisa_hari": 46, "persen_terpakai": 87.5},
+        "komponen": {}, "jumlah_servis": {}})
+    r = ai._t_cek_garansi({"rangka": "SJ346555"}, ADMIN)
+    assert r["found"] is True
+    assert "MASIH AKTIF" in r["catatan"] and "sisa 46 hari" in r["catatan"]
+    assert list(r.keys())[-1] == "catatan"
+
+
+def test_tool_cek_garansi_unit_tak_ada_jujur(dunia, monkeypatch):
+    monkeypatch.setattr(ai.sims_warranty, "info_unit", lambda r: None)
+    r = ai._t_cek_garansi({"rangka": "XX999999"}, ADMIN)
+    assert r["found"] is False and "tidak ditemukan" in r["catatan"].lower()
+
+
+def test_tool_riwayat_klaim(dunia, monkeypatch):
+    monkeypatch.setattr(ai.sims_warranty, "daftar_klaim",
+                        lambda **kw: {"total": 2, "halaman": 1, "klaim": [
+                            {"no_wo": "RIDZ1", "status": "Selesai"}]})
+    r = ai._t_riwayat_klaim({"rangka": "SJ394896"}, ADMIN)
+    assert r["found"] and r["total"] == 2
+    assert list(r.keys())[-1] == "catatan"
+
+
+def test_tool_detail_klaim_lengkap(dunia, monkeypatch):
+    monkeypatch.setattr(ai.sims_warranty, "daftar_klaim", lambda **kw: {
+        "klaim": [{"no_wo": "RIDZ0052607121", "ro_id": "99", "frame": "ST131522",
+                   "tanggal": "2026-07-22", "km": 19243, "status": "Menunggu review",
+                   "gejala": "pompa bocor", "tindakan": "ganti"}]})
+    monkeypatch.setattr(ai.sims_warranty, "detail_wo", lambda rid: {
+        "roId": "99", "faultContent": "pompa injeksi bocor",
+        "handleMethod": "ganti pompa", "faultAddress": "Bayung Lencir",
+        "reportName": "jefri", "reportPhone": "0822",
+        "parts": [{"partCode": "1001671518", "partName": "Injection pump",
+                   "zhOldPartName": "机械喷油泵总成", "partNum": 1,
+                   "partPrice": 7804.81, "partAmount": 7804.81,
+                   "partMgtAmount": 390.24, "repairType": "ro-part-repair-gh",
+                   "faultModel": "002", "dutyCode": "WP",
+                   "oldPartSupplierCode": "100006"}],
+        "labours": [{"labourCode": "MAAA5600", "labourName": "Replace pump",
+                     "labourQuotaNoRepeat": 2.6, "labourPrice": 130.0,
+                     "labourAmount": 338.0}],
+        "oils": [], "additionals": [],
+        "amountList": [{"auditType": "s-ro-status-kd", "currencyCode": "CNY",
+                        "partAmount": 7804.81, "labourAmount": 338.0,
+                        "oilAmount": 0.0, "partMgtAmount": 390.24,
+                        "totalAmount": 8533.05}]})
+    monkeypatch.setattr(ai.sims_warranty, "jejak_audit", lambda rid: [
+        {"waktu": "2026-07-22 09:40", "tahap": "Submission", "oleh": "wf",
+         "aksi": "Free Flow", "opini": None,
+         "tahap_berikut": "Rep Office Review", "menunggu": "A,B"}])
+    monkeypatch.setattr(ai.sims_warranty, "kebijakan", lambda rid: {
+        "tarif_jasa_per_jam": 130.0})
+    monkeypatch.setattr(ai.sims_warranty, "ringkas_audit", lambda rid: {
+        "roId": "99", "fileMap": {"faultStartPhoto_file": [
+            {"fileUploadInfoId": "f1"}], "vinPhoto_file": [
+            {"fileUploadInfoId": "f2"}]}})
+    monkeypatch.setattr(ai.sims_warranty, "foto_bytes", lambda fid: b"jpegdata")
+    monkeypatch.setattr(ai.ai_export, "stash_raw",
+                        lambda judul, data, nama: ("img1", nama))
+    r = ai._t_detail_klaim({"no_wo": "ridz0052607121"}, ADMIN)   # case-insensitive
+    assert r["found"] is True
+    p = r["part_diklaim"][0]
+    assert p["pn"] == "1001671518" and p["jenis"] == "ganti"
+    assert p["harga_cny"] == 7804.81
+    assert r["jasa_diklaim"][0]["jam_kuota"] == 2.6
+    assert r["alur_persetujuan"]["menunggu"] == "A,B"
+    assert r["gambar"] and r["gambar"][0]["nama_figure"] == "Foto kerusakan"
+    assert "CNY" in r["catatan"]
+    assert list(r.keys())[-1] == "catatan"
+
+
+def test_tool_detail_klaim_wo_belum_dikerjakan(dunia, monkeypatch):
+    monkeypatch.setattr(ai.sims_warranty, "daftar_klaim", lambda **kw: {
+        "klaim": [{"no_wo": "RIDZ2", "ro_id": "77", "status": "Kerja ditugaskan"}]})
+    monkeypatch.setattr(ai.sims_warranty, "detail_wo", lambda rid: {
+        "roId": "77", "parts": [], "labours": [], "oils": [], "additionals": [],
+        "amountList": []})
+    monkeypatch.setattr(ai.sims_warranty, "jejak_audit", lambda rid: [])
+    monkeypatch.setattr(ai.sims_warranty, "kebijakan", lambda rid: None)
+    monkeypatch.setattr(ai.sims_warranty, "ringkas_audit", lambda rid: {})
+    r = ai._t_detail_klaim({"no_wo": "RIDZ2"}, ADMIN)
+    assert r["found"] and r["part_diklaim"] == []
+    assert "belum dikerjakan" in r["catatan"]      # kosong ≠ error, dijelaskan
+
+
+# ── gerbang Menu Control ─────────────────────────────────────────────
+def test_key_ai_garansi_terdaftar():
+    from app.services.permissions import ASISTEN_KEYS
+    assert ASISTEN_KEYS["ai_garansi"] == "Garansi & Klaim SIMS"
+
+
+def test_spec_hanya_untuk_yang_berhak(monkeypatch):
+    monkeypatch.setattr(ai, "_boleh_ai", lambda user, key: False)
+    nama_admin = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "")}
+    nama_staf = {s["function"]["name"] for s in ai._tool_specs(STAF, "")}
+    nama_pembeli = {s["function"]["name"] for s in ai._tool_specs(PEMBELI, "")}
+    for t in ("cek_garansi", "riwayat_klaim", "detail_klaim"):
+        assert t in nama_admin
+        assert t not in nama_staf
+        assert t not in nama_pembeli
+
+
+def test_spec_staf_dengan_centang(monkeypatch):
+    monkeypatch.setattr(ai, "_boleh_ai",
+                        lambda user, key: key == "ai_garansi")
+    nama = {s["function"]["name"] for s in ai._tool_specs(STAF, "")}
+    assert {"cek_garansi", "riwayat_klaim", "detail_klaim"} <= nama
+
+
+def test_run_tool_menolak_pembeli(monkeypatch):
+    monkeypatch.setattr(ai, "_boleh_ai", lambda user, key: False)
+    r = ai._run_tool("cek_garansi", {"rangka": "SJ346555"}, PEMBELI)
+    assert r.get("denied") or "tidak tersedia" in (r.get("error") or "")
+
+
+def test_handler_lapis_ketiga_fail_closed(monkeypatch):
+    """Walau lolos dispatch (mis. dipanggil langsung), handler tetap menolak."""
+    monkeypatch.setattr(ai, "_boleh_ai", lambda user, key: False)
+    monkeypatch.setattr(ai.sims_warranty, "available", lambda: True)
+    for fn in (ai._t_cek_garansi, ai._t_riwayat_klaim, ai._t_detail_klaim):
+        assert "error" in fn({"rangka": "X", "no_wo": "Y"}, STAF)

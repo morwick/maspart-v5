@@ -79,6 +79,9 @@ ASISTEN_KEYS: dict[str, str] = {
     "ai_penawaran": "Buat Penawaran",
     "ai_stok_admin": "Stok Tertahan & Alternatif",
     "ai_pesanan_bermasalah": "Pesanan Bermasalah",
+    # Paket garansi & klaim SIMS (cek_garansi/riwayat_klaim/detail_klaim):
+    # data DMS pabrik — nilai klaim CNY, nama+HP pelapor, foto unit.
+    "ai_garansi": "Garansi & Klaim SIMS",
 }
 
 # kind → (perm_type, semua key+label, key yang selalu aktif)

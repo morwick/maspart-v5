@@ -33,7 +33,7 @@ from . import (abs_scr_codes, accurate, ai_chat_log, ai_export, ai_knowledge, ai
                dtc_diagnosa, eol_dtc, epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref,
                gudang, gudang_config, harga, maintenance_ref, manual_media, manual_teks, orders,
                part_index, pengetahuan, pin_ecu, populasi, repairkit, reservations, search_log,
-               sims, sims_eol, sinonim, skema_ref, wiring_ref)
+               sims, sims_eol, sims_warranty, sinonim, skema_ref, wiring_ref)
 
 logger = logging.getLogger("maspart.ai")
 
@@ -137,6 +137,13 @@ def _can_stok_admin(user: dict) -> bool:
 
 def _can_pesanan_bermasalah(user: dict) -> bool:
     return _is_admin(user) or _boleh_ai(user, "ai_pesanan_bermasalah")
+
+
+def _can_garansi(user: dict) -> bool:
+    """Garansi & klaim SIMS (cek_garansi/riwayat_klaim/detail_klaim): admin
+    selalu; staf bila dicentang 'ai_garansi'; pembeli TIDAK PERNAH (boleh_ai
+    fail-closed) — data klaim memuat nama+HP pelapor & nilai modal CNY."""
+    return _is_admin(user) or _boleh_ai(user, "ai_garansi")
 
 
 def _boleh_isi_stok_harga(args: dict, user: dict) -> bool:

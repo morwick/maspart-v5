@@ -26,6 +26,11 @@ def test_tool_diagnosa_termasuk():
     assert "diagnosa" in ai._TOOLS_GAMBAR_INLINE
 
 
+def test_tool_detail_klaim_termasuk():
+    """Foto klaim garansi SIMS (2026-07-22) tampil inline."""
+    assert "detail_klaim" in ai._TOOLS_GAMBAR_INLINE
+
+
 def test_tool_bergambar_lama_tidak_hilang_saat_refactor():
     """Regresi: pengangkatan keluar dari rantai elif tak boleh menjatuhkan
     satu pun tool yang sebelumnya sudah menampilkan gambar."""

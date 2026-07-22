@@ -1237,3 +1237,181 @@ def _gearbox_from_rangka(rangka: str) -> tuple[str, dict]:
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════
+#  GARANSI & KLAIM SIMS (DMS repair order) — 2026-07-22
+#  Gerbang: _can_garansi (Menu Control 'ai_garansi'; admin selalu, pembeli
+#  tidak pernah). Spec hanya ditawarkan bila boleh (p2) + _run_tool menolak
+#  terpusat (p7); cek di handler = lapis ketiga (defense in depth).
+# ═══════════════════════════════════════════════════════════════════════
+_GARANSI_DENIED = {"error": "Data garansi & klaim SIMS tidak tersedia untuk akun Anda."}
+
+# Foto klaim: kategori paling informatif didahulukan (kerusakan & bongkar);
+# vin/nameplate/odometer hanya pelengkap administratif.
+_FOTO_KLAIM_PRIORITAS = ("faultStartPhoto_file", "detachPhoto_file",
+                        "allCarPhoto_file", "odometerPhoto_file",
+                        "nameplatePhoto_file", "vinPhoto_file")
+_MAX_FOTO_KLAIM = 4
+
+
+def _t_cek_garansi(args: dict, user: dict) -> dict:
+    """Status garansi + spek + nomor seri komponen SATU unit (SIMS DMS)."""
+    if not _can_garansi(user):
+        return dict(_GARANSI_DENIED)
+    if not sims_warranty.available():
+        return {"error": "Koneksi SIMS belum siap di server."}
+    rangka = (args.get("rangka") or args.get("frame") or "").strip()
+    if not rangka:
+        return {"error": "Sebutkan nomor rangka (VIN penuh atau frame number)."}
+    info = sims_warranty.info_unit(rangka)
+    if not info:
+        return {"found": False,
+                "rangka": rangka,
+                "catatan": ("Unit tidak ditemukan di SIMS untuk frame "
+                            f"'{sims_warranty.frame_dari_rangka(rangka)}'. Cek ulang "
+                            "nomor rangka; sampaikan jujur bila tetap tidak ada.")}
+    g = info.get("garansi") or {}
+    out = {"found": True, **info}
+    status = ("MASIH AKTIF" if g.get("masih_aktif")
+              else "SUDAH BERAKHIR" if g.get("masih_aktif") is False else "TIDAK DIKETAHUI")
+    out["catatan"] = (
+        f"Garansi {status}"
+        + (f" — sisa {g['sisa_hari']} hari" if g.get("masih_aktif") else "")
+        + ". Sumber: SIMS DMS resmi Sinotruk (data pabrik per-unit). "
+        "'sisa_hari' & status dihitung server — sebut APA ADANYA, jangan hitung ulang. "
+        "Nomor seri komponen (mesin/gearbox/gardan) = bawaan pabrik unit ini; berguna "
+        "untuk klaim & pencarian part presisi. Untuk riwayat klaimnya panggil "
+        "riwayat_klaim(rangka)."
+    )
+    return out
+
+
+def _t_riwayat_klaim(args: dict, user: dict) -> dict:
+    """Daftar work order klaim garansi — per unit, per no WO, atau terbaru."""
+    if not _can_garansi(user):
+        return dict(_GARANSI_DENIED)
+    if not sims_warranty.available():
+        return {"error": "Koneksi SIMS belum siap di server."}
+    rangka = (args.get("rangka") or args.get("vin") or "").strip()
+    no_wo = (args.get("no_wo") or args.get("roNo") or "").strip()
+    try:
+        halaman = max(int(args.get("halaman") or 1), 1)
+    except (TypeError, ValueError):
+        halaman = 1
+    d = sims_warranty.daftar_klaim(vin=rangka, ro_no=no_wo, halaman=halaman)
+    if d is None:
+        return {"error": "SIMS tidak merespons — coba lagi sebentar lagi."}
+    rows = d.get("klaim") or []
+    if not rows:
+        return {"found": False, "total": d.get("total") or 0,
+                "catatan": ("Tidak ada klaim yang cocok"
+                            + (f" untuk '{rangka or no_wo}'" if (rangka or no_wo) else "")
+                            + ". Sampaikan apa adanya — jangan mengarang riwayat.")}
+    out = {"found": True, "total": d.get("total"), "halaman": d.get("halaman"),
+           "klaim": rows}
+    out["catatan"] = (
+        "Riwayat klaim garansi dari SIMS DMS (dealer PT MAS). 'status' sudah "
+        "berlabel Indonesia — sebut apa adanya. Isi lengkap satu WO (part+jasa+"
+        "nilai+foto) panggil detail_klaim(no_wo). Total di 'total'; halaman "
+        "berikut via parameter halaman. Nama/HP pelapor = data internal, "
+        "tampilkan seperlunya."
+    )
+    return out
+
+
+def _t_detail_klaim(args: dict, user: dict) -> dict:
+    """Isi lengkap SATU work order klaim: part+jasa+nilai CNY, alur persetujuan,
+    kebijakan tarif, dan foto klaim (inline)."""
+    if not _can_garansi(user):
+        return dict(_GARANSI_DENIED)
+    if not sims_warranty.available():
+        return {"error": "Koneksi SIMS belum siap di server."}
+    no_wo = (args.get("no_wo") or args.get("roNo") or args.get("wo") or "").strip()
+    if not no_wo:
+        return {"error": "Sebutkan nomor work order (mis. RIDZ00526xxxxx)."}
+    d = sims_warranty.daftar_klaim(ro_no=no_wo, page_size=3)
+    rec = next((x for x in (d or {}).get("klaim") or []
+                if (x.get("no_wo") or "").upper() == no_wo.upper()), None)
+    if not rec:
+        return {"found": False,
+                "catatan": f"WO '{no_wo}' tidak ditemukan di SIMS. Cek ulang nomornya."}
+    ro_id = str(rec.get("ro_id") or "")
+    wo = sims_warranty.detail_wo(ro_id) or {}
+    parts = [sims_warranty.format_part(p) for p in (wo.get("parts") or [])]
+    jasa = [sims_warranty.format_jasa(j) for j in (wo.get("labours") or [])]
+    total = []
+    for a in (wo.get("amountList") or []):
+        total.append({
+            "tahap": sims_warranty.status_label(a.get("auditType")),
+            "mata_uang": a.get("currencyCode"),
+            "part_cny": a.get("partAmount"), "jasa_cny": a.get("labourAmount"),
+            "oli_cny": a.get("oilAmount"), "admin_cny": a.get("partMgtAmount"),
+            "total_cny": a.get("totalAmount"),
+        })
+    jejak = sims_warranty.jejak_audit(ro_id)
+    out = {
+        "found": True,
+        "no_wo": rec.get("no_wo"), "frame": rec.get("frame"),
+        "tanggal": rec.get("tanggal"), "km": rec.get("km"),
+        "status": rec.get("status"),
+        "gejala": wo.get("faultContent") or rec.get("gejala"),
+        "tindakan": wo.get("handleMethod") or rec.get("tindakan"),
+        "lokasi_kejadian": wo.get("faultAddress"),
+        "pelapor": {"nama": wo.get("reportName"), "hp": wo.get("reportPhone")},
+        "part_diklaim": parts,
+        "jasa_diklaim": jasa,
+        "oli_diklaim": len(wo.get("oils") or []),
+        "biaya_tambahan": len(wo.get("additionals") or []),
+        "total_per_tahap": total,
+    }
+    if jejak:
+        akhir = jejak[-1]
+        out["alur_persetujuan"] = {
+            "tahap_kini": akhir.get("tahap_berikut") or akhir.get("tahap"),
+            "menunggu": akhir.get("menunggu"),
+            "riwayat": jejak[-4:],
+        }
+    pol = sims_warranty.kebijakan(ro_id)
+    if pol:
+        out["kebijakan_garansi"] = pol
+
+    # Foto klaim → kartu gambar inline (kanal 'gambar' + _TOOLS_GAMBAR_INLINE).
+    gambar = []
+    fm = (sims_warranty.ringkas_audit(ro_id) or {}).get("fileMap") or {}
+    for kat in _FOTO_KLAIM_PRIORITAS:
+        for f in (fm.get(kat) or []):
+            if len(gambar) >= _MAX_FOTO_KLAIM:
+                break
+            fid = str(f.get("fileUploadInfoId") or "")
+            data = sims_warranty.foto_bytes(fid) if fid else None
+            if not data:
+                continue
+            image_id, filename = ai_export.stash_raw(
+                no_wo, data, f"klaim_{fid}.jpg")
+            label = {"faultStartPhoto_file": "Foto kerusakan",
+                     "detachPhoto_file": "Foto pembongkaran",
+                     "allCarPhoto_file": "Foto unit",
+                     "odometerPhoto_file": "Foto odometer",
+                     "nameplatePhoto_file": "Foto nameplate",
+                     "vinPhoto_file": "Foto VIN"}.get(kat, "Foto klaim")
+            gambar.append({"image_id": image_id, "filename": filename,
+                           "pn": rec.get("no_wo"), "nama_figure": label,
+                           "kategori": "Klaim"})
+        if len(gambar) >= _MAX_FOTO_KLAIM:
+            break
+    if gambar:
+        out["gambar"] = gambar
+
+    catatan = (
+        "Detail klaim garansi SIMS DMS. ⚠️ Semua nilai uang dalam CNY (modal "
+        "klaim pabrik) — JANGAN diubah ke rupiah kecuali user minta konversi. "
+        "part_diklaim/jasa_diklaim KOSONG = WO belum dikerjakan mekanik "
+        "(normal untuk status Order dibuka/Kerja ditugaskan), bukan error. "
+        "'alur_persetujuan.menunggu' = nama yang sedang memegang klaim."
+    )
+    if gambar:
+        catatan += (" Foto klaim terlampir & tampil OTOMATIS di bawah jawaban — "
+                    "⛔ JANGAN buat link/gambar sendiri.")
+    out["catatan"] = catatan   # WAJIB key terakhir (_cap_tool_content)
+    return out
+
+

@@ -309,7 +309,8 @@ _TOOLS_GAMBAR_INLINE = frozenset({
     "gambar_exploded", "gambar_exploded_mesin", "uraikan_mesin", "uraikan_assembly",
     "part_aus_dari_rangka", "diagram_wiring", "cari_manual",
     "cari_pengetahuan", "buka_pengetahuan",
-    "diagnosa",   # fan-out pengetahuan_internal ikut membawa gambar (18451fd)
+    "diagnosa",      # fan-out pengetahuan_internal ikut membawa gambar (18451fd)
+    "detail_klaim",  # foto klaim garansi SIMS (2026-07-22)
 })
 
 # Budget output lebih besar untuk panggilan yang WAJIB menulis jawaban (bukan ronde
@@ -775,6 +776,9 @@ _TOOL_LABEL = {
     "cek_kendaraan": "Mengecek data kendaraan (EPC)",
     "pengganti_part": "Mencari part pengganti",
     "diagnosa": "Mendiagnosa (SIMS)",
+    "cek_garansi": "Mengecek garansi unit",
+    "riwayat_klaim": "Membuka riwayat klaim",
+    "detail_klaim": "Membuka detail klaim",
     "katalog_kategori": "Menyiapkan katalog bergambar",
     "katalog_mesin": "Menyiapkan katalog mesin",
     "gambar_exploded": "Mengambil gambar exploded view",
