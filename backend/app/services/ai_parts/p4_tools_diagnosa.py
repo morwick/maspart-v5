@@ -600,8 +600,8 @@ def _t_cari_manual(args: dict, user: dict) -> dict:
     if not topik:
         return {"error": "Sebutkan topik/gejalanya."}
 
-    rows = manual_teks.search(topik, limit=4)
-    if not rows:
+    berskor = manual_teks.search_skor(topik, limit=4)
+    if not berskor:
         logger.info("MISS cari_manual q=%r user=%s", topik, user.get("username") or "?")
         return {
             "found": False, "jumlah": 0,
@@ -610,22 +610,32 @@ def _t_cari_manual(args: dict, user: dict) -> dict:
                         "pakai diagram_wiring."),
         }
 
+    skor_juara = berskor[0][0]
+    ada_tier_lemah = False
     hasil: list[dict] = []
     gambar: list[dict] = []
     ada_tft = False
-    for r in rows:
+    for sc, r in berskor:
         if (r.get("sumber") or "").startswith("manual_tft"):
             ada_tft = True
+        # Penyajian bertingkat sadar-skor (pola cari_pengetahuan): juara teks
+        # penuh; pendukung kuat (≥0.45×juara) potongan; lemah judul-saja.
+        juara = not hasil
+        kuat = sc >= 0.45 * skor_juara
+        batas = 1300 if juara else (500 if kuat else 0)
         item = {
             "sumber": r.get("sumber"), "halaman": r.get("halaman"),
             "judul": r.get("judul_id") or r.get("judul"),
-            # teks China APA ADANYA — model WAJIB terjemahkan ke Indonesia.
-            "teks_china": (r.get("teks") or "")[:1300],
         }
-        if r.get("blok"):
-            item["blok_china"] = r["blok"]
-        if r.get("tabel"):
-            item["tabel"] = r["tabel"][:6]
+        if batas:
+            # teks China APA ADANYA — model WAJIB terjemahkan ke Indonesia.
+            item["teks_china"] = (r.get("teks") or "")[:batas]
+            if r.get("blok"):
+                item["blok_china"] = r["blok"]
+            if r.get("tabel"):
+                item["tabel"] = r["tabel"][:6]
+        else:
+            ada_tier_lemah = True
         if r.get("kode"):
             item["kode"] = r["kode"]
         hasil.append(item)
@@ -640,23 +650,26 @@ def _t_cari_manual(args: dict, user: dict) -> dict:
             if len(gambar) >= 8:
                 break
 
-    out = {
-        "found": True,
-        "jumlah": len(hasil),
-        "hasil": hasil,
-        "catatan": (
-            "Isi MANUAL teknik resmi yang cocok. ⚠️ Field 'teks_china'/'blok_china'/"
-            "'tabel' aslinya BAHASA CHINA — WAJIB kamu TERJEMAHKAN ke Bahasa Indonesia "
-            "saat menjawab (jangan tampilkan China mentah; JANGAN ubah angka/kode/pin/"
-            "satuan). Jawab runtut: sebut topik, lalu (bila kartu gangguan) kemungkinan "
-            "penyebab & langkah pemeriksaan; sebut halaman/sumbernya. ⛔ JANGAN mengarang "
-            "di luar isi manual."
-        ),
-    }
+    catatan = (
+        "Isi MANUAL teknik resmi yang cocok. ⚠️ Field 'teks_china'/'blok_china'/"
+        "'tabel' aslinya BAHASA CHINA — WAJIB kamu TERJEMAHKAN ke Bahasa Indonesia "
+        "saat menjawab (jangan tampilkan China mentah; JANGAN ubah angka/kode/pin/"
+        "satuan). Jawab runtut: sebut topik, lalu (bila kartu gangguan) kemungkinan "
+        "penyebab & langkah pemeriksaan; sebut halaman/sumbernya. ⛔ JANGAN mengarang "
+        "di luar isi manual."
+    )
+    if skor_juara < _SKOR_LEMAH:
+        catatan += (" ⚠️ Kecocokan LEMAH — kemungkinan TIDAK menjawab pertanyaan; "
+                    "jangan dipaksakan, katakan bila tidak relevan.")
+    if ada_tier_lemah:
+        catatan += (" Hasil tanpa 'teks_china' = kecocokan tipis (judul saja); "
+                    "abaikan bila judulnya tak relevan.")
+    out = {"found": True, "jumlah": len(hasil), "hasil": hasil}
     if gambar:
         out["gambar"] = gambar
-        out["catatan"] += (" Gambar halaman manual terlampir & tampil OTOMATIS (inline) "
-                           "di bawah jawabanmu — ⛔ JANGAN buat link/gambar sendiri.")
+        catatan += (" Gambar halaman manual terlampir & tampil OTOMATIS (inline) "
+                    "di bawah jawabanmu — ⛔ JANGAN buat link/gambar sendiri.")
+    out["catatan"] = catatan
     # Kartu PDF manual TFT (ada di skema_ref) supaya user bisa buka aslinya.
     if ada_tft:
         try:
