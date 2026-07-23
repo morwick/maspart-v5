@@ -4,8 +4,9 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-07-17** (rombakan besar asisten AI fase 0→5 — lihat §9;
-> struktur kode asisten kini `backend/app/services/ai_parts/` + loader `ai_assistant.py`).
+> Terakhir diverifikasi: **2026-07-23** (APK 2.1.8 rilis — paritas web↔mobile penuh;
+> entri update terakhir = blok **2026-07-18 s/d 2026-07-23** di ujung changelog ini.
+> Struktur kode asisten: `backend/app/services/ai_parts/` + loader `ai_assistant.py`).
 > Ditambah **§3.5 — Cara Kerja Aplikasi (deep-dive fungsional)** pada 2026-06-25 agar AI/dev
 > langsung paham domain, alur data, logika pencarian + sinonim, AI tools, API & frontend.
 > Update **2026-06-27**: tambah fitur **Repair Kit Transmisi** (data + tool AI + endpoint +
@@ -431,6 +432,69 @@
 > repair_kit, jadwal, _LOOKUP_NOTE) + deskripsi tool terpanjang diringkas (specs −929c/permintaan)
 > — guard TIDAK disentuh. DITUNDA (butuh keputusan+eval): subset KAMUS −5k tok, pindah domain_block
 > −7k tok, merger gambar_exploded*/katalog_*, gating tool pembeli. Test +8 (`test_akurasi_audit.py`).
+> Update **2026-07-18 — PENGETAHUAN MANUAL + OLAH-EXCEL 9 PERBAIKAN + GERBANG STOK** (rinci di
+> checklist akhir dokumen): (a) `pin_ecu` MULTI-ECU 515 pin (5 sumber) + service `skema_ref`
+> (5 kartu PDF via diagram_wiring). (b) **`manual_media`** (`3bdef7e`) — 223 PNG diekstrak dari
+> PDF/Excel manual (pypdfium2+openpyxl), 50 terkurasi AI-vision, tampil inline via `diagram_wiring`
+> berperingkat relevansi; PNG scp-only. (c) **Fase C `manual_teks` + tool `cari_manual`** (`beb617e`)
+> — 319 record naratif manual Bosch ECU CN + TFT NanoBCU (130 terkurasi kunci Indonesia, model
+> menerjemahkan saat menjawab). (d) **Olah-Excel unggahan 9 perbaikan Fase 1-5** (`9ba86fd`..
+> `8c2df69`) — builder `sheet_status` warna+rekap byte-stable, `sheet_isi_kolom` +pengganti/
+> cross-ref/berat/dimensi/rencana_pemenuhan, tool `sheet_jadi_penawaran` (Excel→Penawaran Accurate,
+> admin) + `template_excel_part`, terima CSV + impor Google Sheets (anti-SSRF). (e) **Gerbang STOK
+> `col_stok`** (`c39efbd`) — kembaran gerbang harga, terpusat `permissions.py`. 932 test.
+> Update **2026-07-19 — MENU CONTROL TAB ASISTEN AI + GERBANG SERVER-SIDE**: (a) tab **Asisten AI**
+> di Menu Control (`40babfb`) — kind `asisten`, 5 key kemampuan eks-admin-only per akun; flag
+> `grant_off`, helper `boleh_ai` fail-closed, OR dgn role lama. (b) Gerbang `col_harga`/`col_stok`
+> ditegakkan juga di **router non-AI** (`e9d1f12`) — mask/strip response + 403 export; cache izin
+> frontend TTL 60 dtk. ⚠️ Fase 2 (require_menu per-router) belum.
+> Update **2026-07-20 — PENGETAHUAN ADMIN + REFINEMENT 4 ITEM**: (a) **Indexing PENGETAHUAN admin**
+> (`0f9d037`..`3a3f8a9`) — admin unggah dokumen jadi pengetahuan asisten; tool `cari_pengetahuan` +
+> `buka_pengetahuan` (bedah isi dalam), gambar tampil + multibahasa + kurasi selamat re-index,
+> ambang relevansi + dedup (payload model −36%). (b) **Seret-lepas file** langsung ke area chat
+> (`966ba35`); fitur cari-part-dari-foto DIHAPUS dari asisten (`bb1924a`, keputusan pemilik).
+> (c) Refinement: gate 3 tool banding/sensus dari pembeli (`9f0dc63`), telemetri tool gagal dibelah
+> **nf** (tak ketemu) vs **err** (infra) (`2912ecf`), i18n backfill 4 dataset diagnosa/perawatan
+> 2.169 string (`656d369`), proyeksi per-field salinan model utk hasil tool raksasa −45%
+> (`b1d19ad`). (d) Excel: sel Harga/Stok/Qty/Berat jadi ANGKA + pemisah ribuan (`21ce136`+`d3144fd`).
+> Update **2026-07-21 — AUDIT JUAL-BELI L1-L5 + ACCURATE + LACAK RESI + APK 2.1.5–2.1.7**:
+> (a) **Audit jual-beli** (`cc0a735`+`a4e4eca`+`d7ea5f8`): checkout idempoten, mismatch nominal
+> ditandai, `/payment/status` dibatasi 30/menit/akun, kebocoran per_gudang ke pembeli ditutup,
+> TOCTOU set_status admin, dedup harga etalase=checkout, qty<1 ditolak; **migrasi 014 diverifikasi
+> SUDAH jalan** (RPC reserve_order ada) → race oversell tertutup. (b) **Harga SIMS = CNY apa
+> adanya** (`8498dd6`) — harga modal; konversi IDR hanya bila diminta; harga jual Rp = Accurate.
+> (c) **`/api/app/meta` hidup + panel Config Aplikasi** (`46ec3a4`) — dulu 404; ⚠️ `latest_name`
+> wajib diisi manual tiap rilis APK. (d) **Pelanggan penawaran = TAUTAN AKUN** (`0f1b94b`+`44b38fb`)
+> — `users.accurate_customer_id` (migrasi 024) + menu admin `/admin/pelanggan` pencarian gaya
+> Accurate; bukan lagi cocok-nama recipient_name. (e) Alamat penerima per-akun + lepas sesi Accurate
+> usai penawaran (`8556a5d`). (f) **Lacak resi in-app** (`287c25b`) — `/track/waybill` manifest
+> kurir, cache 10 mnt; label ala Shopee BELUM bisa (RajaOngkir tanpa rute pemesanan). (g) Mesin cari
+> pengetahuan **V2/V3** (`eb9a561`+`f98a5b6`) — typo+stem+PN+diversitas; tier sadar-skor −30-40%
+> token. (h) Plafon input pembeli (`3cca309`); fix Excel harga Accurate+SIMS saling timpa
+> (`7dc8c2d`). (i) **APK 2.1.5** (fix stok '—' detail part) → **2.1.6** (alamat per-akun) →
+> **2.1.7** (lacak resi).
+> Update **2026-07-22 — GARANSI SIMS + TELEMATICS ARMADA + MODE PERBAIKAN + CI**: (a) **Garansi &
+> Klaim SIMS** (`49177ce`+`43e5743`+`fc8170b`) — tool `cek_garansi`/`riwayat_klaim`/`detail_klaim`
+> (frame 8-char, foto klaim inline, 1.979 klaim dealer MAS) + cek massal + Excel riwayat +
+> `rekap_klaim` (label status lengkap + agregasi nilai CNY); gerbang Menu Control `ai_garansi`.
+> (b) **Telematics/GPS Sinotruk** (`a7c3944`..`f16131e`) — tool ADMIN-ONLY `lihat_unit_armada`/
+> `excel_unit_armada`/`ganti_nama_unit` + daftarkan unit baru/masukkan ke FLEET/buat FLEET
+> (WRITE 2-langkah, satuan + massal Excel); 257 unit; env `TELEMATICS_*` di Coolify; re-login
+> code 350. (c) **Mode Perbaikan asisten** (`2cae5c0`) — saklar global admin di Menu Control +
+> popup pemberitahuan di web & mobile. (d) Pagar bahasa pengayaan LLM wajib Indonesia (`cc284dd`+
+> `ff7c3e0`); fan-out pengetahuan internal ke `diagnosa` + gambar inline (`18451fd`+`73b053f`);
+> istilah lapangan user diteruskan MENTAH ke semua tool pencarian + penjaga deterministik
+> (`caea366`+`da667d7`). (e) `manual_teks` dapat mesin cari V2/V3 (`c0388a9`); Excel **format
+> angka pintar per-kolom** di builder bersama — persen/berat/CNY/USD/Rp (`83c4f63`). (f)
+> **`cek_massal_part`** (`55b61c9`) — banyak PN 1 panggilan (nama+stok+harga, Excel opsional);
+> ingatan konteks diperluas PN user + no WO klaim (`0b55713`); routing tool dipertegas (`c827456`).
+> (g) **push.sh clean-scp** (anti file basi) + **CI pytest GitHub Actions**
+> `.github/workflows/ci.yml` (`9e38de5`) — ⚠️ repo privat, cek hasil manual di tab Actions.
+> (h) Auto-logout idle 5 menit masuk lalu DIBATALKAN pemilik (`e08f94c`→revert `31a81e2`).
+> **1332 unit test** (⚠️ `test_determinisme` flaky pytest-randomly, pre-existing).
+> Update **2026-07-23 — APK 2.1.8**: rilis `ad45a02` bawa popup Mode Perbaikan ke aplikasi
+> (arm64-v8a, debug-signed, versionCode 2011); halaman /download 2.1.8 · 21 MB. Paritas
+> web↔mobile PENUH per tanggal ini. ⚠️ isi `latest_name=2.1.8` di Config Aplikasi bila belum.
 
 ---
 
@@ -453,8 +517,10 @@ Fitur utama (berdasarkan halaman frontend & router backend):
 - **Populasi** — data populasi unit
 - **Orders / Pesanan / Keranjang** — alur jual-beli + pembayaran + ongkir
 - **Chat** — chat order & gudang
-- **Asisten AI** — chatbot (DeepSeek, OpenAI-compatible) dengan ~30 tool (katalog, EPC
-  per-VIN, banding, repair kit, fault code, populasi) + guard anti-halusinasi
+- **Asisten AI** — chatbot (DeepSeek, OpenAI-compatible) dengan 73 spec tool, disaring
+  per peran (katalog, EPC
+  per-VIN, banding, repair kit, fault code, populasi, garansi/klaim SIMS, telematics
+  armada, pengetahuan admin, olah-Excel) + guard anti-halusinasi
 - **Umpan balik AI** — 👍/👎 per jawaban asisten (tabel Supabase `ai_feedback`,
   review admin di `/admin/feedback`) — §3.5.5g
 - **Monitoring User** — online/offline in-memory di `/admin/monitoring` — §3.5.11
@@ -508,7 +574,7 @@ maspart-main/
 │   ├── epc_token.txt                   # token sesi EPC (di-gitignore; auto-refresh via SSO)
 │   └── manuals/                        # PDF manual
 │
-├── migrations/         # SQL migrations (Supabase/Postgres) 003..014
+├── migrations/         # SQL migrations (Supabase/Postgres) 003..024
 ├── deploy/             # script & config deploy VPS (lihat §5)
 ├── .streamlit/         # config.toml + secrets.toml (warisan versi Streamlit)
 └── .devcontainer/
