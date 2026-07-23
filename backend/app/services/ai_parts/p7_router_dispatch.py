@@ -127,6 +127,7 @@ _DISPATCH = {
     "uraikan_assembly": _t_uraikan_assembly,
     "turunan_assembly": _t_turunan_assembly,
     "uraikan_mesin": _t_uraikan_mesin,
+    "part_dari_mesin": _t_part_dari_mesin,
     "pengganti_part": _t_pengganti_part,
     "repair_kit_mesin": _t_repair_kit_mesin,
     "unit_dari_part": _t_unit_dari_part,

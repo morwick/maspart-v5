@@ -856,6 +856,30 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "part_dari_mesin",
+                "description": (
+                    "CARI PART DI MESIN WEICHAI langsung dari NOMOR MESIN (serial engine, mis. "
+                    "'4P24B000713') — TANPA perlu nomor rangka/VIN. Untuk 'carikan starter untuk "
+                    "no engine 4P24B000713', 'part injector mesin nomor X', 'BOM mesin dari nomor "
+                    "engine Y'. Beda dari uraikan_mesin (yang butuh RANGKA unit Sinotruk): tool ini "
+                    "masuk EPC Weichai LANGSUNG dari serial mesinnya. Tanpa 'part' → daftar GROUP "
+                    "mesin + model engine (mis. WP4G130E22); dengan 'part' → komponen yang cocok + "
+                    "stok/harga lokal. Hanya untuk mesin merek WEICHAI (WP/WD/WP-series). ⛔ JANGAN "
+                    "mengarang PN."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "no_mesin": {"type": "string", "description": "Nomor mesin / serial engine Weichai (mis. '4P24B000713')."},
+                        "part": {"type": "string", "description": "Opsional: nama komponen yang dicari (mis. 'starter', 'injector', 'piston', 'filter oli'). Kosong = daftar group mesin."},
+                    },
+                    "required": ["no_mesin"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "pengganti_part",
                 "description": (
                     "PERSAMAAN/PENGGANTI (supersession) part — jawab 'PN ini diganti nomor berapa?', "

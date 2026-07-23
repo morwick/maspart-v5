@@ -881,6 +881,7 @@ _TOOL_LABEL = {
     "part_aus_dari_rangka": "Menelusuri part poros unit (EPC)",
     "bom_dari_rangka": "Menyusun BOM unit (EPC)",
     "uraikan_mesin": "Menguraikan part mesin (Weichai)",
+    "part_dari_mesin": "Mencari part dari nomor mesin (Weichai)",
     "uraikan_assembly": "Menguraikan komponen assembly",
     "turunan_assembly": "Menelusuri turunan assembly (lintas model)",
     "kategori_unit": "Memetakan kategori unit (EPC)",

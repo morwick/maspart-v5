@@ -45,6 +45,7 @@ _WORKERS = 16
 _lock = threading.Lock()
 _bridge_cache: dict[str, dict] = {}   # frame -> {at, bridge}
 _bom_cache: dict[str, dict] = {}      # frame -> {at, val}
+_bom_no_cache: dict[str, dict] = {}   # nomor mesin -> {at, val} (jalur by-engine-no)
 _UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/149 Safari/537.36"}
 
 
@@ -227,6 +228,39 @@ def _descendants(dhh: str, node_id, ddate: str, token: str, seen: set,
     return out
 
 
+def _walk_bom(token: str, dhh: str, ddate: str, engine_meta: dict) -> dict:
+    """Ambil pohon BOM (root → GROUP + part langsung tiap group) dari order (dhh)
+    yang SUDAH ter-resolve. Dipakai bersama oleh jalur per-RANGKA (engine_bom) &
+    per-NOMOR-MESIN (engine_bom_by_no). engine_meta = {model, serial?}."""
+    tree = _get(_TREE_URL, {"dhhNumber": dhh, "dhhDate": ddate, "lang": "en_US",
+                            "ypartFlag": "false"}, token)
+    if "_err" in tree:
+        return {"found": False, "reason": tree["_err"], "message": "Gagal ambil pohon BOM mesin Weichai."}
+    data = tree.get("data")
+    root = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) else None)
+    if not root:
+        return {"found": False, "reason": "empty", "message": "BOM mesin Weichai kosong untuk order ini."}
+
+    groups_raw = [g for g in (root.get("children") or []) if g.get("id")]
+
+    def _fill(g: dict) -> dict:
+        parts = _list_node(dhh, g["id"], ddate, token)
+        return {"id": g["id"], "pn": (g.get("partNumber") or "").strip().upper(),
+                "nama": " ".join((g.get("partName") or "").split()),
+                "jumlah_part": len(parts), "parts": parts}
+
+    with ThreadPoolExecutor(max_workers=_WORKERS) as ex:
+        groups = list(ex.map(_fill, groups_raw))
+    total = sum(g["jumlah_part"] for g in groups)
+    return {"found": True,
+            "engine": {"model": engine_meta.get("model"),
+                       "nomor_mesin": engine_meta.get("serial"),
+                       "nama": " ".join((root.get("partName") or "").split()),
+                       "order": dhh},
+            "jumlah_group": len(groups), "jumlah_part": total, "groups": groups,
+            "_ctx": {"dhh": dhh, "ddate": ddate, "token": token}}
+
+
 def engine_bom(rangka: str) -> dict:
     """BOM MESIN Weichai dari NOMOR RANGKA (full auto: SSO→order→tree→list). Ambil GROUP +
     part LANGSUNG tiap group (cepat, cache). Turunan part (mis. Filter Element di dalam Oil
@@ -243,36 +277,66 @@ def engine_bom(rangka: str) -> dict:
     br = _bridge(frame)
     if not br.get("found"):
         return br
-    token, dhh, ddate = br["token"], br["dhhNumber"], br.get("dhhDate") or ""
-
-    tree = _get(_TREE_URL, {"dhhNumber": dhh, "dhhDate": ddate, "lang": "en_US",
-                            "ypartFlag": "false"}, token)
-    if "_err" in tree:
-        return {"found": False, "reason": tree["_err"], "message": "Gagal ambil pohon BOM mesin Weichai."}
-    data = tree.get("data")
-    root = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) else None)
-    if not root:
-        return {"found": False, "reason": "empty", "message": "BOM mesin Weichai kosong untuk unit ini."}
-
-    groups_raw = [g for g in (root.get("children") or []) if g.get("id")]
-
-    def _fill(g: dict) -> dict:
-        parts = _list_node(dhh, g["id"], ddate, token)
-        return {"id": g["id"], "pn": (g.get("partNumber") or "").strip().upper(),
-                "nama": " ".join((g.get("partName") or "").split()),
-                "jumlah_part": len(parts), "parts": parts}
-
-    with ThreadPoolExecutor(max_workers=_WORKERS) as ex:
-        groups = list(ex.map(_fill, groups_raw))
-    total = sum(g["jumlah_part"] for g in groups)
-    val = {"found": True,
-           "engine": {"model": br.get("serial"),
-                      "nama": " ".join((root.get("partName") or "").split()),
-                      "order": dhh},
-           "jumlah_group": len(groups), "jumlah_part": total, "groups": groups,
-           "_ctx": {"dhh": dhh, "ddate": ddate, "token": token}}
+    val = _walk_bom(br["token"], br["dhhNumber"], br.get("dhhDate") or "",
+                    {"model": br.get("serial"), "serial": br.get("serial")})
+    if not val.get("found"):
+        return val
     with _lock:
         _bom_cache[frame] = {"at": time.monotonic(), "val": val}
+    return val
+
+
+def resolve_engine_order(no_mesin: str) -> dict:
+    """Resolusi NOMOR MESIN (serial engine) langsung ke order Weichai — TANPA VIN
+    (jalur global getOrderNumber; token account-level kita bekerja utk serial apa
+    pun, terverifikasi live 2026-07-23 no 4P24B000713 → WP4G130E22).
+    {found, token, dhhNumber, dhhDate, model, engine_nama} atau {found:False, reason}."""
+    serial = (no_mesin or "").strip()
+    if not serial:
+        return {"found": False, "reason": "input", "message": "Nomor mesin kosong."}
+    token = _ensure_token()
+    if not token:
+        return {"found": False, "reason": "no_session",
+                "message": ("Sesi EPC Weichai belum aktif. Cek satu unit bermesin Weichai "
+                            "dulu (mis. 'cek piston unit <rangka>') agar token aktif, lalu ulangi.")}
+    go = _get(_ORDER_URL, {"serialNumber": serial}, token)
+    if "_err" in go:
+        return {"found": False, "reason": go["_err"], "message": "Gagal ambil order mesin dari Weichai."}
+    od = go.get("data")
+    if not isinstance(od, dict):
+        return {"found": False, "reason": "no_order",
+                "message": f"Nomor mesin '{serial}' tidak ditemukan di EPC Weichai (cek nomornya)."}
+    dhh = od.get("dhhNumber") or od.get("orderNumber") or ""
+    if not dhh:
+        return {"found": False, "reason": "no_order",
+                "message": f"Order untuk nomor mesin '{serial}' tak ditemukan di Weichai."}
+    iba = od.get("ibaLang") or od.get("iba") or {}
+    return {"found": True, "token": token, "dhhNumber": dhh,
+            "dhhDate": od.get("effDate") or "",
+            "completionDate": od.get("completionDate") or "",
+            "model": iba.get("Model") or od.get("dhhName"),
+            "engine_nama": iba.get("英文名称") or ""}
+
+
+def engine_bom_by_no(no_mesin: str) -> dict:
+    """BOM MESIN Weichai LANGSUNG dari NOMOR MESIN (tanpa VIN). Sama bentuk dgn
+    engine_bom, tapi order di-resolve via resolve_engine_order."""
+    serial = (no_mesin or "").strip().upper()
+    if not serial:
+        return {"found": False, "reason": "input", "message": "Nomor mesin kosong."}
+    with _lock:
+        c = _bom_no_cache.get(serial)
+        if c and (time.monotonic() - c["at"] < _CACHE_TTL):
+            return c["val"]
+    r = resolve_engine_order(serial)
+    if not r.get("found"):
+        return r
+    val = _walk_bom(r["token"], r["dhhNumber"], r.get("dhhDate") or "",
+                    {"model": r.get("model"), "serial": serial})
+    if not val.get("found"):
+        return val
+    with _lock:
+        _bom_no_cache[serial] = {"at": time.monotonic(), "val": val}
     return val
 
 
@@ -500,10 +564,20 @@ def exploded_figures(rangka: str, pn: str, kategori: str = "lengkap") -> dict:
 
 
 def find_parts(rangka: str, terms: list[str]) -> dict:
-    """Cari komponen mesin yg nama/PN cocok. Untuk part LANGSUNG yang cocok (mis. 'Oil
-    Filter') JUGA diurai TURUNANNYA (mis. Filter Element, Seat) — on-demand, jadi cepat.
+    """Cari komponen mesin yg nama/PN cocok DARI NOMOR RANGKA. Lihat _filter_bom."""
+    return _filter_bom(engine_bom(rangka), terms)
+
+
+def find_parts_by_no(no_mesin: str, terms: list[str]) -> dict:
+    """Cari komponen mesin yg nama/PN cocok LANGSUNG DARI NOMOR MESIN (tanpa VIN)."""
+    return _filter_bom(engine_bom_by_no(no_mesin), terms)
+
+
+def _filter_bom(bom: dict, terms: list[str]) -> dict:
+    """Saring BOM mesin (hasil engine_bom / engine_bom_by_no) per kata kunci. Untuk
+    part LANGSUNG yang cocok (mis. 'Oil Filter') JUGA diurai TURUNANNYA (mis. Filter
+    Element, Seat) — on-demand, jadi cepat.
     {found, engine, cocok, hasil:[{pn, nama, group, dari?}]}."""
-    bom = engine_bom(rangka)
     if not bom.get("found"):
         return bom
     ctx = bom.get("_ctx") or {}

@@ -2043,7 +2043,35 @@ def _uraikan_mesin_impl(args: dict, user: dict) -> dict:
         res = epc_weichai.find_parts(rangka, match_terms)
     else:
         res = epc_weichai.engine_bom(rangka)
+    return _format_mesin_bom(res, part, user, rangka)
 
+
+def _t_part_dari_mesin(args: dict, user: dict) -> dict:
+    """CARI PART DI MESIN WEICHAI LANGSUNG DARI NOMOR MESIN (serial engine) — TANPA
+    VIN/rangka. Untuk 'carikan starter untuk no engine 4P24B000713'. Tanpa 'part' →
+    daftar GROUP mesin; dengan 'part' → komponen cocok + stok/harga lokal. Order
+    di-resolve via getOrderNumber(serialNumber=<no>) memakai token account-level."""
+    no_mesin = (args.get("no_mesin") or args.get("no_engine")
+                or args.get("serial") or args.get("nomor_mesin") or "").strip()
+    if not no_mesin:
+        return {"error": "Sebutkan NOMOR MESIN (serial engine, mis. 4P24B000713)."}
+    part = (args.get("part") or args.get("query") or "").strip()
+    if part:
+        terms, _syn = _expand_query(part)
+        match_terms = [part] + [t for t in terms if t]
+        ql = (part + " " + " ".join(terms)).lower()
+        for dom, extra in _AUS_KEYWORDS.items():
+            if dom in ql:
+                match_terms += extra
+        res = epc_weichai.find_parts_by_no(no_mesin, match_terms)
+    else:
+        res = epc_weichai.engine_bom_by_no(no_mesin)
+    return _format_mesin_bom(res, part, user, "")
+
+
+def _format_mesin_bom(res: dict, part: str, user: dict, rangka: str) -> dict:
+    """Bentuk hasil BOM mesin Weichai (dipakai jalur per-VIN & per-NOMOR-MESIN):
+    daftar group (tanpa part) atau komponen cocok + silang stok/harga (dgn part)."""
     if not res.get("found"):
         reason = res.get("reason")
         if reason in ("no_link", "no_engine", "no_order"):
@@ -2053,7 +2081,11 @@ def _uraikan_mesin_impl(args: dict, user: dict) -> dict:
         return {"found": False, "error": res.get("message") or "Gagal mengambil BOM mesin Weichai. Coba lagi."}
 
     eng = res.get("engine") or {}
-    engine_info = {"model_mesin": eng.get("nama"), "nomor_mesin": eng.get("model"), "order": eng.get("order")}
+    engine_info = {"model_mesin": eng.get("nama"),
+                   "nomor_mesin": eng.get("nomor_mesin") or eng.get("model"),
+                   "order": eng.get("order")}
+    if eng.get("model") and eng.get("model") != eng.get("nomor_mesin"):
+        engine_info["kode_model"] = eng.get("model")   # mis. WP4G130E22 (jalur by-no)
 
     # Mode DAFTAR GROUP (tanpa 'part').
     if not part:
