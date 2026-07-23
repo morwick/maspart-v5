@@ -6,6 +6,39 @@
 # Urutan muat & pembagian: lihat _PARTS di ai_assistant.py.
 from __future__ import annotations
 
+# ── Tautan pengetahuan antar-store (2026-07-23) ──
+_MAX_TERKAIT = 5
+
+
+def _sisip_terkait(out: dict, ents: list, exclude: str, user: dict) -> dict:
+    """Sisip `pengetahuan_terkait` (record store LAIN yang menyebut entitas yang
+    sama — via knowledge_links) + 1 kalimat instruksi. INVARIAN: `catatan` tetap
+    KEY TERAKHIR (aturan _cap_tool_content potong-tengah). Fail-open: gagal apa
+    pun → out kembali utuh."""
+    try:
+        if not ents or not isinstance(out, dict):
+            return out
+        rows = knowledge_links.terkait(ents, exclude_store=exclude,
+                                       limit=_MAX_TERKAIT,
+                                       untuk_pembeli=_is_pembeli(user))
+        # hanya tautan yang tool pembukanya SAH utk peran ini
+        allowed = _allowed_tool_names(user)
+        rows = [r for r in rows if r.get("buka", "").split("(", 1)[0] in allowed]
+        if not rows:
+            return out
+        cat = out.pop("catatan", "") or ""
+        # `ref` internal (dedup/debug) — TIDAK dikirim ke model (hemat token)
+        out["pengetahuan_terkait"] = [{"store": r["store"], "judul": r["judul"],
+                                       "buka": r["buka"]} for r in rows]
+        out["catatan"] = (cat + " 🔗 'pengetahuan_terkait' = pengetahuan LAIN yang "
+                          "menyinggung entitas sama (part/kode/model). BOLEH panggil "
+                          "SATU tool lanjutan dari kolom 'buka' HANYA bila pertanyaan "
+                          "user memang membutuhkannya — ⛔ jangan borong semua tautan.")
+    except Exception:
+        logger.exception("sisip pengetahuan_terkait gagal (dilewati)")
+    return out
+
+
 def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
     spn = args.get("spn")
     fmi = args.get("fmi")
@@ -217,7 +250,7 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
             "jangan menambah langkah karangan."
         )
 
-    return {
+    out = {
         "total_database": fault_codes.count(),
         "total_database_eol": eol_dtc.count(),
         "kriteria": {"spn": spn, "fmi": fmi, "code": code, "query": query, "unit": unit},
@@ -234,6 +267,10 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
         "pdf_diagnosa": pdf_cards,
         "catatan": catatan,
     }
+    return _sisip_terkait(
+        out, knowledge_links.entitas(dtc=code or "", spn=spn, fmi=fmi,
+                                     teks=" ".join(filter(None, [query, unit]))),
+        "dtc_codes", user)
 
 
 def _t_diagnosa(args: dict, user: dict) -> dict:
@@ -423,7 +460,9 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
             + (" Gambar terlampir tampil otomatis — ⛔ JANGAN buat link/gambar sendiri."
                if peng.get("gambar") else "")
         )
-    return out
+    return _sisip_terkait(
+        out, knowledge_links.entitas(dtc=kode, spn=spn, fmi=fmi, teks=keluhan),
+        "dtc_codes", user)
 
 
 def _t_cari_filter_shantui(args: dict, user: dict) -> dict:
@@ -448,7 +487,7 @@ def _t_cari_filter_shantui(args: dict, user: dict) -> dict:
                 + ". Atau sebut jenis filter (oli/solar/udara/hidrolik/water separator)."
             ),
         }
-    return {
+    out = {
         "jumlah": len(rows),
         "hasil": [
             {
@@ -467,6 +506,11 @@ def _t_cari_filter_shantui(args: dict, user: dict) -> dict:
             "part_number_shantui = nomor part asli Shantui."
         ),
     }
+    ents = []
+    for r in rows[:10]:
+        ents += knowledge_links.entitas(pn=r.get("part_number") or "",
+                                        model=r.get("model") or "")
+    return _sisip_terkait(out, list(dict.fromkeys(ents)), "filter_shantui", user)
 
 
 def _t_diagram_wiring(args: dict, user: dict) -> dict:
@@ -562,7 +606,8 @@ def _t_diagram_wiring(args: dict, user: dict) -> dict:
                 " 📎 Ada SKEMA/MANUAL PDF resmi yang cocok — terlampir sebagai "
                 "KARTU yang bisa DIBUKA user ('pdf_skema'): sebutkan judulnya & "
                 "beri tahu user bisa membukanya dari kartu. ⛔ JANGAN buat link sendiri.")
-        return out
+        return _sisip_terkait(out, knowledge_links.entitas(teks=komponen),
+                              "wiring_ref", user)
     out = {
         "found": True,
         "jumlah": len(gambar),
@@ -586,7 +631,8 @@ def _t_diagram_wiring(args: dict, user: dict) -> dict:
         out["catatan"] += (
             " 📎 'pdf_skema' = SKEMA/MANUAL PDF resmi terkait, terlampir sebagai "
             "KARTU yang bisa DIBUKA user — sebutkan judulnya. ⛔ JANGAN buat link sendiri.")
-    return out
+    return _sisip_terkait(out, knowledge_links.entitas(teks=komponen),
+                          "wiring_ref", user)
 
 
 def _t_cari_manual(args: dict, user: dict) -> dict:
@@ -684,7 +730,10 @@ def _t_cari_manual(args: dict, user: dict) -> dict:
                                    "KARTU yang bisa DIBUKA user.")
         except Exception:  # pragma: no cover
             pass
-    return out
+    _teks_ent = topik + " " + " ".join(
+        " ".join(str(k) for k in (h.get("kode") or [])) for h in hasil[:3])
+    return _sisip_terkait(out, knowledge_links.entitas(teks=_teks_ent),
+                          "manual_teks", user)
 
 
 # Batas gambar tool penemuan. Frontend hanya merender 6 gambar per giliran
@@ -866,7 +915,8 @@ def _t_cari_pengetahuan(args: dict, user: dict) -> dict:
         catatan += (" Gambar terlampir & tampil OTOMATIS (inline) di bawah jawabanmu "
                     "— ⛔ JANGAN buat link/gambar sendiri.")
     out["catatan"] = catatan   # WAJIB key terakhir (_cap_tool_content potong tengah)
-    return out
+    return _sisip_terkait(out, knowledge_links.entitas(teks=topik),
+                          "pengetahuan", user)
 
 
 def _t_buka_pengetahuan(args: dict, user: dict) -> dict:
@@ -990,7 +1040,7 @@ def _t_jadwal_perawatan(args: dict, user: dict) -> dict:
                 "(dikelompokkan per jenis alat). Interval jam lazim: 250/500/1000/2000."
             ),
         }
-    return {
+    out = {
         "model_diminta": model or "(semua)",
         "jenis_diminta": jenis or "(semua)",
         "jam_diminta": jam,
@@ -1016,6 +1066,12 @@ def _t_jadwal_perawatan(args: dict, user: dict) -> dict:
             "variannya. Sajikan per 'sistem'."
         ),
     }
+    ents = knowledge_links.entitas(model=model)
+    for r in rows[:10]:
+        for e in knowledge_links.entitas(pn=r.get("part_number") or ""):
+            if e not in ents:
+                ents.append(e)
+    return _sisip_terkait(out, ents, "jadwal_perawatan", user)
 
 
 def _t_cek_populasi(args: dict, user: dict) -> dict:

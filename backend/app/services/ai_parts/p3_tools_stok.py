@@ -407,6 +407,15 @@ def _t_cari_part(args: dict, user: dict) -> dict:
             "dan labeli hasil ini 'perkiraan per-model'. Bila rangka SUDAH ada, utamakan "
             "tool EPC (part_aus_dari_rangka/bom_dari_rangka) alih-alih hasil ini."
         )
+    # Tautan pengetahuan HANYA saat hasil sempit (≤3 PN) — daftar panjang tak
+    # butuh tautan & hemat token.
+    if 0 < len(out) <= 3:
+        ents: list[str] = []
+        for it in out:
+            for e in knowledge_links.entitas(pn=it.get("part_number") or ""):
+                if e not in ents:
+                    ents.append(e)
+        out_res = _sisip_terkait(out_res, ents, "catalog_bom", user)
     return out_res
 
 
@@ -711,6 +720,10 @@ def _t_detail_part(args: dict, user: dict) -> dict:
         result["pengganti"] = [{"pn": e["pn"], "nama": e.get("nama")} for e in pgl[:5]]
         result["info_pengganti"] = ("PN ini punya part PENGGANTI resmi — bila stok kosong, "
                                     "tawarkan cek pengganti (tool pengganti_part utk detail).")
+    # Tautan pengetahuan lintas-store utk PN ini (manual/jadwal/filter/repairkit/
+    # DTC yang menyebutnya) — jembatan part → pengetahuan.
+    result = _sisip_terkait(result, knowledge_links.entitas(pn=pn),
+                            "catalog_bom", user)
     return result
 
 
