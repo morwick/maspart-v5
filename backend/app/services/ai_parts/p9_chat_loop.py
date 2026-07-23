@@ -677,6 +677,15 @@ _EPC_VIN_PART_TOOLS = frozenset({
     "kategori_unit", "assembly_utama_unit", "banding_rangka", "banding_rangka_massal",
 })
 
+# Tool GARANSI/KLAIM SIMS: PN di hasilnya = data klaim RESMI yang sudah terikat ke
+# unit (frame) — tak perlu diverifikasi ulang ke EPC. PN asal tool ini dikecualikan
+# dari guard EPC-FIRST (kasus nyata: "cek <no WO>" setelah tabel riwayat klaim —
+# kolom Frame terbaca sebagai 'rangka disebut' → ekskursi EPC 6 ronde sia-sia).
+_KLAIM_TOOLS = frozenset({
+    "cek_garansi", "riwayat_klaim", "detail_klaim",
+    "sheet_garansi_massal", "excel_riwayat_klaim", "rekap_klaim",
+})
+
 
 def _subst_correction_msg(subst: list[str]) -> str:
     return (
@@ -1062,6 +1071,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     # cari_part (lokal per-model) & tak ada di hasil EPC = suspect (salah utk unit ini).
     epc_vin_pns: set[str] = set()
     cari_local_pns: set[str] = set()
+    klaim_pns: set[str] = set()  # PN dari tool garansi/klaim — kebal guard EPC-FIRST
     epc_vin_used = False
     # PN yang PERNAH ditandai suspect di riwayat → tetap dicurigai di follow-up
     # (state guard mereset tiap turn; tanpa ini PN lokal per-model jadi 'bersih'
@@ -1075,6 +1085,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             epc_vin_used = True
         elif name == "cari_part":
             cari_local_pns.update(res_pns)
+        elif name in _KLAIM_TOOLS:
+            klaim_pns.update(res_pns)
 
     def _finalize(reply: str, part_pns=None) -> dict:
         """Bungkus payload jawaban + catat observabilitas (best-effort). Dipanggil
@@ -1247,10 +1259,11 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             # GUARD EPC-FIRST (aturan pemilik: part per-unit wajib sesuai rangka):
             # user menyebut rangka di pesan terakhir + jawaban memuat PN + model
             # belum MENCOBA satu pun tool ber-argumen rangka → paksa cek EPC dulu
-            # (sekali). Token rangka & kode unit tak dihitung sebagai PN.
+            # (sekali). Token rangka & kode unit tak dihitung sebagai PN; PN dari
+            # tool garansi/klaim (`klaim_pns`) juga tidak — sudah resmi per-unit.
             if user_rangka_recent and not rangka_tool_attempted and not epc_first_retried:
                 _pn_reply = [p for p in _drop_unit_tokens(list(_extract_pns(reply)))
-                             if p not in _rangka_tokens]
+                             if p not in _rangka_tokens and p not in klaim_pns]
                 if _pn_reply:
                     epc_first_retried = True
                     messages.append({"role": "assistant", "content": content})
@@ -1413,7 +1426,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     elif ((user_dtc_tokens and not dtc_tool_attempted
            and any(t in reply.upper() for t in user_dtc_tokens))
           or (user_rangka_recent and not rangka_tool_attempted
-              and _drop_unit_tokens(list(_extract_pns(reply))))):
+              and [p for p in _drop_unit_tokens(list(_extract_pns(reply)))
+                   if p not in klaim_pns])):
         reply += ("\n\n⚠️ Jawaban ini belum sempat diverifikasi penuh ke database/EPC "
                   "— mohon tanyakan ulang untuk kepastian.")
     return _finalize(reply)

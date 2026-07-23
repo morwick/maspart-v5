@@ -121,6 +121,36 @@ def test_epc_first_jawaban_tanpa_pn_lolos(monkeypatch):
     assert calls["n"] == 1  # tak ada PN → guard tak menyala
 
 
+def test_epc_first_kebal_pn_dari_tool_klaim(monkeypatch):
+    # Kasus nyata 2026-07-23: tabel riwayat klaim memuat kolom Frame (RT108970 dst)
+    # → "cek <no WO>" berikutnya memanggil detail_klaim, jawabannya ber-PN, dan guard
+    # EPC-FIRST memaksa ekskursi EPC 6 ronde sia-sia. PN hasil tool garansi/klaim =
+    # data resmi per-unit → guard TIDAK boleh menyala.
+    seq = [
+        {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": "a", "function": {"name": "detail_klaim",
+                                     "arguments": '{"no_wo":"RIDZ0052607125"}'}},
+        ]}, "finish_reason": "tool_calls"}]},
+        {"choices": [{"message": {"content":
+                      "Part yang diklaim: WG9100443050 (timing gear)."},
+                      "finish_reason": "stop"}]},
+    ]
+    calls = _stub_model(monkeypatch, seq)
+    monkeypatch.setattr(ai, "_run_tool", lambda name, args, user, sheet_id="": {
+        "found": True, "no_wo": "RIDZ0052607125", "frame": "RT108970",
+        "parts": [{"part_number": "WG9100443050", "nama": "timing gear"}]})
+    history = [
+        {"role": "user", "content": "riwayat klaim garansi bulan ini"},
+        {"role": "assistant",
+         "content": "RIDZ0052607125 | Frame RT108970 | Timing gear rusak"},
+        {"role": "user", "content": "cek RIDZ0052607125"},
+    ]
+    out = ai.chat(USER, history)
+    assert calls["n"] == 2  # ronde tool + jawaban final; TANPA koreksi EPC-first
+    assert "WG9100443050" in out["reply"]
+    assert "belum sempat diverifikasi" not in out["reply"]  # tanpa disclaimer terminal
+
+
 # ── Guard DTC-first (bukti log 2026-07-16: SPN 520243 FMI 21 dijawab 'tidak
 #    ditemukan' TANPA memanggil tool, padahal datanya ADA) ────────────────────
 def test_dtc_tokens_deteksi():
