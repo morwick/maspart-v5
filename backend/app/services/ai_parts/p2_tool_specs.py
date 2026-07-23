@@ -904,6 +904,32 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "cek_massal_part_rangka",
+                "description": (
+                    "CEK SATU PART (mis. 'injector', 'kampas rem', 'filter oli') di BANYAK NOMOR "
+                    "RANGKA (VIN) SEKALIGUS — jalur EPC Sinotruk Atlas per-VIN. PASANGAN dari "
+                    "cek_massal_part_mesin: yang itu untuk daftar NOMOR MESIN (Weichai), yang INI "
+                    "untuk daftar NOMOR RANGKA (unit Sinotruk/HOWO/SITRAK — termasuk yang bermesin "
+                    "MC). Pakai saat user memberi DAFTAR VIN dan menanyakan satu komponen ('cek "
+                    "injector untuk rangka A, B, C, …'). Efisien: unit ber-konfigurasi sama "
+                    "diproses sekali. Otomatis deteksi pengganti (supersession) → 'pn_order_terkini' "
+                    "+ silang stok/harga lokal. Set excel=true untuk kartu unduh Excel. Istilah "
+                    "Indonesia diterjemahkan otomatis. ⛔ JANGAN panggil cari_part_di_unit berulang."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "daftar_rangka": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Daftar nomor rangka/VIN (array ATAU string dipisah baris/koma) — mis. ['LZZ1BG3H0SJ398963','LZZ1BG3H1SJ398969']."},
+                        "part": {"type": "string", "description": "Komponen yang dicek di semua unit (mis. 'injector', 'kampas rem', 'filter oli')."},
+                        "excel": {"type": "boolean", "description": "true = buat file Excel (kartu unduh) berisi tabel per nomor rangka."},
+                    },
+                    "required": ["daftar_rangka", "part"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "pengganti_part",
                 "description": (
                     "PERSAMAAN/PENGGANTI (supersession) part — jawab 'PN ini diganti nomor berapa?', "

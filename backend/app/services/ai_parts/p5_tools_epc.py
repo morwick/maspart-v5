@@ -2242,6 +2242,128 @@ def _t_cek_massal_part_mesin(args: dict, user: dict) -> dict:
     return out
 
 
+def _t_cek_massal_part_rangka(args: dict, user: dict) -> dict:
+    """CEK SATU PART (mis. 'injector') di BANYAK NOMOR RANGKA sekaligus (1 panggilan)
+    — jalur EPC Sinotruk Atlas per-VIN. Pasangan cek_massal_part_mesin (yang untuk
+    NOMOR MESIN Weichai); ini untuk NOMOR RANGKA (unit Sinotruk/HOWO, mesin MC dll).
+    Efisien: unit ber-konfigurasi (order) sama diproses sekali. Deteksi pengganti
+    (SIMS) → pn_order_terkini; silang stok/harga lokal; opsi Excel."""
+    rgs = _parse_daftar_mesin(args.get("daftar_rangka") or args.get("rangka")
+                              or args.get("daftar") or args.get("vins"))
+    part = (args.get("part") or args.get("query") or "").strip()
+    if not rgs:
+        return {"error": "Sebutkan daftar NOMOR RANGKA (VIN, pisah baris/koma)."}
+    if not part:
+        return {"error": "Sebutkan PART yang dicek (mis. 'injector', 'kampas rem', 'filter oli')."}
+    dipotong = len(rgs) > _MAX_MASSAL_MESIN
+    rgs = rgs[:_MAX_MASSAL_MESIN]
+
+    # istilah lapangan ID → nama katalog EN (EPC hanya paham EN/CN) — WAJIB.
+    terms, _syn = _expand_query(part)
+    kws = [t for t in dict.fromkeys([part] + [t for t in terms if t]) if t and len(t) >= 3]
+
+    res = epc_bom.find_part_massal_rangka(rgs, kws)
+    per = res.get("per_rangka") or {}
+    if not per:
+        return {"found": False, "error": "Tidak ada rangka valid untuk dicek."}
+    # token EPC bermasalah utk SEMUA → jujur.
+    if all((v.get("_err") in ("token_expired", "no_token")) for v in per.values()):
+        return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
+
+    main_pn: dict[str, dict] = {}
+    pn_unik: set[str] = set()
+    for r in rgs:
+        e = per.get(r) or {}
+        if e.get("found"):
+            mh = _pick_main_hit(e.get("hits") or [], part)
+            if mh:
+                main_pn[r] = mh
+                pn_unik.add(mh["pn"])
+
+    # SUPERSESSION (SIMS partEquivalentQuery, part Sinotruk) → PN order terkini.
+    order_pn: dict[str, str] = {}
+    for pn in pn_unik:
+        try:
+            eq = sims.equivalents_for(pn) or {}
+            cand = [x.get("pn") for x in (eq.get("digantikan_oleh") or []) if x.get("pn")]
+            order_pn[pn] = cand[0] if cand else pn
+        except Exception:
+            order_pn[pn] = pn
+
+    boleh_harga = _boleh_harga(user)
+    all_pns = list(pn_unik | set(order_pn.values()))
+    local = {k.upper(): v for k, v in (part_index.rows_for_pns(all_pns) if all_pns else {}).items()}
+
+    hasil: list[dict] = []
+    tak_ada: list[str] = []
+    for r in rgs:
+        e = per.get(r) or {}
+        if not e.get("found"):
+            tak_ada.append(r)
+            why = ("nomor rangka tak ditemukan di EPC" if e.get("_err") in ("not_found", "input")
+                   else f"tidak ada '{part}' di katalog unit ini")
+            hasil.append({"rangka": r, "found": False, "catatan": why})
+            continue
+        mh = main_pn.get(r) or {}
+        pn = mh.get("pn")
+        opn = order_pn.get(pn, pn)
+        lr = local.get((opn or pn or "").upper(), {})
+        row = {"rangka": r, "found": True, "part": mh.get("nama") or part, "pn_epc": pn}
+        if opn and opn != pn:
+            row["pn_order_terkini"] = opn
+            row["catatan_pn"] = f"PN {pn} punya pengganti {opn} — utamakan {opn}."
+        row["stok_lokal"] = lr.get("stok")
+        if boleh_harga:
+            row["harga_lokal"] = lr.get("harga")
+        hasil.append(row)
+
+    ketemu = len(rgs) - len(tak_ada)
+    out: dict = {
+        "found": ketemu > 0, "part_dicari": part, "jumlah_rangka": len(rgs),
+        "ketemu": ketemu, "tak_ada": len(tak_ada),
+        "konfigurasi_unik": res.get("order_unik"),
+        "pn_unik": sorted(pn_unik), "hasil": hasil,
+    }
+
+    if args.get("excel"):
+        kolom = ["No", "Nomor Rangka", "Part", "PN (EPC)", "PN Order Terkini"]
+        if boleh_harga:
+            kolom += ["Harga"]
+        kolom += ["Stok Lokal", "Keterangan"]
+        baris: list[list] = []
+        for i, r in enumerate(hasil, start=1):
+            if r.get("found"):
+                base = [str(i), r["rangka"], r.get("part") or "", r.get("pn_epc") or "",
+                        r.get("pn_order_terkini") or r.get("pn_epc") or ""]
+                if boleh_harga:
+                    base += [r.get("harga_lokal") if r.get("harga_lokal") not in (None, "") else "—"]
+                base += [ai_export.ke_angka(r.get("stok_lokal")) if r.get("stok_lokal") not in (None, "") else "—",
+                         r.get("catatan_pn") or ""]
+            else:
+                base = [str(i), r["rangka"], part, "", ""]
+                if boleh_harga:
+                    base += ["—"]
+                base += ["—", r.get("catatan") or "tidak ditemukan"]
+            baris.append(base)
+        export_id, filename = ai_export.stash_export(
+            f"Cek {part} — {len(rgs)} rangka", kolom, baris)
+        out["export_id"] = export_id
+        out["filename"] = filename
+        out["jumlah_baris"] = len(baris)
+
+    catatan = (f"Cek '{part}' di {len(rgs)} nomor rangka dalam SATU panggilan (⛔ JANGAN "
+               f"cari_part_di_unit berulang). {ketemu} ketemu, {len(tak_ada)} tidak. "
+               f"{res.get('order_unik')} konfigurasi unik. 'pn_order_terkini' = PN "
+               "pengganti resmi bila ada — utamakan itu utk order. Sebut jujur yang tak "
+               "ketemu. ⛔ JANGAN mengarang PN.")
+    if dipotong:
+        catatan = f"⚠️ Daftar dipotong ke {_MAX_MASSAL_MESIN} rangka pertama. " + catatan
+    if out.get("export_id"):
+        catatan += " File Excel siap — kartu unduh muncul OTOMATIS; JANGAN tulis ulang tabel."
+    out["catatan"] = catatan
+    return out
+
+
 def _format_mesin_bom(res: dict, part: str, user: dict, rangka: str) -> dict:
     """Bentuk hasil BOM mesin Weichai (dipakai jalur per-VIN & per-NOMOR-MESIN):
     daftar group (tanpa part) atau komponen cocok + silang stok/harga (dgn part)."""

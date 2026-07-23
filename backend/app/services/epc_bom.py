@@ -886,6 +886,57 @@ def search_in_unit(rangka: str, keywords: list[str]) -> dict:
             "hasil": hasil}
 
 
+def find_part_massal_rangka(rangkas: list[str], keywords: list[str]) -> dict:
+    """Cari part (keywords) di BANYAK NOMOR RANGKA sekaligus — EFISIEN: kelompokkan
+    unit per ORDER (konfigurasi katalog sama → hasil sama), cari SEKALI per order,
+    petakan balik per rangka. Jalur EPC Sinotruk Atlas (search_in_unit).
+    {per_rangka:{rangka:{found, order_no, frame, hits:[{pn,nama}] | _err}},
+     order_unik, pn_unik:[...]}."""
+    kws = [k.strip() for k in (keywords or []) if k and len(k.strip()) >= 3]
+    if not rangkas or not kws:
+        return {"per_rangka": {}, "order_unik": 0, "pn_unik": []}
+
+    # 1) resolve tiap rangka → orderNo (root cache; ringan). Paralel.
+    def _res(r):
+        f = _frame(r)
+        root = _atlas_root_cached(f)
+        return r, f, (root.get("orderNo") if "_err" not in root else None), root.get("_err")
+    resolved: dict = {}
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for r, f, order, err in ex.map(_res, rangkas):
+            resolved[r] = (f, order, err)
+
+    # 2) kelompokkan per orderNo; cari SEKALI per order (frame wakil).
+    orders: dict = {}
+    for r, (f, order, err) in resolved.items():
+        if order:
+            orders.setdefault(order, []).append((r, f))
+
+    def _search(order_frame):
+        order, frame = order_frame
+        return order, search_in_unit(frame, kws)
+    hits_by_order: dict = {}
+    reps = [(order, grp[0][1]) for order, grp in orders.items()]
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(reps)))) as ex:
+        for order, d in ex.map(_search, reps):
+            hits_by_order[order] = d
+
+    # 3) petakan balik per rangka.
+    per: dict = {}
+    pn_unik: set = set()
+    for r, (f, order, err) in resolved.items():
+        if not order:
+            per[r] = {"found": False, "frame": f, "_err": err or "not_found"}
+            continue
+        d = hits_by_order.get(order) or {}
+        hits = [{"pn": h["pn"], "nama": h.get("nama")} for h in (d.get("hasil") or [])]
+        for h in hits:
+            pn_unik.add(h["pn"])
+        per[r] = {"found": bool(hits), "order_no": order, "frame": f,
+                  "hits": hits, **({"_err": d.get("_err")} if d.get("_err") else {})}
+    return {"per_rangka": per, "order_unik": len(orders), "pn_unik": sorted(pn_unik)}
+
+
 def reverse_find_in_unit(rangka: str, pn: str) -> dict:
     """Cari SEBUAH PN di SATU unit lewat pencarian terbalik EPC — SATU panggilan
     (home/reverse/part?t=car&v=<orderNo>&k=<pn>&cjh=<frame>), pengganti sisiran
