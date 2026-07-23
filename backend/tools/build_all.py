@@ -29,6 +29,8 @@ TOOLS = Path(__file__).resolve().parent
 _URUTAN = [
     "build_fault_codes", "build_abs_scr", "build_fault_cards", "build_dtc_store",
     "build_maintenance", "build_filter_ref", "build_repairkit", "build_pin_ecu",
+    # membaca hasil builder di atas → taruh di ekor; ai_knowledge tetap _TERAKHIR
+    "build_knowledge_links",
 ]
 _OPSIONAL = ["build_catalog_bom"]
 _MEDIA = ["build_manual_media", "build_manual_teks"]  # baca PDF sumber — hanya --with-media
