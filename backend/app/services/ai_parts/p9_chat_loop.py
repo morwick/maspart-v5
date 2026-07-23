@@ -6,13 +6,25 @@
 # Urutan muat & pembagian: lihat _PARTS di ai_assistant.py.
 from __future__ import annotations
 
-def _post_chat(messages: list[dict], tools: list[dict], max_tokens: int = 6000) -> dict:
-    s = get_settings()
-    if not s.ai_configured:
-        raise AINotConfigured("DEEPSEEK_API_KEY belum diset di backend/.env")
-    url = f"{s.deepseek_base_url.rstrip('/')}/chat/completions"
+class _AIGagalSementara(RuntimeError):
+    """Provider utama gagal karena hal SEMENTARA (402 saldo habis / 429 / 5xx /
+    jaringan) — layak dialihkan ke provider cadangan. Subclass RuntimeError agar
+    pemanggil lama (`except RuntimeError`) tetap bekerja tanpa fallback."""
+
+
+_FALLBACK_COOLDOWN_S = 600   # primary baru tumbang → 10 mnt langsung ke fallback
+_fallback_until = 0.0        # deadline monotonic; > now = jalur fallback aktif
+
+
+def _post_provider(base_url: str, api_key: str, model: str, messages: list[dict],
+                   tools: list[dict], max_tokens: int, label: str = "DeepSeek") -> dict:
+    """Satu panggilan chat-completions OpenAI-compatible ke SATU provider.
+    402 → _AIGagalSementara LANGSUNG (saldo tak pulih dalam 2 detik, jangan
+    buang waktu retry); 429/5xx/jaringan setelah 1x retry → _AIGagalSementara;
+    4xx lain (400/401/404) = permanen → RuntimeError polos."""
+    url = f"{base_url.rstrip('/')}/chat/completions"
     payload = {
-        "model": s.deepseek_model,
+        "model": model,
         "messages": messages,
         "temperature": 0.1,
         # Cukup besar agar blok pikir internal [PIKIR] (kerap panjang saat membandingkan
@@ -25,7 +37,7 @@ def _post_chat(messages: list[dict], tools: list[dict], max_tokens: int = 6000) 
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
     headers = {
-        "Authorization": f"Bearer {s.deepseek_api_key}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     # Retry SEKALI untuk kegagalan sementara (jaringan putus, 429 rate-limit,
@@ -37,18 +49,56 @@ def _post_chat(messages: list[dict], tools: list[dict], max_tokens: int = 6000) 
             if attempt == 1:
                 time.sleep(1.5)
                 continue
-            raise RuntimeError(f"Gagal menghubungi DeepSeek (jaringan): {e}") from e
+            raise _AIGagalSementara(f"Gagal menghubungi {label} (jaringan): {e}") from e
         if r.status_code in (429, 500, 502, 503, 504) and attempt == 1:
             time.sleep(2)
             continue
         if r.status_code >= 400:
-            # Jangan bocorkan key; cukup status + pesan ringkas dari DeepSeek.
+            # Jangan bocorkan key; cukup status + pesan ringkas dari provider.
             try:
                 detail = (r.json().get("error") or {}).get("message") or ""
             except Exception:
                 detail = r.text[:200]
-            raise RuntimeError(f"DeepSeek API error {r.status_code}: {detail}")
+            msg = f"{label} API error {r.status_code}: {detail}"
+            if r.status_code in (402, 429, 500, 502, 503, 504):
+                raise _AIGagalSementara(msg)
+            raise RuntimeError(msg)
         return r.json()
+
+
+def _post_chat(messages: list[dict], tools: list[dict], max_tokens: int = 6000) -> dict:
+    """Router provider: DeepSeek utama; gagal-SEMENTARA (402/429/5xx/jaringan)
+    → provider cadangan (env AI_FALLBACK_*, payload sama, model di-swap) dengan
+    cooldown 10 menit (selama itu langsung fallback, lalu re-probe primary).
+    Tanpa fallback ter-konfigurasi = perilaku lama persis. ⚠️ fallback tak punya
+    prompt-cache DeepSeek — lebih mahal, tapi asisten TETAP HIDUP."""
+    global _fallback_until
+    s = get_settings()
+    if not s.ai_configured:
+        raise AINotConfigured("DEEPSEEK_API_KEY belum diset di backend/.env")
+    fb = s.ai_fallback_configured
+    if fb and time.monotonic() < _fallback_until:
+        try:   # cooldown aktif: primary baru saja tumbang → langsung fallback
+            return _post_provider(s.ai_fallback_base_url, s.ai_fallback_api_key,
+                                  s.ai_fallback_model, messages, tools, max_tokens,
+                                  label="fallback")
+        except Exception:
+            _fallback_until = 0.0   # fallback ikut tumbang → probe primary lagi
+    try:
+        return _post_provider(s.deepseek_base_url, s.deepseek_api_key,
+                              s.deepseek_model, messages, tools, max_tokens)
+    except _AIGagalSementara as e:
+        if not fb:
+            raise                    # perilaku lama persis (subclass RuntimeError)
+        _fallback_until = time.monotonic() + _FALLBACK_COOLDOWN_S
+        logger.warning("provider utama gagal (%s) → fallback %s", e, s.ai_fallback_model)
+        try:
+            return _post_provider(s.ai_fallback_base_url, s.ai_fallback_api_key,
+                                  s.ai_fallback_model, messages, tools, max_tokens,
+                                  label="fallback")
+        except Exception as e2:
+            _fallback_until = 0.0    # dua-duanya mati → jangan kunci ke fallback
+            raise e from e2          # error PRIMARY yang muncul ke user
 
 
 def _add_usage(tot: dict, data: dict) -> None:

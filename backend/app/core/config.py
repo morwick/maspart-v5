@@ -106,6 +106,18 @@ class Settings(BaseSettings):
     def ai_configured(self) -> bool:
         return bool(self.deepseek_api_key)
 
+    # ── Asisten AI — provider CADANGAN (OpenAI-compatible; dipakai otomatis saat
+    #    DeepSeek 402 saldo habis / 429 / 5xx / jaringan). Kosong = fitur mati.
+    #    Diisi via UI Coolify (AI_FALLBACK_*); vendor bebas asal OpenAI-compatible. ──
+    ai_fallback_base_url: str = ""
+    ai_fallback_api_key: str = ""
+    ai_fallback_model: str = ""
+
+    @property
+    def ai_fallback_configured(self) -> bool:
+        return bool(self.ai_fallback_base_url and self.ai_fallback_api_key
+                    and self.ai_fallback_model)
+
     # ── Telematics/GPS armada (Sinotruk Fleet Service — www.sg.sinotruksfs.com) ──
     # Portal pelacakan GPS/IoT armada, TERPISAH dari SIMS & EPC (server, auth,
     # kredensial berbeda). Login RSA (services/telematics.py). Diisi di UI Coolify
