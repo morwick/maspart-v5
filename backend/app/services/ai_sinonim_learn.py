@@ -26,7 +26,7 @@ import time
 import requests
 
 from ..core.config import get_settings
-from . import part_index, search_log, sinonim
+from . import ai_feedback, part_index, search_log, sinonim
 
 logger = logging.getLogger("maspart.sinonim")
 
@@ -81,10 +81,43 @@ def _existing_triggers() -> set[str]:
     return out
 
 
+def _fb_kandidat(have: set, seen: dict, taken: set, limit: int) -> list[dict]:
+    """Kandidat dari pertanyaan 👎 (ai_feedback rating='down' belum resolved) —
+    loop feedback 2026-07-23: down-vote yang berbentuk FRASA ISTILAH pendek
+    (1-6 kata) sering = istilah lapangan yang gagal dipahami; kalimat panjang
+    bukan bahan kamus. Feedback TIDAK di-auto-resolve saat usulan disetujui
+    (sinonim baru ≠ keluhan pasti beres — antrean admin tetap loop manusia)."""
+    out: list[dict] = []
+    try:
+        rows = ai_feedback.list_feedback(rating="down", only_open=True, limit=100)
+    except Exception:
+        rows = []
+    for r in rows or []:
+        q = " ".join(str(r.get("question") or "").split()).strip(" ?!.")
+        key = q.lower()
+        words = q.split()
+        if not q or key in have or key in seen or key in taken:
+            continue
+        if not (1 <= len(words) <= 6) or len(q) < 4:
+            continue
+        if _PN_LIKE.match(q.replace(" ", "")) and any(c.isdigit() for c in q):
+            continue
+        try:   # kamus sudah meng-cover istilahnya → gap-nya bukan di kamus
+            if any(sinonim.hit(t, q) for t in have):
+                continue
+        except Exception:
+            pass
+        out.append({"query": q, "count": 1, "sumber": "feedback"})
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _kandidat(limit: int) -> list[dict]:
     """Miss tersering yang BELUM ada di kamus & belum pernah diusulkan/ditolak.
     Query mirip PN (huruf+angka panjang tanpa spasi) dilewati — itu urusan
-    suggest_pns, bukan kamus sinonim."""
+    suggest_pns, bukan kamus sinonim. Sisa slot diisi kandidat dari umpan
+    balik 👎 (_fb_kandidat)."""
     have = _existing_triggers()
     seen = _load()  # dipanggil dalam _lock oleh generate()
     out: list[dict] = []
@@ -98,6 +131,10 @@ def _kandidat(limit: int) -> list[dict]:
         out.append(m)
         if len(out) >= limit:
             break
+    if len(out) < limit:
+        out += _fb_kandidat(have, seen,
+                            {(m.get("query") or "").strip().lower() for m in out},
+                            limit - len(out))
     return out
 
 

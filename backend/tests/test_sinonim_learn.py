@@ -58,6 +58,51 @@ def _env(tmp_path, monkeypatch):
     return tmp_path
 
 
+def test_fb_kandidat_dari_feedback_down(_env, monkeypatch):
+    """P7 2026-07-23: pertanyaan 👎 pendek ala istilah = kandidat kamus; kalimat
+    panjang / PN / yang sudah ter-cover kamus / duplikat miss DISARING."""
+    monkeypatch.setattr(learn.ai_feedback, "list_feedback", lambda **kw: [
+        {"question": "karet stabil howo?", "rating": "down", "resolved": False},
+        {"question": "kenapa jawaban kamu tadi salah total soal harga part "
+                     "yang saya tanyakan kemarin sore ya", "rating": "down"},   # panjang
+        {"question": "WG9100443050", "rating": "down"},                          # PN
+        {"question": "spion", "rating": "down"},                                 # dobel miss
+    ])
+    search_log.record_miss("spion", "nama", "asisten")
+    out = learn._kandidat(10)
+    qs = [m["query"] for m in out]
+    assert "karet stabil howo" in qs                 # dipangkas '?' + lolos filter
+    assert qs.count("spion") == 1                    # dedup vs miss
+    fb = next(m for m in out if m["query"] == "karet stabil howo")
+    assert fb["sumber"] == "feedback"
+    assert "WG9100443050" not in qs
+    assert not any(len(q.split()) > 6 for q in qs)
+
+
+def test_fb_kandidat_feedback_error_aman(_env, monkeypatch):
+    def boom(**kw):
+        raise RuntimeError("supabase mati")
+
+    monkeypatch.setattr(learn.ai_feedback, "list_feedback", boom)
+    search_log.record_miss("spion", "nama", "asisten")
+    assert [m["query"] for m in learn._kandidat(10)] == ["spion"]
+
+
+def test_fb_kandidat_ikut_generate(_env, monkeypatch):
+    """End-to-end: tanpa miss, kandidat feedback masuk pipeline usulan yang sama."""
+    monkeypatch.setattr(learn.ai_feedback, "list_feedback", lambda **kw: [
+        {"question": "karet stabil", "rating": "down", "resolved": False}])
+    monkeypatch.setattr(learn, "_llm_usulan", lambda misses: [{
+        "query": "karet stabil", "triggers": ["karet stabil"],
+        "keywords": ["stabilizer bushing"], "grup": "poros",
+        "confidence": 0.9, "alasan": "istilah lapangan",
+    }])
+    monkeypatch.setattr(learn.part_index, "search_part_name",
+                        lambda k: [{"pn": "WG1"}])
+    res = learn.generate(limit=10)
+    assert res["dibuat"] == 1 and res["usulan"][0]["query"] == "karet stabil"
+
+
 def test_generate_validasi_keyword_dan_approve(_env, monkeypatch):
     search_log.record_miss("spion", "nama", "asisten")
     search_log.record_miss("spion", "nama", "asisten")
