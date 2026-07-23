@@ -737,6 +737,32 @@ _KLAIM_TOOLS = frozenset({
 })
 
 
+# ── Rem panggilan tool identik per-giliran (2026-07-23) ──
+# Log produksi 30 hari: 82,6% giliran ber-ronde ≥4 berisi tool GAGAL — model
+# membakar ronde memanggil tool yang sama berulang. Cache per-giliran: panggilan
+# IDENTIK tak dieksekusi ulang (hasil lama + instruksi berhenti), dan tiap tool
+# maksimal 3 eksekusi BERBEDA per giliran.
+_MAX_CALLS_PER_TOOL = 3
+_NOTE_ULANG = ("⛔ PANGGILAN IDENTIK DIABAIKAN: tool ini sudah dipanggil dengan "
+               "argumen PERSIS sama giliran ini — hasil di atas adalah hasil "
+               "sebelumnya (tidak dijalankan ulang; mengulanginya TIDAK akan "
+               "mengubah hasil). Jawab dari data yang sudah ada, coba pendekatan "
+               "LAIN (tool/argumen berbeda), atau sampaikan jujur bila datanya "
+               "memang tidak ada.")
+
+
+def _tool_call_key(name: str, args: dict) -> tuple | None:
+    """Kunci identitas panggilan tool per-giliran. Kunci server-side berawalan
+    '_' DIKELUARKAN (_grounded = set yang TUMBUH tiap ronde & tak ter-JSON;
+    _q_user/_sheet_id disuntik server) — identitas = argumen PILIHAN MODEL saja.
+    None bila args tak ter-serialisasi (tak pernah di-cache)."""
+    try:
+        vis = {k: v for k, v in (args or {}).items() if not str(k).startswith("_")}
+        return (name, json.dumps(vis, sort_keys=True, ensure_ascii=False, default=str))
+    except Exception:
+        return None
+
+
 def _subst_correction_msg(subst: list[str]) -> str:
     return (
         "⛔ KOREKSI OTORITAS DATA: PN berikut berasal dari KATALOG LOKAL per-model "
@@ -1126,6 +1152,32 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     epc_vin_pns: set[str] = set()
     cari_local_pns: set[str] = set()
     klaim_pns: set[str] = set()  # PN dari tool garansi/klaim — kebal guard EPC-FIRST
+    # Rem panggilan tool identik (state per-giliran; lihat _tool_call_key).
+    _call_cache: dict[tuple, dict] = {}   # key → hasil (sukses & gagal di-cache)
+    _call_count: dict[str, int] = {}      # nama tool → jml eksekusi BERBEDA
+
+    def _run_tool_turn(name: str, args: dict, u: dict, sid: str = "") -> dict:
+        key = _tool_call_key(name, args)
+        if key is not None and key in _call_cache:
+            res = dict(_call_cache[key])          # shallow copy — cache tak termutasi
+            res["catatan_panggilan_ulang"] = _NOTE_ULANG
+            return res
+        if _call_count.get(name, 0) >= _MAX_CALLS_PER_TOOL:
+            # TANPA field 'error' — _tool_fail_kind harus membaca "nf", bukan "err"
+            # (telemetri tool-gagal tak boleh tercemar oleh rem ini).
+            return {"found": False, "dibatasi": True,
+                    "catatan": (f"⛔ BATAS: tool '{name}' sudah dipanggil "
+                                f"{_MAX_CALLS_PER_TOOL}× dengan argumen berbeda "
+                                "giliran ini — panggilan berikutnya DITOLAK. "
+                                "Gabungkan kebutuhan dalam SATU panggilan (banyak "
+                                "tool menerima ARRAY/multi-istilah), jawab dari "
+                                "data yang sudah terkumpul, atau sampaikan jujur "
+                                "bila tidak ada.")}
+        res = _run_tool(name, args, u, sid)
+        if key is not None and isinstance(res, dict):
+            _call_cache[key] = res
+            _call_count[name] = _call_count.get(name, 0) + 1
+        return res
     epc_vin_used = False
     # PN yang PERNAH ditandai suspect di riwayat → tetap dicurigai di follow-up
     # (state guard mereset tiap turn; tanpa ini PN lokal per-model jadi 'bersih'
@@ -1236,8 +1288,8 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                         rangka_tool_attempted = True
                     if name in ("cari_kode_kesalahan", "diagnosa"):
                         dtc_tool_attempted = True
-                    result = _run_tool(name, {**lc_args, "_q_user": q_user_terakhir},
-                                       user, sheet_id)
+                    result = _run_tool_turn(name, {**lc_args, "_q_user": q_user_terakhir},
+                                            user, sheet_id)
                     tools_used.append(name)
                     _dump = _dump_tool(result, name)
                     _res_pns = _extract_pns(_dump)
@@ -1384,7 +1436,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 _lbl_seen.append(_lbl)
                 _emit(on_progress, _lbl)
 
-        def _exec_call(tc: dict) -> tuple[dict, str, dict, dict]:
+        def _parse_call(tc: dict) -> tuple[str, dict]:
             fn = (tc.get("function") or {})
             name = fn.get("name") or ""
             try:
@@ -1393,8 +1445,12 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                 args = {}
             if name in ("buat_excel", "hitung_part"):   # pagar anti-karangan PN
                 args = {**args, "_grounded": grounded}
-            return tc, name, args, _run_tool(name, {**args, "_q_user": q_user_terakhir},
-                                             user, sheet_id)
+            return name, args
+
+        def _exec_call(tc: dict) -> tuple[dict, str, dict, dict]:
+            name, args = _parse_call(tc)
+            return tc, name, args, _run_tool_turn(
+                name, {**args, "_q_user": q_user_terakhir}, user, sheet_id)
 
         # PERCEPATAN: batch >1 tool dieksekusi PARALEL (model kerap memanggil
         # beberapa tool sekaligus, mis. detail_part 3 PN / EPC + katalog) —
@@ -1402,8 +1458,31 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
         # tool read-only & ber-lock sendiri; hasil diproses BERURUTAN di bawah
         # agar urutan pesan/grounding deterministik.
         if len(tool_calls) > 1:
-            with ThreadPoolExecutor(max_workers=min(4, len(tool_calls))) as _ex:
-                executed = list(_ex.map(_exec_call, tool_calls))
+            # Panggilan IDENTIK dalam SATU batch di-dedup SEBELUM pool — tanpa
+            # ini dua thread paralel lolos cache (race) dan dobel eksekusi.
+            parsed = [_parse_call(tc) for tc in tool_calls]
+            keys = [_tool_call_key(n, a) for n, a in parsed]
+            first_idx: dict = {}
+            uniq: list[int] = []
+            for i, k in enumerate(keys):
+                if k is None or k not in first_idx:
+                    if k is not None:
+                        first_idx[k] = i
+                    uniq.append(i)
+            with ThreadPoolExecutor(max_workers=min(4, len(uniq))) as _ex:
+                uniq_res = dict(zip(uniq, _ex.map(
+                    lambda i: _run_tool_turn(parsed[i][0],
+                                             {**parsed[i][1], "_q_user": q_user_terakhir},
+                                             user, sheet_id), uniq)))
+            executed = []
+            for i, tc in enumerate(tool_calls):
+                n, a = parsed[i]
+                if i in uniq_res:
+                    executed.append((tc, n, a, uniq_res[i]))
+                else:   # kembaran identik dalam batch → hasil sama + catatan
+                    res = dict(uniq_res[first_idx[keys[i]]])
+                    res["catatan_panggilan_ulang"] = _NOTE_ULANG
+                    executed.append((tc, n, a, res))
         else:
             executed = [_exec_call(tool_calls[0])]
 
