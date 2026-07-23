@@ -6,7 +6,8 @@
 # Urutan muat & pembagian: lihat _PARTS di ai_assistant.py.
 from __future__ import annotations
 
-def _t_gambar_exploded(args: dict, user: dict) -> dict:
+def _t_gambar_exploded_satu(args: dict, user: dict) -> dict:
+    """Jalur SATU PN (perilaku lama persis, termasuk auto-fallback Atlas→mesin)."""
     sumber = (args.get("sumber") or "").strip().lower()
     if sumber == "mesin":
         return _gambar_exploded_mesin_impl(args, user)
@@ -25,6 +26,44 @@ def _t_gambar_exploded(args: dict, user: dict) -> dict:
                             + (h2.get("catatan") or ""))
             return h2
     return hasil
+
+
+def _t_gambar_exploded(args: dict, user: dict) -> dict:
+    """MULTI-PN (2026-07-23): log produksi — model memanggil tool ini 4× beruntun
+    dalam satu giliran (1 PN per panggilan). `pn` kini menerima ARRAY atau string
+    berpemisah ';'/',' (maks 4 PN, dedup); tiap PN tetap lewat jalur satu-PN utuh
+    (termasuk auto-fallback Atlas→mesin), hasil diagregasi + status per-PN."""
+    pn_raw = args.get("pn") or args.get("part_number") or ""
+    if isinstance(pn_raw, (list, tuple)):
+        pns = [str(x).strip().upper() for x in pn_raw if str(x).strip()]
+    else:
+        pns = [p.strip().upper() for p in re.split(r"[;,]", str(pn_raw)) if p.strip()]
+    pns = list(dict.fromkeys(pns))[:4]
+    if len(pns) <= 1:
+        return _t_gambar_exploded_satu({**args, "pn": (pns[0] if pns else "")}, user)
+
+    a_multi = {k: v for k, v in args.items() if k != "balon"}  # balon = mode 1 PN saja
+    per_pn: list[dict] = []
+    gambar: list[dict] = []
+    nihil: list[str] = []
+    for p in pns:                                   # sekuensial — fallback per-PN utuh
+        h = _t_gambar_exploded_satu({**a_multi, "pn": p}, user)
+        ok = bool(h.get("found"))
+        row = {"pn": p, "found": ok,
+               "sumber_dipakai": h.get("sumber_dipakai") or "atlas"}
+        if not ok:
+            row["error"] = h.get("error") or h.get("catatan")
+            nihil.append(p)
+        else:
+            for g in (h.get("gambar") or [])[:2]:   # multi-PN: maks 2 figure per PN
+                gambar.append({**g, "pn": p})
+        per_pn.append(row)
+    return {"found": bool(gambar), "pns": pns, "per_pn": per_pn,
+            "pn_nihil": nihil, "gambar": gambar[:_MAX_EXPLODED_FIGURES],
+            "catatan": ("Gambar exploded SIAP untuk PN ber-found=true (tampil inline "
+                        "otomatis). 'pn_nihil' = PN TANPA gambar — sampaikan jujur, "
+                        "⛔ jangan mengarang. 'balon' diabaikan pada mode multi-PN — "
+                        "sorot balon hanya via panggilan 1 PN.")}
 
 
 def _t_gambar_exploded_mesin(args: dict, user: dict) -> dict:
