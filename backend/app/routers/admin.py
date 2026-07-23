@@ -656,6 +656,29 @@ def resolve_search_miss(body: ResolveMissRequest, _admin: dict = Depends(require
     return {"ok": ok}
 
 
+# ── Gap Pengetahuan (miner ai_belajar — pertanyaan gagal berulang) ───────────
+@router.get("/ai-belajar/gap")
+def ai_belajar_gap(_admin: dict = Depends(require_admin)):
+    """Kelompok pertanyaan yang berulang GAGAL dijawab asisten (outcome != ok,
+    ≥3 kali) — daftar prioritas topik untuk admin menulis Pengetahuan AI.
+    Diisi otomatis oleh miner harian ai_belajar (baca-saja)."""
+    from ..services import ai_belajar
+    rows = ai_belajar.gaps()
+    return {"jumlah": len(rows), "gap": rows}
+
+
+class ResolveGapRequest(BaseModel):
+    topik: str
+
+
+@router.post("/ai-belajar/gap/resolve")
+def ai_belajar_gap_resolve(body: ResolveGapRequest,
+                           _admin: dict = Depends(require_admin)):
+    """Tandai satu topik gap selesai ditangani → hapus dari daftar."""
+    from ..services import ai_belajar
+    return {"ok": ai_belajar.resolve_gap(body.topik)}
+
+
 # ── Kamus Sinonim (istilah lapangan → kata kunci katalog) ────────────────────
 # Menulis data/sinonim/sinonim.json; asisten AI memuat ulang otomatis per-mtime,
 # jadi entri baru LANGSUNG dimengerti tanpa restart.

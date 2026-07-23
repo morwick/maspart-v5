@@ -94,6 +94,14 @@ def _warmup():
     except Exception as e:  # pragma: no cover
         print(f"[startup] auto-isi kode pos gudang gagal: {e}")
     try:
+        # Miner belajar-sendiri harian (bebas-LLM, bebas-jaringan-eksternal):
+        # chat-log gagal → kandidat sinonim + gap topik admin; cache EPC disk →
+        # edges part↔unit → rebuild knowledge_links (tautan antar-pengetahuan).
+        from .services import ai_belajar
+        ai_belajar.start_scheduled()
+    except Exception as e:  # pragma: no cover
+        print(f"[startup] scheduler ai_belajar gagal: {e}")
+    try:
         # Rekonsiliasi pembayaran (latar, tiap 10 menit). Uang pembeli tak lewat
         # server kita, jadi server mati tak menghentikan pembayaran — yang hilang
         # adalah NOTIFIKASI-nya (retry webhook Midtrans cuma ± 5–6 jam). Penyapu ini
