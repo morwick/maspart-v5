@@ -832,6 +832,30 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "turunan_assembly",
+                "description": (
+                    "TELUSURI TURUNAN (komponen di dalam) sebuah assembly dari PN-nya, LINTAS "
+                    "MODEL — dipakai saat uraikan_assembly per-VIN GAGAL karena di pohon VIN itu "
+                    "assembly hanya muncul UTUH tanpa rincian (leaf), padahal model LAIN memuat "
+                    "breakdown-nya. Sistem mencari PN assembly ini secara global ke SEMUA model, "
+                    "lalu mengambil daftar komponen dari model pertama yang punya rinciannya "
+                    "(disilang stok/harga lokal + atribusi model sumber). Pakai untuk 'assembly "
+                    "WG9925477132 isinya apa saja' saat unit user tak punya rinciannya. ⛔ Butuh PN "
+                    "assembly (bukan nama). Bila user menyebut RANGKA + nama assembly, coba "
+                    "uraikan_assembly DULU; tool ini fallback saat itu tak beranak."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pn": {"type": "string", "description": "PN assembly yang mau ditelusuri turunannya (mis. 'WG9925477132')."},
+                    },
+                    "required": ["pn"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "pengganti_part",
                 "description": (
                     "PERSAMAAN/PENGGANTI (supersession) part — jawab 'PN ini diganti nomor berapa?', "

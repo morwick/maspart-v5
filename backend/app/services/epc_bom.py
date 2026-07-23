@@ -950,6 +950,95 @@ def figure_for_instance(rangka: str, instance: dict, pn: str) -> dict:
     }
 
 
+def _item_pengganti(p: dict, pn: str) -> list[dict]:
+    """partAlternates item → daftar pengganti (afterTh), buang diri sendiri."""
+    alt: list[dict] = []
+    seen: set = set()
+    for a in (p.get("partAlternates") or []):
+        after = str(a.get("afterTh") or "").strip().upper()
+        if after and after != pn and after not in seen:
+            seen.add(after)
+            alt.append({"pn": after,
+                        "nama": " ".join(str(a.get("afterName") or "").split())})
+    return alt
+
+
+def assembly_components_global(pn: str, max_figures: int = 10,
+                               min_anak: int = 2) -> dict:
+    """TURUNAN (komponen) sebuah assembly PN dari MODEL MANA PUN yang punya
+    breakdown-nya — jalur GLOBAL EPC (bukan per-VIN). Untuk kasus: assembly
+    hanya muncul sebagai leaf tanpa anak di pohon VIN target, padahal model lain
+    memuat rinciannya.
+
+    Alur (terverifikasi live 2026-07-23, PN WG9925477132 → 1357 baris / 173
+    figure unik; figure pertama beranak 66):
+      1. home/reverse/part?t=global&k=<PN> → semua (model, figure induk) pemakai;
+      2. dedup per figure (partCode induk) — banyak model berbagi figure sama;
+      3. tiap figure unik (cap max_figures) → part/tree/item?type=model → items;
+      4. figure PERTAMA dgn >= min_anak anak (PN selain assembly) = breakdown-nya.
+
+    Return {found, assembly:{pn}, sumber_model, figure_pn, figure_nama, svg,
+    jumlah_model_pemakai, figure_unik, figure_dicoba, komponen:[{pn,nama,nama_cn,
+    qty,balon,pengganti}]} atau {found:False, ...} / {_err}."""
+    pnu = (pn or "").strip().upper()
+    if not pnu:
+        return {"found": False, "_err": "input"}
+    res = _get_auto(_REVERSE_URL, {"t": "global", "k": pnu})
+    if "_err" in res:
+        return {"found": False, "_err": res["_err"]}
+    rows = [d for d in (res.get("data") or []) if isinstance(d, dict)]
+    # dedup per figure induk (partCode); simpan wakil model pertama tiap figure.
+    figures: dict[str, dict] = {}
+    for d in rows:
+        fig = (d.get("partCode") or "").strip()
+        if fig and fig not in figures:
+            figures[fig] = d
+    dicoba = 0
+    for fig, d in list(figures.items())[:max_figures]:
+        rid, pid, plid = d.get("rootId"), d.get("partId"), d.get("partListId")
+        if not (rid and pid):
+            continue
+        dicoba += 1
+        r = _get_auto(_ATLAS_ITEM_URL, {
+            "id": plid or 0, "partId": pid, "parentId": rid, "rootId": rid,
+            "partCode": fig, "type": "model", "isSearch": "0"})
+        if "_err" in r:
+            continue
+        data = r.get("data") if isinstance(r.get("data"), dict) else {}
+        items = data.get("items") or []
+        anak = [p for p in items
+                if str(p.get("code") or "").strip().upper()
+                and str(p.get("code") or "").strip().upper() != pnu]
+        if len(anak) < min_anak:
+            continue
+        komponen = []
+        for p in anak:
+            cpn = str(p.get("code") or "").strip().upper()
+            komponen.append({
+                "pn": cpn,
+                "nama": " ".join(str(p.get("name") or "").split()),
+                "nama_cn": " ".join(str(p.get("originalName") or "").split()),
+                "qty": p.get("amount"), "balon": p.get("ballNum"),
+                "pengganti": _item_pengganti(p, cpn)})
+        svgs = [s for s in (data.get("d2s") or []) if isinstance(s, str)]
+        return {
+            "found": True,
+            "assembly": {"pn": pnu, "nama": " ".join(
+                str((figures[fig].get("partName") or "")).split()) or None},
+            "sumber_model": " ".join(str(d.get("model") or "").split()),
+            "figure_pn": fig,
+            "figure_nama": " ".join(str(d.get("partName") or "").split()),
+            "svg": svgs[0] if svgs else None,
+            "jumlah_model_pemakai": len(rows),
+            "figure_unik": len(figures),
+            "figure_dicoba": dicoba,
+            "komponen": komponen,
+        }
+    return {"found": False, "assembly": {"pn": pnu},
+            "jumlah_model_pemakai": len(rows), "figure_unik": len(figures),
+            "figure_dicoba": dicoba}
+
+
 def category_top(rangka: str) -> dict:
     """Daftar kategori/assembly TINGKAT-ATAS untuk 1 unit (1 panggilan + cache).
     Sukses → {found, frame_number, order_no, root_id, jumlah, kategori:[norm_cat...]}.

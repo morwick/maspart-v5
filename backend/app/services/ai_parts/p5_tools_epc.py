@@ -1878,8 +1878,16 @@ def _uraikan_assembly_impl(args: dict, user: dict) -> dict:
         if res.get("incomplete"):
             msg = ("Penelusuran pohon EPC unit ini belum tuntas (sebagian data gagal/terpotong) — "
                    "JANGAN simpulkan assembly tak ada; minta user coba lagi sebentar.")
-        return {"found": False, "frame_number": res.get("frame_number"), "error": msg,
-                "_incomplete": bool(res.get("incomplete"))}
+        out = {"found": False, "frame_number": res.get("frame_number"), "error": msg,
+               "_incomplete": bool(res.get("incomplete"))}
+        # Bila assembly disebut via PN tapi tak beranak di VIN ini → sarankan
+        # jalur LINTAS MODEL (turunan_assembly) yang mencari rincian di model lain.
+        if pn and not res.get("incomplete"):
+            out["saran_lintas_model"] = (
+                f"Assembly PN {pn} mungkin hanya muncul UTUH di unit ini tanpa "
+                "rincian. Coba tool turunan_assembly(pn='" + pn + "') untuk "
+                "menelusuri turunannya dari model lain yang memuat breakdown-nya.")
+        return out
 
     comps = res.get("components") or []
     pns = [c["pn"] for c in comps]
@@ -1922,6 +1930,96 @@ def _uraikan_assembly_impl(args: dict, user: dict) -> dict:
         **({"peringatan_tidak_lengkap":
             "⚠️ Penelusuran pohon EPC unit ini belum tuntas — daftar komponen bisa belum lengkap."}
            if res.get("incomplete") else {}),
+    }
+
+
+def _t_turunan_assembly(args: dict, user: dict) -> dict:
+    """TELUSURI TURUNAN (komponen) sebuah assembly PN dari MODEL MANA PUN yang
+    punya rinciannya — jalur GLOBAL EPC. Untuk kasus: assembly hanya muncul
+    sebagai leaf tanpa anak di pohon VIN target (uraikan_assembly per-VIN gagal),
+    padahal model lain memuat breakdown-nya. Menyilang komponen ke stok/harga
+    lokal + atribusi model sumbernya."""
+    pn = (args.get("pn") or args.get("part_number") or args.get("assembly") or "").strip().upper()
+    if not pn:
+        return {"error": "Sebutkan PN assembly yang mau ditelusuri turunannya."}
+    if not _PN_LIKE_RE.match(pn):
+        return {"error": ("Tool ini butuh PN assembly (mis. WG9925477132), bukan nama. "
+                          "Untuk cari per nama+VIN pakai uraikan_assembly.")}
+
+    res = epc_bom.assembly_components_global(pn)
+    err = res.get("_err")
+    if err in ("token_expired", "no_token"):
+        return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
+    if err == "network":
+        return {"found": False, "error": "Gagal menghubungi server EPC (jaringan). Coba lagi."}
+    if err:
+        return {"found": False, "error": "EPC tidak mengembalikan data untuk PN ini."}
+
+    if not res.get("found"):
+        n_model = res.get("jumlah_model_pemakai") or 0
+        if n_model:
+            return {"found": False, "part_number": pn,
+                    "jumlah_model_pemakai": n_model,
+                    "figure_dicoba": res.get("figure_dicoba"),
+                    "error": (f"PN {pn} dipakai {n_model} baris/model, tapi pada "
+                              f"{res.get('figure_dicoba')} figure teratas yang dicek "
+                              "TIDAK ada breakdown komponen (assembly ini leaf di "
+                              "semua figure itu — mungkin memang tak diurai EPC). "
+                              "⛔ JANGAN mengarang isinya."),
+                    "catatan": "Bisa jadi assembly ini tak punya rincian di EPC; sampaikan jujur."}
+        return {"found": False, "part_number": pn,
+                "error": f"PN {pn} tidak ditemukan di EPC (cek PN; hanya Sinotruk/HOWO/SITRAK)."}
+
+    comps = res.get("komponen") or []
+    pns = [c["pn"] for c in comps]
+    local: dict[str, dict] = {}
+    for r in part_index.rows_for_pns(pns).items():
+        p, row = r
+        local[p.upper()] = row
+    boleh_harga = _boleh_harga(user)
+    rows: list[dict] = []
+    for c in comps:
+        lr = local.get(c["pn"], {})
+        row = {
+            "part_number": c["pn"],
+            "nama": " ".join((lr.get("part_name") or c.get("nama") or c.get("nama_cn") or "").split()),
+            "nama_china": c.get("nama_cn") or None,
+            "qty_di_assembly": c.get("qty"),
+            "balon": c.get("balon"),
+            "ada_di_inventori": bool(lr),
+        }
+        if c.get("pengganti"):
+            row["part_pengganti"] = c["pengganti"]
+        if lr:
+            row["stok_total"] = lr.get("stok")
+            if boleh_harga:
+                row["harga_lokal"] = lr.get("harga")
+            row["stok_per_gudang"] = lr.get("gudang") or {}
+        rows.append(row)
+    if _is_pembeli(user):
+        for row in rows:
+            row.pop("stok_per_gudang", None)
+
+    return {
+        "found": True,
+        "part_number": pn,
+        "assembly_nama": (res.get("assembly") or {}).get("nama"),
+        "sumber_model": res.get("sumber_model"),
+        "figure_pn": res.get("figure_pn"),
+        "figure_nama": res.get("figure_nama"),
+        "jumlah_model_pemakai": res.get("jumlah_model_pemakai"),
+        "figure_unik_dicek": res.get("figure_dicoba"),
+        "jumlah_komponen": len(rows),
+        "komponen": rows,
+        "sumber": ("EPC global — rincian assembly ini diambil dari MODEL LAIN yang "
+                   "memuat breakdown-nya (VIN asal Anda mungkin hanya punya assembly "
+                   "utuh tanpa turunan). Komponen disilang stok/harga lokal."),
+        "catatan": ("Ini TURUNAN assembly di atas, ditemukan dari model "
+                    f"'{res.get('sumber_model') or '?'}'. SEBUTKAN bahwa rincian ini "
+                    "dari model lain (asumsi kompatibel karena PN assembly sama), "
+                    "sarankan verifikasi bila kritis. Tampilkan PN + nama + qty + "
+                    "balon + stok/harga. ⛔ JANGAN sebut PN assembly sbg komponen; "
+                    "⛔ JANGAN mengarang PN di luar daftar."),
     }
 
 
