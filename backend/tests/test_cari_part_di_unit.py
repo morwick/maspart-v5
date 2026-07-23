@@ -155,6 +155,38 @@ def test_epc_bermasalah_bukan_jawaban_kosong(dunia, monkeypatch):
     assert r["found"] is False and "jaringan" in r["error"].lower()
 
 
+def test_multi_istilah_satu_panggilan(dunia):
+    """Log produksi: model memanggil tool 3-4× per giliran dgn istilah berbeda →
+    kini SEMUA istilah (array) dicari sekali jalan; hasil dilabeli per istilah &
+    istilah nihil disebut eksplisit."""
+    r = ai._t_cari_part_di_unit(
+        {"rangka": "SJ346500", "kata_kunci": ["kampas rem", "sayap pesawat"]}, ADMIN)
+    assert r["found"] and r["jumlah_part"] == 2
+    # kedua istilah ikut dicari dalam SATU panggilan search
+    assert "sayap pesawat" in dunia["keywords"]
+    assert "brake friction plate" in dunia["keywords"]
+    # hasil dilabeli istilah asalnya
+    assert all(p["untuk_istilah"] == "kampas rem" for p in r["parts"])
+    # istilah tanpa hasil disebut eksplisit + instruksi jujur
+    assert r["istilah_tanpa_hasil"] == ["sayap pesawat"]
+    assert "JANGAN mengarang" in r["catatan_istilah_nihil"]
+
+
+def test_multi_istilah_string_pemisah_titik_koma(dunia):
+    r = ai._t_cari_part_di_unit(
+        {"rangka": "SJ346500", "kata_kunci": "kampas rem; sayap pesawat"}, ADMIN)
+    assert r["found"] and r["istilah_tanpa_hasil"] == ["sayap pesawat"]
+    assert "sayap pesawat" in dunia["keywords"]
+
+
+def test_istilah_tunggal_tanpa_label_ekstra(dunia):
+    """Back-compat: satu istilah = output persis seperti dulu (tanpa untuk_istilah/
+    istilah_tanpa_hasil)."""
+    r = ai._t_cari_part_di_unit({"rangka": "SJ346500", "kata_kunci": "kampas rem"}, ADMIN)
+    assert "untuk_istilah" not in r["parts"][0]
+    assert "istilah_tanpa_hasil" not in r and "catatan_istilah_nihil" not in r
+
+
 def test_terdaftar_sebagai_tool_epc_per_vin():
     """Wajib masuk _EPC_VIN_PART_TOOLS: hasilnya PN per-VIN otoritatif (dipakai guard
     substitusi katalog-lokal) & dispatch."""

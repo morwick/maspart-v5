@@ -1187,27 +1187,48 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
     kamus sinonim dulu. Tiap PN disilangkan ke inventori lokal (stok/harga) dan
     diberi assembly INDUK (reverse) agar konteks pemasangannya jelas."""
     rangka = (args.get("rangka") or "").strip()
-    kata = (args.get("kata_kunci") or args.get("query") or "").strip()
+    kata_raw = args.get("kata_kunci") or args.get("query") or ""
+    # MULTI-ISTILAH (2026-07-23): log produksi 30 hari — model memanggil tool ini
+    # 3-4× beruntun dalam SATU giliran (beberapa part sekaligus / istilah
+    # alternatif) = ronde & latensi terbuang (giliran terlambat 87-148 dtk).
+    # Terima ARRAY atau string berpemisah ';'/',' : semua istilah diekspansi &
+    # dicari SEKALI jalan, tiap hasil dilabeli istilah asalnya.
+    if isinstance(kata_raw, (list, tuple)):
+        kata_list = [str(x).strip() for x in kata_raw if str(x).strip()]
+    else:
+        kata_list = [p.strip() for p in re.split(r"[;,]", str(kata_raw)) if p.strip()]
+    kata_list = list(dict.fromkeys(kata_list))[:6]
+    kata = "; ".join(kata_list)
     if not rangka:
         return {"error": "Sebutkan nomor rangka (VIN atau frame number)."}
     if not kata:
         return {"error": "Sebutkan part yang dicari (mis. 'kampas rem', 'cross joint')."}
 
-    # Istilah lapangan → keyword katalog EN/CN (EPC tak paham 'kampas'). Query asli
-    # tetap disertakan (mungkin sudah bahasa Inggris / PN).
-    terms, matched_syn = _expand_query(kata)
-    kws = [t for t in dict.fromkeys(terms) if t and len(t.strip()) >= 3]
-    # Kata kategori PAYUNG ('kopling','rem') tak diekspansi sinonim (trigger-nya
-    # semua frasa spt 'kampas kopling') → 'kopling' polos melewatkan hampir semua
-    # sub-part. Tambal dgn keyword keluarga penuh, HANYA saat sinonim TAK kena
-    # (kalau kena, keyword-nya sudah presisi — jangan diperlebar & banjiri hasil).
-    if not matched_syn:
-        for kw in _umbrella_keywords(kata):
-            if kw and len(kw.strip()) >= 3 and kw not in kws:
+    # Istilah lapangan → keyword katalog EN/CN (EPC tak paham 'kampas') — per
+    # istilah lalu digabung utk SATU pencarian. Query asli tetap disertakan
+    # (mungkin sudah bahasa Inggris / PN).
+    kws: list[str] = []
+    matched_syn: list[str] = []
+    _kw2istilah: dict[str, str] = {}
+    for _ist in kata_list:
+        terms, ms = _expand_query(_ist)
+        matched_syn += ms
+        kk = [t for t in dict.fromkeys(terms) if t and len(t.strip()) >= 3]
+        # Kata kategori PAYUNG ('kopling','rem') tak diekspansi sinonim (trigger-nya
+        # semua frasa spt 'kampas kopling') → 'kopling' polos melewatkan hampir semua
+        # sub-part. Tambal dgn keyword keluarga penuh, HANYA saat sinonim TAK kena
+        # (kalau kena, keyword-nya sudah presisi — jangan diperlebar & banjiri hasil).
+        if not ms:
+            for kw in _umbrella_keywords(_ist):
+                if kw and len(kw.strip()) >= 3 and kw not in kk:
+                    kk.append(kw)
+        # Buang keyword generik tunggal (bolt/nut/...) bila ada keyword spesifik —
+        # tanpa ini 'baut roda' membanjiri hasil dgn ratusan 'bolt' tak relevan.
+        for kw in _tekan_generik(kk)[:12]:
+            _kw2istilah.setdefault(kw.lower(), _ist)
+            if kw not in kws:
                 kws.append(kw)
-    # Buang keyword generik tunggal (bolt/nut/...) bila ada keyword spesifik —
-    # tanpa ini 'baut roda' membanjiri hasil dgn ratusan 'bolt' tak relevan.
-    kws = _tekan_generik(kws)[:12]
+    kws = kws[:12 if len(kata_list) == 1 else 24]
 
     # Mode TELITI: sisir SEMUA baris part list pohon unit. Perlu karena indeks
     # home/match/part TIDAK mencakup figure mesin MC — kasus nyata NJ248278:
@@ -1295,6 +1316,8 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
             "cocok_kata_kunci": h.get("kata_kunci"),
             "ada_di_inventori": bool(lr),
         }
+        if len(kata_list) > 1:
+            row["untuk_istilah"] = _kw2istilah.get((h.get("kata_kunci") or "").lower())
         # Assembly INDUK: hasil mode teliti SUDAH membawanya (dari node pohon yang
         # dibuka); hasil match perlu reverse — hanya beberapa PN teratas agar cepat.
         asm = h.get("dari_assembly") or {}
@@ -1343,6 +1366,17 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
                     "bedanya lewat 'di_dalam_assembly' — JANGAN pilih satu diam-diam. "
                     "⛔ JANGAN mengarang PN di luar daftar ini."),
     }
+    if len(kata_list) > 1:
+        # Istilah yang TIDAK menemukan satu part pun disebut eksplisit — model
+        # wajib jujur per istilah, bukan menyimpulkan dari campuran hasil.
+        _ketemu = {p0.get("untuk_istilah") for p0 in parts if p0.get("untuk_istilah")}
+        _tanpa = [i for i in kata_list if i not in _ketemu]
+        if _tanpa:
+            out["istilah_tanpa_hasil"] = _tanpa
+            out["catatan_istilah_nihil"] = (
+                "Istilah berikut TIDAK menemukan part di unit ini: "
+                + ", ".join(_tanpa) + ". Sampaikan JUJUR per istilah — "
+                "⛔ JANGAN mengarang PN untuk istilah nihil.")
     if not mode_teliti:
         # Indeks match TIDAK meliput semua figure (mesin MC absen). Kalau part yang
         # DIMINTA user tak ada di daftar (yang keluar cuma kerabatnya — bracket/baut),

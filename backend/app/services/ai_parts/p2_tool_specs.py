@@ -611,13 +611,16 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "BELAKANG) → sebutkan SEMUA, bedakan via assembly induk (pemisahan "
                     "posisi eksplisit: part_aus_dari_rangka). ⚠️ Hasil kosong auto-eskalasi "
                     "TELITI; hasil ada tapi part diminta tak termuat (cuma bracket/baut) → "
-                    "panggil ulang teliti=true (sisir semua baris; pertama ~1 mnt)."
+                    "panggil ulang teliti=true (sisir semua baris; pertama ~1 mnt). "
+                    "⭐ BEBERAPA part / istilah alternatif → kirim SEMUA di kata_kunci "
+                    "(array) dalam SATU panggilan; ⛔ JANGAN panggil tool ini berulang "
+                    "per istilah."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "rangka": {"type": "string", "description": "Nomor rangka/VIN unit."},
-                        "kata_kunci": {"type": "string", "description": "Nama part yang dicari — KIRIM istilah user APA ADANYA (kamus sinonim lapangan diterapkan otomatis di server; ⛔ JANGAN terjemahkan/tebak padanan Inggris sendiri sebelum mencoba mentahnya). Istilah Indonesia/Inggris/PN sama-sama boleh — mis. 'kampas rem', 'filter oli'."},
+                        "kata_kunci": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Nama part yang dicari — KIRIM istilah user APA ADANYA (kamus sinonim lapangan diterapkan otomatis di server; ⛔ JANGAN terjemahkan/tebak padanan Inggris sendiri sebelum mencoba mentahnya). Istilah Indonesia/Inggris/PN sama-sama boleh — mis. 'kampas rem', 'filter oli'. BOLEH ARRAY berisi beberapa part/istilah sekaligus (dicari sekali jalan, hasil dilabeli per istilah) — mis. ['handle retarder','tuas retarder'] atau ['filter oli','filter solar']."},
                         "teliti": {"type": "boolean", "description": "true = sisir SEMUA baris part list pohon unit (lambat pencarian pertama, cakupan penuh). Pakai saat hasil mode cepat tidak memuat part yang diminta."},
                     },
                     "required": ["rangka", "kata_kunci"],

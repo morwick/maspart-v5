@@ -188,7 +188,12 @@ def _paksa_istilah_kamus(name: str, args: dict, question: str) -> str:
     field = next((f for f in fields if str(args.get(f) or "").strip()), None)
     if not field:
         return ""
-    kata = str(args.get(field) or "").strip()
+    kata_raw = args.get(field)
+    # kata_kunci boleh ARRAY (multi-istilah cari_part_di_unit) — cek gabungannya.
+    if isinstance(kata_raw, (list, tuple)):
+        kata = "; ".join(str(x).strip() for x in kata_raw if str(x).strip())
+    else:
+        kata = str(kata_raw or "").strip()
     if any(c.isdigit() for c in kata):
         return ""                      # kemungkinan PN — jangan diganggu
     cocok: list[tuple[str, dict]] = []  # (trigger yg muncul di question, entri)
@@ -208,9 +213,13 @@ def _paksa_istilah_kamus(name: str, args: dict, question: str) -> str:
         if any(i and sinonim.hit(i, kata) for i in istilah):
             return ""                  # model selaras kamus utk salah satu grup
     # Tak satu grup pun terpuaskan → model mengarang. Trigger TERPANJANG yang
-    # muncul di pertanyaan dipakai ('cucuk per' menang atas 'per').
+    # muncul di pertanyaan dipakai ('cucuk per' menang atas 'per'). Nilai array:
+    # istilah user DITAMBAHKAN (istilah lain di daftar bisa saja sah).
     t, e = max(cocok, key=lambda te: len(te[0]))
-    args[field] = t
+    if isinstance(kata_raw, (list, tuple)):
+        args[field] = [*[str(x).strip() for x in kata_raw if str(x).strip()], t]
+    else:
+        args[field] = t
     kw = ", ".join(k for k in (e.get("keywords") or []) if k)
     logger.info("istilah dipaksa: %r -> %r (tool %s)", kata, t, name)
     return (f"⚠️ kata kunci buatanmu '{kata}' TIDAK sesuai istilah user '{t}' — "
