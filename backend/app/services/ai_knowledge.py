@@ -272,6 +272,9 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         "cakupan": {
             "unit_katalog_bom": len(bom.get("units") or {}),
             "pn_unik_bom": len(pn_kat),
+            # Angka di bawah HANYA payload (metrics/admin/test) — TIDAK dirender
+            # ke blok prompt (prompt statis wajib byte-identik, jaga cache).
+            "tautan_pengetahuan": _links_count(),
         },
         "prefix_pn": prefixes,
         "sub_prefix_pn": sub_rows,
@@ -285,6 +288,15 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         "maintenance_shantui": maintenance_by_jenis,
         "gearbox_repairkit": gearbox_models,
     }
+
+
+def _links_count() -> int:
+    """Jumlah entitas tertaut knowledge_links (best-effort; absen → 0)."""
+    try:
+        from . import knowledge_links
+        return knowledge_links.count()
+    except Exception:
+        return 0
 
 
 def build_and_save(**kw) -> Path:
@@ -322,6 +334,7 @@ def _input_mtime() -> float:
         svc / "filter_shantui.json.gz",
         svc / "jadwal_perawatan.json.gz",
         get_settings().data_path / "repairkit" / "transmisi.json",
+        get_settings().data_path / "knowledge_links.json.gz",
     ]
     mt = 0.0
     for p in kandidat:
