@@ -930,6 +930,51 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "spek_massal_rangka",
+                "description": (
+                    "SPESIFIKASI/KONFIGURASI BANYAK UNIT sekaligus dari daftar NOMOR RANGKA — "
+                    "model, seri, gerak (4×2/6×2/6×4), jenis (cargo/tractor/dump), emisi, "
+                    "rem/ABS, mesin, gearbox, gardan (EPC resmi getVehicleConfig). Untuk 'apa "
+                    "spek unit-unit ini' / pendataan armada. Set excel=true utk kartu unduh. "
+                    "⚠️ Ini SPEK, bukan daftar part — utk part per unit pakai "
+                    "cek_massal_part_rangka/bom_dari_rangka."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "daftar_rangka": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Daftar nomor rangka/VIN (array ATAU string dipisah baris/koma)."},
+                        "excel": {"type": "boolean", "description": "true = buat file Excel (kartu unduh)."},
+                    },
+                    "required": ["daftar_rangka"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "banding_konfigurasi_rangka",
+                "description": (
+                    "BANDINGKAN KONFIGURASI/SPESIFIKASI banyak unit (≥2 nomor rangka): field "
+                    "mana yang SAMA di semua unit, mana yang BERBEDA (model/gerak/jenis/rem/"
+                    "gearbox/gardan/dll), dan unit dikelompokkan per konfigurasi identik. "
+                    "Untuk 'apa perbedaan unit-unit ini' saat maksudnya SPEK. ⚠️ PELENGKAP "
+                    "banding_rangka_massal: yang itu membandingkan SET PART nyata (pakai itu "
+                    "utk 'partnya sama/beda?'); yang INI membandingkan spesifikasi — spek "
+                    "sama ≠ part pasti sama. Set excel=true utk kartu unduh."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "daftar_rangka": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Daftar nomor rangka/VIN, minimal 2 (array ATAU string dipisah baris/koma)."},
+                        "excel": {"type": "boolean", "description": "true = buat file Excel (kartu unduh)."},
+                    },
+                    "required": ["daftar_rangka"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "pengganti_part",
                 "description": (
                     "PERSAMAAN/PENGGANTI (supersession) part — jawab 'PN ini diganti nomor berapa?', "
@@ -2153,7 +2198,8 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         _GATED_PEMBELI = {"excel_stok_gudang", "banding_rangka_massal", "banding_rangka",
                           # sensus/banding internal utk staf — pembeli tetap punya jalur
                           # per-VIN (bom_dari_rangka/part_aus/cari_part_di_unit, EPC-first)
-                          "daftar_transmisi_assy", "banding_assy", "banding_kategori"}
+                          "daftar_transmisi_assy", "banding_assy", "banding_kategori",
+                          "spek_massal_rangka", "banding_konfigurasi_rangka"}
         specs = [s for s in specs if s["function"]["name"] not in _GATED_PEMBELI]
 
     # ── Gating STOK (Menu Control 'Kolom Stok'): tool yang SELURUH gunanya

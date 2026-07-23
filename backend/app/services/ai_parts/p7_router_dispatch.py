@@ -130,6 +130,8 @@ _DISPATCH = {
     "part_dari_mesin": _t_part_dari_mesin,
     "cek_massal_part_mesin": _t_cek_massal_part_mesin,
     "cek_massal_part_rangka": _t_cek_massal_part_rangka,
+    "spek_massal_rangka": _t_spek_massal_rangka,
+    "banding_konfigurasi_rangka": _t_banding_konfigurasi_rangka,
     "pengganti_part": _t_pengganti_part,
     "repair_kit_mesin": _t_repair_kit_mesin,
     "unit_dari_part": _t_unit_dari_part,

@@ -1316,6 +1316,8 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
             "cocok_kata_kunci": h.get("kata_kunci"),
             "ada_di_inventori": bool(lr),
         }
+        if h.get("pasok") == "stop":
+            row["status_pasok"] = "STOP — tidak dipasok pabrik lagi (discontinued)"
         if len(kata_list) > 1:
             row["untuk_istilah"] = _kw2istilah.get((h.get("kata_kunci") or "").lower())
         # Assembly INDUK: hasil mode teliti SUDAH membawanya (dari node pohon yang
@@ -1364,7 +1366,10 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
                     "ringkas (PN + nama + assembly induk bila ada + stok). Bila ada beberapa "
                     "varian (mis. kampas DEPAN vs BELAKANG), SEBUTKAN semuanya & jelaskan "
                     "bedanya lewat 'di_dalam_assembly' — JANGAN pilih satu diam-diam. "
-                    "⛔ JANGAN mengarang PN di luar daftar ini."),
+                    "⛔ JANGAN mengarang PN di luar daftar ini."
+                    + (" ⚠️ Part ber-'status_pasok' STOP = discontinued pabrik — SEBUTKAN "
+                       "itu & sarankan cek pengganti (pengganti_part)."
+                       if any(p.get("status_pasok") for p in parts) else "")),
     }
     if len(kata_list) > 1:
         # Istilah yang TIDAK menemukan satu part pun disebut eksplisit — model
@@ -1905,6 +1910,8 @@ def _uraikan_assembly_impl(args: dict, user: dict) -> dict:
             "nama_china": " ".join((c.get("nama_cn") or "").split()),
             "qty_di_assembly": c.get("qty"),
         }
+        if c.get("pasok") == "stop":
+            row["status_pasok"] = "STOP — tidak dipasok pabrik lagi (discontinued)"
         if c.get("pengganti"):
             row["part_pengganti"] = c["pengganti"]
         if lr:
@@ -1988,6 +1995,8 @@ def _t_turunan_assembly(args: dict, user: dict) -> dict:
             "balon": c.get("balon"),
             "ada_di_inventori": bool(lr),
         }
+        if c.get("pasok") == "stop":
+            row["status_pasok"] = "STOP — tidak dipasok pabrik lagi (discontinued)"
         if c.get("pengganti"):
             row["part_pengganti"] = c["pengganti"]
         if lr:
@@ -2360,6 +2369,189 @@ def _t_cek_massal_part_rangka(args: dict, user: dict) -> dict:
         catatan = f"⚠️ Daftar dipotong ke {_MAX_MASSAL_MESIN} rangka pertama. " + catatan
     if out.get("export_id"):
         catatan += " File Excel siap — kartu unduh muncul OTOMATIS; JANGAN tulis ulang tabel."
+    out["catatan"] = catatan
+    return out
+
+
+# ── Spesifikasi/konfigurasi unit dari EPC getVehicleConfig (2026-07-23) ──
+# Field terpilih (dari 56 field respons) + label Indonesia. Urutan = urutan sajian.
+_CFG_FIELDS = [
+    ("modelCode", "model"), ("seriesName", "seri"), ("driveMode", "gerak"),
+    ("useType", "jenis"), ("discharge", "emisi"), ("breakMode", "rem"),
+    ("engineModelCode", "mesin"), ("gearboxModelCode", "gearbox"),
+    ("axleFrontModelCode", "gardan_depan"), ("axleMidModelCode", "gardan_tengah"),
+    ("axleRearModelCode", "gardan_belakang"), ("cabModelCode", "kabin"),
+    ("wheelBase", "jarak_sumbu"), ("tyreSpec", "ban"), ("springType", "pegas"),
+]
+_CFG_TR = {"载货车": "Cargo", "牵引车": "Tractor (kepala)", "自卸车": "Dump",
+           "搅拌车": "Mixer", "欧V": "Euro V", "欧IV": "Euro IV", "欧III": "Euro III",
+           "欧II": "Euro II", "发动机": "", "变速箱": "", "自调臂": " self-adjusting arm",
+           "前轴": " front axle", "驱动桥": " drive axle", "中桥": " middle axle",
+           "后桥": " rear axle", "(鼓)": " (drum)", "(盘)": " (disc)",
+           "法兰式取力器": " PTO (power take-off)"}
+
+
+def _tr_cfg(v) -> str:
+    s = " ".join(str(v or "").split())
+    for k, e in _CFG_TR.items():
+        s = s.replace(k, e)
+    if s == "normal":            # breakMode 'normal' = tanpa ABS
+        s = "tanpa ABS"
+    return " ".join(s.split())
+
+
+def _configs_rangka(rangkas: list[str]) -> dict:
+    """Ambil konfigurasi EPC (getVehicleConfig) BANYAK rangka paralel →
+    {rangka: {label: nilai}} ({} bila rangka tak dikenal EPC)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _one(r):
+        d = epc.get_config(epc_bom._frame(r)) or {}
+        return r, {lbl: _tr_cfg(d.get(f)) for f, lbl in _CFG_FIELDS
+                   if str(d.get(f) or "").strip()}
+    out: dict = {}
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for r, cfg in ex.map(_one, rangkas):
+            out[r] = cfg
+    return out
+
+
+def _t_spek_massal_rangka(args: dict, user: dict) -> dict:
+    """SPESIFIKASI BANYAK UNIT sekaligus dari daftar NOMOR RANGKA — model, gerak
+    (4×2/6×4), jenis, emisi, rem/ABS, mesin, gearbox, gardan, dst (EPC resmi
+    getVehicleConfig). Untuk 'apa spek unit-unit ini' / data armada. Opsi Excel."""
+    rgs = _parse_daftar_mesin(args.get("daftar_rangka") or args.get("rangka")
+                              or args.get("daftar") or args.get("vins"))
+    if not rgs:
+        return {"error": "Sebutkan daftar NOMOR RANGKA (VIN, pisah baris/koma)."}
+    dipotong = len(rgs) > _MAX_MASSAL_MESIN
+    rgs = rgs[:_MAX_MASSAL_MESIN]
+    cfgs = _configs_rangka(rgs)
+
+    hasil: list[dict] = []
+    tak_ada: list[str] = []
+    for r in rgs:
+        cfg = cfgs.get(r) or {}
+        if not cfg:
+            tak_ada.append(r)
+            hasil.append({"rangka": r, "found": False,
+                          "catatan": "rangka tak dikenal EPC (cek nomornya)"})
+        else:
+            hasil.append({"rangka": r, "found": True, **cfg})
+
+    ketemu = len(rgs) - len(tak_ada)
+    labels = [lbl for _f, lbl in _CFG_FIELDS
+              if any(lbl in (cfgs.get(r) or {}) for r in rgs)]
+    out: dict = {"found": ketemu > 0, "jumlah_rangka": len(rgs), "ketemu": ketemu,
+                 "tak_ada": len(tak_ada), "hasil": hasil}
+
+    if args.get("excel"):
+        kolom = ["No", "Nomor Rangka"] + [l.replace("_", " ").title() for l in labels]
+        baris = []
+        for i, h in enumerate(hasil, start=1):
+            baris.append([str(i), h["rangka"]]
+                         + [(h.get(l) or ("—" if h.get("found") else "tak dikenal EPC"))
+                            for l in labels])
+        export_id, filename = ai_export.stash_export(
+            f"Spesifikasi {len(rgs)} unit", kolom, baris)
+        out["export_id"], out["filename"] = export_id, filename
+        out["jumlah_baris"] = len(baris)
+
+    catatan = (f"Spesifikasi {len(rgs)} unit dari EPC resmi (getVehicleConfig). "
+               "Sajikan ringkas per unit / kelompokkan yang sama. ⚠️ Ini KONFIGURASI "
+               "(spek), BUKAN daftar part — utk banding PART pakai banding_rangka_massal; "
+               "spek sama ≠ part pasti sama. ⛔ JANGAN mengarang nilai.")
+    if dipotong:
+        catatan = f"⚠️ Daftar dipotong ke {_MAX_MASSAL_MESIN} rangka pertama. " + catatan
+    if out.get("export_id"):
+        catatan += " File Excel siap — kartu unduh muncul OTOMATIS."
+    out["catatan"] = catatan
+    return out
+
+
+def _t_banding_konfigurasi_rangka(args: dict, user: dict) -> dict:
+    """BANDINGKAN KONFIGURASI/SPESIFIKASI (bukan part) BANYAK unit via daftar
+    NOMOR RANGKA: field mana SAMA di semua unit, mana BERBEDA, dan unit
+    terkelompok per konfigurasi identik. Pelengkap banding_rangka_massal (yang
+    membandingkan SET PART). Opsi Excel."""
+    rgs = _parse_daftar_mesin(args.get("daftar_rangka") or args.get("rangka_list")
+                              or args.get("rangka") or args.get("daftar"))
+    if len(rgs) < 2:
+        return {"error": "Perlu MINIMAL 2 nomor rangka untuk dibandingkan."}
+    dipotong = len(rgs) > _MAX_MASSAL_MESIN
+    rgs = rgs[:_MAX_MASSAL_MESIN]
+    cfgs = _configs_rangka(rgs)
+    valid = {r: c for r, c in cfgs.items() if c}
+    gagal = [r for r in rgs if not cfgs.get(r)]
+    if len(valid) < 2:
+        return {"found": False,
+                "error": ("Kurang dari 2 rangka yang dikenal EPC — tak bisa "
+                          f"dibandingkan. Tak dikenal: {', '.join(gagal) or '-'}")}
+
+    labels = [lbl for _f, lbl in _CFG_FIELDS
+              if any(lbl in c for c in valid.values())]
+    sama: dict = {}
+    beda: list[str] = []
+    for l in labels:
+        vals = {c.get(l) or "" for c in valid.values()}
+        if len(vals) == 1:
+            sama[l] = next(iter(vals))
+        else:
+            beda.append(l)
+
+    # kelompokkan unit ber-konfigurasi identik (atas field yang BERBEDA)
+    kel_map: dict = {}
+    for r in rgs:
+        c = valid.get(r)
+        if not c:
+            continue
+        key = tuple(c.get(l) or "" for l in beda)
+        kel_map.setdefault(key, []).append(r)
+    kelompok = []
+    for i, (key, units) in enumerate(
+            sorted(kel_map.items(), key=lambda kv: -len(kv[1]))):
+        kelompok.append({"kelompok": chr(65 + i), "jumlah_unit": len(units),
+                         "unit": units,
+                         "konfigurasi": {l: v for l, v in zip(beda, key) if v}})
+    kel_of = {u: k["kelompok"] for k in kelompok for u in k["unit"]}
+
+    out: dict = {
+        "found": True, "jumlah_rangka": len(rgs),
+        "dikenal_epc": len(valid), "tak_dikenal": gagal,
+        "spek_sama_semua_unit": sama,
+        "field_berbeda": beda,
+        "jumlah_kelompok": len(kelompok),
+        "kelompok": kelompok,
+    }
+
+    if args.get("excel"):
+        kolom = ["No", "Nomor Rangka", "Kelompok"] + \
+                [l.replace("_", " ").title() for l in beda]
+        baris = []
+        for i, r in enumerate(rgs, start=1):
+            c = valid.get(r) or {}
+            baris.append([str(i), r, kel_of.get(r, "—")]
+                         + [(c.get(l) or ("—" if c else "tak dikenal EPC"))
+                            for l in beda])
+        baris.append(["", "", "", *([""] * len(beda))])
+        for l, v in sama.items():
+            baris.append(["", "SAMA di semua unit:", l.replace("_", " ").title(),
+                          v, *([""] * max(0, len(beda) - 1))])
+        export_id, filename = ai_export.stash_export(
+            f"Banding konfigurasi {len(rgs)} unit", kolom, baris)
+        out["export_id"], out["filename"] = export_id, filename
+        out["jumlah_baris"] = len(baris)
+
+    catatan = (f"Banding KONFIGURASI {len(valid)} unit: {len(sama)} field SAMA, "
+               f"{len(beda)} BERBEDA → {len(kelompok)} kelompok konfigurasi. "
+               "Sajikan: yang sama dulu (ringkas), lalu perbedaan per kelompok "
+               "(sebut unit anggotanya). ⚠️ Ini SPESIFIKASI — spek sama ≠ part "
+               "pasti sama; utk kepastian PART pakai banding_rangka_massal. "
+               "⛔ JANGAN mengarang nilai.")
+    if dipotong:
+        catatan = f"⚠️ Daftar dipotong ke {_MAX_MASSAL_MESIN} rangka pertama. " + catatan
+    if out.get("export_id"):
+        catatan += " File Excel siap — kartu unduh muncul OTOMATIS."
     out["catatan"] = catatan
     return out
 
