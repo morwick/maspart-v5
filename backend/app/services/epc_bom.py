@@ -517,6 +517,14 @@ def _atlas_children(frame: str, root_id, module: str, part_id,
     }, errbox)
 
 
+def _pasok_of(p: dict) -> str | None:
+    """Status pasok pabrik dari `marketability` item EPC (temuan HAR 2026-07-23):
+    'g' = masih dipasok, 'b' = TIDAK dipasok lagi (discontinued). None = tak ada
+    datanya (mis. cache lama sebelum field ini diekstrak)."""
+    mk = str(p.get("marketability") or "").strip().lower()
+    return {"g": "dipasok", "b": "stop"}.get(mk)
+
+
 def _atlas_item_row(p: dict, module: str) -> dict | None:
     """Item EPC mentah → baris ternormalisasi (TANPA filter kata kunci). None bila tak ber-PN."""
     pn = str(p.get("code") or "").strip().upper()
@@ -535,9 +543,13 @@ def _atlas_item_row(p: dict, module: str) -> dict | None:
             alt.append({"pn": after,
                         "nama": " ".join(str(a.get("afterName") or "").split()),
                         "nama_cn": " ".join(str(a.get("originalAfterName") or "").split())})
-    return {"pn": pn, "nama": name_en, "nama_cn": name_cn, "qty": p.get("amount"),
-            "posisi": ATLAS_POSISI.get(module), "modul": module,
-            "pengganti": alt, "berat": p.get("weight")}
+    row = {"pn": pn, "nama": name_en, "nama_cn": name_cn, "qty": p.get("amount"),
+           "posisi": ATLAS_POSISI.get(module), "modul": module,
+           "pengganti": alt, "berat": p.get("weight")}
+    pasok = _pasok_of(p)
+    if pasok:
+        row["pasok"] = pasok
+    return row
 
 
 def _atlas_collect(frame: str, modules: tuple[str, ...]) -> dict:
@@ -1065,12 +1077,16 @@ def assembly_components_global(pn: str, max_figures: int = 10,
         komponen = []
         for p in anak:
             cpn = str(p.get("code") or "").strip().upper()
-            komponen.append({
+            krow = {
                 "pn": cpn,
                 "nama": " ".join(str(p.get("name") or "").split()),
                 "nama_cn": " ".join(str(p.get("originalName") or "").split()),
                 "qty": p.get("amount"), "balon": p.get("ballNum"),
-                "pengganti": _item_pengganti(p, cpn)})
+                "pengganti": _item_pengganti(p, cpn)}
+            pasok = _pasok_of(p)
+            if pasok:
+                krow["pasok"] = pasok
+            komponen.append(krow)
         svgs = [s for s in (data.get("d2s") or []) if isinstance(s, str)]
         return {
             "found": True,
@@ -1622,10 +1638,12 @@ def search_items_in_unit(rangka: str, keywords: list[str]) -> dict:
         if key in seen:
             continue
         seen.add(key)
-        skored.append((skor, len(row["nama"] or ""),
-                       {"pn": row["pn"], "nama": row["nama"], "nama_cn": row["nama_cn"],
-                        "qty": row.get("qty"), "kata_kunci": kw_hit,
-                        "dari_assembly": row.get("dari_assembly")}))
+        item = {"pn": row["pn"], "nama": row["nama"], "nama_cn": row["nama_cn"],
+                "qty": row.get("qty"), "kata_kunci": kw_hit,
+                "dari_assembly": row.get("dari_assembly")}
+        if row.get("pasok"):
+            item["pasok"] = row["pasok"]
+        skored.append((skor, len(row["nama"] or ""), item))
     # skor tertinggi dulu; lalu nama TERPENDEK (paling spesifik) dulu
     skored.sort(key=lambda x: (-x[0], x[1]))
     hasil = [s[2] for s in skored]
