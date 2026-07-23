@@ -160,15 +160,24 @@ def fetch_svg(file_id: str, token: str) -> bytes | None:
     return r.content if b"<svg" in r.content[:3000].lower() else None
 
 
+# Seed VIN bermesin Weichai (terverifikasi bridge found=True 2026-07-23) — dipakai
+# untuk MINT token account-level saat belum ada sesi (mis. tool part_dari_mesin
+# dipanggil di container yang baru restart, tanpa lookup VIN lebih dulu). Token
+# yang di-mint bersifat account-level (zq-login) → sah utk serial mesin apa pun.
+_DEFAULT_SEED_FRAME = "RT108966"
+
+
 def _ensure_token(rangka: str = "") -> str:
     """Token Weichai valid: dari cache (fresh) atau mint via bridge (rangka bila ada,
-    kalau tidak pakai seed frame terakhir). '' bila belum ada sesi & tak bisa mint."""
+    lalu seed terakhir, lalu seed default). '' hanya bila mint pun gagal."""
     with _lock:
         if _tok_cache["token"] and (time.monotonic() - _tok_cache["at"] < _CACHE_TTL):
             return _tok_cache["token"]
         seed = rangka or _tok_cache.get("seed") or ""
-    if seed:
-        br = _bridge(epc_bom._frame(seed))
+    for s in (seed, _DEFAULT_SEED_FRAME):
+        if not s:
+            continue
+        br = _bridge(epc_bom._frame(s))
         if br.get("found"):
             return br["token"]
     return ""
