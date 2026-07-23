@@ -888,6 +888,7 @@ _TOOL_LABEL = {
     "stok_gudang": "Mengambil stok gudang",
     "stok_accurate": "Mengambil stok Accurate",
     "cek_massal_part": "Mengecek banyak part",
+    "info_part": "Membuka pengetahuan part",
     "cek_kendaraan": "Mengecek data kendaraan (EPC)",
     "pengganti_part": "Mencari part pengganti",
     "diagnosa": "Mendiagnosa (SIMS)",

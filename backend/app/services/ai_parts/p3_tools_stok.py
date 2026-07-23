@@ -407,12 +407,19 @@ def _t_cari_part(args: dict, user: dict) -> dict:
             "dan labeli hasil ini 'perkiraan per-model'. Bila rangka SUDAH ada, utamakan "
             "tool EPC (part_aus_dari_rangka/bom_dari_rangka) alih-alih hasil ini."
         )
-    # Tautan pengetahuan HANYA saat hasil sempit (≤3 PN) — daftar panjang tak
-    # butuh tautan & hemat token.
+    # Tautan pengetahuan + keluarga taksonomi HANYA saat hasil sempit (≤3 PN)
+    # — daftar panjang tak butuh tautan & hemat token.
     if 0 < len(out) <= 3:
         ents: list[str] = []
         for it in out:
-            for e in knowledge_links.entitas(pn=it.get("part_number") or ""):
+            pn_it = it.get("part_number") or ""
+            try:
+                _kel = part_taxonomy.ringkas(pn_it)
+                if _kel:
+                    it["keluarga_part"] = _kel
+            except Exception:
+                pass
+            for e in knowledge_links.entitas(pn=pn_it):
                 if e not in ents:
                     ents.append(e)
         out_res = _sisip_terkait(out_res, ents, "catalog_bom", user)
@@ -720,11 +727,73 @@ def _t_detail_part(args: dict, user: dict) -> dict:
         result["pengganti"] = [{"pn": e["pn"], "nama": e.get("nama")} for e in pgl[:5]]
         result["info_pengganti"] = ("PN ini punya part PENGGANTI resmi — bila stok kosong, "
                                     "tawarkan cek pengganti (tool pengganti_part utk detail).")
+    # Keluarga part (taksonomi) — 1 baris pemahaman ("filter oli (mesin/…)").
+    try:
+        _kel = part_taxonomy.ringkas(pn)
+        if _kel:
+            result["keluarga_part"] = _kel
+    except Exception:
+        pass
     # Tautan pengetahuan lintas-store utk PN ini (manual/jadwal/filter/repairkit/
     # DTC yang menyebutnya) — jembatan part → pengetahuan.
     result = _sisip_terkait(result, knowledge_links.entitas(pn=pn),
                             "catalog_bom", user)
     return result
+
+
+def _t_info_part(args: dict, user: dict) -> dict:
+    """PENGETAHUAN MENDALAM sebuah part/keluarga part (part_taxonomy — Fase C
+    2026-07-23): fungsi, sistem/sub-sistem, gejala umum bila rusak, contoh PN,
+    plus tautan pengetahuan lain (jadwal/filter/manual/DTC) via knowledge_links.
+    'fungsi'/'gejala_umum' = kurasi internal tervalidasi; kosong = belum
+    dikurasi → sajikan bagian deterministik saja, JUJUR."""
+    nama = (args.get("nama") or args.get("query") or "").strip()
+    pn = (args.get("pn") or args.get("part_number") or "").strip()
+    if not (nama or pn):
+        return {"error": "Sebutkan nama part (mis. 'filter oli') atau PN-nya."}
+    if not part_taxonomy.available():
+        return {"error": "Taksonomi part belum tersedia di server."}
+    rows = part_taxonomy.cari(nama or pn, limit=3)
+    if not rows and pn:
+        r1 = part_taxonomy.for_pn(pn)
+        rows = [r1] if r1 else []
+    if not rows:
+        return {"found": False,
+                "catatan": (f"'{nama or pn}' belum terklasifikasi di taksonomi "
+                            "part. ⛔ Jangan mengarang fungsi/gejala — jawab dari "
+                            "pengetahuan umum HANYA dgn kalimat hati-hati tanpa "
+                            "angka/PN, atau arahkan ke cari_part utk data konkret.")}
+    r = rows[0]
+    out: dict = {
+        "found": True,
+        "keluarga": r.get("keluarga"),
+        "sistem": r.get("sistem"),
+        "sub_sistem": r.get("sub_sistem"),
+        "jumlah_pn_di_katalog": r.get("jumlah_pn"),
+        "nama_katalog_umum": r.get("nama_kunci") or [],
+        "contoh_pn": (r.get("contoh_pn") or [])[:8],
+    }
+    if str(r.get("fungsi") or "").strip():
+        out["fungsi"] = r["fungsi"]
+    if str(r.get("gejala_umum") or "").strip():
+        out["gejala_umum"] = r["gejala_umum"]
+    if len(rows) > 1:
+        out["keluarga_lain_mirip"] = [x.get("keluarga") for x in rows[1:]]
+    out["catatan"] = (
+        "Ini PENGETAHUAN KELUARGA part (taksonomi internal dari katalog). "
+        + ("'fungsi'/'gejala_umum' = kurasi internal — sajikan apa adanya. "
+           if out.get("fungsi") else
+           "Keluarga ini BELUM dikurasi fungsi/gejalanya — sampaikan bagian "
+           "yang ada saja, ⛔ JANGAN mengarang fungsi/gejala spesifik. ")
+        + "'contoh_pn' = contoh dari katalog (BUKAN rekomendasi utk unit "
+          "tertentu). Utk stok/harga pakai cari_part/detail_part; part per-unit "
+          "WAJIB cek EPC via rangka. ⛔ JANGAN mengarang PN di luar daftar.")
+    ents = knowledge_links.entitas(pn=pn) if pn else []
+    for cpn in (r.get("contoh_pn") or [])[:3]:
+        for e in knowledge_links.entitas(pn=cpn):
+            if e not in ents:
+                ents.append(e)
+    return _sisip_terkait(out, ents, "part_taxonomy", user)
 
 
 _MAX_MASSAL_PN = 100

@@ -159,6 +159,7 @@ _DISPATCH = {
     "diagnosa": _t_diagnosa,
     "cari_filter_shantui": _t_cari_filter_shantui,
     "jadwal_perawatan": _t_jadwal_perawatan,
+    "info_part": _t_info_part,
     "cek_garansi": _t_cek_garansi,
     "riwayat_klaim": _t_riwayat_klaim,
     "detail_klaim": _t_detail_klaim,

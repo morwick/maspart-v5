@@ -369,6 +369,27 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "info_part",
+                "description": (
+                    "PENGETAHUAN MENDALAM sebuah part / KELUARGA part: fungsi part itu, "
+                    "sistem & sub-sistemnya, gejala umum bila rusak, contoh PN katalog, "
+                    "plus tautan ke jadwal perawatan/filter/manual/DTC yang menyebutnya. "
+                    "Pakai untuk pertanyaan PEMAHAMAN: 'apa fungsi X', 'X itu bagian apa', "
+                    "'kalau X rusak gejalanya apa', 'bedanya X dan Y'. ⛔ Untuk STOK/HARGA "
+                    "tetap cari_part/detail_part; part per-UNIT tetap cek EPC via rangka."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "nama": {"type": "string", "description": "Nama part/keluarga (Indonesia/Inggris) — mis. 'filter oli', 'release bearing', 'kampas rem'."},
+                        "pn": {"type": "string", "description": "Opsional: PN konkret — sistem mencari keluarganya dari nama katalog PN itu."},
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "repair_kit_transmisi",
                 "description": (
                     "Daftar REPAIR KIT / perpak TRANSMISI (gearbox) per model — komponen "

@@ -275,6 +275,7 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
             # Angka di bawah HANYA payload (metrics/admin/test) — TIDAK dirender
             # ke blok prompt (prompt statis wajib byte-identik, jaga cache).
             "tautan_pengetahuan": _links_count(),
+            "keluarga_part": _taxonomy_count(),
         },
         "prefix_pn": prefixes,
         "sub_prefix_pn": sub_rows,
@@ -295,6 +296,15 @@ def _links_count() -> int:
     try:
         from . import knowledge_links
         return knowledge_links.count()
+    except Exception:
+        return 0
+
+
+def _taxonomy_count() -> int:
+    """Jumlah keluarga part_taxonomy (best-effort; absen → 0)."""
+    try:
+        from . import part_taxonomy
+        return part_taxonomy.count()
     except Exception:
         return 0
 
@@ -335,6 +345,7 @@ def _input_mtime() -> float:
         svc / "jadwal_perawatan.json.gz",
         get_settings().data_path / "repairkit" / "transmisi.json",
         get_settings().data_path / "knowledge_links.json.gz",
+        svc / "part_taxonomy.json.gz",
     ]
     mt = 0.0
     for p in kandidat:
