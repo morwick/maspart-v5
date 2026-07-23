@@ -321,6 +321,35 @@ def _t_cari_part(args: dict, user: dict) -> dict:
             "apa adanya. ⛔ JANGAN mengklaim itu part resmi Sinotruk/kompatibel dengan "
             "unit tertentu tanpa cek EPC.")
 
+    # JARING TERAKHIR — MASTER SIMS by NAMA (pageDealer partName LIKE, ±670rb
+    # part; terverifikasi 2026-07-23). Katalog Excel lokal cuma subset — part
+    # nyata bisa 0 hasil di semua jalur di atas. Maks 2 keyword EN (dari ekspansi
+    # sinonim yang SUDAH dihitung), cap 8 hasil, memo 1 jam di sims.
+    hasil_master_sims: list[dict] = []
+    if not items and not hasil_sims and not stok_lokal and sims.available():
+        _en_kws = [t for t in search_terms
+                   if len(t) >= 4 and not any(c.isdigit() for c in t)][:2]
+        _seen_pc: set[str] = set()
+        for _kw in _en_kws:
+            for r in sims.search_master_by_name(_kw, limit=8):
+                pc = str(r.get("partCode") or "").strip().upper()
+                if pc and pc not in _seen_pc:
+                    _seen_pc.add(pc)
+                    hasil_master_sims.append({
+                        "part_number": pc,
+                        "part_name": r.get("partName") or "",
+                        "brand": r.get("brandName") or "",
+                        "sumber": "SIMS master (670rb part — katalog pabrik global)"})
+            if len(hasil_master_sims) >= 8:
+                break
+        hasil_master_sims = hasil_master_sims[:8]
+    if hasil_master_sims:
+        note = ((note + " ") if note else "") + (
+            "'hasil_master_sims' = kecocokan NAMA di master pabrik SIMS — part-nya "
+            "NYATA di katalog global tapi TIDAK/belum tentu dijual & di-stok lokal. "
+            "Sampaikan apa adanya; utk harga SIMS lanjutkan harga_sims. ⛔ JANGAN "
+            "klaim stok/harga lokal/kompatibilitas unit dari data ini.")
+
     # UMPAN BALIK KAMUS: catat pencarian yang 0 hasil. Daftar 'MISS' ini = istilah
     # lapangan yang belum dikenali sistem → kandidat tambahan untuk sinonim.json.
     # Cek log: docker logs <container> 2>&1 | grep MISS  (lihat PROJECT.md §3.5.3).
@@ -332,9 +361,10 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         )
         # Catat ke log persisten (halaman admin 'Pencarian Nihil') — hanya bila
         # istilah tak dikenali sinonim (yang dikenali tapi 0 hasil = data belum ada,
-        # bukan celah kamus) DAN SIMS/stok lokal juga tidak mengenalnya (kalau
-        # mereka kenal, itu bukan celah kamus istilah). Best-effort.
-        if not matched_syn and not hasil_sims and not stok_lokal:
+        # bukan celah kamus) DAN SIMS/stok lokal/master juga tidak mengenalnya
+        # (kalau mereka kenal, itu bukan celah kamus istilah). Best-effort.
+        if not matched_syn and not hasil_sims and not stok_lokal \
+                and not hasil_master_sims:
             try:
                 search_log.record_miss(q, "nama", "asisten")
             except Exception:
@@ -344,13 +374,15 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         "query": q, "kata_kunci_dicari": search_terms, "unit_filter": unit or None,
         # found=False saat NIHIL total → _tool_failed/_LOOKUP_GAGAL_NOTE menyala
         # (dulu miss cari_part — tool paling ramai — tak terdeteksi sistem).
-        "found": bool(items) or bool(hasil_sims) or bool(stok_lokal),
+        "found": (bool(items) or bool(hasil_sims) or bool(stok_lokal)
+                  or bool(hasil_master_sims)),
         "catatan": note,
         "jumlah_part_unik": len(items), "jumlah_relevan_kuat": jumlah_relevan,
         "ditampilkan": len(out),
         "jumlah_tersedia_stok": jumlah_tersedia,
         "saran_mungkin_maksud": saran,
         "hasil_sims": hasil_sims,
+        "hasil_master_sims": hasil_master_sims,
         "stok_lokal_tambahan": stok_lokal,
         "urutan": "Hasil DIURUT berdasarkan KECOCOKAN/KOMPATIBILITAS part dengan katalog (BUKAN stok). Rekomendasikan part yang paling cocok untuk unit/kebutuhan user — stok hanya info, bukan dasar rekomendasi.",
         "info_stok_harga": "Stok & harga berlaku per Part Number (sama untuk semua varian unit yang memakai PN itu).",
@@ -600,6 +632,23 @@ def _t_detail_part(args: dict, user: dict) -> dict:
         if saran:
             out_miss["saran_mungkin_maksud"] = saran
             out_miss["pesan"] += " Lihat 'saran_mungkin_maksud' — konfirmasi ke user."
+        # VALIDASI MASTER SIMS (anti-halusinasi tahap 2, 2026-07-23): PN yang tak
+        # dijual lokal bisa saja SAHIH di master pabrik (±670rb) — bedakan 'PN
+        # salah ketik' dari 'part nyata yang tidak kami stok'. found tetap False.
+        _minfo: dict = {}
+        if sims.available():
+            try:
+                _minfo = sims.get_part_info(pn) or {}
+            except Exception:
+                _minfo = {}
+        if (_minfo or {}).get("partName"):
+            out_miss["master_sims"] = {"part_number": pn.upper(),
+                                       "part_name": _minfo["partName"],
+                                       "brand": _minfo.get("brandName") or ""}
+            out_miss["pesan"] += (" NAMUN: PN ini SAHIH di master SIMS (nama resmi "
+                                  "di 'master_sims') tapi TIDAK dijual/di-stok "
+                                  "lokal — sampaikan itu ke user; tawarkan cek "
+                                  "harga_sims.")
         return out_miss
     # Semua varian unit yang memakai PN ini.
     varian = []

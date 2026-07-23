@@ -55,6 +55,22 @@ def _jangan_bangun_indeks_epc_nyata(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _jangan_cari_master_sims_nyata(request, monkeypatch):
+    """search_master_by_name menembak pageDealer NYATA (login token + GET) — sejak
+    2026-07-23 query NAMA 0-hasil di cari_part memicunya sbg jaring terakhir; test
+    biasa tak boleh menyentuh jaringan. Di-no-op kecuali modul pengujinya (ia mock
+    sendiri). Memo per-nama juga dibersihkan agar tak bocor antar-test."""
+    try:
+        from app.services import sims
+        sims._master_name_memo.clear()
+        if request.module.__name__ != "test_sims_master_fallback":
+            monkeypatch.setattr(sims, "search_master_by_name",
+                                lambda name, limit=8: [])
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _bersihkan_idempotensi_order():
     """Cache idempotensi POST /orders (L5) proses-lokal → bersihkan antar-test
     agar hasil order satu test tak bocor ke test lain yang sidik jarinya sama."""

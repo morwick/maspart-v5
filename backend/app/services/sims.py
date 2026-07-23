@@ -241,6 +241,28 @@ _equiv_lock = _threading.Lock()
 _equiv_index: dict = {"ts": 0.0, "by_pn": {}}   # {norm_pn: {digantikan_oleh:[{pn,nama}], menggantikan:[{pn,nama}]}}
 _equiv_sched_started = False
 
+# ── PENCARIAN MASTER by NAMA (pageDealer partName LIKE, ±670rb part) ─────────
+# Jaring terakhir cari_part saat katalog lokal nihil. Memo in-memory kecil TTL
+# 1 jam (BUKAN part_info.json — file itu keyed-PN utk berat/ongkir).
+_master_name_memo: dict[str, tuple] = {}   # name.lower() -> (ts, rows)
+_MASTER_NAME_TTL = 3600
+
+
+def search_master_by_name(name: str, limit: int = 8) -> list:
+    """Cari master part SIMS by NAMA (EN). Ringkas [{partCode,partName,brandName}];
+    [] bila kosong/gagal. Hasil di-memo 1 jam per kata kunci."""
+    key = str(name or "").strip().lower()
+    if not key or not _SIMS_OK:
+        return []
+    hit = _master_name_memo.get(key)
+    if hit and _time.time() - hit[0] < _MASTER_NAME_TTL:
+        return hit[1][:limit]
+    rows = _sf.fetch_part_info_by_name(key, page_size=limit)
+    if len(_master_name_memo) > 256:
+        _master_name_memo.clear()
+    _master_name_memo[key] = (_time.time(), rows)
+    return rows
+
 
 def _eq_norm(pn: str) -> str:
     return "".join((pn or "").upper().split())

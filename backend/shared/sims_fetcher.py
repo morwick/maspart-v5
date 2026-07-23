@@ -38,6 +38,22 @@ BASE_HEADERS = {
 }
 
 
+def _rows_from(raw) -> list:
+    """Ambil list rows dari berbagai kemungkinan struktur response SIMS
+    (list polos / data.rows / records / result / list — API-nya tak konsisten)."""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        data = raw.get("data") or raw.get("rows") or raw.get("records") or \
+               raw.get("result") or raw.get("list") or []
+        if isinstance(data, dict):
+            return data.get("rows") or data.get("records") or \
+                   data.get("list") or data.get("data") or []
+        if isinstance(data, list):
+            return data
+    return []
+
+
 def _get_retry(url, *, params=None, headers=None, timeout=15,
                attempts=2, backoff=0.8):
     """GET dengan retry singkat KHUSUS galat jaringan (DNS blip / koneksi putus).
@@ -279,19 +295,7 @@ def fetch_sims_part_info(part_number: str, force_refresh: bool = False) -> dict:
 
         resp.raise_for_status()
         raw = resp.json()
-
-        # Ambil list rows dari berbagai kemungkinan struktur response
-        rows = []
-        if isinstance(raw, list):
-            rows = raw
-        elif isinstance(raw, dict):
-            data = raw.get("data") or raw.get("rows") or raw.get("records") or \
-                   raw.get("result") or raw.get("list") or []
-            if isinstance(data, dict):
-                rows = data.get("rows") or data.get("records") or \
-                       data.get("list") or data.get("data") or []
-            elif isinstance(data, list):
-                rows = data
+        rows = _rows_from(raw)
 
         if rows:
             row = rows[0] if isinstance(rows[0], dict) else {}
@@ -371,6 +375,33 @@ def fetch_part_equivalents(part_number: str, page_size: int = 50) -> list:
         return recs if isinstance(recs, list) else []
     except Exception as e:
         print(f"[sims_fetcher] Error fetch equivalents '{pn}': {e}")
+        return []
+
+
+def fetch_part_info_by_name(name: str, page_size: int = 8) -> list:
+    """Cari MASTER part SIMS (±670rb baris pageDealer) berdasarkan NAMA —
+    filter partName LIKE server-side (TERVERIFIKASI 2026-07-23: 'mirror' → 989
+    baris, frasa 'clutch disc' juga jalan). Return ringkas
+    [{partCode, partName, brandName}]; [] bila kosong/gagal (non-fatal)."""
+    q = str(name or "").strip()
+    if len(q) < 3:
+        return []
+    try:
+        headers = {**BASE_HEADERS, "Authorization": _get_token()}
+        params = {"partName": q, "currentPage": 1,
+                  "pageSize": max(1, min(int(page_size), 20))}
+        resp = _get_retry(PART_INFO_API_URL, params=params, headers=headers, timeout=15)
+        if resp.status_code in (401, 403):
+            _reset_token()
+            headers = {**BASE_HEADERS, "Authorization": _get_token()}
+            resp = _get_retry(PART_INFO_API_URL, params=params, headers=headers, timeout=15)
+        resp.raise_for_status()
+        return [{"partCode": str(r.get("partCode") or "").strip().upper(),
+                 "partName": str(r.get("partName") or "").strip(),
+                 "brandName": str(r.get("brandName") or "").strip()}
+                for r in _rows_from(resp.json()) if isinstance(r, dict)][:page_size]
+    except Exception as e:
+        print(f"[sims_fetcher] Error search master by name '{q}': {e}")
         return []
 
 
