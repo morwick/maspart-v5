@@ -880,6 +880,30 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "cek_massal_part_mesin",
+                "description": (
+                    "CEK SATU PART (mis. 'starter', 'alternator', 'filter oli') di BANYAK NOMOR "
+                    "MESIN Weichai SEKALIGUS — versi massal part_dari_mesin. Pakai saat user "
+                    "memberi DAFTAR nomor engine dan menanyakan satu komponen ('cek starter untuk "
+                    "no engine A, B, C, …'). Efisien: mesin ber-konfigurasi sama diproses sekali. "
+                    "Otomatis mendeteksi PENGGANTI (supersession) → memberi 'pn_order_terkini' "
+                    "(PN resmi terbaru untuk dipesan) + silang stok/harga lokal. Set excel=true "
+                    "untuk kartu unduh Excel. ⛔ JANGAN panggil part_dari_mesin berulang per nomor."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "daftar_no_mesin": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Daftar nomor mesin (array ATAU string dipisah baris/koma) — mis. ['4P24B000713','4P25G002767']."},
+                        "part": {"type": "string", "description": "Komponen yang dicek di semua mesin (mis. 'starter', 'alternator', 'filter oli')."},
+                        "excel": {"type": "boolean", "description": "true = buat file Excel (kartu unduh) berisi tabel per nomor mesin."},
+                    },
+                    "required": ["daftar_no_mesin", "part"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "pengganti_part",
                 "description": (
                     "PERSAMAAN/PENGGANTI (supersession) part — jawab 'PN ini diganti nomor berapa?', "

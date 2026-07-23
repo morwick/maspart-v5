@@ -188,8 +188,10 @@ def mine_chat_logs(limit: int = _MINE_LOG_LIMIT) -> dict:
                          if g["jumlah"] >= _GAP_MIN_JUMLAH),
                         key=lambda g: -g["jumlah"])[:_GAP_MAX]
         _save_json_atomic(_gap_path(), publik)
-    return {"baris_baru": len(baru), "miss_terekam": n_miss,
-            "gap_publik": len(load_json(_gap_path(), default=[]))}
+        n_gap = len(publik)
+    else:
+        n_gap = len(gaps())
+    return {"baris_baru": len(baru), "miss_terekam": n_miss, "gap_publik": n_gap}
 
 
 def gaps() -> list[dict]:

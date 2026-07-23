@@ -17,6 +17,10 @@ def dunia(tmp_path, monkeypatch):
     monkeypatch.setattr(belajar, "get_settings", lambda: _S())
     monkeypatch.setattr(search_log, "_path", lambda: tmp_path / "misses.json")
     search_log._state["data"] = None
+    # Cache loader per-mtime global — bersihkan agar tulis+baca file gap/state
+    # dalam satu test tak tertutup entri basi dari test lain (granularity mtime).
+    from app.services import knowledge_util
+    knowledge_util._LOAD_CACHE.clear()
     # ⛔ ZERO-NETWORK: panggilan requests apa pun = bug
     import requests as _rq
 

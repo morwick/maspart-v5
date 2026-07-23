@@ -582,6 +582,67 @@ def find_parts_by_no(no_mesin: str, terms: list[str]) -> dict:
     return _filter_bom(engine_bom_by_no(no_mesin), terms)
 
 
+def find_part_massal(engine_nos: list[str], terms: list[str]) -> dict:
+    """Cari part (terms) di BANYAK nomor mesin sekaligus — EFISIEN: resolve tiap
+    nomor ke order, KELOMPOKKAN per dhhNumber (banyak mesin berbagi konfigurasi
+    sama), lalu walk BOM SEKALI per order unik. Hasil dipetakan balik per mesin.
+    {per_engine:{no:{found,model,dhhNumber,hits:[{pn,nama,group}] | reason}},
+     orders_unik, pn_unik:[...]} atau {_err}."""
+    tok = _ensure_token()
+    if not tok:
+        return {"_err": "no_session"}
+    kws = [t.lower() for t in terms if t and len(t) >= 2]
+    pn_terms = {t.upper() for t in terms if t}
+
+    def _match(p: dict) -> bool:
+        hay = (p["nama"] + " " + p["pn"]).lower()
+        return p["pn"] in pn_terms or (bool(kws) and any(k in hay for k in kws))
+
+    # 1) resolve tiap mesin → order (getOrderNumber cepat). Paralel ringan.
+    def _res(no):
+        return no, resolve_engine_order(no)
+    resolved: dict = {}
+    with ThreadPoolExecutor(max_workers=_WORKERS) as ex:
+        for no, r in ex.map(_res, engine_nos):
+            resolved[no] = ((r["dhhNumber"], r.get("dhhDate") or "", r.get("model"))
+                            if r.get("found") else (None, None, r.get("reason") or "no_order"))
+
+    # 2) kelompokkan per order unik & walk SEKALI.
+    orders: dict = {}
+    for no, (dhh, dd, md) in resolved.items():
+        if dhh:
+            orders.setdefault((dhh, dd, md), []).append(no)
+
+    def _walk_filter(key):
+        dhh, dd, md = key
+        bom = _walk_bom(tok, dhh, dd, {"model": md})
+        hh = []
+        if bom.get("found"):
+            for g in bom.get("groups") or []:
+                for p in g.get("parts") or []:
+                    if _match(p):
+                        hh.append({"pn": p["pn"], "nama": p["nama"], "group": g["nama"]})
+        return key, hh
+    hits_by_order: dict = {}
+    with ThreadPoolExecutor(max_workers=min(_WORKERS, max(1, len(orders)))) as ex:
+        for key, hh in ex.map(_walk_filter, list(orders)):
+            hits_by_order[key] = hh
+
+    # 3) petakan balik per mesin.
+    per_engine: dict = {}
+    pn_unik: set = set()
+    for no, (dhh, dd, md) in resolved.items():
+        if not dhh:
+            per_engine[no] = {"found": False, "reason": md}
+            continue
+        hh = hits_by_order.get((dhh, dd, md)) or []
+        for h in hh:
+            pn_unik.add(h["pn"])
+        per_engine[no] = {"found": bool(hh), "model": md, "dhhNumber": dhh, "hits": hh}
+    return {"per_engine": per_engine, "orders_unik": len(orders),
+            "pn_unik": sorted(pn_unik)}
+
+
 def _filter_bom(bom: dict, terms: list[str]) -> dict:
     """Saring BOM mesin (hasil engine_bom / engine_bom_by_no) per kata kunci. Untuk
     part LANGSUNG yang cocok (mis. 'Oil Filter') JUGA diurai TURUNANNYA (mis. Filter

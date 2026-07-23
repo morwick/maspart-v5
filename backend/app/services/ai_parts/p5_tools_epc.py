@@ -2069,6 +2069,179 @@ def _t_part_dari_mesin(args: dict, user: dict) -> dict:
     return _format_mesin_bom(res, part, user, "")
 
 
+_MAX_MASSAL_MESIN = 60
+_ANCILLARY_MESIN = ("pipe", "hose", "bracket", "clamp", "bolt", "washer", "gasket",
+                    "tube", "joint", "connector", "支架", "管", "screw", "nut")
+
+
+def _parse_daftar_mesin(v) -> list[str]:
+    """daftar nomor mesin (list ATAU string dipisah baris/koma/spasi/;) → uppercase,
+    dedup, urut asli. Serial engine biasanya alfanumerik ≥6 char."""
+    if isinstance(v, (list, tuple)):
+        toks = [str(x) for x in v]
+    else:
+        toks = re.split(r"[\s,;]+", str(v or ""))
+    out: list[str] = []
+    for t in toks:
+        p = t.strip().upper()
+        if len(p) >= 6 and p not in out:
+            out.append(p)
+    return out
+
+
+def _pick_main_hit(hits: list[dict], part: str) -> dict | None:
+    """Dari hits satu mesin, pilih komponen UTAMA (bukan pipa/bracket penyerta)."""
+    if not hits:
+        return None
+    pl = part.lower()
+
+    def _rank(h):
+        nm = (h.get("nama") or "").lower()
+        anc = any(w in nm for w in _ANCILLARY_MESIN)
+        phrase = 0 if nm.startswith(pl) else (1 if pl in nm else 2)
+        return (anc, phrase, len(nm))
+    return sorted(hits, key=_rank)[0]
+
+
+def _t_cek_massal_part_mesin(args: dict, user: dict) -> dict:
+    """CEK SATU PART (mis. 'starter') di BANYAK NOMOR MESIN Weichai sekaligus (1
+    panggilan) — versi massal part_dari_mesin. Efisien: mesin ber-konfigurasi sama
+    diproses sekali. Deteksi PENGGANTI (supersession) → rekomendasi PN order terkini;
+    silang stok/harga lokal; opsi Excel."""
+    nos = _parse_daftar_mesin(args.get("daftar_no_mesin") or args.get("no_mesin")
+                              or args.get("daftar") or args.get("engines"))
+    part = (args.get("part") or args.get("query") or "").strip()
+    if not nos:
+        return {"error": "Sebutkan daftar NOMOR MESIN (pisah baris/koma)."}
+    if not part:
+        return {"error": "Sebutkan PART yang dicek (mis. 'starter', 'alternator', 'filter oli')."}
+    dipotong = len(nos) > _MAX_MASSAL_MESIN
+    nos = nos[:_MAX_MASSAL_MESIN]
+
+    terms, _syn = _expand_query(part)
+    match_terms = [part] + [t for t in terms if t]
+    ql = (part + " " + " ".join(terms)).lower()
+    for dom, extra in _AUS_KEYWORDS.items():
+        if dom in ql:
+            match_terms += extra
+
+    res = epc_weichai.find_part_massal(nos, match_terms)
+    if res.get("_err") == "no_session":
+        return {"found": False, "error": ("Sesi EPC Weichai belum aktif. Coba lagi sebentar "
+                                          "(token sedang disiapkan), atau cek satu unit bermesin "
+                                          "Weichai dulu.")}
+    per = res.get("per_engine") or {}
+
+    # PN utama per mesin + kumpulan PN unik utama.
+    main_pn: dict[str, dict] = {}
+    pn_utama_unik: set[str] = set()
+    for no in nos:
+        e = per.get(no) or {}
+        if e.get("found"):
+            mh = _pick_main_hit(e.get("hits") or [], part)
+            if mh:
+                main_pn[no] = mh
+                pn_utama_unik.add(mh["pn"])
+
+    # SUPERSESSION: utk tiap PN utama unik, cari pengganti TERBARU (rekomendasi order).
+    order_pn: dict[str, str] = {}   # pn_epc -> pn_order (terkini)
+    for pn in pn_utama_unik:
+        try:
+            rp = epc_weichai.replace_part(pn)
+            cand = rp.get("digantikan_oleh") or []
+            # ambil yg tanggal terbaru bila ada; kalau tidak, PN itu sendiri.
+            if cand:
+                cand_sorted = sorted(cand, key=lambda x: str(x.get("tanggal") or ""), reverse=True)
+                order_pn[pn] = cand_sorted[0].get("pn") or pn
+            else:
+                order_pn[pn] = pn
+        except Exception:
+            order_pn[pn] = pn
+
+    # Silang stok/harga lokal utk PN utama + PN order.
+    boleh_harga = _boleh_harga(user)
+    all_pns = list(pn_utama_unik | set(order_pn.values()))
+    local = part_index.rows_for_pns(all_pns) if all_pns else {}
+    local = {k.upper(): v for k, v in local.items()}
+
+    def _stok(pn):
+        return (local.get(pn.upper()) or {}).get("stok")
+
+    def _harga(pn):
+        return (local.get(pn.upper()) or {}).get("harga") if boleh_harga else None
+
+    hasil: list[dict] = []
+    tak_ada: list[str] = []
+    for no in nos:
+        e = per.get(no) or {}
+        if not e.get("found"):
+            tak_ada.append(no)
+            hasil.append({"no_mesin": no, "found": False,
+                          "catatan": ("nomor mesin tak ada di EPC Weichai" if e.get("reason") == "no_order"
+                                      else f"tidak ada '{part}' di BOM mesin ini")})
+            continue
+        mh = main_pn.get(no) or {}
+        pn = mh.get("pn")
+        opn = order_pn.get(pn, pn)
+        row = {"no_mesin": no, "found": True, "model": e.get("model"),
+               "part": mh.get("nama") or part, "pn_epc": pn,
+               "group": mh.get("group")}
+        if opn and opn != pn:
+            row["pn_order_terkini"] = opn
+            row["catatan_pn"] = f"PN {pn} sudah digantikan {opn} — pesan pakai {opn}."
+        row["stok_lokal"] = _stok(opn or pn)
+        if boleh_harga:
+            row["harga_lokal"] = _harga(opn or pn)
+        hasil.append(row)
+
+    ketemu = len(nos) - len(tak_ada)
+    out: dict = {
+        "found": ketemu > 0, "part_dicari": part, "jumlah_mesin": len(nos),
+        "ketemu": ketemu, "tak_ada": len(tak_ada),
+        "konfigurasi_unik": res.get("orders_unik"),
+        "pn_starter_unik": sorted(pn_utama_unik),
+        "hasil": hasil,
+    }
+
+    if args.get("excel"):
+        kolom = ["No", "Nomor Mesin", "Model", "Part", "PN (EPC)", "PN Order Terkini"]
+        if boleh_harga:
+            kolom += ["Harga"]
+        kolom += ["Stok Lokal", "Keterangan"]
+        baris: list[list] = []
+        for i, r in enumerate(hasil, start=1):
+            if r.get("found"):
+                base = [str(i), r["no_mesin"], r.get("model") or "", r.get("part") or "",
+                        r.get("pn_epc") or "", r.get("pn_order_terkini") or r.get("pn_epc") or ""]
+                if boleh_harga:
+                    base += [r.get("harga_lokal") if r.get("harga_lokal") is not None else "—"]
+                base += [ai_export.ke_angka(r.get("stok_lokal")) if r.get("stok_lokal") not in (None, "") else "—",
+                         r.get("catatan_pn") or ""]
+            else:
+                base = [str(i), r["no_mesin"], "", part, "", ""]
+                if boleh_harga:
+                    base += ["—"]
+                base += ["—", r.get("catatan") or "tidak ditemukan"]
+            baris.append(base)
+        export_id, filename = ai_export.stash_export(
+            f"Cek {part} — {len(nos)} nomor mesin", kolom, baris)
+        out["export_id"] = export_id
+        out["filename"] = filename
+        out["jumlah_baris"] = len(baris)
+
+    catatan = (f"Cek '{part}' di {len(nos)} nomor mesin dalam SATU panggilan. {ketemu} "
+               f"ketemu, {len(tak_ada)} tidak. {res.get('orders_unik')} konfigurasi unik. "
+               "Bila SATU part muncul dalam beberapa PN (mis. karena supersession), "
+               "'pn_order_terkini' = PN resmi terbaru untuk dipesan — UTAMAKAN itu. "
+               "Sebut jujur mesin yang tak ketemu. ⛔ JANGAN mengarang PN.")
+    if dipotong:
+        catatan = f"⚠️ Daftar dipotong ke {_MAX_MASSAL_MESIN} nomor pertama. " + catatan
+    if out.get("export_id"):
+        catatan += " File Excel siap — kartu unduh muncul OTOMATIS; JANGAN tulis ulang tabel."
+    out["catatan"] = catatan
+    return out
+
+
 def _format_mesin_bom(res: dict, part: str, user: dict, rangka: str) -> dict:
     """Bentuk hasil BOM mesin Weichai (dipakai jalur per-VIN & per-NOMOR-MESIN):
     daftar group (tanpa part) atau komponen cocok + silang stok/harga (dgn part)."""
