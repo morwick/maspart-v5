@@ -151,6 +151,36 @@ def test_epc_first_kebal_pn_dari_tool_klaim(monkeypatch):
     assert "belum sempat diverifikasi" not in out["reply"]  # tanpa disclaimer terminal
 
 
+def test_epc_first_tak_terpicu_frame_di_tabel_asisten(monkeypatch):
+    """Root-cause fix 2026-07-23: frame 8-char di TABEL BUATAN ASISTEN (armada/
+    klaim/populasi) bukan 'user menyebut rangka' — guard tak boleh menyala."""
+    monkeypatch.setattr(ai.part_index, "search_exact_pns",
+                        lambda pns: [{"part_number": p} for p in pns
+                                     if p.startswith("WG")])
+    calls = _stub_model(monkeypatch, ["Stok WG9100443050 ada 5."])
+    history = [
+        {"role": "user", "content": "daftar unit armada dong"},
+        {"role": "assistant",
+         "content": "Unit armada: RT108970 (HOWO 6x4) | RT108971 (HOWO 8x4)"},
+        {"role": "user", "content": "stok WG9100443050 berapa?"},
+    ]
+    ai.chat(USER, history)
+    assert calls["n"] == 1  # frame hanya di tabel asisten → guard TAK menyala
+
+
+def test_epc_first_tetap_terpicu_frame_dari_user(monkeypatch):
+    """Pin aturan keras pemilik: user menyebut rangka → PN wajib dicek EPC."""
+    monkeypatch.setattr(ai.part_index, "search_exact_pns",
+                        lambda pns: [{"part_number": "WG9100443050"}])
+    calls = _stub_model(monkeypatch, ["Kampas remnya WG9100443050."])
+    history = [
+        {"role": "assistant", "content": "Perkiraan per-model: WG9100443050."},
+        {"role": "user", "content": "unit rangka RT108966, kampas remnya itu?"},
+    ]
+    ai.chat(USER, history)
+    assert calls["n"] == 2  # koreksi EPC-first tetap jalan
+
+
 # ── Guard DTC-first (bukti log 2026-07-16: SPN 520243 FMI 21 dijawab 'tidak
 #    ditemukan' TANPA memanggil tool, padahal datanya ADA) ────────────────────
 def test_dtc_tokens_deteksi():

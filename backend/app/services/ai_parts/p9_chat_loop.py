@@ -1047,12 +1047,16 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     lookup_gagal = False  # ada tool lookup yang error/tak ketemu → jangan mengarang angka
     tool_gagal_pernah = False  # untuk observabilitas: pernahkah ada tool gagal turn ini
     tools_failed: list[str] = []  # nama tool yang GAGAL turn ini (observabilitas per-tool)
-    # Guard EPC-FIRST: rangka disebut di percakapan TERKINI? + apakah model sudah
-    # MENCOBA tool ber-argumen rangka (sukses/gagal sama-sama dihitung 'mencoba').
+    # Guard EPC-FIRST: rangka disebut USER di percakapan TERKINI? + apakah model
+    # sudah MENCOBA tool ber-argumen rangka (sukses/gagal sama-sama 'mencoba').
     # Jendela = 6 pesan terakhir (bukan hanya pesan terakhir): follow-up "kampas
     # remnya berapa?" 2 giliran setelah VIN diberi TETAP wajib cek EPC. Dibatasi 6
     # agar VIN yang sudah sangat lama tak memaksa EPC selamanya.
-    _recent_up = [((_m or {}).get("content") or "").upper() for _m in history[-6:]]
+    # HANYA pesan role=user yang dihitung: tabel buatan asisten (lihat_unit_armada,
+    # riwayat_klaim, cek_populasi, banding_rangka_massal) penuh token frame 8-char
+    # dan dulu false-trigger guard → ekskursi EPC sia-sia (kasus 148 dtk 2026-07-23).
+    _recent_up = [((_m or {}).get("content") or "").upper()
+                  for _m in history[-6:] if (_m or {}).get("role") == "user"]
     user_rangka_recent = any(_rangka_candidates(c) for c in _recent_up)
     _rangka_tokens: set[str] = set()
     for _m in history:
