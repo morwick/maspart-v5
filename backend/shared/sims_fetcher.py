@@ -37,6 +37,23 @@ BASE_HEADERS = {
     "language":        "en",
 }
 
+
+def _get_retry(url, *, params=None, headers=None, timeout=15,
+               attempts=2, backoff=0.8):
+    """GET dengan retry singkat KHUSUS galat jaringan (DNS blip / koneksi putus).
+    Status HTTP apa pun (termasuk 401/403) DITERUSKAN apa adanya — refresh token
+    tetap urusan pemanggil. Dulu satu blip jaringan = hasil {} yang oleh asisten
+    terbaca 'tidak ditemukan' (bohong)."""
+    last = None
+    for i in range(attempts):
+        try:
+            return requests.get(url, params=params, headers=headers, timeout=timeout)
+        except requests.RequestException as e:
+            last = e
+            if i + 1 < attempts:
+                time.sleep(backoff)
+    raise last
+
 # ══════════════════════════════════════════════
 #  SINGLETON TOKEN
 # ══════════════════════════════════════════════
@@ -241,7 +258,7 @@ def fetch_sims_part_info(part_number: str, force_refresh: bool = False) -> dict:
         token   = _get_token()
         headers = {**BASE_HEADERS, "Authorization": token}
 
-        resp = requests.get(
+        resp = _get_retry(
             PART_INFO_API_URL,
             params={"partCode": part_number.strip(), "currentPage": 1, "pageSize": 1},
             headers=headers,
@@ -253,7 +270,7 @@ def fetch_sims_part_info(part_number: str, force_refresh: bool = False) -> dict:
             _reset_token()
             token   = _get_token()
             headers = {**BASE_HEADERS, "Authorization": token}
-            resp    = requests.get(
+            resp    = _get_retry(
                 PART_INFO_API_URL,
                 params={"partCode": part_number.strip(), "currentPage": 1, "pageSize": 1},
                 headers=headers,
@@ -344,11 +361,11 @@ def fetch_part_equivalents(part_number: str, page_size: int = 50) -> list:
         token = _get_token()
         headers = {**BASE_HEADERS, "Authorization": token}
         params = {"partCode": pn, "currentPage": 1, "pageSize": page_size}
-        resp = requests.get(PART_EQUIV_API_URL, params=params, headers=headers, timeout=15)
+        resp = _get_retry(PART_EQUIV_API_URL, params=params, headers=headers, timeout=15)
         if resp.status_code in (401, 403):
             _reset_token()
             headers = {**BASE_HEADERS, "Authorization": _get_token()}
-            resp = requests.get(PART_EQUIV_API_URL, params=params, headers=headers, timeout=15)
+            resp = _get_retry(PART_EQUIV_API_URL, params=params, headers=headers, timeout=15)
         resp.raise_for_status()
         recs = (resp.json() or {}).get("records") or []
         return recs if isinstance(recs, list) else []
@@ -364,11 +381,11 @@ def fetch_equivalents_page(page: int, page_size: int = 500) -> tuple:
         token = _get_token()
         headers = {**BASE_HEADERS, "Authorization": token}
         params = {"currentPage": page, "pageSize": page_size}
-        resp = requests.get(PART_EQUIV_API_URL, params=params, headers=headers, timeout=30)
+        resp = _get_retry(PART_EQUIV_API_URL, params=params, headers=headers, timeout=30)
         if resp.status_code in (401, 403):
             _reset_token()
             headers = {**BASE_HEADERS, "Authorization": _get_token()}
-            resp = requests.get(PART_EQUIV_API_URL, params=params, headers=headers, timeout=30)
+            resp = _get_retry(PART_EQUIV_API_URL, params=params, headers=headers, timeout=30)
         resp.raise_for_status()
         j = resp.json() or {}
         recs = j.get("records") or []
@@ -397,7 +414,7 @@ def fetch_sims_images(part_number: str, force_refresh: bool = False) -> list:
         token   = _get_token()
         headers = {**BASE_HEADERS, "Authorization": token}
 
-        resp = requests.get(
+        resp = _get_retry(
             PHOTO_API_URL,
             params={"partCode": part_number.strip()},
             headers=headers,
@@ -409,7 +426,7 @@ def fetch_sims_images(part_number: str, force_refresh: bool = False) -> list:
             _reset_token()
             token   = _get_token()
             headers = {**BASE_HEADERS, "Authorization": token}
-            resp    = requests.get(
+            resp    = _get_retry(
                 PHOTO_API_URL,
                 params={"partCode": part_number.strip()},
                 headers=headers,

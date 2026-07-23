@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 
 import requests
 import urllib3
@@ -52,13 +53,22 @@ def get_config(rangka: str) -> dict:
         if cjh in _cache:
             return _cache[cjh]
     data: dict = {}
-    try:
-        r = requests.get(_CONFIG_URL, params={"chassisNo": cjh}, timeout=20, verify=False)
-        j = r.json()
-        if isinstance(j, dict) and j.get("success") and isinstance(j.get("data"), dict):
-            data = j["data"]
-    except Exception:
-        data = {}
+    # Retry 1x utk blip jaringan — dulu satu ConnectionError = 'rangka tidak
+    # ditemukan' palsu di giliran itu (miss memang tak di-cache, tapi jawaban
+    # asisten giliran tsb sudah terlanjur salah).
+    for _attempt in (1, 2):
+        try:
+            r = requests.get(_CONFIG_URL, params={"chassisNo": cjh},
+                             timeout=20, verify=False)
+            j = r.json()
+            if isinstance(j, dict) and j.get("success") and isinstance(j.get("data"), dict):
+                data = j["data"]
+            break
+        except Exception:
+            if _attempt == 1:
+                time.sleep(0.8)
+                continue
+            data = {}
     # Cache HANYA hit asli. Jangan cache {} dari error jaringan / respons gagal —
     # tanpa TTL, satu blip akan permanen jadi 'rangka tidak ditemukan' sepanjang
     # proses hidup. Miss dibiarkan tak ter-cache → panggilan berikut coba lagi.
