@@ -58,6 +58,10 @@ class AIChatRequest(BaseModel):
     # Lampiran Excel dari giliran sebelumnya (dari /chat-sheet). Server memverifikasi
     # id ini milik user yang sama; kalau tidak, lampiran diabaikan diam-diam.
     sheet_id: str = ""
+    # Id percakapan yang dibuat KLIEN (UUID, di-reset saat "hapus obrolan") →
+    # memori sesi server (services/ai_session.py). Opsional: klien lama yang tak
+    # mengirimnya tetap berjalan, hanya tanpa ingatan lintas-giliran.
+    conversation_id: str = ""
 
 
 class FeedbackRequest(BaseModel):
@@ -88,7 +92,8 @@ def ai_chat(body: AIChatRequest, user: dict = Depends(require_ai)):
     if not any(m["role"] == "user" and m["content"].strip() for m in history):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pesan kosong.")
     try:
-        result = ai_assistant.chat(user, history, sheet_id=(body.sheet_id or "").strip())
+        result = ai_assistant.chat(user, history, sheet_id=(body.sheet_id or "").strip(),
+                                   conversation_id=(body.conversation_id or "").strip())
     except ai_assistant.AINotConfigured:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -119,7 +124,8 @@ def ai_chat_stream(body: AIChatRequest, user: dict = Depends(require_ai)):
         try:
             box["result"] = ai_assistant.chat(
                 user, history, sheet_id=(body.sheet_id or "").strip(),
-                on_progress=lambda label: q.put(("progress", label)))
+                on_progress=lambda label: q.put(("progress", label)),
+                conversation_id=(body.conversation_id or "").strip())
         except ai_assistant.AINotConfigured:
             box["error"] = "Asisten AI belum dikonfigurasi (DEEPSEEK_API_KEY kosong)."
         except Exception as e:  # pragma: no cover - dijaga generator
@@ -243,6 +249,7 @@ def export_ai_excel(export_id: str, _user: dict = Depends(require_ai)):
 async def ai_chat_image(
     messages: str = Form("[]", description="Riwayat chat (JSON list {role, content})."),
     file: UploadFile = File(..., description="Foto part untuk dikenali."),
+    conversation_id: str = Form("", description="Id percakapan (memori sesi server)."),
     user: dict = Depends(require_ai),
 ):
     """Chat dengan FOTO: foto dikenali via Cari-by-Foto (DINOv2) → kandidat Part Number
@@ -269,7 +276,8 @@ async def ai_chat_image(
         candidates = []
 
     try:
-        result = ai_assistant.chat(user, history, photo_candidates=candidates)
+        result = ai_assistant.chat(user, history, photo_candidates=candidates,
+                                   conversation_id=(conversation_id or "").strip())
     except ai_assistant.AINotConfigured:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -296,6 +304,7 @@ async def ai_chat_sheet(
     messages: str = Form("[]", description="Riwayat chat (JSON list {role, content})."),
     file: UploadFile | None = File(None, description="File Excel (.xlsx/.xlsm) atau CSV (.csv) yang diunggah user."),
     gsheet_url: str = Form("", description="Alternatif file: link berbagi Google Sheets."),
+    conversation_id: str = Form("", description="Id percakapan (memori sesi server)."),
     user: dict = Depends(require_ai),
 ):
     """Chat dengan LAMPIRAN EXCEL. File dibaca di server (kolom dikenali otomatis),
@@ -342,7 +351,8 @@ async def ai_chat_sheet(
 
     sheet_id = ai_sheet.put_sheet(user.get("username", ""), parsed)
     try:
-        result = ai_assistant.chat(user, history, sheet_id=sheet_id)
+        result = ai_assistant.chat(user, history, sheet_id=sheet_id,
+                                   conversation_id=(conversation_id or "").strip())
     except ai_assistant.AINotConfigured:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,

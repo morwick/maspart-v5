@@ -2093,15 +2093,24 @@ export async function getAiStatus(
   return res.json();
 }
 
+// `conversationId` = id percakapan (UUID buatan klien, di-reset saat "hapus
+// obrolan"). Server memakainya untuk MEMORI SESI: PN/angka hasil tool + nomor
+// rangka/mesin giliran lalu, supaya follow-up "harganya berapa?" tidak dianggap
+// karangan oleh guard. Opsional — tanpa itu asisten tetap jalan, hanya pelupa.
 export async function aiChat(
   token: string,
   messages: AIChatTurn[],
   sheetId?: string,
+  conversationId?: string,
 ): Promise<AIChatResult> {
   const res = await fetch(`${API_BASE}/api/ai/chat`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, sheet_id: sheetId || "" }),
+    body: JSON.stringify({
+      messages,
+      sheet_id: sheetId || "",
+      conversation_id: conversationId || "",
+    }),
   });
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
@@ -2117,11 +2126,16 @@ export async function aiChatStream(
   messages: AIChatTurn[],
   sheetId: string | undefined,
   onProgress: (label: string) => void,
+  conversationId?: string,
 ): Promise<AIChatResult> {
   const res = await fetch(`${API_BASE}/api/ai/chat-stream`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, sheet_id: sheetId || "" }),
+    body: JSON.stringify({
+      messages,
+      sheet_id: sheetId || "",
+      conversation_id: conversationId || "",
+    }),
   });
   if (!res.ok || !res.body) throw new ApiError(res.status, await parseError(res));
 
@@ -2228,10 +2242,12 @@ export async function aiChatSheet(
   token: string,
   messages: AIChatTurn[],
   file: File,
+  conversationId?: string,
 ): Promise<AIChatResult> {
   const form = new FormData();
   form.append("messages", JSON.stringify(messages));
   form.append("file", file);
+  form.append("conversation_id", conversationId || "");
   const res = await fetch(`${API_BASE}/api/ai/chat-sheet`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },

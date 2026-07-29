@@ -33,6 +33,21 @@ def _file() -> Path:
     return get_settings().data_path / "sinonim" / "sinonim.json"
 
 
+def _file_gejala() -> Path:
+    """Dataset GEJALA → part (dibangun offline oleh backend/tools/build_gejala_map.py).
+
+    Skemanya SAMA PERSIS dengan sinonim.json, dan itu disengaja: dengan begitu
+    seluruh jalur yang sudah ada — expand_query, umbrella_keywords, subset kamus
+    di prompt, penjaga istilah deterministik — otomatis ikut memahami keluhan
+    lapangan ("mesin pincang", "asap hitam", "rem blong") tanpa satu baris kode
+    runtime baru. File belum ada = fitur mati, bukan error.
+
+    Dipisah dari sinonim.json supaya CRUD admin (load/save) tidak pernah menulis
+    ulang data turunan ini, dan supaya rebuild-nya bisa menimpa satu file saja.
+    """
+    return get_settings().data_path / "sinonim" / "gejala_map.json"
+
+
 def _clean_list(vals) -> list[str]:
     """Rapikan daftar string: strip, buang kosong & duplikat (case-insensitive,
     urutan asli dipertahankan)."""
@@ -73,9 +88,19 @@ def load() -> list[dict]:
 # ── LOOKUP TERPUSAT (dipakai ai_assistant + buyer_catalog) ───────────
 def entries() -> list[dict]:
     """Entri kamus dgn cache per-mtime (knowledge_util.load_json) — murah
-    dipanggil per-query, editan admin tetap langsung terpakai."""
+    dipanggil per-query, editan admin tetap langsung terpakai.
+
+    Kamus kurasi (sinonim.json) DULU, lalu dataset gejala turunan — urutannya
+    penting: pada seri skor yang sama, entri kurasi manusia harus menang. Grup
+    yang sudah ada di kamus kurasi tidak ditimpa dataset turunan."""
     data = load_json(_file())
-    return [e for e in data if isinstance(e, dict)] if isinstance(data, list) else []
+    out = [e for e in data if isinstance(e, dict)] if isinstance(data, list) else []
+    gj = load_json(_file_gejala())
+    if isinstance(gj, list):
+        ada = {str((e.get("grup") or "")).lower() for e in out}
+        out += [e for e in gj
+                if isinstance(e, dict) and str((e.get("grup") or "")).lower() not in ada]
+    return out
 
 
 def hit(trigger: str, text: str) -> bool:

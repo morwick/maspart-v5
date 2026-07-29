@@ -54,7 +54,38 @@ def main() -> int:
               f"| qty={r['quantity']} | stok={r['stok']} | harga={r['harga']}")
     if len(res) > 10:
         print(f"  ... (+{len(res) - 10} lagi)")
+    _lapor_belajar()
     return 0
+
+
+def _lapor_belajar() -> None:
+    """Umur artefak loop belajar-sendiri (ai_belajar) & dataset gejala.
+
+    Loop ini dirancang rapi tapi mudah TIDAK PERNAH BERJALAN tanpa ada yang
+    sadar: schedulernya baru menyala 15 menit setelah startup dan seluruh
+    keluarannya berupa file di disk. Bila `state.json` tak pernah terbentuk,
+    kamus tak pernah tumbuh dari kegagalan nyata — dan itu senyap sempurna.
+    Baris-baris ini membuatnya terlihat."""
+    import time as _t
+    from pathlib import Path
+
+    from app.core.config import get_settings
+    from app.services import ai_belajar
+
+    print("\n── LOOP BELAJAR ───────────────────────────────────────")
+    berkas: list[tuple[str, Path]] = [
+        ("state ai_belajar", ai_belajar._state_path()),
+        ("gap topik", ai_belajar._gap_path()),
+        ("pencarian nihil", get_settings().data_path / "search_misses.json"),
+        ("dataset gejala", get_settings().data_path / "sinonim" / "gejala_map.json"),
+    ]
+    for label, p in berkas:
+        if not p.exists():
+            print(f"  {label:18s}: ⚠️  BELUM ADA ({p.name})")
+            continue
+        umur_jam = (_t.time() - p.stat().st_mtime) / 3600
+        tanda = "⚠️ " if umur_jam > 48 else "✅"
+        print(f"  {label:18s}: {tanda} diperbarui {umur_jam:.1f} jam lalu")
 
 
 if __name__ == "__main__":

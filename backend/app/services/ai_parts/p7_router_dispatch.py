@@ -225,6 +225,40 @@ _TOOLS_ISTILAH = {
 }
 
 
+# Kata terlalu umum untuk membuktikan apa pun bila muncul di kedua sisi.
+_ISTILAH_STOP = frozenset(
+    "part number nomor kode cari carikan cek cekin tolong untuk dari dan atau "
+    "yang ada punya buat mau saya unit truk mobil depan belakang kiri kanan "
+    "atas bawah besar kecil baru lama".split())
+
+
+def _berakar_di_pertanyaan(kata: str, question: str) -> bool:
+    """Apakah istilah model tumbuh dari kata yang DIKETIK user sendiri?
+
+    Ini pembeda yang benar antara dua kasus yang tampak sama bagi guard:
+
+      • "carikan cucuk per"        → model menulis "cross joint".
+        Tak satu kata pun ('cross', 'joint') ada di pertanyaan → itu tafsiran
+        model, dan tafsirannya SALAH. Timpa dengan istilah mentah user.
+
+      • "cek per daun dan bearing roda" → model menulis "wheel bearing".
+        Kata 'bearing' ADA di pertanyaan → model sedang melayani permintaan
+        KEDUA user, bukan salah menerjemahkan yang pertama. Menimpanya membuang
+        separuh pertanyaan.
+
+    Sengaja BUKAN "apakah istilahnya ada di katalog": "cross joint" itu nama part
+    yang benar-benar ada — persis sebabnya insiden asli lolos pagar seperti itu.
+    Yang salah bukan keberadaannya, melainkan bahwa ia tak pernah disebut user.
+    """
+    q = (question or "").casefold()
+    for w in re.findall(r"[a-z]{4,}", (kata or "").casefold()):
+        if w in _ISTILAH_STOP:
+            continue
+        if w in q:
+            return True
+    return False
+
+
 def _paksa_istilah_kamus(name: str, args: dict, question: str) -> str:
     """Mutasi `args` in-place bila model mengarang istilah; return catatan
     untuk model ("" = tidak menimpa apa-apa)."""
@@ -258,15 +292,25 @@ def _paksa_istilah_kamus(name: str, args: dict, question: str) -> str:
         istilah = [*(e.get("triggers") or []), *(e.get("keywords") or [])]
         if any(i and sinonim.hit(i, kata) for i in istilah):
             return ""                  # model selaras kamus utk salah satu grup
-    # Tak satu grup pun terpuaskan → model mengarang. Trigger TERPANJANG yang
-    # muncul di pertanyaan dipakai ('cucuk per' menang atas 'per'). Nilai array:
-    # istilah user DITAMBAHKAN (istilah lain di daftar bisa saja sah).
+    # Tak satu grup pun terpuaskan. Trigger TERPANJANG yang muncul di pertanyaan
+    # dipakai ('cucuk per' menang atas 'per').
     t, e = max(cocok, key=lambda te: len(te[0]))
+    kw = ", ".join(k for k in (e.get("keywords") or []) if k)
+
     if isinstance(kata_raw, (list, tuple)):
+        # Nilai array: istilah user DITAMBAHKAN (istilah lain di daftar bisa sah).
         args[field] = [*[str(x).strip() for x in kata_raw if str(x).strip()], t]
+    elif _berakar_di_pertanyaan(kata, question):
+        # Skalar, tapi istilah model BERAKAR pada kata user sendiri → jangan ganti.
+        logger.info("istilah dibiarkan (berakar di pertanyaan): %r vs user %r (tool %s)",
+                    kata, t, name)
+        return (f"ℹ️ kata kuncimu '{kata}' berakar pada kata user sendiri, jadi "
+                f"server TIDAK menggantinya. Tapi user juga menyebut '{t}' "
+                f"(kamus lapangan resmi: {kw or t}) — itu permintaan TERPISAH. "
+                f"Pastikan KEDUANYA terjawab: bila perlu cari sekali lagi dengan "
+                "istilah itu. Sebut padanan istilahnya saat menjawab.")
     else:
         args[field] = t
-    kw = ", ".join(k for k in (e.get("keywords") or []) if k)
     logger.info("istilah dipaksa: %r -> %r (tool %s)", kata, t, name)
     return (f"⚠️ kata kunci buatanmu '{kata}' TIDAK sesuai istilah user '{t}' — "
             f"server MENGGANTINYA dengan istilah user (kamus lapangan resmi: "

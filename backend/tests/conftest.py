@@ -15,8 +15,11 @@ def _jangan_tulis_observabilitas_prod(request, monkeypatch):
     """Test yang memanggil ai_assistant.chat() TIDAK boleh menulis ke Supabase
     PRODUKSI (kejadian nyata 2026-07-08: 150 baris 'tester' mengotori halaman
     Observabilitas AI). log_turn di-no-op untuk SEMUA test — kecuali modul
-    test_ai_chat_log yang memang menguji fungsi itu (ia mock requests sendiri)."""
-    if request.module.__name__ == "test_ai_chat_log":
+    test_ai_chat_log* yang memang menguji fungsi itu (mereka mock requests
+    sendiri). Pengecualiannya berbasis PREFIKS: dulu nama persis, sehingga
+    test_ai_chat_log_session_id ikut di-no-op dan seluruh assertion-nya menguji
+    stub, bukan kode nyata."""
+    if request.module.__name__.startswith("test_ai_chat_log"):
         return
     try:
         from app.services import ai_chat_log

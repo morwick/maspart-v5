@@ -51,7 +51,11 @@ _MAX_FOTO_PER_PART = 3         # plafon foto per part (jaga ukuran file & RAM)
 _TANPA_FOTO = "—"
 
 _STASH_TTL_SEC = 2 * 3600.0
-_STASH_MAX = 40
+_STASH_MAX = 40                # pagar RAM global (semua user)
+# Eviksi dulu MILIK PENGUNGGAH sendiri. Tanpa ini, `_STASH_MAX` global membuat
+# unggahan user LAIN menggusur lampiran yang sedang dipakai user ini sebelum TTL
+# habis — dari sisi user, asisten mendadak "lupa" ada file, tanpa sebab terlihat.
+_STASH_MAX_PER_USER = 5
 _lock = threading.Lock()
 _stash: dict[str, dict] = {}
 
@@ -542,12 +546,21 @@ def ringkas(parsed: dict) -> dict:
 def put_sheet(username: str, parsed: dict) -> str:
     now = time.monotonic()
     sid = uuid.uuid4().hex
+    u = (username or "").lower()
     with _lock:
         for k in [k for k, v in _stash.items() if now - v["at"] > _STASH_TTL_SEC]:
             _stash.pop(k, None)
+        # 1) Kuota PER-USER: unggahan ke-6 menggusur lampiran TERTUA milik user
+        #    yang sama — kerugiannya ditanggung pengunggahnya sendiri.
+        milik = [k for k, v in _stash.items() if v["user"] == u]
+        while len(milik) >= _STASH_MAX_PER_USER:
+            tertua = min(milik, key=lambda k: _stash[k]["at"])
+            _stash.pop(tertua, None)
+            milik.remove(tertua)
+        # 2) Pagar RAM global tetap ada sebagai jaring terakhir (banyak user aktif).
         while len(_stash) >= _STASH_MAX:
             _stash.pop(min(_stash, key=lambda k: _stash[k]["at"]), None)
-        _stash[sid] = {"at": now, "user": (username or "").lower(), "data": parsed}
+        _stash[sid] = {"at": now, "user": u, "data": parsed}
     return sid
 
 

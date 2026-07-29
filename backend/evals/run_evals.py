@@ -17,11 +17,22 @@ Catatan:
   pakai cache .cache/*.pkl.
 - Kasus ber-tag 'epc'/'weichai' menembak EPC Sinotruk/Weichai sungguhan — default
   di-SKIP; aktifkan dengan --net.
-- Hasil lengkap ditulis ke evals/last_run.json (di-gitignore) untuk dibedah.
+- Hasil lengkap ditulis ke evals/last_run.json (di-gitignore) untuk dibedah;
+  ringkasan tiap run di-APPEND ke evals/history.jsonl sebagai baseline antar-rilis.
+
+Bentuk kasus (golden.json):
+- `question` (str) — satu pertanyaan; atau
+- `turns` [{role, content}] — riwayat palsu + pertanyaan terakhir; atau
+- `steps` ["q1", "q2", …] — percakapan BERSESI: tiap langkah dijalankan lewat
+  chat() dengan conversation_id yang sama dan riwayat diakumulasi dari jawaban
+  NYATA. Assertion berlaku pada jawaban langkah TERAKHIR. Ini satu-satunya cara
+  menguji memori lintas-giliran (mis. "harganya berapa?" setelah BOM per-VIN).
 """
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
+import inspect
 import json
 import sys
 import time
@@ -46,13 +57,79 @@ ai_chat_log.log_turn = lambda **kw: True
 
 GOLDEN = _EVALS_DIR / "golden.json"
 LAST_RUN = _EVALS_DIR / "last_run.json"
+HISTORY = _EVALS_DIR / "history.jsonl"
 NET_TAGS = {"epc", "weichai"}
 # Akun eval: role admin = seluruh tool tersedia (kasus tidak menyentuh data pesanan).
 EVAL_USER = {"username": "eval-runner", "role": "admin"}
 
+# Kegagalan JARINGAN bukan regresi perilaku. Run 2026-07-20: 12 gagal, 10 di
+# antaranya "Gagal menghubungi DeepSeek (jaringan)" karena koneksi putus di
+# tengah run — angka pass/fail jadi tak bisa dipakai sebagai metrik kualitas.
+# Hanya error TRANSPORT yang di-retry; error perilaku/tool tetap FAIL seketika.
+_RETRY_HINTS = ("jaringan", "menghubungi", "timeout", "timed out",
+                "connection", "temporarily", "sementara")
+_RETRY_BACKOFF = (5, 15)   # detik; 2 percobaan ulang
+
+
+def _is_network_error(e: Exception) -> bool:
+    if not isinstance(e, RuntimeError):
+        return False
+    msg = str(e).casefold()
+    return any(h in msg for h in _RETRY_HINTS)
+
 
 def _contains(hay: str, needle: str) -> bool:
     return needle.casefold() in (hay or "").casefold()
+
+
+# chat() menerima `conversation_id` sejak memori sesi server (Fase 1B). Runner
+# ini harus tetap jalan di checkout yang belum punya parameter itu.
+_CHAT_PUNYA_CONV = "conversation_id" in inspect.signature(ai_assistant.chat).parameters
+
+
+def _chat_once(turns: list[dict], conv_id: str = "") -> dict:
+    """Satu panggilan chat() NYATA, dengan retry khusus kegagalan jaringan."""
+    kw = {"conversation_id": conv_id} if (conv_id and _CHAT_PUNYA_CONV) else {}
+    for percobaan in range(len(_RETRY_BACKOFF) + 1):
+        try:
+            return ai_assistant.chat(EVAL_USER, turns, **kw)
+        except Exception as e:
+            if percobaan >= len(_RETRY_BACKOFF) or not _is_network_error(e):
+                raise
+            jeda = _RETRY_BACKOFF[percobaan]
+            print(f"       ↻ jaringan gagal ({e}) — ulang dalam {jeda}s "
+                  f"[{percobaan + 1}/{len(_RETRY_BACKOFF)}]")
+            time.sleep(jeda)
+    raise AssertionError("unreachable")   # pragma: no cover
+
+
+def _conv_id(case_id: str) -> str:
+    """id kasus → conversation_id yang lolos validasi ai_session
+    (^[A-Za-z0-9-]{8,64}$). Unik per kasus agar memori sesi tak bocor antar-kasus."""
+    aman = "".join(c if (c.isalnum() or c == "-") else "-" for c in case_id)
+    return f"eval-{aman}"[:64].ljust(8, "0")
+
+
+def _jalankan_kasus(case: dict, conv_id: str) -> tuple[str, list[str]]:
+    """Jalankan satu kasus → (reply terakhir, tools_used gabungan).
+    Mode `steps` = percakapan bersesi; riwayat diakumulasi dari jawaban NYATA."""
+    steps = case.get("steps") or []
+    if not steps:
+        turns = case.get("turns") or [{"role": "user", "content": case["question"]}]
+        out = _chat_once(turns)
+        return (out.get("reply") or ""), (out.get("tools_used") or [])
+
+    riwayat: list[dict] = list(case.get("turns") or [])
+    reply, tools_used = "", []
+    for q in steps:
+        riwayat.append({"role": "user", "content": q})
+        out = _chat_once(riwayat, conv_id)
+        reply = out.get("reply") or ""
+        riwayat.append({"role": "assistant", "content": reply})
+        for t in (out.get("tools_used") or []):
+            if t not in tools_used:
+                tools_used.append(t)
+    return reply, tools_used
 
 
 def check_case(case: dict, reply: str, tools_used: list[str],
@@ -101,6 +178,10 @@ def _check_expect(case: dict, exp: dict, reply: str, tools_used: list[str],
         for t in case.get("turns") or [{"role": "user", "content": case.get("question", "")}]:
             if (t.get("role") or "") == "user":
                 allowed |= ai_assistant._extract_pns(t.get("content") or "")
+        # Mode `steps`: tiap langkah adalah pesan user — PN yang DIKETIK user di
+        # langkah mana pun tetap sah (definisi 'grounded' yang sama dgn chat()).
+        for q in case.get("steps") or []:
+            allowed |= ai_assistant._extract_pns(str(q or ""))
         # Kode nama unit/seri (HOWO-380, NX400HP, SG21-C6) BUKAN PN — guard produksi
         # juga mengecualikannya (_drop_unit_tokens); tanpa ini eval false-positive
         # saat model menyebut daftar unit yang tersedia.
@@ -166,13 +247,12 @@ def main() -> int:
 
     ai_assistant._run_tool = _spy_run_tool
     for i, case in enumerate(cases, 1):
-        turns = case.get("turns") or [{"role": "user", "content": case["question"]}]
         tool_pns.clear()
         t0 = time.time()
         try:
-            out = ai_assistant.chat(EVAL_USER, turns)
-            reply = out.get("reply") or ""
-            tools_used = out.get("tools_used") or []
+            # conversation_id unik per kasus → memori sesi satu kasus tak pernah
+            # bocor ke kasus lain (eval harus tetap independen antar-kasus).
+            reply, tools_used = _jalankan_kasus(case, _conv_id(case["id"]))
             fails = check_case(case, reply, tools_used, tool_pns)
         except Exception as e:  # error API/tool = kasus gagal, eval jalan terus
             reply, tools_used, fails = "", [], [f"EXCEPTION: {type(e).__name__}: {e}"]
@@ -195,8 +275,30 @@ def main() -> int:
     print(f"\n── HASIL: {n_pass}/{len(cases)} lolos, {n_fail} gagal · {time.time()-t_all:.0f}s total ──")
     LAST_RUN.write_text(json.dumps({"pass": n_pass, "fail": n_fail, "results": results},
                                    ensure_ascii=False, indent=2), encoding="utf-8")
+    _catat_history(n_pass, n_fail, cases, results, args)
     print(f"Detail lengkap: {LAST_RUN}")
     return 1 if n_fail else 0
+
+
+def _catat_history(n_pass: int, n_fail: int, cases: list[dict],
+                   results: list[dict], args) -> None:
+    """Append SATU baris ringkasan per run ke evals/history.jsonl — baseline
+    antar-rilis. Tanpa ini, `last_run.json` selalu menimpa dirinya sendiri dan
+    tak ada cara melihat apakah sebuah perubahan menaikkan atau menurunkan mutu.
+    Best-effort: kegagalan menulis TIDAK boleh menggagalkan eval."""
+    try:
+        baris = {
+            "waktu": _dt.datetime.now().isoformat(timespec="seconds"),
+            "model": get_settings().deepseek_model,
+            "pass": n_pass, "fail": n_fail, "total": len(cases),
+            "net": bool(args.net),
+            "filter": args.only or args.tag or "",
+            "gagal_id": [r["id"] for r in results if not r["pass"]],
+        }
+        with HISTORY.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(baris, ensure_ascii=False) + "\n")
+    except Exception as e:  # pragma: no cover — murni pencatatan
+        print(f"(catatan: gagal menulis {HISTORY.name}: {e})")
 
 
 if __name__ == "__main__":

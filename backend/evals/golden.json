@@ -356,6 +356,40 @@
       "_kenapa": "Blok PENGETAHUAN DARI DATA NYATA (2026-07-09): pola prefix PN di-mining dari catalog_bom (WG2229 → dominan Transmisi/Gearbox) — asisten menjawab keluarga part dari fakta terhitung, bukan hafalan.",
       "question": "part number yang awalannya WG2229 itu biasanya part bagian apa sih?",
       "expect": { "reply_any": ["transmisi", "gearbox"], "no_new_pn": true }
+    },
+    {
+      "id": "istilah-cucuk-per",
+      "tags": ["lokal"],
+      "_kenapa": "Insiden 2026-07-22: user bilang 'cucuk per', model DUA KALI mengarang terjemahannya sendiri ('cross joint', lalu 'fuel injector') meski prompt + kamus melarang. Penjaga istilah deterministik WAJIB tetap menimpa istilah yang tak berakar pada kata user — kasus ini menguncinya sebelum guard itu dilonggarkan.",
+      "question": "carikan cucuk per dong",
+      "expect": { "tools_any": ["cari_part", "cari_part_di_unit"], "reply_any": ["spring pin", "cucuk per", "pin per"] },
+      "expect_alt": [{ "reply_any": ["rangka", "vin"] }]
+    },
+    {
+      "id": "istilah-multipart-tak-dibajak",
+      "tags": ["lokal"],
+      "_kenapa": "Sisi sebaliknya dari istilah-cucuk-per. Trigger kamus 'per' cocok, tapi 'bearing' DIKETIK user sendiri — dulu kata kunci model ditimpa jadi 'per' dan permintaan kedua hilang tanpa jejak.",
+      "question": "tolong cek per daun dan bearing roda",
+      "expect": { "tools_any": ["cari_part", "cari_part_di_unit"], "reply_all": ["bearing"], "reply_any": ["leaf spring", "per daun", "spring"] },
+      "expect_alt": [{ "reply_any": ["rangka", "vin"] }]
+    },
+    {
+      "id": "gejala-mesin-loyo-nanjak",
+      "tags": ["lokal"],
+      "_kenapa": "Pertanyaan berbasis GEJALA, bukan nama part. Retrieval murni leksikal membuat kasus begini gagal SENYAP — dan kegagalannya terlihat identik dgn 'datanya memang tidak ada'. Dijembatani data/sinonim/gejala_map.json.",
+      "question": "truk saya loyo waktu nanjak dan asapnya hitam, kira-kira part apa yang perlu dicek?",
+      "expect": { "tools_any": ["cari_part", "cari_pengetahuan", "cari_manual", "diagnosa", "cari_kode_kesalahan"], "reply_any": ["filter", "injector", "nozzle", "turbo", "solar", "bahan bakar"] }
+    },
+    {
+      "id": "konteks-rangka-user-only",
+      "tags": ["lokal"],
+      "_kenapa": "Kolom Frame di tabel buatan ASISTEN tak boleh jadi 'rangka aktif' (_recent_rangka kini user-only). Dulu follow-up dijawab untuk unit ORANG LAIN yang kebetulan ada di tabel.",
+      "turns": [
+        { "role": "user", "content": "tampilkan riwayat klaim garansi bulan ini" },
+        { "role": "assistant", "content": "Berikut klaim bulan ini:\n\n| No WO | Frame | Status |\n|---|---|---|\n| RIDZ0052607123 | SJ346500 | Selesai |\n| RIDZ0052607124 | SJ346501 | Proses |" },
+        { "role": "user", "content": "kampas rem depan untuk unit itu apa nomornya?" }
+      ],
+      "expect": { "reply_any": ["rangka", "vin", "nomor rangka", "unit mana"] }
     }
   ]
 }

@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     # ── Asisten AI (DeepSeek — OpenAI-compatible API) ──
     deepseek_api_key: str = ""                       # key dari platform.deepseek.com
     deepseek_base_url: str = "https://api.deepseek.com"  # base URL OpenAI-compatible
-    deepseek_model: str = "deepseek-chat"            # "deepseek-chat" | "deepseek-reasoner"
+    deepseek_model: str = "deepseek-v4-flash"           # "deepseek-v4-flash" | "deepseek-chat" | "deepseek-reasoner"
 
     @property
     def ai_configured(self) -> bool:
@@ -117,6 +117,14 @@ class Settings(BaseSettings):
     def ai_fallback_configured(self) -> bool:
         return bool(self.ai_fallback_base_url and self.ai_fallback_api_key
                     and self.ai_fallback_model)
+
+    # ── Memori sesi asisten (services/ai_session.py) ──
+    # Ingatan singkat SERVER per percakapan: PN/angka hasil tool + slot entitas
+    # (rangka/mesin/WO) giliran lalu, supaya follow-up "harganya berapa?" tidak
+    # disanitasi guard jadi "⟨PN tak terverifikasi⟩". KILL-SWITCH: set
+    # AI_SESSION_MEMORY=0 di Coolify → asisten kembali ke perilaku stateless
+    # tanpa perlu deploy ulang kode klien.
+    ai_session_memory: bool = True
 
     # ── Telematics/GPS armada (Sinotruk Fleet Service — www.sg.sinotruksfs.com) ──
     # Portal pelacakan GPS/IoT armada, TERPISAH dari SIMS & EPC (server, auth,

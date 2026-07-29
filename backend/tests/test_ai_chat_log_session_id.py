@@ -1,0 +1,92 @@
+"""session_id di ai_chat_log (migrations/025) + degradasi bila migrasi belum jalan.
+
+Migrasi dijalankan MANUAL oleh pemilik di Supabase, jadi kode wajib tetap
+mencatat walau kolomnya belum ada — kalau tidak, observabilitas mati diam-diam
+persis saat fitur baru dirilis.
+"""
+from __future__ import annotations
+
+import pytest
+
+from app.services import ai_chat_log
+
+
+class _Resp:
+    def __init__(self, code):
+        self.status_code = code
+        self.headers = {}
+        self.text = ""
+
+
+@pytest.fixture
+def kirim(monkeypatch):
+    """Rekam payload tiap percobaan POST; `tolak` = set kolom yang 'belum ada'."""
+    rekam: list[dict] = []
+    state = {"tolak": set()}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        rekam.append(dict(json or {}))
+        if state["tolak"] & set((json or {}).keys()):
+            return _Resp(400)          # PostgREST: kolom tak dikenal
+        return _Resp(201)
+
+    monkeypatch.setattr(ai_chat_log.requests, "post", fake_post)
+    monkeypatch.setattr(ai_chat_log, "_rest_url", lambda t: "http://x/" + t)
+    monkeypatch.setattr(ai_chat_log, "_service_headers", lambda *a, **k: {})
+    return rekam, state
+
+
+def _log(**kw):
+    dasar = dict(username="budi", role="user", question="q", tools_used=["cari_part"],
+                 rounds=1, latency_ms=10, guard_hit=False, tool_failed=False,
+                 reply_len=5, outcome="ok")
+    dasar.update(kw)
+    return ai_chat_log.log_turn(**dasar)
+
+
+def test_session_id_ikut_tercatat(kirim):
+    rekam, _ = kirim
+    assert _log(session_id="conv-123-abc") is True
+    assert rekam[0]["session_id"] == "conv-123-abc"
+
+
+def test_kolom_session_belum_ada_tetap_tercatat(kirim):
+    """Migrasi 025 belum dijalankan → turun satu tingkat, log TIDAK hilang."""
+    rekam, state = kirim
+    state["tolak"] = {"session_id"}
+    assert _log(session_id="conv-123-abc") is True
+    assert len(rekam) == 2
+    assert "session_id" in rekam[0]
+    assert "session_id" not in rekam[1]
+    assert rekam[1]["tools_failed"] is None or "tools_failed" in rekam[1]
+
+
+def test_degradasi_berjenjang_sampai_dasar(kirim):
+    """Skema paling lama (016) pun masih menerima baris dasar."""
+    rekam, state = kirim
+    state["tolak"] = {"session_id", "tools_failed", "reply", "tokens_in"}
+    assert _log(session_id="c-1", reply="halo") is True
+    terakhir = rekam[-1]
+    for kolom in ("session_id", "tools_failed", "reply", "tokens_in"):
+        assert kolom not in terakhir
+    assert terakhir["question"] == "q"
+
+
+def test_tanpa_session_id_kolomnya_null(kirim):
+    rekam, _ = kirim
+    _log()
+    assert rekam[0]["session_id"] is None
+
+
+def test_pertanyaan_panjang_tak_lagi_dipotong_500(kirim):
+    """500 char memotong justru bagian yang menjelaskan MAKSUD user."""
+    rekam, _ = kirim
+    _log(question="x" * 900)
+    assert len(rekam[0]["question"]) == 900
+    assert ai_chat_log._QUESTION_CAP == 1000
+
+
+def test_pertanyaan_sangat_panjang_tetap_di_cap(kirim):
+    rekam, _ = kirim
+    _log(question="x" * 5000)
+    assert len(rekam[0]["question"]) == 1000

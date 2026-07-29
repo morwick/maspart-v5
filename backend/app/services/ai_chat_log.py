@@ -53,13 +53,19 @@ def create_table_sql() -> str:
         "  tokens_cache_hit int not null default 0,\n"
         "  api_calls int not null default 0,\n"
         "  reply text,\n"                                # migrations/022 (teks jawaban AI)
-        "  tools_failed text\n"                          # migrations/023 (tool yang gagal)
+        "  tools_failed text,\n"                         # migrations/023 (tool yang gagal)
+        "  session_id text\n"                            # migrations/025 (percakapan)
         ");\n"
         "create index if not exists ai_chat_log_created_idx on ai_chat_log (created_at desc);\n"
+        "create index if not exists ai_chat_log_session_idx on ai_chat_log (session_id);\n"
     )
 
 
 _REPLY_CAP = 4000  # teks jawaban di-cap (bisa beberapa KB) — cukup utk monitoring
+# Pertanyaan lapangan sering panjang (tempel daftar PN, keluhan bertele). 500
+# char memotong justru bagian yang menjelaskan MAKSUD user — padahal kolomnya
+# `text`, jadi menaikkan cap tak menambah biaya skema.
+_QUESTION_CAP = 1000
 
 
 def log_turn(*, username: str | None, role: str | None, question: str,
@@ -67,21 +73,24 @@ def log_turn(*, username: str | None, role: str | None, question: str,
              guard_hit: bool, tool_failed: bool, reply_len: int,
              outcome: str, tokens_in: int = 0, tokens_out: int = 0,
              tokens_cache_hit: int = 0, api_calls: int = 0, reply: str = "",
-             tools_failed: list[str] | None = None) -> bool:
+             tools_failed: list[str] | None = None,
+             session_id: str = "") -> bool:
     """Simpan satu baris observabilitas. Best-effort: False bila gagal/tabel absen,
     TAK melempar (pemanggil membungkus lagi, tapi tetap aman di sini).
 
     tokens_* = biaya DeepSeek giliran ini (jumlah seluruh panggilan API-nya),
     dari field `usage` respons. Kolomnya dari migrations/021. `reply` = teks jawaban
     AI (di-cap _REPLY_CAP) dari migrations/022. `tools_failed` = nama tool yang gagal
-    (migrations/023). Bila migrasi belum dijalankan, baris diulang berjenjang TANPA
-    kolom yang absen agar log tetap tercatat."""
+    (migrations/023). `session_id` = id percakapan (migrations/025) — tanpa ini tiap
+    baris berdiri sendiri dan kegagalan FOLLOW-UP (kelas bug terbesar asisten) tak
+    bisa direkonstruksi. Bila migrasi belum dijalankan, baris diulang berjenjang
+    TANPA kolom yang absen agar log tetap tercatat."""
     tools = tools_used or []
     gagal = tools_failed or []
     base = {
         "username": (username or None),
         "role": (role or None),
-        "question": (question or "")[:500] or None,
+        "question": (question or "")[:_QUESTION_CAP] or None,
         "tools": (", ".join(tools) if tools else None),
         "tools_count": len(tools),
         "rounds": int(rounds),
@@ -99,11 +108,12 @@ def log_turn(*, username: str | None, role: str | None, question: str,
         "api_calls": int(api_calls or 0),
     }
     with_reply = {**base, **tok, "reply": (reply or "")[:_REPLY_CAP] or None}
-    full = {**with_reply, "tools_failed": (", ".join(gagal) if gagal else None)}
-    # 4 tingkat berjenjang: reply+tools_failed (022+023) → reply (022) → token (021)
-    # → base. Kolom absen (migrasi belum jalan) bikin PostgREST balas 400 → coba
-    # tingkat berikutnya (log tetap tercatat, degradasi bertahap).
-    for payload in (full, with_reply, {**base, **tok}, base):
+    with_failed = {**with_reply, "tools_failed": (", ".join(gagal) if gagal else None)}
+    full = {**with_failed, "session_id": (session_id or None)}
+    # 5 tingkat berjenjang: +session_id (025) → +tools_failed (023) → reply (022)
+    # → token (021) → base. Kolom absen (migrasi belum jalan) bikin PostgREST
+    # balas 400 → coba tingkat berikutnya (log tetap tercatat, degradasi bertahap).
+    for payload in (full, with_failed, with_reply, {**base, **tok}, base):
         try:
             r = requests.post(
                 _rest_url("ai_chat_log"),
@@ -122,14 +132,15 @@ _SELECT_BASE = ("id,created_at,username,role,question,tools,tools_count,"
                 "rounds,latency_ms,guard_hit,tool_failed,reply_len,outcome")
 _SELECT_TOKENS = _SELECT_BASE + ",tokens_in,tokens_out,tokens_cache_hit,api_calls"
 _SELECT_REPLY = _SELECT_TOKENS + ",reply"
-_SELECT_FULL = _SELECT_REPLY + ",tools_failed"
+_SELECT_FAILED = _SELECT_REPLY + ",tools_failed"
+_SELECT_FULL = _SELECT_FAILED + ",session_id"
 
 
 def list_logs(limit: int = 200) -> list[dict]:
     """Baris observabilitas terbaru dulu (untuk halaman admin). Kolom terkaya dicoba
-    dulu (tools_failed=023, reply=022, token=021); skema lama → fallback ke select
-    yang lebih ramping."""
-    for sel in (_SELECT_FULL, _SELECT_REPLY, _SELECT_TOKENS, _SELECT_BASE):
+    dulu (session_id=025, tools_failed=023, reply=022, token=021); skema lama →
+    fallback ke select yang lebih ramping."""
+    for sel in (_SELECT_FULL, _SELECT_FAILED, _SELECT_REPLY, _SELECT_TOKENS, _SELECT_BASE):
         try:
             r = requests.get(
                 _rest_url("ai_chat_log"),

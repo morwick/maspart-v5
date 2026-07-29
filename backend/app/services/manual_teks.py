@@ -141,6 +141,14 @@ def _score(r: dict, ql: str, words: list[str]) -> int:
 # manual tebal tak menenggelamkan yang lain; kursi sisa diisi ulang.
 _MAX_PER_SUMBER = 2
 
+# Ambang RELATIF terhadap skor juara (pola yang sudah terbukti di
+# pengetahuan.search_skor). Sebelumnya `sc > 0` sudah cukup masuk, sehingga
+# record yang hanya kena SATU kata umum ikut naik dan disajikan sederajat dengan
+# kecocokan sungguhan — asisten lalu mengutip manual yang tak relevan dengan
+# nada yakin. Ambang absolut tak bisa dipakai di sini (skor field-weighted
+# berskala bebas), tapi ambang relatif menyaring ekor tanpa menyentuh juara.
+_AMBANG_RELATIF = 0.30
+
 
 def search_skor(topik: str = "", limit: int = 5) -> list[tuple[float, dict]]:
     """(skor, record) terurut. Fallback typo/stem/PN bila kecocokan eksak tipis;
@@ -175,6 +183,11 @@ def search_skor(topik: str = "", limit: int = 5) -> list[tuple[float, dict]]:
                 berskor.append((sc, i, r))
 
     berskor.sort(key=lambda t: (-t[0], t[1]))
+
+    # Buang ekor yang jauh di bawah juara — sisanya bukan jawaban, hanya derau.
+    if berskor:
+        batas = berskor[0][0] * _AMBANG_RELATIF
+        berskor = [t for t in berskor if t[0] >= batas]
 
     # Diversitas per sumber (lintasan 1), lalu isi kursi sisa.
     hasil: list[tuple[float, dict]] = []

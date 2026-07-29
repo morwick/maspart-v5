@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -175,6 +176,32 @@ def _title(ws, text: str, sub: str, ncol: int) -> int:
     return 4  # baris mulai konten
 
 
+# .xlsx itu arsip ZIP, dan setiap ENTRI-nya membawa stempel waktu sendiri yang
+# diambil dari jam dinding saat penulisan. Jadi memasang wb.properties saja TIDAK
+# cukup: dua build data identik yang kebetulan jatuh di detik berbeda tetap
+# menghasilkan bytes berbeda. Cacat ini laten — test byte-stable lolos selama
+# kedua pemanggilan mendarat di detik yang sama, lalu gagal acak begitu mesin
+# sedang sibuk (mis. saat suite penuh berjalan). Stempel dipin ke batas bawah
+# yang diizinkan format ZIP (1980-01-01).
+_ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
+
+
+def _zip_stabil(raw: bytes) -> bytes:
+    """Tulis ulang arsip xlsx dgn stempel waktu entri yang tetap. Urutan entri &
+    metode kompresi dipertahankan agar isinya identik bagi Excel."""
+    src = zipfile.ZipFile(io.BytesIO(raw))
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as dst:
+        for info in src.infolist():
+            zi = zipfile.ZipInfo(info.filename, date_time=_ZIP_EPOCH)
+            zi.compress_type = info.compress_type
+            zi.external_attr = info.external_attr
+            zi.internal_attr = info.internal_attr
+            zi.create_system = info.create_system
+            dst.writestr(zi, src.read(info.filename))
+    return out.getvalue()
+
+
 def _save_stable(wb) -> bytes:
     """Simpan workbook → bytes DETERMINISTIK. openpyxl cap created/modified dgn
     datetime.now() → dua build data sama menghasilkan bytes berbeda; pin ke tanggal
@@ -188,7 +215,10 @@ def _save_stable(wb) -> bytes:
         pass
     buf = io.BytesIO()
     wb.save(buf)
-    return buf.getvalue()
+    try:
+        return _zip_stabil(buf.getvalue())
+    except Exception:  # pragma: no cover — file tetap sah walau tak ter-normalisasi
+        return buf.getvalue()
 
 
 def banding_rangka_excel(rangka_1: str, rangka_2: str, kategori: str = "") -> tuple[bytes | None, str]:

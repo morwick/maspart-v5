@@ -136,6 +136,48 @@ def _gap_key(q: str) -> str:
     return " ".join(toks[:8])
 
 
+_BOBOT_DISLIKE = 3      # satu 👎 setara 3 giliran ber-outcome jelek
+
+
+def _serap_feedback_down(acc: dict, state: dict) -> dict:
+    """Masukkan pertanyaan ber-👎 ke akumulator gap topik yang sama.
+
+    Watermark-nya SENDIRI (`watermark_feedback`), bukan watermark chat-log:
+    keduanya tabel berbeda dengan laju berbeda, dan memakai watermark chat-log
+    akan diam-diam melewatkan 👎 setiap kali user lain sempat mengobrol setelah
+    umpan balik itu diberikan — persis sinyal yang paling ingin kita tangkap.
+
+    Dipisah jadi fungsi sendiri supaya kegagalan tabel ai_feedback (mis. migrasi
+    belum jalan) tak pernah menjatuhkan penambangan chat-log yang utama."""
+    try:
+        from . import ai_feedback
+        rows = ai_feedback.list_feedback(rating="down", limit=200) or []
+    except Exception:
+        return acc
+    wm = str(state.get("watermark_feedback") or "")
+    terbaru = wm
+    for r in rows:
+        dibuat = str(r.get("created_at") or "")
+        if dibuat <= wm:
+            continue            # sudah pernah diserap di putaran sebelumnya
+        terbaru = max(terbaru, dibuat)
+        q = " ".join(str(r.get("question") or "").split())
+        key = _gap_key(q)
+        if not key:
+            continue
+        g = acc.get(key) or {"topik": key, "contoh": q, "jumlah": 0, "terakhir": ""}
+        g["jumlah"] = int(g.get("jumlah") or 0) + _BOBOT_DISLIKE
+        g["dislike"] = int(g.get("dislike") or 0) + 1
+        g["terakhir"] = max(str(g.get("terakhir") or ""),
+                            str(r.get("created_at") or "")[:16])
+        if not g.get("contoh") or len(q) < len(g["contoh"]):
+            g["contoh"] = q
+        acc[key] = g
+    if terbaru:
+        state["watermark_feedback"] = terbaru
+    return acc
+
+
 def mine_chat_logs(limit: int = _MINE_LOG_LIMIT) -> dict:
     """Baca giliran chat BARU (di atas watermark) → misses istilah + gap topik."""
     try:
@@ -177,6 +219,13 @@ def mine_chat_logs(limit: int = _MINE_LOG_LIMIT) -> dict:
             if len(q) < len(g.get("contoh") or "") or not g.get("contoh"):
                 g["contoh"] = q
             acc[key] = g
+        # (c) 👎 EKSPLISIT dari user — sinyal terkuat yang kita punya, tapi
+        #     sebelumnya hanya duduk di panel admin dan tak pernah dipakai apa
+        #     pun secara otomatis. Diberi bobot _BOBOT_DISLIKE karena "user
+        #     menekan jempol ke bawah" jauh lebih meyakinkan daripada heuristik
+        #     `outcome != ok` (yang juga menyala saat asisten JUJUR bilang data
+        #     tak ada). Read-only terhadap tabel ai_feedback.
+        acc = _serap_feedback_down(acc, state)
         # rapikan akumulator (cap — kelompok terbanyak menang)
         if len(acc) > 400:
             acc = dict(sorted(acc.items(), key=lambda kv: -kv[1]["jumlah"])[:400])

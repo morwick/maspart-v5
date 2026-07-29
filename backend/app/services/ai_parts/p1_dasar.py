@@ -29,7 +29,8 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 from ..core.config import get_settings
-from . import (abs_scr_codes, accurate, ai_chat_log, ai_export, ai_knowledge, ai_sheet, catalog_bom,
+from . import (abs_scr_codes, accurate, ai_chat_log, ai_export, ai_knowledge, ai_session, ai_sheet,
+               catalog_bom,
                dtc_diagnosa, eol_dtc, epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref,
                gudang, gudang_config, harga, knowledge_links, maintenance_ref, manual_media,
                manual_teks, orders, part_index, part_taxonomy, pengetahuan, pin_ecu, populasi,
@@ -43,6 +44,8 @@ _MAX_TOOL_ROUNDS = 8          # batas putaran panggil-tool agar tidak loop;
                               # rantai fallback multi-tool butuh > 6 putaran
 
 _MAX_HISTORY = 16             # batas pesan riwayat yang dikirim balik ke model
+_KAMUS_SUBSET_MAX = 16        # baris [KAMUS ISTILAH GILIRAN INI] (±1,5–2,5rb chars);
+                              # 12 terlalu sempit utk pertanyaan multi-part
 _MAX_PART_ROWS = 12           # batas baris hasil pencarian part global (hemat token)
 _MAX_PART_ROWS_UNIT = 25      # batas lebih longgar saat difilter ke 1 unit (daftar lengkap)
 _MAX_EXPLODED_FIGURES = 6     # batas figure exploded view per panggilan gambar_exploded
@@ -285,27 +288,36 @@ def _kamus_subset_block(messages: list[dict]) -> str:
     DIHAPUS dari prompt statik; pencarian tak terpengaruh (semua jalur cari
     sudah ekspansi server-side via sinonim.expand_query) — subset ini hanya
     membantu model memilih kata query & menjelaskan padanan Inggris ke user.
-    Disuntik sbg pesan system DINAMIS di ekor (zona bebas prompt-cache)."""
+    Disuntik sbg pesan system DINAMIS di ekor (zona bebas prompt-cache).
+
+    Pemilihan BERPRIORITAS: dulu 12 entri PERTAMA dalam urutan file yang menang,
+    jadi pada pertanyaan multi-part istilah paling spesifik bisa tak pernah sampai
+    ke model hanya karena posisinya di kamus. Kini semua grup yang cocok dikumpulkan
+    dulu lalu diurutkan by panjang trigger yang match (desc) — 'cucuk per' menang
+    atas 'per', sama seperti aturan penjaga istilah di _paksa_istilah_kamus."""
     teks = " ".join(
         str((m or {}).get("content") or "") for m in (messages or [])[-6:]
         if (m or {}).get("role") == "user")
     if not teks:
         return ""
-    lines: list[str] = []
+    cocok: list[tuple[int, str]] = []   # (panjang trigger yg match, baris)
     seen: set[str] = set()
     for e in _load_sinonim_entries():
         grup = e.get("grup") or ""
         if grup in seen:
             continue
-        t = next((t for t in (e.get("triggers") or []) if t and sinonim.hit(t, teks)), None)
-        if t:
-            seen.add(grup)
-            trig = ", ".join(dict.fromkeys(x for x in (e.get("triggers") or []) if x))
-            kw = ", ".join(dict.fromkeys(k for k in (e.get("keywords") or []) if k))
-            if trig and kw:
-                lines.append(f"- {trig} → {kw}")
-        if len(lines) >= 12:  # pagar ukuran (±1–2rb chars)
-            break
+        t = max((t for t in (e.get("triggers") or []) if t and sinonim.hit(t, teks)),
+                key=len, default=None)
+        if not t:
+            continue
+        seen.add(grup)
+        trig = ", ".join(dict.fromkeys(x for x in (e.get("triggers") or []) if x))
+        kw = ", ".join(dict.fromkeys(k for k in (e.get("keywords") or []) if k))
+        if trig and kw:
+            cocok.append((len(t), f"- {trig} → {kw}"))
+    # Trigger paling spesifik dulu; urutan file jadi pemecah seri (stabil).
+    cocok.sort(key=lambda x: -x[0])
+    lines = [b for _, b in cocok[:_KAMUS_SUBSET_MAX]]
     if not lines:
         return ""
     return ("[KAMUS ISTILAH GILIRAN INI] (Indonesia → kata kunci katalog "

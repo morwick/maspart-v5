@@ -104,6 +104,34 @@ const PERAN_LABEL: Record<string, string> = {
 // antar-menu & refresh), otomatis bersih saat tab ditutup.
 const CHAT_KEY = "maspart_asisten_chat";
 
+// Id percakapan → MEMORI SESI server (backend: services/ai_session.py). Dengan
+// ini asisten mengingat PN/angka hasil tool + nomor rangka/mesin giliran lalu,
+// sehingga follow-up "harganya berapa?" tidak disensor guard jadi "⟨PN tak
+// terverifikasi⟩". Disimpan berdampingan dgn CHAT_KEY dan DIGANTI saat obrolan
+// dihapus — percakapan baru tidak boleh mewarisi ingatan percakapan lama.
+const CONV_KEY = "maspart_asisten_conv";
+
+function getConversationId(): string {
+  try {
+    let id = sessionStorage.getItem(CONV_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      sessionStorage.setItem(CONV_KEY, id);
+    }
+    return id;
+  } catch {
+    return ""; // storage diblokir → jalan tanpa memori sesi (perilaku lama)
+  }
+}
+
+function resetConversationId(): void {
+  try {
+    sessionStorage.setItem(CONV_KEY, crypto.randomUUID());
+  } catch {
+    /* abaikan storage diblokir */
+  }
+}
+
 /* ── Ikon garis (SVG inline, tanpa dependency) ── */
 function Icon({ d, size = 16, sw = 1.8 }: { d: string; size?: number; sw?: number }) {
   return (
@@ -302,25 +330,31 @@ export default function AsistenPage() {
 
     try {
       const payload: AIChatTurn[] = next.map((m) => ({ role: m.role, content: m.content }));
+      const convId = getConversationId();
       let res: AIChatResult;
       try {
-        res = await aiChatStream(token, payload, sheetId, (label) =>
-          setMsgs((m) => {
-            const copy = [...m];
-            const last = copy[copy.length - 1];
-            if (last?.role === "assistant" && last.streamStatus) {
-              const prev = last.streamStatus[last.streamStatus.length - 1];
-              if (prev !== label) {
-                copy[copy.length - 1] = { ...last, streamStatus: [...last.streamStatus, label] };
+        res = await aiChatStream(
+          token,
+          payload,
+          sheetId,
+          (label) =>
+            setMsgs((m) => {
+              const copy = [...m];
+              const last = copy[copy.length - 1];
+              if (last?.role === "assistant" && last.streamStatus) {
+                const prev = last.streamStatus[last.streamStatus.length - 1];
+                if (prev !== label) {
+                  copy[copy.length - 1] = { ...last, streamStatus: [...last.streamStatus, label] };
+                }
               }
-            }
-            return copy;
-          }),
+              return copy;
+            }),
+          convId,
         );
       } catch (streamErr) {
         // Streaming gagal (mis. proxy buffering / SSE tak didukung) → fallback ke /chat.
         if (streamErr instanceof ApiError && streamErr.status === 401) throw streamErr;
-        res = await aiChat(token, payload, sheetId);
+        res = await aiChat(token, payload, sheetId, convId);
       }
       applyResult(res);
     } catch (err) {
@@ -359,7 +393,7 @@ export default function AsistenPage() {
     setBusy(true);
     try {
       const payload: AIChatTurn[] = next.map((m) => ({ role: m.role, content: m.content }));
-      const res = await aiChatSheet(token, payload, file);
+      const res = await aiChatSheet(token, payload, file, getConversationId());
       if (res.sheet_id) {
         setSheetId(res.sheet_id);
         setSheetName(file.name);
@@ -407,6 +441,9 @@ export default function AsistenPage() {
     } catch {
       /* abaikan */
     }
+    // Obrolan baru = ingatan baru. Tanpa ini, memori sesi server masih memegang
+    // rangka/PN percakapan LAMA dan asisten akan merujuknya seolah masih relevan.
+    resetConversationId();
   }
 
   // Kirim 👍/👎 atas jawaban asisten pada indeks `idx`. Menyertakan pertanyaan

@@ -22,7 +22,7 @@ def test_log_turn_kirim_payload(monkeypatch):
         return _R()
 
     monkeypatch.setattr(ai_chat_log.requests, "post", fake_post)
-    ok = ai_chat_log.log_turn(username="u", role="admin", question="q" * 800,
+    ok = ai_chat_log.log_turn(username="u", role="admin", question="q" * 1400,
                               tools_used=["cari_part", "detail_part"], rounds=2,
                               latency_ms=1234, guard_hit=True, tool_failed=False,
                               reply_len=50, outcome="ok")
@@ -30,7 +30,9 @@ def test_log_turn_kirim_payload(monkeypatch):
     assert sent["json"]["tools"] == "cari_part, detail_part"
     assert sent["json"]["tools_count"] == 2
     assert sent["json"]["guard_hit"] is True
-    assert len(sent["json"]["question"]) == 500  # dipotong
+    # Cap dinaikkan 500 → 1000 (_QUESTION_CAP): 500 char memotong justru bagian
+    # yang menjelaskan MAKSUD user, dan kolomnya `text` jadi tak menambah biaya.
+    assert len(sent["json"]["question"]) == ai_chat_log._QUESTION_CAP == 1000
 
 
 def test_log_turn_kirim_reply_dicap(monkeypatch):
