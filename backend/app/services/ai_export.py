@@ -184,21 +184,31 @@ def _title(ws, text: str, sub: str, ncol: int) -> int:
 # sedang sibuk (mis. saat suite penuh berjalan). Stempel dipin ke batas bawah
 # yang diizinkan format ZIP (1980-01-01).
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
+_CORE_XML = "docProps/core.xml"
+# openpyxl MENIMPA properties.modified dengan waktu simpan di dalam save(), jadi
+# memasangnya sebelum save() (lihat _save_stable) hanya mengunci `created`.
+# Nilainya dinormalkan di sini, setelah workbook jadi.
+_MODIFIED_RE = re.compile(rb"(<dcterms:modified[^>]*>)[^<]*(</dcterms:modified>)")
+_MODIFIED_TETAP = b"2000-01-01T00:00:00Z"
 
 
 def _zip_stabil(raw: bytes) -> bytes:
-    """Tulis ulang arsip xlsx dgn stempel waktu entri yang tetap. Urutan entri &
-    metode kompresi dipertahankan agar isinya identik bagi Excel."""
+    """Tulis ulang arsip xlsx menjadi byte-stabil: stempel waktu tiap entri ZIP
+    dipin, dan `dcterms:modified` di core.xml dinormalkan. Urutan entri & metode
+    kompresi dipertahankan agar isinya identik bagi Excel."""
     src = zipfile.ZipFile(io.BytesIO(raw))
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as dst:
         for info in src.infolist():
+            data = src.read(info.filename)
+            if info.filename == _CORE_XML:
+                data = _MODIFIED_RE.sub(rb"\g<1>" + _MODIFIED_TETAP + rb"\g<2>", data)
             zi = zipfile.ZipInfo(info.filename, date_time=_ZIP_EPOCH)
             zi.compress_type = info.compress_type
             zi.external_attr = info.external_attr
             zi.internal_attr = info.internal_attr
             zi.create_system = info.create_system
-            dst.writestr(zi, src.read(info.filename))
+            dst.writestr(zi, data)
     return out.getvalue()
 
 

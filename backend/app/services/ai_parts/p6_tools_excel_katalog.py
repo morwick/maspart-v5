@@ -527,6 +527,70 @@ def _katalog_kategori_impl(args: dict, user: dict) -> dict:
     }
 
 
+def _exploded_via_reverse(rangka: str, pn: str, balon_req: int | None) -> dict | None:
+    """Gambar exploded TANPA kategori: reverse_find_in_unit → figure_for_instance.
+
+    Dua panggilan EPC total, memakai jalur yang sudah dipakai UI web (routers/parts)
+    dan terverifikasi menemukan part yang TERSEMBUNYI di dalam assembly. Return
+    None bila jalur ini tak bisa memutuskan apa-apa — pemanggil lalu jatuh ke
+    jalur kategori lama (jadi perubahan ini menambah peluang, bukan menggantikan)."""
+    try:
+        rev = epc_bom.reverse_find_in_unit(rangka, pn)
+    except Exception:  # pragma: no cover
+        return None
+    if not rev.get("found"):
+        # Masalah token/jaringan HARUS dilaporkan jujur, bukan diam-diam jatuh ke
+        # jalur lain yang akan gagal dengan pesan yang menyesatkan.
+        err = rev.get("_err")
+        if err in ("token_expired", "no_token"):
+            return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
+        return None
+
+    gambar: list[dict] = []
+    daftar_balon: list[dict] = []
+    nama_figure = ""
+    balon_pn = None
+    for inst in (rev.get("instances") or [])[:_MAX_EXPLODED_FIGURES]:
+        try:
+            fig = epc_bom.figure_for_instance(rangka, inst, pn)
+        except Exception:  # pragma: no cover
+            continue
+        if not fig.get("found") or not fig.get("svg"):
+            continue
+        if balon_pn is None:
+            balon_pn = fig.get("balon")
+            nama_figure = fig.get("nama") or ""
+        hl = balon_req if balon_req is not None else fig.get("balon")
+        image_id, filename = ai_export.stash_builder(
+            f"Exploded {pn} - {fig.get('nama') or inst.get('parent_nama') or ''}",
+            {"kind": "exploded", "svg": fig["svg"], "balon": hl}, ext="png")
+        gambar.append({"image_id": image_id, "filename": filename, "balon": hl,
+                       "nama_figure": fig.get("nama") or inst.get("parent_nama"),
+                       "kategori": "", "jumlah_item": fig.get("jumlah_item")})
+        if not daftar_balon:
+            daftar_balon = [{"balon": it.get("balon"), "pn": it.get("pn"),
+                             "nama": it.get("nama")}
+                            for it in (fig.get("items_ringkas") or [])][:40]
+    if not gambar:
+        return None            # tak ada figure ber-SVG → biar jalur lama mencoba
+
+    catatan = (f"Gambar exploded view SIAP — tampil OTOMATIS (inline) di bawah jawabanmu. "
+               f"PN {pn} = NOMOR BALON '{balon_pn}' di figure '{nama_figure}'. "
+               "'daftar_balon_gambar' berisi SEMUA balon di gambar + part-nya — bila user "
+               "lanjut tanya 'no N itu apa', jawab dari daftar itu DAN panggil lagi "
+               "gambar_exploded dengan 'balon'=N agar balon itu disorot. ⛔ JANGAN buat "
+               "link/gambar/URL sendiri; JANGAN sebut PN lain di luar data ini.")
+    if balon_req is not None:
+        catatan = (f"Gambar exploded view SIAP (inline). NOMOR BALON {balon_req} DISOROT "
+                   f"(kuning) di figure '{nama_figure}'. Jawab SINGKAT; gambar sudah "
+                   "tampil sendiri — ⛔ JANGAN mengarang PN.")
+    return {"found": True, "frame_number": rev.get("frame_number"), "pn": pn,
+            "kategori": "", "balon_disorot": balon_req, "part_di_balon": None,
+            "daftar_balon_gambar": daftar_balon,
+            "jumlah_figure_cocok": len(gambar), "gambar": gambar,
+            "sumber": "reverse", "catatan": catatan}
+
+
 def _gambar_exploded_atlas_impl(args: dict, user: dict) -> dict:
     """GAMBAR EXPLODED VIEW EPC untuk SATU PN (per-VIN): temukan figure yang memuat
     PN + NOMOR BALON-nya, siapkan PNG yang tampil INLINE di chat. Reuse Parts Atlas
@@ -539,6 +603,20 @@ def _gambar_exploded_atlas_impl(args: dict, user: dict) -> dict:
                          "PER-VIN dari EPC (hanya Sinotruk/HOWO/SITRAK)."}
     if not pn:
         return {"error": "Sebutkan Part Number yang mau ditampilkan gambar exploded view-nya."}
+    try:
+        balon_req = int(args.get("balon")) if str(args.get("balon") or "").strip() else None
+    except (TypeError, ValueError):
+        balon_req = None
+
+    # JALUR UTAMA: pencarian TERBALIK — PN + rangka langsung ke alamat node-nya,
+    # lalu satu panggilan figure. Tak butuh kategori sama sekali. Sebelumnya tool
+    # ini MEWAJIBKAN kategori padahal spec-nya sendiri menyuruh mengosongkan,
+    # sehingga tiap permintaan gambar membakar satu ronde hanya untuk bertanya
+    # "kategori apa?" — lalu tebakan kategorinya sering meleset ('not_in_category').
+    if get_settings().epc_exploded_reverse:
+        rev = _exploded_via_reverse(rangka, pn, balon_req)
+        if rev is not None:
+            return rev
     if not kategori:
         return {"found": False,
                 "pilihan_kategori": ["kabin", "mesin", "kopling", "transmisi", "gardan depan",
@@ -549,10 +627,6 @@ def _gambar_exploded_atlas_impl(args: dict, user: dict) -> dict:
                                   "piston/liner/klep → 'mesin'; sinkromes → 'transmisi'; part "
                                   "kabin → 'kabin'). Panggil lagi dengan 'kategori' terisi. ⛔ "
                                   "jangan menebak sembarang kategori.")}
-    try:
-        balon_req = int(args.get("balon")) if str(args.get("balon") or "").strip() else None
-    except (TypeError, ValueError):
-        balon_req = None
     d = epc_bom.exploded_figures(rangka, pn, kategori)
     if not d.get("found"):
         err = d.get("_err")

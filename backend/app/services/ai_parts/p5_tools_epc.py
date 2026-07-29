@@ -1213,14 +1213,14 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
     for _ist in kata_list:
         terms, ms = _expand_query(_ist)
         matched_syn += ms
-        kk = [t for t in dict.fromkeys(terms) if t and len(t.strip()) >= 3]
+        kk = [t for t in dict.fromkeys(terms) if epc_bom.kw_layak(t)]
         # Kata kategori PAYUNG ('kopling','rem') tak diekspansi sinonim (trigger-nya
         # semua frasa spt 'kampas kopling') → 'kopling' polos melewatkan hampir semua
         # sub-part. Tambal dgn keyword keluarga penuh, HANYA saat sinonim TAK kena
         # (kalau kena, keyword-nya sudah presisi — jangan diperlebar & banjiri hasil).
         if not ms:
             for kw in _umbrella_keywords(_ist):
-                if kw and len(kw.strip()) >= 3 and kw not in kk:
+                if epc_bom.kw_layak(kw) and kw not in kk:
                     kk.append(kw)
         # Buang keyword generik tunggal (bolt/nut/...) bila ada keyword spesifik —
         # tanpa ini 'baut roda' membanjiri hasil dgn ratusan 'bolt' tak relevan.

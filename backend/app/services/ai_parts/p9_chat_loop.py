@@ -1376,28 +1376,46 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     # Rem panggilan tool identik (state per-giliran; lihat _tool_call_key).
     _call_cache: dict[tuple, dict] = {}   # key → hasil (sukses & gagal di-cache)
     _call_count: dict[str, int] = {}      # nama tool → jml eksekusi BERBEDA
+    # Batch >1 tool dieksekusi di ThreadPoolExecutor, jadi state di atas disentuh
+    # BEBERAPA THREAD sekaligus. Tanpa lock, cek plafon (baca) dan penambahan
+    # (tulis) terpisah — seluruh gelombang worker pertama membaca angka yang sama
+    # dan lolos bersamaan, membuat plafon efektif ≈ 3 + (worker-1) alih-alih 3.
+    _call_lock = threading.Lock()
 
     def _run_tool_turn(name: str, args: dict, u: dict, sid: str = "") -> dict:
         key = _tool_call_key(name, args)
-        if key is not None and key in _call_cache:
-            res = dict(_call_cache[key])          # shallow copy — cache tak termutasi
-            res["catatan_panggilan_ulang"] = _NOTE_ULANG
-            return res
-        if _call_count.get(name, 0) >= _MAX_CALLS_PER_TOOL:
-            # TANPA field 'error' — _tool_fail_kind harus membaca "nf", bukan "err"
-            # (telemetri tool-gagal tak boleh tercemar oleh rem ini).
-            return {"found": False, "dibatasi": True,
-                    "catatan": (f"⛔ BATAS: tool '{name}' sudah dipanggil "
-                                f"{_MAX_CALLS_PER_TOOL}× dengan argumen berbeda "
-                                "giliran ini — panggilan berikutnya DITOLAK. "
-                                "Gabungkan kebutuhan dalam SATU panggilan (banyak "
-                                "tool menerima ARRAY/multi-istilah), jawab dari "
-                                "data yang sudah terkumpul, atau sampaikan jujur "
-                                "bila tidak ada.")}
-        res = _run_tool(name, args, u, sid)
-        if key is not None and isinstance(res, dict):
-            _call_cache[key] = res
+        with _call_lock:
+            if key is not None and key in _call_cache:
+                res = dict(_call_cache[key])      # shallow copy — cache tak termutasi
+                res["catatan_panggilan_ulang"] = _NOTE_ULANG
+                return res
+            if _call_count.get(name, 0) >= _MAX_CALLS_PER_TOOL:
+                # TANPA field 'error' — _tool_fail_kind membacanya sbg "brake",
+                # BUKAN "nf": rem ≠ data tidak ada. Membedakannya penting karena
+                # "nf" dulu menyuntik nota "lookup gagal" ke model, sehingga model
+                # mengira 44 PN sisanya memang tak ada di data.
+                return {"found": False, "dibatasi": True,
+                        "catatan": (f"⛔ BATAS: tool '{name}' sudah dipanggil "
+                                    f"{_MAX_CALLS_PER_TOOL}× dengan argumen berbeda "
+                                    "giliran ini — panggilan berikutnya DITOLAK. "
+                                    "Data yang belum sempat diambil BELUM TENTU tidak "
+                                    "ada; jangan menyimpulkan 'tidak ditemukan'. "
+                                    "Gabungkan kebutuhan dalam SATU panggilan — untuk "
+                                    "BANYAK Part Number pakai cek_massal_part (array "
+                                    "daftar_pn, sudah memuat berat; dimensi=true bila "
+                                    "perlu ukuran). Banyak tool lain juga menerima "
+                                    "ARRAY/multi-istilah.")}
+            # RESERVASI slot sebelum eksekusi — inilah yang membuat plafon benar.
             _call_count[name] = _call_count.get(name, 0) + 1
+        try:
+            res = _run_tool(name, args, u, sid)   # eksekusi DI LUAR lock: jangan
+        except Exception:                         # menyerialkan thread pool.
+            with _call_lock:                      # gagal → kembalikan slotnya,
+                _call_count[name] = max(0, _call_count.get(name, 0) - 1)
+            raise
+        if key is not None and isinstance(res, dict):
+            with _call_lock:
+                _call_cache[key] = res
         return res
     epc_vin_used = False
     # PN yang PERNAH ditandai suspect di riwayat → tetap dicurigai di follow-up
@@ -1588,7 +1606,10 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
                     if _kind:
                         tool_gagal_pernah = True
                         _catat_tool_gagal(tools_failed, name, _kind)
-                        if not lookup_gagal:
+                        # "brake" = ditolak rem, BUKAN pernyataan soal datanya →
+                        # jangan suntik nota "lookup gagal"; pesan `dibatasi`
+                        # sudah menjelaskan sendiri & menunjuk tool massal.
+                        if _kind != "brake" and not lookup_gagal:
                             lookup_gagal = True
                             messages.append({"role": "user", "content": _LOOKUP_GAGAL_NOTE})
                 continue
@@ -1780,7 +1801,11 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
             _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
             _kind = _tool_fail_kind(result)
             if _kind:
-                lookup_gagal = True
+                # Lihat catatan jalur bocor di atas: "brake" tak menyalakan
+                # lookup_gagal — kalau ikut, model menyimpulkan puluhan PN yang
+                # ditolak rem itu "tidak ada di data", padahal belum dicek.
+                if _kind != "brake":
+                    lookup_gagal = True
                 tool_gagal_pernah = True
                 _catat_tool_gagal(tools_failed, name, _kind)
         if lookup_gagal:

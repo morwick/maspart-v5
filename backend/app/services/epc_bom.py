@@ -837,6 +837,22 @@ def _tree_node(frame: str, root_id, part_id) -> dict:
 
 
 _SEARCH_MAX_KEYWORDS = 8            # plafon kata kunci per pencarian (1 call EPC/kata)
+
+
+def kw_layak(k: str) -> bool:
+    """Kata kunci pencarian cukup panjang untuk dipakai?
+
+    Ambang lama `len >= 3` adalah heuristik ASCII yang diterapkan buta ke CJK —
+    padahal dalam bahasa Mandarin DUA hanzi sudah satu kata utuh. Akibatnya
+    seluruh keyword Mandarin di kamus dibuang sebelum sempat dipakai: 衬套
+    (bushing), 支架 (bracket), 座椅 (jok), 板簧/钢板 (pegas daun). Ironisnya
+    `_skor_item` memberi BONUS +2 untuk kecocokan CJK — bonus yang tak pernah
+    bisa menyala. Nama Mandarin ada lengkap di data EPC, jadi ini kehilangan
+    cuma-cuma, dan persis menabrak kasus-kasus nihil di log produksi."""
+    s = (k or "").strip()
+    if len(s) >= 3:
+        return True
+    return len(s) >= 2 and any(ord(c) > 0x2E80 for c in s)
 _root_cache: dict[str, dict] = {}   # frame -> {"at", "val"} (rootId+orderNo, ringan)
 
 
@@ -866,7 +882,7 @@ def search_in_unit(rangka: str, keywords: list[str]) -> dict:
     {found, frame_number, order_no, hasil:[{pn, nama, kata_kunci}]} — dedup per PN,
     urut sesuai urutan keywords. {found:False,_err} bila EPC bermasalah."""
     frame = _frame(rangka)
-    kws = [k.strip() for k in (keywords or []) if k and len(k.strip()) >= 3]
+    kws = [k.strip() for k in (keywords or []) if kw_layak(k)]
     if not frame or not kws:
         return {"found": False, "_err": "input"}
     r = _atlas_root_cached(frame)
@@ -1286,6 +1302,107 @@ def _walk_all_nodes(rangka: str) -> dict:
     return val
 
 
+def assembly_components_from_items(rangka: str, terms: list[str], pn: str = "") -> dict:
+    """Uraikan assembly dari INDEKS ITEM unit (offline, `dari_assembly` per baris).
+
+    Jaring pengaman untuk `assembly_components`, yang mencocokkan nama NODE POHON
+    dan karena itu balas kosong untuk permintaan yang tak pernah menjadi nama node.
+    Di sini yang dicocokkan adalah nama ASSEMBLY INDUK dari item-item nyata.
+
+    Kejujuran adalah inti fungsi ini: bila assembly-nya ketemu tapi komponen yang
+    user sebut tak dirinci EPC sebagai item terpisah (kasus nyata: "bushing untuk
+    front spring" — front spring memang punya 48 elemen, TIDAK satu pun bushing),
+    kita tetap mengembalikan komponen yang BENAR-BENAR ada + catatan tegas.
+    Balasan kosong membuat user mengira datanya tak ada sama sekali; daftar 48
+    elemen nyata jauh lebih berguna, dan tetap tidak mengarang."""
+    base = _all_items(rangka)
+    if not base.get("found") or not base.get("rows"):
+        return {"found": False, "frame_number": base.get("frame_number"),
+                "_err": base.get("_err")}
+
+    kws = [t.lower().strip() for t in (terms or []) if t and kw_layak(t)]
+    pnu = (pn or "").strip().upper()
+    if not kws and not pnu:
+        return {"found": False, "frame_number": base.get("frame_number"), "_err": "input"}
+
+    # Kelompokkan per assembly induk.
+    grup: dict[tuple, list[dict]] = {}
+    for r in base["rows"]:
+        da = r.get("dari_assembly") or {}
+        key = ((da.get("pn") or "").upper(), da.get("nama") or "")
+        if not key[0] and not key[1]:
+            continue
+        grup.setdefault(key, []).append(r)
+
+    def _skor(k: str, hay: str) -> int:
+        """Frasa utuh bernilai lebih, tapi kecocokan PER KATA tetap dihitung —
+        user menulis 'front spring' sementara EPC menamainya 'Front LEAF spring
+        suspension'. Mensyaratkan substring utuh membuat kasus seperti itu nihil
+        padahal assembly-nya jelas ada."""
+        if k in hay:
+            return 3
+        kata = [w for w in k.split() if len(w) >= 3]
+        return sum(1 for w in kata if w in hay)
+
+    skored: list[tuple] = []
+    for (apn, anama), rows_ in grup.items():
+        if pnu and apn == pnu:
+            skored.append((999, 0, apn, anama, rows_))
+            continue
+        hay = f"{apn} {anama}".lower()
+        sc = sum(_skor(k, hay) for k in kws)
+        if not sc:
+            # Nama assembly tak menyebutnya, tapi ISI-nya mungkin — 座椅 ada di
+            # nama_cn item, bukan di nama induk 'Seat assembly'. Bobotnya lebih
+            # rendah agar kecocokan pada nama induk tetap menang.
+            isi = " ".join(f"{r.get('nama') or ''} {r.get('nama_cn') or ''}"
+                           for r in rows_).lower()
+            sc = sum(1 for k in kws if k in isi)
+            if not sc:
+                continue
+        elif "assembly" in hay or "总成" in hay:
+            sc += 2
+        skored.append((sc, len(hay), apn, anama, rows_))
+    if not skored:
+        return {"found": False, "frame_number": base.get("frame_number"),
+                "error": "assembly tak ditemukan di indeks item unit ini"}
+    skored.sort(key=lambda x: (-x[0], x[1]))
+    _sc, _n, apn, anama, rows_ = skored[0]
+
+    comps, seen = [], set()
+    for r in rows_:
+        p = (r.get("pn") or "").upper()
+        if not p or p in seen:
+            continue
+        seen.add(p)
+        comps.append({"pn": r.get("pn"), "nama": r.get("nama"),
+                      "nama_cn": r.get("nama_cn"), "qty": r.get("qty")})
+
+    out = {"found": True, "frame_number": base.get("frame_number"),
+           "assembly": {"pn": apn, "nama": anama},
+           "jumlah": len(comps), "components": comps[:80],
+           "sumber": "indeks_item",
+           "incomplete": base.get("incomplete")}
+
+    # Istilah user yang TIDAK muncul di satu pun komponen → katakan terus terang.
+    tak_ketemu = []
+    gab = " ".join(f"{c.get('pn') or ''} {c.get('nama') or ''} {c.get('nama_cn') or ''}"
+                   for c in comps).lower()
+    for k in kws:
+        if k not in (anama or "").lower() and k not in gab:
+            tak_ketemu.append(k)
+    if tak_ketemu:
+        out["istilah_tak_dirinci"] = tak_ketemu
+        out["catatan_kejujuran"] = (
+            f"EPC TIDAK merinci {', '.join(tak_ketemu)} sebagai item terpisah di dalam "
+            f"'{anama}' untuk unit ini. Daftar di 'components' adalah isi NYATA assembly "
+            "itu — sajikan apa adanya dan katakan terus terang bahwa istilah yang user "
+            "sebut tak ada sebagai part tersendiri; tawarkan elemen terdekat dari daftar. "
+            "⛔ JANGAN mengarang part number untuk istilah yang tak ada."
+        )
+    return out
+
+
 def assembly_components(rangka: str, terms: list[str], pn: str = "") -> dict:
     """Uraikan satu ASSEMBLY (per-VIN) → daftar komponennya.
 
@@ -1325,6 +1442,13 @@ def assembly_components(rangka: str, terms: list[str], pn: str = "") -> dict:
         target = scored[0][2] if scored else None
 
     if target is None:
+        # Pohon dicocokkan pada nama NODE, dan banyak permintaan lapangan tak
+        # pernah menjadi nama node ("bracket bangku mesin howo"). Sebelum
+        # menyerah, coba indeks ITEM unit — di sana setiap baris membawa
+        # `dari_assembly`, satu-satunya struktur induk→komponen yang kita punya.
+        alt = assembly_components_from_items(rangka, terms, pn)
+        if alt.get("found"):
+            return alt
         return {"found": False, "frame_number": frame,
                 "error": "assembly tak ditemukan di pohon unit ini",
                 "incomplete": walk.get("incomplete")}
@@ -1463,22 +1587,32 @@ def _items_disk_path(frame: str) -> Path:
 
 
 def _items_disk_load(frame: str) -> dict | None:
-    """Indeks item dari disk (None bila absen/kedaluwarsa/rusak). Build LENGKAP
-    dipercaya 7 hari; build PARSIAL (ada node gagal) hanya 1 jam lalu dibangun
-    ulang — supaya persist-nya cuma menahan rebuild 56-84 dtk yang berulang, TAPI
-    'part tak ada' tak jadi vonis permanen yang salah. File lama tanpa flag
-    'incomplete' dianggap LENGKAP (kompatibel mundur)."""
+    """Indeks item dari disk (None bila absen/rusak/kosong).
+
+    Build LENGKAP yang lewat 7 hari TIDAK dibuang, hanya ditandai `stale` —
+    pemanggil menyajikannya seketika lalu memicu rebuild di latar. Dulu file
+    kedaluwarsa dibalas None, sehingga kelima unit yang cache-nya sudah ada pun
+    kembali membayar cold-build 56-84 detik DI DALAM anggaran 8 ronde giliran
+    chat — biaya yang ditanggung user, untuk data yang praktis tak berubah
+    (katalog per-VIN statis setelah unit diproduksi).
+
+    Build PARSIAL tetap kedaluwarsa keras setelah 1 jam: isinya bolong, dan
+    "part tidak ada" tak boleh jadi vonis permanen yang salah.
+    File lama tanpa flag 'incomplete' dianggap LENGKAP (kompatibel mundur)."""
     try:
         p = _items_disk_path(frame)
         if not p.exists():
             return None
         d = json.loads(p.read_text(encoding="utf-8"))
         incomplete = bool(d.get("incomplete"))
-        ttl = _ITEMS_PARTIAL_TTL if incomplete else _ITEMS_DISK_TTL
-        if (time.time() - float(d.get("ts") or 0)) > ttl:
+        umur = time.time() - float(d.get("ts") or 0)
+        if incomplete and umur > _ITEMS_PARTIAL_TTL:
             return None
         rows = d.get("rows") or []
-        return {"ts": time.time(), "rows": rows, "incomplete": incomplete} if rows else None
+        if not rows:
+            return None
+        return {"ts": time.time(), "rows": rows, "incomplete": incomplete,
+                "stale": (not incomplete) and umur > _ITEMS_DISK_TTL}
     except Exception:
         return None
 
@@ -1494,7 +1628,39 @@ def _items_disk_save(frame: str, rows: list[dict], incomplete: bool = False) -> 
         pass
 
 
-def _all_items(rangka: str) -> dict:
+_items_refresh_aktif: set[str] = set()
+
+
+def _refresh_items_latar(frame: str) -> None:
+    """Bangun ulang indeks item di THREAD LATAR untuk cache yang sudah basi.
+
+    Sengaja TIDAK menulis ke cache RAM lebih dulu: kalau ditulis, `_all_items`
+    akan terus mengembalikan yang basi selama TTL RAM dan rebuild-nya tak pernah
+    dipakai. Penanda `_items_refresh_aktif` mencegah puluhan thread untuk frame
+    yang sama saat satu giliran memanggil beberapa tool sekaligus."""
+    with _items_all_lock:
+        if frame in _items_refresh_aktif:
+            return
+        _items_refresh_aktif.add(frame)
+
+    def _kerja() -> None:
+        try:
+            _bangun_items(frame)
+        except Exception:   # pragma: no cover — murni best-effort
+            pass
+        finally:
+            with _items_all_lock:
+                _items_refresh_aktif.discard(frame)
+
+    threading.Thread(target=_kerja, daemon=True, name=f"epc-items-refresh-{frame}").start()
+
+
+def _bangun_items(rangka: str) -> dict:
+    """Paksa build indeks item (lewati cache RAM & disk) — dipakai refresh latar."""
+    return _all_items(rangka, _paksa=True)
+
+
+def _all_items(rangka: str, _paksa: bool = False) -> dict:
     """SEMUA baris part list sebuah unit (setiap item membawa 'dari_assembly').
 
     Tiga lapis: RAM (1 jam) → DISK (7 hari; katalog per-VIN praktis statis —
@@ -1503,7 +1669,7 @@ def _all_items(rangka: str) -> dict:
     build PARSIAL (ada node gagal) dipersist 1 jam saja — cukup menahan rebuild
     56-84 dtk berulang, tapi tetap dibangun ulang agar cakupan menyusul lengkap."""
     frame_pre = _frame(rangka)
-    if frame_pre:
+    if frame_pre and not _paksa:
         with _items_all_lock:
             c = _items_all_cache.get(frame_pre)
             if c and (time.time() - c["ts"]) < _ITEMS_ALL_TTL:
@@ -1511,8 +1677,14 @@ def _all_items(rangka: str) -> dict:
                         "rows": c["rows"], "incomplete": c["incomplete"]}
         d = _items_disk_load(frame_pre)
         if d:
-            with _items_all_lock:
-                _items_all_cache[frame_pre] = d
+            if d.get("stale"):
+                # Sajikan yang lama SEKARANG, segarkan di latar. Menunggu rebuild
+                # 56-84 dtk di jalur jawab adalah kerugian yang jauh lebih besar
+                # daripada risiko katalog per-VIN yang bergeser (praktis nol).
+                _refresh_items_latar(frame_pre)
+            else:
+                with _items_all_lock:
+                    _items_all_cache[frame_pre] = d
             return {"found": True, "frame_number": frame_pre,
                     "rows": d["rows"], "incomplete": d["incomplete"]}
 
@@ -1526,11 +1698,12 @@ def _all_items(rangka: str) -> dict:
         block = _items_build_locks.setdefault(frame, threading.Lock())
     with block:
         # Build lain baru saja selesai selagi kita menunggu lock → pakai hasilnya.
-        with _items_all_lock:
-            c = _items_all_cache.get(frame)
-            if c and (time.time() - c["ts"]) < _ITEMS_ALL_TTL:
-                return {"found": True, "frame_number": frame,
-                        "rows": c["rows"], "incomplete": c["incomplete"]}
+        if not _paksa:
+            with _items_all_lock:
+                c = _items_all_cache.get(frame)
+                if c and (time.time() - c["ts"]) < _ITEMS_ALL_TTL:
+                    return {"found": True, "frame_number": frame,
+                            "rows": c["rows"], "incomplete": c["incomplete"]}
 
         nodes = [n for n in walk["nodes"] if n.get("part_list_id") and n["part_list_id"] != -1]
         rows: list[dict] = []
@@ -1572,7 +1745,9 @@ def items_index_ready(rangka: str) -> bool:
         if c and (time.time() - c["ts"]) < _ITEMS_ALL_TTL and not c["incomplete"]:
             return True
     d = _items_disk_load(frame)
-    return bool(d) and not d["incomplete"]   # parsial (bolong) ≠ siap
+    # `stale` tetap SIAP: isinya lengkap dan langsung terpakai; penyegarannya
+    # berjalan di latar. Yang tak siap hanyalah build PARSIAL (isinya bolong).
+    return bool(d) and not d["incomplete"]
 
 
 def warm_items_index(rangka: str) -> None:
@@ -1620,7 +1795,7 @@ def search_items_in_unit(rangka: str, keywords: list[str]) -> dict:
     dari_assembly, qty}]} + incomplete. Dedup per (PN, assembly induk).
     Hasil DIURUTKAN relevansi (skor turun; tiebreak nama terpendek = paling
     spesifik) supaya pemangkasan [:40] di pemanggil tak membuang match tepat."""
-    kws = [k.strip().lower() for k in (keywords or []) if k and len(k.strip()) >= 3]
+    kws = [k.strip().lower() for k in (keywords or []) if kw_layak(k)]
     if not kws:
         return {"found": False, "_err": "input"}
     base = _all_items(rangka)

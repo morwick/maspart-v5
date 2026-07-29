@@ -54,6 +54,60 @@ def units(sumber: str | None = None) -> list[str]:
     return res
 
 
+def search_spn_fmi(spn: int | None, fmi: int | None = None,
+                   limit: int = 12) -> list[dict]:
+    """Cari baris kanonik berdasar SPN (+FMI opsional) LINTAS SEMUA SUMBER.
+
+    Ada karena tiga celah yang saling menutupi di jalur lama:
+      • shim `fault_codes.search` hanya melihat sumber 'bosch';
+      • `eol_dtc.search` tak punya parameter spn/fmi sama sekali;
+      • proyeksi legacy `_proj()` hanya mengenal bosch/eol/abs/scr, sehingga
+        baris `sumber="kartu"` (pasangan yang hanya punya lembar diagnosa PDF)
+        TIDAK PERNAH keluar ke konsumen mana pun.
+    Akibatnya kode yang datanya sudah kita miliki tetap dijawab "tidak ada di
+    semua database" — persis keluhan di log produksi.
+
+    Fallback SPN-saja (bila `fmi` diberi tapi tak ada yang cocok) mengikuti pola
+    `abs_scr_codes.search`, satu-satunya store yang sudah melakukannya benar.
+    Hasil eksak selalu didahulukan; pemanggil bisa membedakannya lewat `fmi`.
+    """
+    if spn is None:
+        return []
+    try:
+        spn = int(spn)
+    except (TypeError, ValueError):
+        return []
+    fmi_i: int | None
+    try:
+        fmi_i = int(fmi) if fmi is not None else None
+    except (TypeError, ValueError):
+        fmi_i = None
+
+    sama_spn = [r for r in _load() if r.get("spn") == spn]
+    if not sama_spn:
+        return []
+    if fmi_i is None:
+        return sama_spn[:limit]
+    eksak = [r for r in sama_spn if r.get("fmi") == fmi_i]
+    return (eksak or sama_spn)[:limit]
+
+
+def fmi_tersedia(spn: int | None) -> list[int]:
+    """Daftar FMI yang benar-benar terdaftar untuk sebuah SPN (untuk memberi tahu
+    user 'FMI 20 tak ada, yang ada 3/4/19') — lintas semua sumber."""
+    if spn is None:
+        return []
+    try:
+        spn = int(spn)
+    except (TypeError, ValueError):
+        return []
+    out: list[int] = []
+    for r in _load():
+        if r.get("spn") == spn and isinstance(r.get("fmi"), int) and r["fmi"] not in out:
+            out.append(r["fmi"])
+    return sorted(out)
+
+
 def repair_for(code: str) -> dict | None:
     """Entri EOL ber-perbaikan utk sebuah kode (eksak → prefix) — jembatan hasil
     SPN/FMI Bosch (P0645) ke langkah perbaikan EOL. Bentuk baris = legacy eol."""

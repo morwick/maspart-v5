@@ -158,12 +158,11 @@ def get_part_volumetric_grams_cached(part_number: str) -> int:
     return _vol_grams(_part_info_cached(part_number))
 
 
-def get_part_spec(part_number: str) -> dict:
-    """Spesifikasi fisik resmi SIMS untuk ditampilkan: berat (kg), dimensi (cm),
-    satuan, kemasan minimum, merek. {} bila tak ada data."""
-    info = get_part_info(part_number)
-    if info and "roughWeightKg" not in info:
-        info = get_part_info(part_number, force_refresh=True)
+def _spec_from_info(info: dict) -> dict:
+    """Susun spesifikasi tampil dari satu baris partInfo SIMS. Dipisah agar jalur
+    boleh-jaringan (get_part_spec) dan jalur cache-only (get_part_spec_cached)
+    menghasilkan BENTUK YANG SAMA PERSIS — beda keduanya hanya cara memperoleh
+    `info`, bukan cara menafsirkannya."""
     if not info:
         return {}
     out: dict = {}
@@ -182,6 +181,30 @@ def get_part_spec(part_number: str) -> dict:
     if info.get("brandName"):
         out["merek"] = info["brandName"]
     return out
+
+
+def get_part_spec(part_number: str) -> dict:
+    """Spesifikasi fisik resmi SIMS untuk ditampilkan: berat (kg), dimensi (cm),
+    satuan, kemasan minimum, merek. {} bila tak ada data.
+
+    ⚠️ BOLEH JARINGAN, dan mahal: satu HTTP live per PN (partInfo/pageDealer
+    dipanggil pageSize=1 per partCode, timeout 15 dtk, bisa login-ulang saat 401).
+    Untuk BANYAK PN pakai `get_part_spec_cached` dulu, dan batasi sisanya."""
+    info = get_part_info(part_number)
+    if info and "roughWeightKg" not in info:
+        info = get_part_info(part_number, force_refresh=True)
+    return _spec_from_info(info or {})
+
+
+def get_part_spec_cached(part_number: str) -> dict:
+    """Seperti get_part_spec tapi HANYA dari cache — nol jaringan, {} bila belum
+    ter-cache.
+
+    Sengaja TIDAK meniru `force_refresh` milik get_part_spec (entri cache lama
+    tanpa `roughWeightKg` memicu HTTP live di sana): justru jebakan itulah yang
+    membuat jalur massal tak bisa memakai get_part_spec — 100 PN dgn cache lama
+    berarti 100 fetch berturut-turut. Di sini cache lama cukup dibalas apa adanya."""
+    return _spec_from_info(_part_info_cached(part_number))
 
 
 def get_part_equivalents(part_number: str) -> dict:

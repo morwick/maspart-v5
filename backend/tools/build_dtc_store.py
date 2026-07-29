@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -86,15 +87,43 @@ def dari_bosch(rows: list[dict], tr: dict) -> tuple[list[dict], int]:
     return out, miss
 
 
+# Sebagian besar baris EOL menyimpan SPN/FMI DI DALAM string kode ("SPN444/FMI14")
+# alih-alih di kolom tersendiri. Selama ini kolom spn/fmi-nya dibiarkan None,
+# sehingga ratusan pasangan yang datanya SUDAH KITA MILIKI — lengkap dengan
+# deskripsi Indonesia — tak pernah terjangkau pencarian berbasis SPN/FMI.
+# Kasus nyata dari log produksi: user menanyakan "SPN 444 FMI 14", dijawab
+# "tidak ada di semua database", padahal barisnya ada di store.
+_EOL_SPN_FMI_RE = re.compile(r"^SPN\s*(\d{1,6})\s*/\s*FMI\s*(\d{1,3})$", re.I)
+_SPN_MAKS = 524287      # J1939: SPN 19-bit
+_FMI_MAKS = 31          # J1939: FMI 5-bit
+
+
+def _spn_fmi_dari_kode(kode: str) -> tuple[int | None, int | None]:
+    """('SPN444/FMI14') → (444, 14). (None, None) bila bukan pola itu / di luar
+    rentang J1939 (angka mustahil = salah parse, jangan cemari store)."""
+    m = _EOL_SPN_FMI_RE.match((kode or "").strip())
+    if not m:
+        return None, None
+    spn, fmi = int(m.group(1)), int(m.group(2))
+    if spn <= 0 or spn > _SPN_MAKS or fmi < 0 or fmi > _FMI_MAKS:
+        return None, None
+    return spn, fmi
+
+
 def dari_eol(rows: list[dict]) -> list[dict]:
-    return [_baris(
-        sumber="eol", unit=r.get("unit") or "",
-        kode=(r.get("kode") or "").upper(),
-        deskripsi=r.get("deskripsi") or "",
-        penyebab=r.get("penyebab") or "",
-        perbaikan=r.get("perbaikan") or "",
-        part=r.get("part") or "",
-    ) for r in rows]
+    out = []
+    for r in rows:
+        kode = (r.get("kode") or "").upper()
+        spn, fmi = _spn_fmi_dari_kode(kode)
+        out.append(_baris(
+            sumber="eol", unit=r.get("unit") or "",
+            kode=kode, spn=spn, fmi=fmi,
+            deskripsi=r.get("deskripsi") or "",
+            penyebab=r.get("penyebab") or "",
+            perbaikan=r.get("perbaikan") or "",
+            part=r.get("part") or "",
+        ))
+    return out
 
 
 def dari_abs_scr(rows: list[dict]) -> list[dict]:
@@ -174,7 +203,39 @@ def main() -> int:
         print(f"   kartu PDF: {len(pdf_pairs)} pasangan; flag pada tabel: {len(ada)}; "
               f"baris baru sumber='kartu': {len(kartu_rows)}")
 
-    rows = sorted(bosch + eol + abs_scr + kartu_rows, key=_sort_key)
+    # ── Arsip CSV EOL mentah (build_eol_csv) — sumber KELIMA ──
+    # Hanya pasangan (spn,fmi) yang BELUM terwakili sumber lain. Fail-soft: arsip
+    # ada di mesin pemilik (luar repo), jadi build tetap sukses tanpanya.
+    csv_rows: list[dict] = []
+    try:
+        from build_eol_csv import kumpulkan as _csv_kumpulkan
+        tambahan = _csv_kumpulkan()
+    except Exception as e:      # noqa: BLE001 — arsip opsional
+        print(f"   arsip CSV dilewati: {e}")
+        tambahan = []
+    if tambahan:
+        sudah = {(r["spn"], r["fmi"]) for r in bosch + eol + abs_scr + kartu_rows
+                 if r["spn"] is not None and r["fmi"] is not None}
+        for r in tambahan:
+            pair = (r["spn"], r["fmi"])
+            if pair in sudah:
+                continue
+            sudah.add(pair)
+            csv_rows.append(_baris(
+                sumber="eolcsv", unit=r.get("unit") or "EOL",
+                kode=r.get("kode") or "", spn=r["spn"], fmi=r["fmi"],
+                label=r.get("label") or "",
+                deskripsi=r.get("deskripsi") or "",
+                deskripsi_cn=r.get("deskripsi_cn") or "",
+                penyebab=r.get("penyebab") or "",
+                perbaikan=r.get("perbaikan") or "",
+                part=r.get("part") or "",
+            ))
+        ber_id = sum(1 for r in csv_rows if r["deskripsi"])
+        print(f"   arsip CSV: {len(tambahan)} pasangan dibaca; BARU (belum ada di "
+              f"sumber lain): {len(csv_rows)} (ber-deskripsi Indonesia: {ber_id})")
+
+    rows = sorted(bosch + eol + abs_scr + kartu_rows + csv_rows, key=_sort_key)
 
     # ── validasi ──
     if len(bosch) != len(bosch_src) or len(eol) != len(eol_src) \
@@ -190,10 +251,15 @@ def main() -> int:
         "abs SPN 789": any(r["spn"] == 789 for r in abs_scr if r["sumber"] == "abs"),
         "scr P0427": any(r["kode"] == "P0427" for r in abs_scr if r["sumber"] == "scr"),
         "eol P0100*": any(r["kode"].startswith("P0100") for r in eol),
+        # SPN/FMI yang di-parse dari string kode EOL — dulu selalu None sehingga
+        # baris ini tak terjangkau pencarian SPN.
+        "eol SPN444/FMI14": any(r["spn"] == 444 and r["fmi"] == 14 for r in eol),
     }
     gagal = [k for k, ok in spot.items() if not ok]
     if gagal:
         raise SystemExit(f"⛔ spot-check gagal: {gagal}")
+    n_eol_spn = sum(1 for r in eol if r["spn"] is not None)
+    print(f"   EOL ber-SPN/FMI hasil parse kode: {n_eol_spn} baris")
 
     terisi = sum(1 for r in bosch if r["deskripsi"])
     write_json_gz(OUT, rows)

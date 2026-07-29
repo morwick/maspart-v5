@@ -57,12 +57,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "detail_part",
                 "description": (
-                    "Ambil detail satu Part Number persis: nama, STOK (utama dari ERP Accurate, "
+                    "Ambil detail SATU Part Number persis: nama, STOK (utama dari ERP Accurate, "
                     "disinkron berkala — total + rincian per gudang; fallback Excel bila Accurate "
                     "tak tersedia; lihat field 'sumber_stok'), harga jual lokal, dan SPESIFIKASI "
-                    "fisik resmi (berat kg, dimensi cm, satuan, merek). Pakai juga untuk "
-                    "menjawab pertanyaan berat/dimensi/ukuran sebuah PN. Ini tool utama untuk "
-                    "pertanyaan stok 1 PN."
+                    "fisik resmi (berat kg, dimensi cm, satuan, merek). Ini tool utama untuk "
+                    "pertanyaan stok/berat/dimensi SATU PN. "
+                    "⛔ HANYA untuk satu PN: bila user menyebut 2 PN atau lebih — termasuk untuk "
+                    "berat/dimensi — pakai cek_massal_part (SATU panggilan). Memanggil tool ini "
+                    "berulang untuk banyak PN akan DITOLAK sistem setelah beberapa kali, dan "
+                    "sisanya tidak akan pernah terjawab."
                 ),
                 "parameters": {
                     "type": "object",
@@ -79,10 +82,13 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "name": "cek_massal_part",
                 "description": (
                     "⭐ CEK BANYAK Part Number SEKALIGUS dalam SATU panggilan — nama + stok "
-                    "(total & per gudang) + harga tiap PN dari indeks Accurate. WAJIB pakai "
-                    "ini saat user menyebut/menempel ≥3 PN ('cek PN ini semua', daftar PN) "
-                    "— ⛔ JANGAN memanggil detail_part berulang (boros & lambat). PN yang "
-                    "tidak ada ditandai jujur. Set excel=true untuk file Excel unduhan. "
+                    "(total & per gudang) + harga + BERAT tertagih (kg) tiap PN. WAJIB pakai "
+                    "ini saat user menyebut/menempel ≥2 PN ('cek PN ini semua', daftar PN, "
+                    "dan JUGA saat user minta BERAT/DIMENSI beberapa part) — ⛔ JANGAN "
+                    "memanggil detail_part berulang: sistem akan MENOLAKnya setelah beberapa "
+                    "kali dan sisa PN tak akan terjawab. PN yang tidak ada ditandai jujur. "
+                    "Set dimensi=true bila user memang menanyakan UKURAN/DIMENSI (agak lambat, "
+                    "dibatasi 40 PN pertama). Set excel=true untuk file Excel unduhan. "
                     "Hasil bisa langsung dijadikan penawaran (buat_penawaran) bila user mau."
                 ),
                 "parameters": {
@@ -91,6 +97,13 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "daftar_pn": {
                             "type": "array", "items": {"type": "string"},
                             "description": "Daftar Part Number (boleh juga satu string dipisah baris/koma).",
+                        },
+                        "dimensi": {
+                            "type": "boolean",
+                            "description": ("true → sertakan dimensi P×L×T (cm) dari SIMS. Pakai HANYA "
+                                            "bila user menanyakan ukuran/dimensi: sumbernya lambat "
+                                            "(diambil per part) dan dibatasi 40 PN pertama. Berat "
+                                            "SELALU disertakan tanpa perlu argumen ini."),
                         },
                         "excel": {"type": "boolean", "description": "true → hasil juga jadi file Excel unduhan."},
                     },

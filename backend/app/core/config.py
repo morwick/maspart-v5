@@ -118,6 +118,13 @@ class Settings(BaseSettings):
         return bool(self.ai_fallback_base_url and self.ai_fallback_api_key
                     and self.ai_fallback_model)
 
+    # ── Gambar exploded EPC lewat pencarian TERBALIK (tanpa kategori) ──
+    # PN + rangka → alamat node → figure, 2 panggilan EPC. Menghapus ronde
+    # "kategori apa?" yang selama ini terbuang (spec menyuruh mengosongkan
+    # kategori, tapi handler-nya mewajibkan). Set EPC_EXPLODED_REVERSE=0 untuk
+    # kembali ke jalur sisir-kategori lama tanpa deploy kode.
+    epc_exploded_reverse: bool = True
+
     # ── Memori sesi asisten (services/ai_session.py) ──
     # Ingatan singkat SERVER per percakapan: PN/angka hasil tool + slot entitas
     # (rangka/mesin/WO) giliran lalu, supaya follow-up "harganya berapa?" tidak

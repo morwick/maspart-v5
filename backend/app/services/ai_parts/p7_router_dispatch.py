@@ -528,13 +528,22 @@ _FAIL_INFRA_MARKERS = ("jaringan", "gangguan internal")
 
 def _tool_fail_kind(result) -> str:
     """Klasifikasi kegagalan hasil tool untuk telemetri:
-    ""    → sukses;
-    "nf"  → lookup jujur nihil (found/ditemukan/tersedia == False) — data memang
-            tidak ada, bukan sistem rusak;
-    "err" → error/ditolak/infra (exception, denied, token EPC, jaringan).
-    Statistik lama menyatukan keduanya → tool not-found jujur tampak "rusak"."""
+    ""      → sukses;
+    "brake" → DITOLAK rem anti-loop (_MAX_CALLS_PER_TOOL) — belum sempat dicari,
+              BUKAN pernyataan tentang datanya;
+    "nf"    → lookup jujur nihil (found/ditemukan/tersedia == False) — data memang
+              tidak ada, bukan sistem rusak;
+    "err"   → error/ditolak/infra (exception, denied, token EPC, jaringan).
+    Statistik lama menyatukan keduanya → tool not-found jujur tampak "rusak".
+
+    `brake` dipisah dari `nf` karena keduanya dulu tak terbedakan: hasil rem
+    membawa found=False, sehingga model diberi nota "lookup gagal, jangan
+    mengarang" dan menyimpulkan puluhan PN yang ditolak rem itu TIDAK ADA di
+    data. Yang benar: mereka belum sempat dicek."""
     if not isinstance(result, dict):
         return ""
+    if result.get("dibatasi"):
+        return "brake"
     if result.get("denied") or result.get("_token_issue"):
         return "err"
     for k in ("found", "ditemukan", "tersedia"):
@@ -555,13 +564,20 @@ def _tool_failed(result: dict) -> bool:
     return bool(_tool_fail_kind(result))
 
 
+# Kekuatan sinyal, lemah → kuat. `brake` paling lemah: ia tak mengatakan apa pun
+# tentang data maupun kesehatan sistem, hanya "belum sempat dijalankan". Jadi
+# begitu tool yang sama benar-benar nihil atau error di giliran itu, catatannya
+# di-upgrade — telemetri harus melaporkan fakta terkuat yang kita punya.
+_FAIL_KIND_RANK = {"brake": 1, "nf": 2, "err": 3}
+
+
 def _catat_tool_gagal(daftar: list[str], name: str, kind: str) -> None:
     """Catat entri `nama:kind` ke daftar tools_failed giliran ini — dedupe per
-    NAMA; nf lalu err di giliran sama → upgrade ke err (sinyal lebih kuat)."""
+    NAMA; sinyal yang lebih kuat menimpa yang lemah (brake < nf < err)."""
     for i, e in enumerate(daftar):
         n, _, k = e.partition(":")
         if n == name:
-            if k == "nf" and kind == "err":
+            if _FAIL_KIND_RANK.get(kind, 0) > _FAIL_KIND_RANK.get(k, 0):
                 daftar[i] = f"{name}:{kind}"
             return
     daftar.append(f"{name}:{kind}")

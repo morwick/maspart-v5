@@ -797,6 +797,15 @@ def _t_info_part(args: dict, user: dict) -> dict:
 
 
 _MAX_MASSAL_PN = 100
+# Dimensi = HTTP live SIMS per-PN (tak ada API batch). Plafon jauh lebih ketat
+# daripada `ai_sheet._MAX_DIM_SIMS = 150` karena ini jalur CHAT yang sinkron:
+# user menunggu, dan p90 latensi giliran sudah 46 detik.
+_MAX_DIM_MASSAL = 40
+_DIM_WORKERS = 6
+# Ambang aman di bawah `_MAX_TOOL_CONTENT = 24000` (p7). Melewatinya membuat
+# _cap_tool_content memotong TENGAH → PN di tengah daftar hilang SENYAP dari
+# konteks model, dan model melaporkan sebagian daftar seolah itu semuanya.
+_MASSAL_PAYLOAD_AMAN = 23000
 
 
 def _parse_daftar_pn(v) -> list[str]:
@@ -814,10 +823,63 @@ def _parse_daftar_pn(v) -> list[str]:
     return out
 
 
+def _dimensi_massal(pns: list[str]) -> dict[str, str]:
+    """{PN: "L x W x H"} untuk sampai _MAX_DIM_MASSAL PN. Cache dulu (gratis),
+    sisanya fetch PARALEL — pola yang sudah terbukti di ai_sheet._isi_dimensi
+    (ThreadPoolExecutor + plafon + try/except per PN)."""
+    sel = pns[:_MAX_DIM_MASSAL]
+    peta: dict[str, str] = {}
+    perlu: list[str] = []
+    for p in sel:
+        try:
+            d = (sims.get_part_spec_cached(p) or {}).get("dimensi_cm") or ""
+        except Exception:
+            d = ""
+        if d:
+            peta[p] = d
+        else:
+            perlu.append(p)
+    if perlu:
+        def _amb(p: str) -> tuple[str, str]:
+            try:
+                return p, (sims.get_part_spec(p) or {}).get("dimensi_cm") or ""
+            except Exception:      # satu PN gagal tak boleh menjatuhkan seluruh daftar
+                return p, ""
+        with ThreadPoolExecutor(max_workers=min(_DIM_WORKERS, len(perlu))) as ex:
+            for p, d in ex.map(_amb, perlu):
+                if d:
+                    peta[p] = d
+    return peta
+
+
+def _rampingkan_payload(out: dict, part: list[dict]) -> bool:
+    """Buang `stok_per_gudang` dari item TERAKHIR ke depan sampai payload muat.
+
+    Lebih baik kehilangan RINCIAN per-gudang secara sadar (stok_total tetap utuh
+    & diberi tahu ke model) daripada dipotong tengah oleh _cap_tool_content, yang
+    membuang baris PN utuh tanpa jejak. Return True bila ada yang dibuang."""
+    def _ukuran() -> int:
+        return len(json.dumps(out, ensure_ascii=False, separators=(",", ":"), default=str))
+    if _ukuran() <= _MASSAL_PAYLOAD_AMAN:
+        return False
+    dibuang = False
+    for it in reversed(part):
+        if "stok_per_gudang" in it:
+            it.pop("stok_per_gudang", None)
+            dibuang = True
+            if _ukuran() <= _MASSAL_PAYLOAD_AMAN:
+                break
+    return dibuang
+
+
 def _t_cek_massal_part(args: dict, user: dict) -> dict:
-    """CEK BANYAK PART sekaligus (1 panggilan) — nama + stok + harga per PN dari
-    indeks Accurate. Ganti pemanggilan detail_part berulang (hemat token & cepat).
-    PN = daftar dari user; yang tak ada di indeks ditandai jujur."""
+    """CEK BANYAK PART sekaligus (1 panggilan) — nama + stok + harga + BERAT per PN
+    (dimensi opsional). Ganti pemanggilan detail_part berulang (hemat token & cepat).
+    PN = daftar dari user; yang tak ada di indeks ditandai jujur.
+
+    Berat SELALU disertakan: sumbernya indeks `sims_weights` lewat
+    harga.shipping_weight_for(allow_remote=False) — nol jaringan. Dimensi OPT-IN
+    (`dimensi=true`) karena hanya tersedia lewat HTTP live SIMS per-PN."""
     pns = _parse_daftar_pn(args.get("daftar_pn") or args.get("pns") or args.get("part_numbers"))
     if not pns:
         return {"error": "Sebutkan daftar Part Number (pisah baris/koma)."}
@@ -828,6 +890,9 @@ def _t_cek_massal_part(args: dict, user: dict) -> dict:
     boleh_stok = _boleh_stok(user) and user.get("role") != "pembeli"
     rows = part_index.rows_for_pns(pns)          # {PN: baris} pemaaf suffix varian
     snap = accurate.snapshot() if boleh_harga else {}
+    minta_dim = bool(args.get("dimensi"))
+    peta_dim = _dimensi_massal(pns) if minta_dim else {}
+    dim_dipotong = minta_dim and len(pns) > _MAX_DIM_MASSAL
 
     part: list[dict] = []
     tak_ada: list[str] = []
@@ -851,6 +916,15 @@ def _t_cek_massal_part(args: dict, user: dict) -> dict:
             if hg:
                 item["harga"] = int(hg)
                 ada = ada or True
+        # Berat TERTAGIH (max berat asli & volumetrik) — indeks lokal, nol HTTP.
+        try:
+            g = harga.shipping_weight_for(pn, allow_remote=False) or 0
+        except Exception:
+            g = 0
+        if g > 0:
+            item["berat_kg"] = round(g / 1000, 2)
+        if peta_dim.get(pn):
+            item["dimensi_cm"] = peta_dim[pn]
         if not ada:
             tak_ada.append(pn)
             item["catatan_pn"] = "tidak ditemukan di indeks (cek ejaan / mungkin non-katalog)"
@@ -861,11 +935,16 @@ def _t_cek_massal_part(args: dict, user: dict) -> dict:
                  "tak_ada": len(tak_ada), "part": part}
 
     if args.get("excel"):
+        # Excel tak kena plafon token → dimensi ikut hanya bila memang diminta,
+        # tapi berat selalu (gratis). Label disamakan dgn ai_sheet._ISI_LABEL.
         kolom = ["No", "Part Number", "Nama"]
         if boleh_stok:
             kolom += ["Stok Total", "Stok per Gudang"]
         if boleh_harga:
             kolom += ["Harga"]
+        kolom += ["Berat (kg)"]
+        if minta_dim:
+            kolom += ["Dimensi P×L×T (cm)"]
         baris: list[list] = []
         for i, it in enumerate(part, start=1):
             row = [str(i), it["pn"], it.get("nama") or ""]
@@ -874,16 +953,32 @@ def _t_cek_massal_part(args: dict, user: dict) -> dict:
                         it.get("stok_per_gudang") or ""]
             if boleh_harga:
                 row += [it.get("harga") if it.get("harga") is not None else "—"]
+            row += [it.get("berat_kg") if it.get("berat_kg") is not None else ""]
+            if minta_dim:
+                row += [it.get("dimensi_cm") or ""]
             baris.append(row)
         export_id, filename = ai_export.stash_export(f"Cek {len(pns)} Part", kolom, baris)
         out["export_id"] = export_id
         out["filename"] = filename
         out["jumlah_baris"] = len(baris)
 
+    # Rampingkan SEBELUM menulis catatan — catatan wajib jadi key TERAKHIR.
+    dirampingkan = _rampingkan_payload(out, part)
+
     catatan = (f"Cek massal {len(pns)} PN dalam SATU panggilan (⛔ JANGAN detail_part "
                f"berulang). {ketemu} ketemu, {len(tak_ada)} tidak ada — sebut jujur yang "
-               "tak ada. Stok/harga dari indeks Accurate. Bila user MAU dijadikan "
+               "tak ada. Stok/harga dari indeks Accurate; berat = berat TERTAGIH "
+               "(maks berat asli & volumetrik) dari data SIMS. Bila user MAU dijadikan "
                "penawaran, panggil buat_penawaran dengan PN + qty ini (sudah grounded).")
+    if minta_dim and dim_dipotong:
+        catatan += (f" ⚠️ Dimensi hanya diambil untuk {_MAX_DIM_MASSAL} PN pertama "
+                    "(sumbernya lambat); untuk daftar besar pakai excel=true.")
+    if not minta_dim:
+        catatan += " Butuh DIMENSI juga? panggil ulang tool ini dengan dimensi=true."
+    if dirampingkan:
+        catatan += (" ⚠️ Rincian stok PER-GUDANG sebagian dihilangkan karena daftar "
+                    "terlalu panjang — stok_total tetap akurat; sebut rincian gudang "
+                    "hanya untuk PN yang masih memilikinya.")
     if dipotong:
         catatan = f"⚠️ Daftar dipotong ke {_MAX_MASSAL_PN} PN pertama. " + catatan
     if out.get("export_id"):

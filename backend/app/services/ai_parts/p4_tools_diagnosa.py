@@ -39,6 +39,9 @@ def _sisip_terkait(out: dict, ents: list, exclude: str, user: dict) -> dict:
     return out
 
 
+_SPN_MAKS_J1939 = 524287    # SPN standar J1939 = 19 bit
+
+
 def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
     spn = args.get("spn")
     fmi = args.get("fmi")
@@ -64,17 +67,42 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
             flags["fmi_di_luar_rentang"] = fmi
             fmi = None
 
+    if spn is not None and spn > _SPN_MAKS_J1939:
+        # Angka mustahil (SPN J1939 = 19 bit). Dulu ini berujung nihil bisu dan
+        # user tak pernah tahu bahwa masalahnya di angka yang ia ketik.
+        flags["spn_di_luar_rentang"] = spn
+
     hits = fault_codes.search(spn=spn, fmi=fmi, code=code, query=query, limit=20)
+
+    # Sumber KANONIK lintas-store (bosch/eol/abs/scr/kartu). Menutup tiga celah
+    # sekaligus: eol_dtc.search tak punya param spn/fmi, fault_codes hanya bosch,
+    # dan baris sumber="kartu" tak pernah keluar lewat proyeksi legacy.
+    try:
+        kanonik = dtc_codes.search_spn_fmi(spn, fmi, limit=20) if spn is not None else []
+    except Exception:  # pragma: no cover
+        kanonik = []
+    cocok_eksak_kanonik = any(
+        r.get("spn") == spn and (fmi is None or r.get("fmi") == fmi) for r in kanonik)
+
     if spn is not None and fmi is not None and not hits:
-        # Pasangan persis tak terdaftar → JANGAN kosong diam-diam: tampilkan
-        # semua FMI yang ADA untuk SPN itu + tandai jujur.
+        # Pasangan persis tak terdaftar di tabel Bosch → JANGAN kosong diam-diam:
+        # tampilkan semua FMI yang ADA untuk SPN itu + tandai jujur.
         alt = fault_codes.search(spn=spn, limit=20)
         if alt:
             hits = alt
-            flags["fmi_diminta_tak_terdaftar"] = fmi
-            flags["fmi_tersedia"] = sorted(
-                {r["fmi"] for r in alt if r.get("fmi") is not None})
-    if spn is not None and not hits and not code and not query:
+            # ⚠️ Flag ini HANYA sah bila tak ada sumber lain yang benar-benar
+            # punya pasangan persisnya. Dulu tidak dicek, sehingga SPN 520264
+            # FMI 11 dijawab found=True (dari kartu PDF) SEKALIGUS diberi flag
+            # "FMI 11 tak terdaftar" — model menerima dua pesan yang bertentangan.
+            if not cocok_eksak_kanonik:
+                flags["fmi_diminta_tak_terdaftar"] = fmi
+                tersedia = sorted({r["fmi"] for r in alt if r.get("fmi") is not None})
+                try:
+                    tersedia = sorted(set(tersedia) | set(dtc_codes.fmi_tersedia(spn)))
+                except Exception:  # pragma: no cover
+                    pass
+                flags["fmi_tersedia"] = tersedia
+    if spn is not None and not hits and not kanonik and not code and not query:
         flags["spn_tak_terdaftar"] = True
 
     hasil = []
@@ -144,6 +172,30 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
         for r in abs_scr_hits
     ]
 
+    # Baris kanonik yang TIDAK terwakili sumber legacy di atas — terutama EOL
+    # ber-SPN/FMI (hasil parse string kode) dan baris sumber="kartu". Tanpa ini,
+    # data yang sudah kita miliki tetap tak pernah sampai ke model.
+    _sudah = {(r.get("spn"), r.get("fmi"), (r.get("kode") or "").upper())
+              for r in hits}
+    _sudah |= {(r.get("spn"), r.get("fmi"), (r.get("kode") or "").upper())
+               for r in abs_scr_hits}
+    hasil_kanonik = [
+        {
+            "sumber": r.get("sumber"),
+            "unit_kontrol": r.get("unit"),
+            "kode": r.get("kode"),
+            "spn": r.get("spn"),
+            "fmi": r.get("fmi"),
+            "deskripsi": r.get("deskripsi") or "",
+            "deskripsi_cn": r.get("deskripsi_cn") or "",
+            "penyebab": r.get("penyebab") or "",
+            "perbaikan": r.get("perbaikan") or "",
+            "part_terkait": r.get("part") or "",
+        }
+        for r in kanonik
+        if (r.get("spn"), r.get("fmi"), (r.get("kode") or "").upper()) not in _sudah
+    ][:15]
+
     # Lembar diagnosa PDF resmi (data/Fault) — kartu yang bisa DIBUKA user.
     pdf_cards = _fault_pdf_cards(spn, fmi)
 
@@ -202,8 +254,22 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
             f" ⚠️ Ada {len(hits)} KODE BERBEDA untuk pasangan SPN/FMI ini — "
             "tampilkan SEMUANYA, jangan pilih salah satu."
         )
+    if hasil_kanonik:
+        catatan += (
+            " 'hasil_kanonik' = baris dari store gabungan yang TIDAK ada di tabel "
+            "Bosch/ABS/SCR (mis. EOL ber-SPN/FMI atau pasangan yang hanya punya "
+            "lembar diagnosa PDF). Perlakukan setara: sajikan deskripsi & langkah "
+            "perbaikannya apa adanya."
+        )
+    if flags.get("spn_di_luar_rentang") is not None:
+        catatan += (
+            f" ⚠️ SPN {flags['spn_di_luar_rentang']} MELEBIHI batas standar J1939 "
+            f"(maksimum {_SPN_MAKS_J1939}) — angka itu hampir pasti salah ketik atau "
+            "dua kode yang tergabung. Minta user membacakan ulang SPN dan FMI-nya "
+            "TERPISAH dari scan-tool; jangan menebak."
+        )
     total_kosong = (not hits and not hasil_eol and not hasil_abs_scr
-                    and not pdf_cards and not diagnosa_rinci)
+                    and not hasil_kanonik and not pdf_cards and not diagnosa_rinci)
     if hasil_abs_scr:
         ada_abs = any(h["sistem"] == "ABS" for h in hasil_abs_scr)
         ada_scr = any(h["sistem"] == "SCR" for h in hasil_abs_scr)
@@ -263,6 +329,8 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
         "total_database_abs_scr": abs_scr_codes.count(),
         "jumlah_cocok_abs_scr": len(hasil_abs_scr),
         "hasil_abs_scr": hasil_abs_scr,
+        "jumlah_cocok_kanonik": len(hasil_kanonik),
+        "hasil_kanonik": hasil_kanonik,
         "diagnosa_rinci": diagnosa_rinci,
         "pdf_diagnosa": pdf_cards,
         "catatan": catatan,
