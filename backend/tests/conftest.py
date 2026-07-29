@@ -44,6 +44,24 @@ def _bersihkan_cache_izin():
 
 
 @pytest.fixture(autouse=True)
+def _jangan_baca_feedback_prod(request, monkeypatch):
+    """Umpan balik 👍/👎 kini ikut ditambang ai_belajar.mine_chat_logs. Tanpa
+    penjaga ini, test biasa MEMBACA tabel ai_feedback PRODUKSI lewat jaringan:
+    lambat, dan hasilnya bergantung data nyata — `test_gap_kelompok_minimal_3`
+    langsung gagal ketika kebetulan ada 👎 sungguhan di sana. Di-no-op kecuali
+    modul yang memang mengujinya (mereka mock sendiri)."""
+    if request.module.__name__.startswith("test_ai_feedback") or \
+            request.module.__name__ == "test_ai_belajar_feedback":
+        return
+    try:
+        from app.services import ai_feedback
+        monkeypatch.setattr(ai_feedback, "list_feedback",
+                            lambda rating=None, only_open=False, limit=200: [])
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _jangan_bangun_indeks_epc_nyata(monkeypatch):
     """Indeks item EPC per-unit: warm_items_index menembak RATUSAN panggilan EPC
     nyata di thread latar & menulis cache disk — tak boleh terjadi dari test.

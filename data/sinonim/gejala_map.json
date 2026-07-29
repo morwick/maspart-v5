@@ -1,0 +1,3797 @@
+[
+ {
+  "grup": "gejala:pintu",
+  "triggers": [
+   "pintu macet",
+   "pintu seret",
+   "pintu bunyi",
+   "pintu susah",
+   "pintu longgar"
+  ],
+  "keywords": [
+   "Right door",
+   "Right door assembly"
+  ]
+ },
+ {
+  "grup": "gejala:engsel",
+  "triggers": [
+   "engsel aus",
+   "engsel bunyi",
+   "engsel macet",
+   "pintu turun",
+   "pintu nceng"
+  ],
+  "keywords": [
+   "hinge",
+   "Front upper hinge",
+   "upper hinge",
+   "door hinge"
+  ]
+ },
+ {
+  "grup": "gejala:saringan-solar",
+  "triggers": [
+   "mesin brebet",
+   "tarikan berat",
+   "mesin mati",
+   "solar mampet",
+   "mesin ngambek"
+  ],
+  "keywords": [
+   "fuel filter",
+   "diesel filter"
+  ]
+ },
+ {
+  "grup": "gejala:saringan-oli",
+  "triggers": [
+   "tekanan oli",
+   "lampu oli",
+   "oli kotor",
+   "mesin berisik",
+   "oli cepat hitam"
+  ],
+  "keywords": [
+   "oil filter",
+   "机油滤"
+  ]
+ },
+ {
+  "grup": "gejala:saringan-udara",
+  "triggers": [
+   "asap hitam",
+   "tarikan berat",
+   "mesin ngelitik",
+   "boros solar",
+   "suara kasar"
+  ],
+  "keywords": [
+   "air filter",
+   "air filter assembly",
+   "空滤器"
+  ]
+ },
+ {
+  "grup": "gejala:water-separator",
+  "triggers": [
+   "mesin brebet",
+   "mesin mati",
+   "air di solar",
+   "solar bercampur air",
+   "filter air penuh"
+  ],
+  "keywords": [
+   "water separator",
+   "oil-water separator"
+  ]
+ },
+ {
+  "grup": "gejala:stang-seher",
+  "triggers": [
+   "mesin ngelitik",
+   "suara ngelitik",
+   "mesin brebet",
+   "mesin getar",
+   "mesin loyo"
+  ],
+  "keywords": [
+   "connecting rod"
+  ]
+ },
+ {
+  "grup": "gejala:seher",
+  "triggers": [
+   "mesin ngelitik",
+   "oli boros",
+   "asap putih",
+   "kompresi turun",
+   "mesin brebet",
+   "tenaga turun"
+  ],
+  "keywords": [
+   "piston"
+  ]
+ },
+ {
+  "grup": "gejala:ring-seher",
+  "triggers": [
+   "oli boros",
+   "asap putih",
+   "kompresi turun",
+   "mesin ngelitik",
+   "tenaga turun"
+  ],
+  "keywords": [
+   "piston ring"
+  ]
+ },
+ {
+  "grup": "gejala:klep",
+  "triggers": [
+   "suara klep",
+   "klep bunyi",
+   "mesin brebet",
+   "tenaga turun",
+   "mesin ngelitik",
+   "asap hitam"
+  ],
+  "keywords": [
+   "valve",
+   "intake valve",
+   "exhaust valve"
+  ]
+ },
+ {
+  "grup": "gejala:injektor",
+  "triggers": [
+   "mesin brebet",
+   "asap hitam",
+   "injektor bocor",
+   "mesin ngelitik",
+   "boros solar",
+   "tenaga turun"
+  ],
+  "keywords": [
+   "injector",
+   "nozzle",
+   "fuel injector",
+   "喷油器"
+  ]
+ },
+ {
+  "grup": "gejala:pompa-solar",
+  "triggers": [
+   "pompa jebol",
+   "pompa ngadat",
+   "mesin mati",
+   "tarikan berat",
+   "mesin ngelitik",
+   "solar tidak masuk"
+  ],
+  "keywords": [
+   "fuel injection pump",
+   "fuel delivery pump",
+   "喷油泵"
+  ]
+ },
+ {
+  "grup": "gejala:turbo",
+  "triggers": [
+   "turbo jebol",
+   "suara turbo",
+   "asap hitam",
+   "tenaga turun",
+   "turbo ngadat",
+   "suara mendesis"
+  ],
+  "keywords": [
+   "turbocharger",
+   "turbo",
+   "增压器"
+  ]
+ },
+ {
+  "grup": "gejala:paking",
+  "triggers": [
+   "bocor oli",
+   "bocor air",
+   "paking jebol",
+   "asap putih",
+   "air radiator habis",
+   "oli masuk air"
+  ],
+  "keywords": [
+   "gasket"
+  ]
+ },
+ {
+  "grup": "gejala:metal-jalan",
+  "triggers": [
+   "nglitik",
+   "bunyi nglitik",
+   "mesin grojok",
+   "oli turun",
+   "tekanan oli rendah"
+  ],
+  "keywords": [
+   "connecting rod bearing",
+   "upper connecting rod bearing"
+  ]
+ },
+ {
+  "grup": "gejala:metal-duduk",
+  "triggers": [
+   "nglothok",
+   "bunyi gluduk",
+   "mesin gemuruh",
+   "oli kurang",
+   "tekanan oli drop"
+  ],
+  "keywords": [
+   "main bearing",
+   "main bearing bush",
+   "主轴瓦"
+  ]
+ },
+ {
+  "grup": "gejala:van-belt",
+  "triggers": [
+   "selip",
+   "bunyi mencicit",
+   "belt putus",
+   "v-belt aus",
+   "suara melengking"
+  ],
+  "keywords": [
+   "v-ribbed belt",
+   "ribbed belt"
+  ]
+ },
+ {
+  "grup": "gejala:radiator",
+  "triggers": [
+   "overheat",
+   "panas mesin",
+   "bocor radiator",
+   "radiator mampet",
+   "air radiator mendidih"
+  ],
+  "keywords": [
+   "radiator",
+   "散热器"
+  ]
+ },
+ {
+  "grup": "gejala:selang-radiator",
+  "triggers": [
+   "bocor selang",
+   "radiator bocor",
+   "selang retak",
+   "selang rad pecah",
+   "air radiator habis"
+  ],
+  "keywords": [
+   "radiator water inlet hose",
+   "radiator outlet hose"
+  ]
+ },
+ {
+  "grup": "gejala:pompa-air",
+  "triggers": [
+   "overheat",
+   "suara berisik",
+   "bocor pompa air",
+   "pompa air macet",
+   "air radiator tidak sirkulasi"
+  ],
+  "keywords": [
+   "water pump"
+  ]
+ },
+ {
+  "grup": "gejala:termostat",
+  "triggers": [
+   "overheat",
+   "termostat macet",
+   "mesin dingin terus",
+   "temperatur naik turun",
+   "air radiator tidak panas"
+  ],
+  "keywords": [
+   "thermostat",
+   "thermostat housing",
+   "节温器"
+  ]
+ },
+ {
+  "grup": "gejala:kipas-radiator",
+  "triggers": [
+   "overheat",
+   "kipas mati",
+   "bunyi kipas",
+   "kipas kasar",
+   "kipas tidak jalan"
+  ],
+  "keywords": [
+   "fan",
+   "fan clutch"
+  ]
+ },
+ {
+  "grup": "gejala:kampas-rem",
+  "triggers": [
+   "rem bunyi",
+   "rem blong",
+   "kampas habis",
+   "rem berdecit",
+   "rem tidak pakem"
+  ],
+  "keywords": [
+   "brake friction plate",
+   "brake pad",
+   "brake shoe assembly",
+   "friction plate",
+   "brake lining"
+  ]
+ },
+ {
+  "grup": "gejala:sepatu-rem",
+  "triggers": [
+   "rem bunyi",
+   "sepatu aus",
+   "rem blong",
+   "setel rem",
+   "sepatu rem habis"
+  ],
+  "keywords": [
+   "brake shoe assembly",
+   "brake shoe",
+   "制动蹄"
+  ]
+ },
+ {
+  "grup": "gejala:tromol",
+  "triggers": [
+   "tromol aus",
+   "rem bunyi",
+   "tromol goyang",
+   "tromol pecah",
+   "rem tidak rata"
+  ],
+  "keywords": [
+   "brake drum"
+  ]
+ },
+ {
+  "grup": "gejala:master-rem",
+  "triggers": [
+   "rem blong",
+   "master rem bocor",
+   "tekanan rem kurang",
+   "rem tidak bisa",
+   "master rem macet"
+  ],
+  "keywords": [
+   "master brake valve",
+   "hand brake valve",
+   "brake valve",
+   "制动阀"
+  ]
+ },
+ {
+  "grup": "gejala:kampas-kopling",
+  "triggers": [
+   "kopling selip",
+   "kopling berat",
+   "kopling ngebuang",
+   "kampas kopling habis",
+   "tidak bisa masuk gigi"
+  ],
+  "keywords": [
+   "driven disc",
+   "driven disk",
+   "driven plate",
+   "clutch driven disc",
+   "clutch driven disk"
+  ]
+ },
+ {
+  "grup": "gejala:matahari-kopling",
+  "triggers": [
+   "suara macet",
+   "kopling seret",
+   "matahari rusak",
+   "kopling ngenyel",
+   "kopling tidak lepas"
+  ],
+  "keywords": [
+   "clutch pressure plate",
+   "pressure plate"
+  ]
+ },
+ {
+  "grup": "gejala:drek-lager",
+  "triggers": [
+   "kopling ngecit",
+   "kopling ngenet",
+   "kopling berat",
+   "bunyi cit"
+  ],
+  "keywords": [
+   "release bearing",
+   "clutch release bearing"
+  ]
+ },
+ {
+  "grup": "gejala:gardan",
+  "triggers": [
+   "bunyi gluduk",
+   "bunyi ngelak",
+   "gardan jeglek",
+   "tarikan berat"
+  ],
+  "keywords": [
+   "differential",
+   "axle",
+   "rear axle",
+   "差速器"
+  ]
+ },
+ {
+  "grup": "gejala:as-roda",
+  "triggers": [
+   "bunyi ngitik",
+   "as roda patah"
+  ],
+  "keywords": [
+   "axle shaft",
+   "half shaft"
+  ]
+ },
+ {
+  "grup": "gejala:kopel",
+  "triggers": [
+   "bunyi ngitik",
+   "bunyi dug",
+   "kopel goyang"
+  ],
+  "keywords": [
+   "transmission shaft",
+   "drive shaft"
+  ]
+ },
+ {
+  "grup": "gejala:cross-joint",
+  "triggers": [
+   "bunyi cit-cit",
+   "bunyi ngitik",
+   "cross joint aus"
+  ],
+  "keywords": [
+   "universal joint",
+   "cross",
+   "十字轴"
+  ]
+ },
+ {
+  "grup": "gejala:gigi-nanas",
+  "triggers": [
+   "bunyi ngik",
+   "bunyi geram",
+   "gigi nanas aus"
+  ],
+  "keywords": [
+   "bevel gear",
+   "driving bevel gear",
+   "driven bevel gear",
+   "main reducer",
+   "锥齿轮"
+  ]
+ },
+ {
+  "grup": "gejala:per",
+  "triggers": [
+   "karatan",
+   "per patah",
+   "per lemah",
+   "bunyi grek"
+  ],
+  "keywords": [
+   "leaf spring",
+   "spring",
+   "钢板弹簧"
+  ]
+ },
+ {
+  "grup": "gejala:shock",
+  "triggers": [
+   "mumbul",
+   "olah",
+   "shock bocor",
+   "bunyi bluk-bluk"
+  ],
+  "keywords": [
+   "shock absorber"
+  ]
+ },
+ {
+  "grup": "gejala:ball-joint",
+  "triggers": [
+   "kocak",
+   "setir goyang",
+   "bunyi tok",
+   "getar setir",
+   "ball joint longgar"
+  ],
+  "keywords": [
+   "ball joint"
+  ]
+ },
+ {
+  "grup": "gejala:tie-rod",
+  "triggers": [
+   "setir goyang",
+   "bunyi kretek",
+   "jalan bergoyang",
+   "tie rod longgar",
+   "setir tidak presisi"
+  ],
+  "keywords": [
+   "tie rod",
+   "steering tie rod",
+   "steering tie rod arm",
+   "tie rod arm"
+  ]
+ },
+ {
+  "grup": "gejala:laher-roda",
+  "triggers": [
+   "bunyi ngitik",
+   "bunyi ngong",
+   "roda goyang",
+   "laher roda bocor"
+  ],
+  "keywords": [
+   "wheel hub bearing",
+   "hub bearing"
+  ]
+ },
+ {
+  "grup": "gejala:velg",
+  "triggers": [
+   "velg peyang",
+   "velg retak",
+   "bocor angin",
+   "velg karatan"
+  ],
+  "keywords": [
+   "wheel rim",
+   "rim"
+  ]
+ },
+ {
+  "grup": "gejala:ban",
+  "triggers": [
+   "ban kempes",
+   "ban gundul",
+   "ban pecah",
+   "ban benjol",
+   "aus tidak rata"
+  ],
+  "keywords": [
+   "tire",
+   "tyre"
+  ]
+ },
+ {
+  "grup": "gejala:aki",
+  "triggers": [
+   "aki tekor",
+   "aki drop",
+   "aki soak",
+   "aki mati",
+   "sulit starter",
+   "lampu redup"
+  ],
+  "keywords": [
+   "battery"
+  ]
+ },
+ {
+  "grup": "gejala:dinamo-ampere",
+  "triggers": [
+   "aki tekor",
+   "setrum lemah",
+   "bunyi dengung",
+   "lampu merah nyala",
+   "ngisi nggak stabil"
+  ],
+  "keywords": [
+   "generator",
+   "发电机"
+  ]
+ },
+ {
+  "grup": "gejala:dinamo-starter",
+  "triggers": [
+   "kosong",
+   "nggak muter",
+   "suara grecet",
+   "muter lambat",
+   "nggak nangkap"
+  ],
+  "keywords": [
+   "starter"
+  ]
+ },
+ {
+  "grup": "gejala:lampu-depan",
+  "triggers": [
+   "redup",
+   "putus",
+   "sebelah mati",
+   "nyala nggak stabil"
+  ],
+  "keywords": [
+   "headlight",
+   "headlamp",
+   "front combination light"
+  ]
+ },
+ {
+  "grup": "gejala:klakson",
+  "triggers": [
+   "serak",
+   "nggak bunyi",
+   "mat total"
+  ],
+  "keywords": [
+   "horn",
+   "electric horn"
+  ]
+ },
+ {
+  "grup": "gejala:spakbor",
+  "triggers": [
+   "penyok",
+   "lepas"
+  ],
+  "keywords": [
+   "fender",
+   "mudguard"
+  ]
+ },
+ {
+  "grup": "gejala:bemper",
+  "triggers": [
+   "penyok",
+   "lepas",
+   "bolong"
+  ],
+  "keywords": [
+   "bumper"
+  ]
+ },
+ {
+  "grup": "gejala:spion",
+  "triggers": [
+   "kocak",
+   "gelap",
+   "nggak jelas"
+  ],
+  "keywords": [
+   "mirror",
+   "rear view mirror"
+  ]
+ },
+ {
+  "grup": "gejala:kaca-depan",
+  "triggers": [
+   "buram",
+   "gores"
+  ],
+  "keywords": [
+   "windshield",
+   "windscreen",
+   "front windshield"
+  ]
+ },
+ {
+  "grup": "gejala:wiper",
+  "triggers": [
+   "nggak jalan",
+   "nggak bersih",
+   "karet putus"
+  ],
+  "keywords": [
+   "wiper",
+   "wiper blade",
+   "wiper arm"
+  ]
+ },
+ {
+  "grup": "gejala:seal",
+  "triggers": [
+   "rembes",
+   "basah",
+   "berminyak",
+   "ngeces"
+  ],
+  "keywords": [
+   "oil seal",
+   "seal"
+  ]
+ },
+ {
+  "grup": "gejala:laher",
+  "triggers": [
+   "ngetik",
+   "nggleyer"
+  ],
+  "keywords": [
+   "bearing"
+  ]
+ },
+ {
+  "grup": "gejala:selang",
+  "triggers": [
+   "kempes"
+  ],
+  "keywords": [
+   "hose"
+  ]
+ },
+ {
+  "grup": "gejala:noken-as",
+  "triggers": [
+   "brebet",
+   "ngetuk",
+   "loyo",
+   "mesin mati",
+   "suara kasar"
+  ],
+  "keywords": [
+   "camshaft"
+  ]
+ },
+ {
+  "grup": "gejala:kruk-as",
+  "triggers": [
+   "ngelitik",
+   "getaran",
+   "suara gedor",
+   "mesin loyo",
+   "tenaga hilang"
+  ],
+  "keywords": [
+   "crankshaft"
+  ]
+ },
+ {
+  "grup": "gejala:blok-mesin",
+  "triggers": [
+   "overheat",
+   "oli bocor",
+   "air bocor",
+   "asap putih",
+   "oli campur air"
+  ],
+  "keywords": [
+   "cylinder block"
+  ]
+ },
+ {
+  "grup": "gejala:kepala-silinder",
+  "triggers": [
+   "gasket jebol",
+   "asap putih",
+   "oli rembes",
+   "kompresi hilang"
+  ],
+  "keywords": [
+   "cylinder head",
+   "气缸盖"
+  ]
+ },
+ {
+  "grup": "gejala:boring",
+  "triggers": [
+   "brebet",
+   "asap biru",
+   "oli boros",
+   "suara ngesek",
+   "kompresi bocor"
+  ],
+  "keywords": [
+   "cylinder liner",
+   "liner"
+  ]
+ },
+ {
+  "grup": "gejala:roda-gila",
+  "triggers": [
+   "getaran",
+   "kopling selip",
+   "mesin mati",
+   "suara berisik",
+   "starter ngadat"
+  ],
+  "keywords": [
+   "flywheel"
+  ]
+ },
+ {
+  "grup": "gejala:puli",
+  "triggers": [
+   "berdecit",
+   "ngeriing"
+  ],
+  "keywords": [
+   "pulley"
+  ]
+ },
+ {
+  "grup": "gejala:timing-gear",
+  "triggers": [
+   "nglitik",
+   "brebet",
+   "ngadat",
+   "ngelag",
+   "suara kasar"
+  ],
+  "keywords": [
+   "timing gear"
+  ]
+ },
+ {
+  "grup": "gejala:busi-pijar",
+  "triggers": [
+   "sulit hidup",
+   "ngelitik dingin",
+   "asap putih",
+   "ngadat pagi"
+  ],
+  "keywords": [
+   "intake heater"
+  ]
+ },
+ {
+  "grup": "gejala:intercooler",
+  "triggers": [
+   "loyo",
+   "ngelitik",
+   "tarikan berat",
+   "asap hitam",
+   "boros solar"
+  ],
+  "keywords": [
+   "intercooler",
+   "中冷器"
+  ]
+ },
+ {
+  "grup": "gejala:manifold",
+  "triggers": [
+   "brebet",
+   "bunyi gluduk",
+   "knalpot bocor",
+   "bau asap"
+  ],
+  "keywords": [
+   "manifold",
+   "exhaust manifold"
+  ]
+ },
+ {
+  "grup": "gejala:dudukan-mesin",
+  "triggers": [
+   "ngadut",
+   "bunyi gluduk",
+   "mesin goyang",
+   "kabin bergetar"
+  ],
+  "keywords": [
+   "engine support"
+  ]
+ },
+ {
+  "grup": "gejala:sil-klep",
+  "triggers": [
+   "ngelitik",
+   "asap biru",
+   "asap putih",
+   "oli habis"
+  ],
+  "keywords": [
+   "valve seal"
+  ]
+ },
+ {
+  "grup": "gejala:tutup-klep",
+  "triggers": [
+   "berembes",
+   "kotor",
+   "oli bocor",
+   "bau oli"
+  ],
+  "keywords": [
+   "cylinder head cover",
+   "valve cover"
+  ]
+ },
+ {
+  "grup": "gejala:knalpot",
+  "triggers": [
+   "brebet",
+   "bunyi bising",
+   "bunyi gluduk",
+   "suara kasar"
+  ],
+  "keywords": [
+   "muffler",
+   "silencer",
+   "exhaust",
+   "消声器"
+  ]
+ },
+ {
+  "grup": "gejala:pipa-knalpot",
+  "triggers": [
+   "berlubang",
+   "knalpot bocor",
+   "bunyi gluduk",
+   "asap masuk kabin"
+  ],
+  "keywords": [
+   "exhaust pipe",
+   "排气管"
+  ]
+ },
+ {
+  "grup": "gejala:tangki-solar",
+  "triggers": [
+   "embun",
+   "solar kotor",
+   "air di solar"
+  ],
+  "keywords": [
+   "fuel tank"
+  ]
+ },
+ {
+  "grup": "gejala:selang-solar",
+  "triggers": [
+   "brebet",
+   "ngelitik",
+   "solar netes"
+  ],
+  "keywords": [
+   "fuel pipe",
+   "燃油管"
+  ]
+ },
+ {
+  "grup": "gejala:tabung-angin",
+  "triggers": [
+   "rem blong",
+   "angin habis",
+   "bunyi desis",
+   "air di tabung",
+   "tekanan angin kurang"
+  ],
+  "keywords": [
+   "air reservoir"
+  ]
+ },
+ {
+  "grup": "gejala:kompresor-angin",
+  "triggers": [
+   "ngadat",
+   "bunyi ngik-ngik",
+   "angin lemah",
+   "bunyi kasar",
+   "tekanan turun"
+  ],
+  "keywords": [
+   "air compressor",
+   "空压机"
+  ]
+ },
+ {
+  "grup": "gejala:brake-chamber",
+  "triggers": [
+   "rem blong",
+   "angin bocor",
+   "bunyi desis",
+   "rem loyo",
+   "rem tidak pakem"
+  ],
+  "keywords": [
+   "brake chamber"
+  ]
+ },
+ {
+  "grup": "gejala:stelan-rem",
+  "triggers": [
+   "rem dalam",
+   "rem ngebag",
+   "bunyi krek",
+   "pedal lembek",
+   "rem kurang pakem"
+  ],
+  "keywords": [
+   "slack adjuster"
+  ]
+ },
+ {
+  "grup": "gejala:selang-rem",
+  "triggers": [
+   "rembes",
+   "bau rem",
+   "tekanan rem kurang"
+  ],
+  "keywords": [
+   "brake hose"
+  ]
+ },
+ {
+  "grup": "gejala:pipa-rem",
+  "triggers": [
+   "berkarat",
+   "desis",
+   "rem blong"
+  ],
+  "keywords": [
+   "brake pipe"
+  ]
+ },
+ {
+  "grup": "gejala:abs",
+  "triggers": [
+   "indikator",
+   "rem terkunci",
+   "ban slip",
+   "sensor kotor",
+   "lampu abs nyala"
+  ],
+  "keywords": [
+   "ABS sensor",
+   "wheel speed sensor"
+  ]
+ },
+ {
+  "grup": "gejala:garpu-persneling",
+  "triggers": [
+   "loncat",
+   "susah masuk"
+  ],
+  "keywords": [
+   "shift fork"
+  ]
+ },
+ {
+  "grup": "gejala:tuas-persneling",
+  "triggers": [
+   "tidak presisi"
+  ],
+  "keywords": [
+   "shift lever",
+   "gear shift"
+  ]
+ },
+ {
+  "grup": "gejala:sincromes",
+  "triggers": [
+   "krek",
+   "teriak",
+   "ngelitik"
+  ],
+  "keywords": [
+   "synchronizer",
+   "synchronous",
+   "同步器"
+  ]
+ },
+ {
+  "grup": "gejala:bak-gigi",
+  "triggers": [
+   "gluduk",
+   "susah ambil"
+  ],
+  "keywords": [
+   "transmission",
+   "gearbox",
+   "gear box",
+   "变速器"
+  ]
+ },
+ {
+  "grup": "gejala:pto",
+  "triggers": [
+   "bergetar",
+   "tidak jalan"
+  ],
+  "keywords": [
+   "power take-off",
+   "PTO"
+  ]
+ },
+ {
+  "grup": "gejala:stir",
+  "triggers": [
+   "tidak stabil"
+  ],
+  "keywords": [
+   "steering"
+  ]
+ },
+ {
+  "grup": "gejala:gearbox-stir",
+  "triggers": [
+   "setir berat",
+   "bunyi setir",
+   "setir macet",
+   "tidak kembali"
+  ],
+  "keywords": [
+   "steering gear",
+   "power steering"
+  ]
+ },
+ {
+  "grup": "gejala:king-pin",
+  "triggers": [
+   "gluduk",
+   "tidak stabil"
+  ],
+  "keywords": [
+   "king pin",
+   "kingpin"
+  ]
+ },
+ {
+  "grup": "gejala:batang-stir",
+  "triggers": [
+   "tidak nyambung"
+  ],
+  "keywords": [
+   "steering column",
+   "steering shaft"
+  ]
+ },
+ {
+  "grup": "gejala:baut-u",
+  "triggers": [
+   "krodak",
+   "putus"
+  ],
+  "keywords": [
+   "U-bolt",
+   "U bolt"
+  ]
+ },
+ {
+  "grup": "gejala:per-keong",
+  "triggers": [
+   "gluduk"
+  ],
+  "keywords": [
+   "coil spring"
+  ]
+ },
+ {
+  "grup": "gejala:stabilizer",
+  "triggers": [
+   "bunyi gluduk",
+   "body roll",
+   "setir berat"
+  ],
+  "keywords": [
+   "stabilizer",
+   "stabilizer bar",
+   "stabilizer bushing"
+  ]
+ },
+ {
+  "grup": "gejala:hanger-per",
+  "triggers": [
+   "bunyi gluduk",
+   "per lepas",
+   "suspensi jatuh",
+   "getar keras",
+   "mobil miring"
+  ],
+  "keywords": [
+   "spring hanger",
+   "spring bracket"
+  ]
+ },
+ {
+  "grup": "gejala:air-bag",
+  "triggers": [
+   "mobil kempes",
+   "kompresor bunyi",
+   "tidak naik",
+   "suspensi keras"
+  ],
+  "keywords": [
+   "air spring",
+   "air bag"
+  ]
+ },
+ {
+  "grup": "gejala:naf-roda",
+  "triggers": [
+   "bunyi ngung",
+   "bunyi grok-grok",
+   "setir bergetar",
+   "roda oleng",
+   "panas berlebih"
+  ],
+  "keywords": [
+   "wheel hub",
+   "hub"
+  ]
+ },
+ {
+  "grup": "gejala:baut-roda",
+  "triggers": [
+   "roda goyang",
+   "bunyi kletek",
+   "setir getar",
+   "roda lepas"
+  ],
+  "keywords": [
+   "wheel bolt",
+   "wheel nut",
+   "hub bolt"
+  ]
+ },
+ {
+  "grup": "gejala:sil-roda",
+  "triggers": [
+   "oli bocor",
+   "rem terkontaminasi",
+   "bunyi ngung",
+   "oli rem basah",
+   "tambal ban basah"
+  ],
+  "keywords": [
+   "hub oil seal"
+  ]
+ },
+ {
+  "grup": "gejala:kabel-body",
+  "triggers": [
+   "korsleting",
+   "lampu mati",
+   "mesin mati",
+   "nggak nyala",
+   "bunyi percikan",
+   "bau kabel hangus"
+  ],
+  "keywords": [
+   "wiring harness",
+   "harness"
+  ]
+ },
+ {
+  "grup": "gejala:saklar",
+  "triggers": [
+   "nggak nyambung",
+   "lampu mati",
+   "saklar macet",
+   "kontak loncat",
+   "nggak bisa on"
+  ],
+  "keywords": [
+   "switch"
+  ]
+ },
+ {
+  "grup": "gejala:sensor",
+  "triggers": [
+   "loyo",
+   "stabil",
+   "mesin ngambek",
+   "nggak responsif",
+   "lampu check engine"
+  ],
+  "keywords": [
+   "sensor",
+   "传感器"
+  ]
+ },
+ {
+  "grup": "gejala:relay",
+  "triggers": [
+   "nggak kerja",
+   "bunyi klik",
+   "lampu mati",
+   "lampu kedip",
+   "stater nggak muter"
+  ],
+  "keywords": [
+   "relay"
+  ]
+ },
+ {
+  "grup": "gejala:lampu-sein",
+  "triggers": [
+   "nggak nyala",
+   "lampu mati",
+   "kedip cepat",
+   "kedip lambat",
+   "mati total",
+   "sein nggak berfungsi"
+  ],
+  "keywords": [
+   "turn signal",
+   "combination lamp"
+  ]
+ },
+ {
+  "grup": "gejala:lampu-belakang",
+  "triggers": [
+   "lampu mati",
+   "lampu redup",
+   "kaca pecah",
+   "rem nggak nyala",
+   "lampu belakang nggak nyala"
+  ],
+  "keywords": [
+   "tail lamp",
+   "brake lamp",
+   "rear combination lamp",
+   "combination rear lamp",
+   "rear lamp"
+  ]
+ },
+ {
+  "grup": "gejala:motor-wiper",
+  "triggers": [
+   "pelan",
+   "wiper diam",
+   "wiper nggak jalan"
+  ],
+  "keywords": [
+   "wiper motor"
+  ]
+ },
+ {
+  "grup": "gejala:soket",
+  "triggers": [
+   "karatan",
+   "putus kontak",
+   "nggak nempel",
+   "lampu mati sepotong"
+  ],
+  "keywords": [
+   "connector",
+   "socket"
+  ]
+ },
+ {
+  "grup": "gejala:spido",
+  "triggers": [
+   "error",
+   "angka diam",
+   "jarum goyang",
+   "nggak jalan",
+   "tidak akurat"
+  ],
+  "keywords": [
+   "instrument",
+   "speedometer"
+  ]
+ },
+ {
+  "grup": "gejala:handle-pintu",
+  "triggers": [
+   "tarik susah",
+   "nggak bisa buka"
+  ],
+  "keywords": [
+   "door handle"
+  ]
+ },
+ {
+  "grup": "gejala:karet-pintu",
+  "triggers": [
+   "bunyi berisik",
+   "karet putus",
+   "air masuk",
+   "angin masuk"
+  ],
+  "keywords": [
+   "door seal",
+   "sealing strip"
+  ]
+ },
+ {
+  "grup": "gejala:jok",
+  "triggers": [
+   "karatan rangka",
+   "jok turun",
+   "geser macet",
+   "jok kempes",
+   "busa penyok"
+  ],
+  "keywords": [
+   "seat"
+  ]
+ },
+ {
+  "grup": "gejala:dasbor",
+  "triggers": [
+   "lampu mati",
+   "kuning pudar",
+   "panel tidak berfungsi"
+  ],
+  "keywords": [
+   "dashboard",
+   "instrument panel"
+  ]
+ },
+ {
+  "grup": "gejala:sabuk-pengaman",
+  "triggers": [
+   "sobék",
+   "nggak kenceng",
+   "gagal otomatis",
+   "kunci susah"
+  ],
+  "keywords": [
+   "safety belt",
+   "seat belt"
+  ]
+ },
+ {
+  "grup": "gejala:power-window",
+  "triggers": [
+   "tidak naik",
+   "kaca miring"
+  ],
+  "keywords": [
+   "window regulator",
+   "power window"
+  ]
+ },
+ {
+  "grup": "gejala:tangki-washer",
+  "triggers": [
+   "mampet",
+   "pompa mati",
+   "air tidak keluar"
+  ],
+  "keywords": [
+   "washer tank"
+  ]
+ },
+ {
+  "grup": "gejala:master-kopling",
+  "triggers": [
+   "rembes",
+   "kopling lembek",
+   "minyak kurus",
+   "pedal kosong",
+   "bau hangus"
+  ],
+  "keywords": [
+   "clutch master cylinder"
+  ]
+ },
+ {
+  "grup": "gejala:booster-kopling",
+  "triggers": [
+   "suara mendesis",
+   "kopling berat",
+   "nggak nge-boost",
+   "kurang tekanan",
+   "bocor angin"
+  ],
+  "keywords": [
+   "clutch booster"
+  ]
+ },
+ {
+  "grup": "gejala:tabung-reservoir",
+  "triggers": [
+   "overheat",
+   "kotor",
+   "tutup rusak",
+   "air panas keluar"
+  ],
+  "keywords": [
+   "expansion tank",
+   "reservoir"
+  ]
+ },
+ {
+  "grup": "gejala:kisi-radiator",
+  "triggers": [
+   "tersumbat",
+   "karat",
+   "panas mesin",
+   "air nggak sirkulasi"
+  ],
+  "keywords": [
+   "radiator core"
+  ]
+ },
+ {
+  "grup": "gejala:kompresor-ac",
+  "triggers": [
+   "bunyi skring",
+   "nggak dingin",
+   "magnet mati",
+   "putus belt"
+  ],
+  "keywords": [
+   "air conditioner compressor",
+   "compressor",
+   "压缩机"
+  ]
+ },
+ {
+  "grup": "gejala:kondensor",
+  "triggers": [
+   "berdebu",
+   "mampet",
+   "angin nggak keluar",
+   "ac kurang dingin"
+  ],
+  "keywords": [
+   "condenser"
+  ]
+ },
+ {
+  "grup": "gejala:evaporator",
+  "triggers": [
+   "desis",
+   "embun",
+   "apek",
+   "tidak dingin",
+   "kurang dingin",
+   "bocor freon"
+  ],
+  "keywords": [
+   "evaporator"
+  ]
+ },
+ {
+  "grup": "gejala:blower",
+  "triggers": [
+   "tidak berhembus",
+   "kipas mati",
+   "kecepatan tetap",
+   "suara kasar",
+   "blower mati"
+  ],
+  "keywords": [
+   "blower"
+  ]
+ },
+ {
+  "grup": "gejala:filter-ac",
+  "triggers": [
+   "kotor",
+   "tersumbat",
+   "udara lemah",
+   "ac kurang dingin"
+  ],
+  "keywords": [
+   "air conditioner filter"
+  ]
+ },
+ {
+  "grup": "gejala:dryer",
+  "triggers": [
+   "basah",
+   "tidak dingin",
+   "embun berlebih",
+   "freon kotor"
+  ],
+  "keywords": [
+   "dryer",
+   "drier"
+  ]
+ },
+ {
+  "grup": "gejala:spatbor",
+  "triggers": [
+   "penyok",
+   "karat",
+   "lecet",
+   "gores",
+   "bolong"
+  ],
+  "keywords": [
+   "fender",
+   "mudguard"
+  ]
+ },
+ {
+  "grup": "gejala:tutup-tangki",
+  "triggers": [
+   "hilang",
+   "ngadat",
+   "bau bensin",
+   "tidak rapat"
+  ],
+  "keywords": [
+   "fuel tank cap",
+   "tank cap"
+  ]
+ },
+ {
+  "grup": "gejala:tangga",
+  "triggers": [
+   "karat"
+  ],
+  "keywords": [
+   "step"
+  ]
+ },
+ {
+  "grup": "gejala:grill",
+  "triggers": [
+   "copot",
+   "penyok",
+   "hilang"
+  ],
+  "keywords": [
+   "grille"
+  ]
+ },
+ {
+  "grup": "gejala:persneling",
+  "triggers": [
+   "gluduk",
+   "loncat",
+   "susah masuk"
+  ],
+  "keywords": [
+   "transmission",
+   "gear shift",
+   "gearbox",
+   "变速器"
+  ]
+ },
+ {
+  "grup": "gejala:pelatuk",
+  "triggers": [
+   "brebet",
+   "bunyi klep",
+   "tenaga turun",
+   "klep renggang",
+   "suara tik tik"
+  ],
+  "keywords": [
+   "rocker arm",
+   "engine rocker arm",
+   "steering rocker arm"
+  ]
+ },
+ {
+  "grup": "gejala:batang-klep",
+  "triggers": [
+   "bengkok",
+   "brebet",
+   "tenaga turun"
+  ],
+  "keywords": [
+   "push rod",
+   "valve push rod"
+  ]
+ },
+ {
+  "grup": "gejala:tappet",
+  "triggers": [
+   "renggang",
+   "gemeretak",
+   "suara metal"
+  ],
+  "keywords": [
+   "tappet",
+   "valve tappet",
+   "tappet rod"
+  ]
+ },
+ {
+  "grup": "gejala:pompa-oli",
+  "triggers": [
+   "ngegel",
+   "tidak naik",
+   "lampu oli",
+   "tekanan rendah",
+   "oli kurang"
+  ],
+  "keywords": [
+   "oil pump"
+  ]
+ },
+ {
+  "grup": "gejala:oil-cooler",
+  "triggers": [
+   "overheat",
+   "tetesan",
+   "bocor oli",
+   "oli keluar",
+   "mesin panas",
+   "tekanan oli turun"
+  ],
+  "keywords": [
+   "oil cooler",
+   "engine oil cooler"
+  ]
+ },
+ {
+  "grup": "gejala:common-rail",
+  "triggers": [
+   "brebet",
+   "ngempos",
+   "tekanan turun",
+   "susah start",
+   "asap hitam",
+   "rpm goyah"
+  ],
+  "keywords": [
+   "common rail",
+   "common rail pipe"
+  ]
+ },
+ {
+  "grup": "gejala:breather",
+  "triggers": [
+   "mbludak",
+   "tekanan tinggi",
+   "oli keluar"
+  ],
+  "keywords": [
+   "breather",
+   "breather plug"
+  ]
+ },
+ {
+  "grup": "gejala:balance-shaft",
+  "triggers": [
+   "guncang",
+   "bunyi gluduk",
+   "mesin kasar"
+  ],
+  "keywords": [
+   "balance shaft"
+  ]
+ },
+ {
+  "grup": "gejala:retarder",
+  "triggers": [
+   "loyo",
+   "rem blong",
+   "tidak pakem"
+  ],
+  "keywords": [
+   "retarder",
+   "缓速器"
+  ]
+ },
+ {
+  "grup": "gejala:relay-valve",
+  "triggers": [
+   "desis",
+   "rem lambat",
+   "hambur angin",
+   "angin bocor"
+  ],
+  "keywords": [
+   "relay valve"
+  ]
+ },
+ {
+  "grup": "gejala:solenoid",
+  "triggers": [
+   "konslet",
+   "ngadat",
+   "tidak kerja"
+  ],
+  "keywords": [
+   "solenoid valve",
+   "solenoid"
+  ]
+ },
+ {
+  "grup": "gejala:drain-valve",
+  "triggers": [
+   "ngocor",
+   "angin habis",
+   "air di tangki"
+  ],
+  "keywords": [
+   "drain valve"
+  ]
+ },
+ {
+  "grup": "gejala:diaphragm",
+  "triggers": [
+   "rem lembek",
+   "bunyi desis",
+   "angin bocor",
+   "tidak pakem"
+  ],
+  "keywords": [
+   "diaphragm",
+   "diaphragm spring brake chamber"
+  ]
+ },
+ {
+  "grup": "gejala:reducer",
+  "triggers": [
+   "bunyi ngerung",
+   "gigi loncat"
+  ],
+  "keywords": [
+   "reducer",
+   "main reducer",
+   "wheel rim reducer",
+   "减速器",
+   "主减速器"
+  ]
+ },
+ {
+  "grup": "gejala:differential-lock",
+  "triggers": [
+   "ngunci sendiri",
+   "bunyi krek",
+   "tidak bisa ngunci"
+  ],
+  "keywords": [
+   "differential lock",
+   "差速锁"
+  ]
+ },
+ {
+  "grup": "gejala:knuckle",
+  "triggers": [
+   "setir berat",
+   "bunyi kreek",
+   "olah setir"
+  ],
+  "keywords": [
+   "steering knuckle",
+   "knuckle arm",
+   "knuckle",
+   "转向节"
+  ]
+ },
+ {
+  "grup": "gejala:regulator",
+  "triggers": [
+   "ngempos",
+   "setir keras",
+   "tidak balik"
+  ],
+  "keywords": [
+   "regulator"
+  ]
+ },
+ {
+  "grup": "gejala:thrust-rod",
+  "triggers": [
+   "bunyi gluduk",
+   "setir miring",
+   "ban aus tidak rata"
+  ],
+  "keywords": [
+   "thrust rod",
+   "V-type thrust rod",
+   "Straight thrust rod"
+  ]
+ },
+ {
+  "grup": "gejala:sun-shade",
+  "triggers": [
+   "silau",
+   "matahari",
+   "tidak turun"
+  ],
+  "keywords": [
+   "sun shade",
+   "sun visor"
+  ]
+ },
+ {
+  "grup": "gejala:kap-mesin",
+  "triggers": [
+   "mengangkat",
+   "tidak rapat",
+   "susah buka"
+  ],
+  "keywords": [
+   "hood",
+   "engine hood"
+  ]
+ },
+ {
+  "grup": "gejala:deflector",
+  "triggers": [
+   "lepas",
+   "bunyi angin"
+  ],
+  "keywords": [
+   "air deflector",
+   "deflector"
+  ]
+ },
+ {
+  "grup": "gejala:plat-nomor",
+  "triggers": [
+   "lepas",
+   "hilang",
+   "bengkok"
+  ],
+  "keywords": [
+   "license plate"
+  ]
+ },
+ {
+  "grup": "gejala:junction-box",
+  "triggers": [
+   "korsleting",
+   "soket longgar",
+   "listrik mati"
+  ],
+  "keywords": [
+   "junction box",
+   "electrical junction box"
+  ]
+ },
+ {
+  "grup": "gejala:lampu-marka",
+  "triggers": [
+   "redup",
+   "air masuk"
+  ],
+  "keywords": [
+   "marker light"
+  ]
+ },
+ {
+  "grup": "gejala:bohlam",
+  "triggers": [
+   "putus",
+   "redup",
+   "gelap",
+   "mati sebatang"
+  ],
+  "keywords": [
+   "bulb"
+  ]
+ },
+ {
+  "grup": "gejala:lantai-kabin",
+  "triggers": [
+   "bolong",
+   "berkarat"
+  ],
+  "keywords": [
+   "floor"
+  ]
+ },
+ {
+  "grup": "gejala:sandaran-jok",
+  "triggers": [
+   "tidak tegak"
+  ],
+  "keywords": [
+   "backrest"
+  ]
+ },
+ {
+  "grup": "gejala:pemanas",
+  "triggers": [
+   "tidak panas",
+   "bau terbakar"
+  ],
+  "keywords": [
+   "heater"
+  ]
+ },
+ {
+  "grup": "gejala:urea",
+  "triggers": [
+   "habis cepat",
+   "sensor error",
+   "lampu nyala"
+  ],
+  "keywords": [
+   "urea",
+   "urea tank"
+  ]
+ },
+ {
+  "grup": "gejala:pedal",
+  "triggers": [
+   "pedal keras",
+   "pedal kosong",
+   "pedal ngempos",
+   "pedal getar",
+   "pedal masuk"
+  ],
+  "keywords": [
+   "pedal"
+  ]
+ },
+ {
+  "grup": "gejala:tensioner",
+  "triggers": [
+   "suara berisik",
+   "rantai kendor",
+   "tensioner jebol",
+   "bunyi ngik",
+   "getaran mesin"
+  ],
+  "keywords": [
+   "tensioning pulley",
+   "tension screw"
+  ]
+ },
+ {
+  "grup": "gejala:gantungan-kopel",
+  "triggers": [
+   "getaran",
+   "vibrasi",
+   "bunyi gluduk",
+   "bunyi ngaduk",
+   "gantungan kopel oblak"
+  ],
+  "keywords": [
+   "center bearing"
+  ]
+ },
+ {
+  "grup": "gejala:planetary-carrier",
+  "triggers": [
+   "suara gigi",
+   "gigi loncat",
+   "transmisi ngelak",
+   "bunyi kletek",
+   "putaran ngos"
+  ],
+  "keywords": [
+   "planetary carrier"
+  ]
+ },
+ {
+  "grup": "gejala:pompa-power-steering",
+  "triggers": [
+   "setir berat",
+   "suara ngocek",
+   "pompa bising",
+   "setir not not",
+   "oli power steering bocor"
+  ],
+  "keywords": [
+   "power steering pump",
+   "steering vane pump",
+   "vane pump"
+  ]
+ },
+ {
+  "grup": "gejala:expansion-valve",
+  "triggers": [
+   "ac beku",
+   "ac embun",
+   "ac ngadat",
+   "ac tidak dingin",
+   "expansion valve mampet"
+  ],
+  "keywords": [
+   "expansion valve"
+  ]
+ },
+ {
+  "grup": "gejala:accumulator",
+  "triggers": [
+   "kompresor pendek",
+   "accumulator buntu",
+   "ac tidak dingin",
+   "ac hidup mati",
+   "ac kurang angin"
+  ],
+  "keywords": [
+   "accumulator"
+  ]
+ },
+ {
+  "grup": "gejala:damper-kabin",
+  "triggers": [
+   "kabin goyang",
+   "bunyi kretek",
+   "kabin oleng",
+   "damper bocor",
+   "getaran kabin"
+  ],
+  "keywords": [
+   "cab coil spring damper",
+   "cab air spring damper",
+   "damper"
+  ]
+ },
+ {
+  "grup": "gejala:alarm-mundur",
+  "triggers": [
+   "alarm mati",
+   "buzzer mati",
+   "alarm putus",
+   "alarm terus bunyi",
+   "mundur tidak bunyi"
+  ],
+  "keywords": [
+   "reversing buzzer",
+   "buzzer"
+  ]
+ },
+ {
+  "grup": "gejala:sensor-putaran",
+  "triggers": [
+   "speedometer mati",
+   "transmisi error",
+   "sensor ngaco",
+   "indikator mati",
+   "putaran tidak stabil"
+  ],
+  "keywords": [
+   "speed sensor",
+   "rotational speed sensor"
+  ]
+ },
+ {
+  "grup": "gejala:kunci-pintu",
+  "triggers": [
+   "kunci macet",
+   "kunci putus",
+   "kunci ngadat",
+   "pintu ngunci sendiri",
+   "pintu tidak bisa dikunci"
+  ],
+  "keywords": [
+   "door lock"
+  ]
+ },
+ {
+  "grup": "gejala:kaca-pintu",
+  "triggers": [
+   "bunyi berdecit",
+   "bocor angin"
+  ],
+  "keywords": [
+   "door glass"
+  ]
+ },
+ {
+  "grup": "gejala:return-spring",
+  "triggers": [
+   "rem macet",
+   "pedal keras",
+   "tidak balik",
+   "tarikan berat"
+  ],
+  "keywords": [
+   "return spring"
+  ]
+ },
+ {
+  "grup": "gejala:brake-camshaft",
+  "triggers": [
+   "rem seret",
+   "bunyi berdecit",
+   "rem tidak bekerja"
+  ],
+  "keywords": [
+   "brake camshaft"
+  ]
+ },
+ {
+  "grup": "gejala:klakson-angin",
+  "triggers": [
+   "kering",
+   "suara serak",
+   "tidak berbunyi",
+   "angin bocor"
+  ],
+  "keywords": [
+   "air horn"
+  ]
+ },
+ {
+  "grup": "gejala:kunci-kabin",
+  "triggers": [
+   "kabin goyang",
+   "kunci macet",
+   "tidak terkunci",
+   "bunyi berdetak"
+  ],
+  "keywords": [
+   "cab lock",
+   "cab lifting",
+   "cab turnover"
+  ]
+ },
+ {
+  "grup": "gejala:elemen-filter",
+  "triggers": [
+   "mesin brebet",
+   "asap hitam",
+   "tarikan berat",
+   "boros solar"
+  ],
+  "keywords": [
+   "filter element"
+  ]
+ },
+ {
+  "grup": "gejala:saklar-kombinasi",
+  "triggers": [
+   "lampu mati",
+   "saklar macet",
+   "wiper tidak jalan",
+   "sinyal tidak nyala"
+  ],
+  "keywords": [
+   "combination switch"
+  ]
+ },
+ {
+  "grup": "gejala:sensor-tekanan",
+  "triggers": [
+   "mesin mati",
+   "error panel",
+   "lampu indikator menyala",
+   "tekanan tidak normal"
+  ],
+  "keywords": [
+   "pressure sensor"
+  ]
+ },
+ {
+  "grup": "gejala:sensor-suhu",
+  "triggers": [
+   "overheat",
+   "lampu indikator",
+   "mesin brebet",
+   "suhu tidak akurat"
+  ],
+  "keywords": [
+   "temperature sensor"
+  ]
+ },
+ {
+  "grup": "gejala:lock-cylinder",
+  "triggers": [
+   "kunci macet",
+   "kunci patah",
+   "kunci susah muter",
+   "pintu tidak bisa dikunci"
+  ],
+  "keywords": [
+   "lock cylinder"
+  ]
+ },
+ {
+  "grup": "gejala:water-tank",
+  "triggers": [
+   "overheat",
+   "air mendidih",
+   "panas mesin",
+   "air radiator kurang",
+   "level air turun"
+  ],
+  "keywords": [
+   "water tank"
+  ]
+ },
+ {
+  "grup": "gejala:range-gear",
+  "triggers": [
+   "susah masuk",
+   "gigi loncat",
+   "bunyi gerinduk",
+   "susah pindah",
+   "gigi macet",
+   "bunyi ngelitik"
+  ],
+  "keywords": [
+   "range gear"
+  ]
+ },
+ {
+  "grup": "gejala:input-shaft",
+  "triggers": [
+   "getaran",
+   "vibrasi",
+   "bunyi ngaung",
+   "bunyi dengung",
+   "kopling bunyi",
+   "gigi susah masuk"
+  ],
+  "keywords": [
+   "input shaft"
+  ]
+ },
+ {
+  "grup": "gejala:main-shaft",
+  "triggers": [
+   "getaran",
+   "bunyi gerinduk",
+   "gigi loncat",
+   "bunyi berdecit",
+   "mesin gemeretuk",
+   "shaft bunyi"
+  ],
+  "keywords": [
+   "main shaft"
+  ]
+ },
+ {
+  "grup": "gejala:counter-shaft",
+  "triggers": [
+   "getaran",
+   "vibrasi",
+   "suara berisik",
+   "bunyi kasar",
+   "shaft bunyi",
+   "gigi tidak mau masuk"
+  ],
+  "keywords": [
+   "counter shaft"
+  ]
+ },
+ {
+  "grup": "gejala:output-shaft",
+  "triggers": [
+   "getaran",
+   "kebocoran",
+   "bocor seal",
+   "bunyi berdecit",
+   "gigi loncat",
+   "bunyi ngik"
+  ],
+  "keywords": [
+   "output shaft"
+  ]
+ },
+ {
+  "grup": "gejala:fork-shaft",
+  "triggers": [
+   "gigi macet",
+   "bunyi kasar",
+   "bunyi krick",
+   "susah pindah",
+   "gigi susah masuk",
+   "gigi tidak mau pindah"
+  ],
+  "keywords": [
+   "fork shaft"
+  ]
+ },
+ {
+  "grup": "gejala:planetary-gear",
+  "triggers": [
+   "getaran",
+   "bunyi gemuruh",
+   "bunyi gerinding",
+   "mesin ngempos",
+   "susah mutar",
+   "gigi tidak mau putar"
+  ],
+  "keywords": [
+   "planetary gear"
+  ]
+ },
+ {
+  "grup": "gejala:synchronizer-ring",
+  "triggers": [
+   "gigi gemerincing",
+   "bunyi krick",
+   "gigi loncat",
+   "bunyi grintik",
+   "susah pindah",
+   "susah masuk gigi"
+  ],
+  "keywords": [
+   "synchronizer ring"
+  ]
+ },
+ {
+  "grup": "gejala:drive-gear",
+  "triggers": [
+   "getaran",
+   "bunyi ngik",
+   "gigi rusak",
+   "bunyi dengung",
+   "gigi ngelitik"
+  ],
+  "keywords": [
+   "drive gear",
+   "driven gear"
+  ]
+ },
+ {
+  "grup": "gejala:per-klep",
+  "triggers": [
+   "mesin brebet",
+   "bunyi tik-tik",
+   "tenaga kurang",
+   "mesin ngempos",
+   "suara klep",
+   "bunyi ngetuk"
+  ],
+  "keywords": [
+   "valve spring"
+  ]
+ },
+ {
+  "grup": "gejala:pen-piston",
+  "triggers": [
+   "knocking",
+   "bunyi ngelitik",
+   "mesin berisik",
+   "tenaga turun",
+   "mesin kasar",
+   "bunyi grebek"
+  ],
+  "keywords": [
+   "piston pin"
+  ]
+ },
+ {
+  "grup": "gejala:thrust-plate",
+  "triggers": [
+   "getaran",
+   "bunyi gemerutuk",
+   "mesin goyang",
+   "bunyi grebek",
+   "tenaga kurang",
+   "mesin ngempos"
+  ],
+  "keywords": [
+   "thrust plate"
+  ]
+ },
+ {
+  "grup": "gejala:sil-depan-mesin",
+  "triggers": [
+   "bocor oli",
+   "oli merembes",
+   "tetes oli",
+   "oli berkurang",
+   "rembes oli",
+   "oli bocor"
+  ],
+  "keywords": [
+   "front oil seal",
+   "rear oil seal"
+  ]
+ },
+ {
+  "grup": "gejala:gigi-noken-as",
+  "triggers": [
+   "bunyi kasar",
+   "timing loncat",
+   "mesin ngempos",
+   "bunyi gerinding",
+   "suara rantai",
+   "mesin brebet"
+  ],
+  "keywords": [
+   "camshaft gear"
+  ]
+ },
+ {
+  "grup": "gejala:tutup-oli",
+  "triggers": [
+   "hilang",
+   "kotor",
+   "bau oli"
+  ],
+  "keywords": [
+   "oil filler"
+  ]
+ },
+ {
+  "grup": "gejala:stick-oli",
+  "triggers": [
+   "kotor",
+   "tidak akurat",
+   "oli tidak terbaca"
+  ],
+  "keywords": [
+   "dipstick",
+   "oil dipstick"
+  ]
+ },
+ {
+  "grup": "gejala:pipa-oli",
+  "triggers": [
+   "rembes",
+   "oli netes"
+  ],
+  "keywords": [
+   "oil pipe",
+   "oil return pipe"
+  ]
+ },
+ {
+  "grup": "gejala:air-duct",
+  "triggers": [
+   "sobek",
+   "tersumbat",
+   "kotor",
+   "bunyi siul"
+  ],
+  "keywords": [
+   "air duct"
+  ]
+ },
+ {
+  "grup": "gejala:inlet-pipe",
+  "triggers": [
+   "kotor",
+   "tersumbat",
+   "hisap lemah"
+  ],
+  "keywords": [
+   "inlet pipe"
+  ]
+ },
+ {
+  "grup": "gejala:oil-tank",
+  "triggers": [
+   "penyok",
+   "oli habis",
+   "volume berkurang"
+  ],
+  "keywords": [
+   "oil tank"
+  ]
+ },
+ {
+  "grup": "gejala:saringan-kasar",
+  "triggers": [
+   "tersumbat",
+   "kotor",
+   "ngelitik",
+   "tenaga turun",
+   "mesin brebet"
+  ],
+  "keywords": [
+   "coarse filter"
+  ]
+ },
+ {
+  "grup": "gejala:rem-tangan",
+  "triggers": [
+   "kendur",
+   "blong",
+   "tidak pakem",
+   "tarikan berat"
+  ],
+  "keywords": [
+   "hand brake"
+  ]
+ },
+ {
+  "grup": "gejala:check-valve",
+  "triggers": [
+   "bunyi desis",
+   "rem lambat",
+   "tekanan turun",
+   "bocor angin",
+   "angin habis"
+  ],
+  "keywords": [
+   "check valve",
+   "quick release valve"
+  ]
+ },
+ {
+  "grup": "gejala:garpu-kopling",
+  "triggers": [
+   "selip",
+   "ngunci",
+   "bunyi ngerik",
+   "pedal keras",
+   "tidak nyambung"
+  ],
+  "keywords": [
+   "release fork"
+  ]
+ },
+ {
+  "grup": "gejala:kabel-gas",
+  "triggers": [
+   "tersangkut",
+   "putus",
+   "tarikan berat",
+   "gas ngepot"
+  ],
+  "keywords": [
+   "accelerator cable"
+  ]
+ },
+ {
+  "grup": "gejala:speed-gear",
+  "triggers": [
+   "ngetuk",
+   "bunyi growl",
+   "loncat gigi",
+   "susah masuk"
+  ],
+  "keywords": [
+   "speed gear"
+  ]
+ },
+ {
+  "grup": "gejala:planetary-shaft",
+  "triggers": [
+   "bunyi ngeden",
+   "bunyi periodik"
+  ],
+  "keywords": [
+   "planetary shaft"
+  ]
+ },
+ {
+  "grup": "gejala:meshing-sleeve",
+  "triggers": [
+   "ngunci",
+   "susah sync",
+   "bunyi gesek",
+   "gigi bunyi"
+  ],
+  "keywords": [
+   "meshing sleeve"
+  ]
+ },
+ {
+  "grup": "gejala:gear-ring",
+  "triggers": [
+   "bunyi gluduk",
+   "gigi loncat",
+   "berisik transmisi",
+   "ngilangin gigi",
+   "susah masuk gigi"
+  ],
+  "keywords": [
+   "gear ring"
+  ]
+ },
+ {
+  "grup": "gejala:flywheel-housing",
+  "triggers": [
+   "loyo",
+   "kebocoran oli",
+   "bunyi gesek",
+   "oli nyemprot",
+   "getaran mesin"
+  ],
+  "keywords": [
+   "flywheel housing"
+  ]
+ },
+ {
+  "grup": "gejala:intake-hose",
+  "triggers": [
+   "kebocoran",
+   "ngembat",
+   "suara desis",
+   "tarikan berat",
+   "asap hitam"
+  ],
+  "keywords": [
+   "intake hose"
+  ]
+ },
+ {
+  "grup": "gejala:throttle",
+  "triggers": [
+   "mesin surut",
+   "tarikan berat",
+   "mesin ngambang",
+   "gas respons lambat",
+   "putaran naik turun"
+  ],
+  "keywords": [
+   "throttle"
+  ]
+ },
+ {
+  "grup": "gejala:clutch-housing",
+  "triggers": [
+   "kopling ngepot",
+   "getaran pedal",
+   "kebocoran oli kopling",
+   "oli kopling rembes",
+   "bunyi saat injak kopling"
+  ],
+  "keywords": [
+   "clutch housing"
+  ]
+ },
+ {
+  "grup": "gejala:exhaust-brake",
+  "triggers": [
+   "nggeteh",
+   "rem blong",
+   "bunyi kencang",
+   "ngebul asap hitam",
+   "exhaust brake mati"
+  ],
+  "keywords": [
+   "exhaust brake"
+  ]
+ },
+ {
+  "grup": "gejala:limit-block",
+  "triggers": [
+   "bunyi decitan",
+   "rem blong",
+   "rem tidak pakem",
+   "pedal rem keras",
+   "minyak rem bocor"
+  ],
+  "keywords": [
+   "limit block"
+  ]
+ },
+ {
+  "grup": "gejala:defrost",
+  "triggers": [
+   "embun",
+   "defrost mati",
+   "kaca ngembun",
+   "kaca buram",
+   "defrost nggak panas"
+  ],
+  "keywords": [
+   "defrost"
+  ]
+ },
+ {
+  "grup": "gejala:kunci-kontak",
+  "triggers": [
+   "kunci macet",
+   "nggak nyala",
+   "kontak mati",
+   "kunci muter susah",
+   "kunci ngunci sendiri"
+  ],
+  "keywords": [
+   "ignition lock"
+  ]
+ },
+ {
+  "grup": "gejala:lampu-kabut",
+  "triggers": [
+   "bohlam putus",
+   "lampu redup",
+   "air masuk",
+   "lampu berembun",
+   "lampu kabut mati"
+  ],
+  "keywords": [
+   "fog lamp",
+   "fog light"
+  ]
+ },
+ {
+  "grup": "gejala:rumah-gardan",
+  "triggers": [
+   "bunyi ngik-ngik",
+   "bocor oli",
+   "rumah gardan retak"
+  ],
+  "keywords": [
+   "axle housing",
+   "differential housing"
+  ]
+ },
+ {
+  "grup": "gejala:gigi-pinion",
+  "triggers": [
+   "bunyi gemeretak",
+   "gigi aus",
+   "nggak ngeper"
+  ],
+  "keywords": [
+   "pinion shaft",
+   "bevel pinion"
+  ]
+ },
+ {
+  "grup": "gejala:behel",
+  "triggers": [
+   "karat",
+   "behel goyang",
+   "behel patah",
+   "pegangan longgar",
+   "baut hilang"
+  ],
+  "keywords": [
+   "handrail"
+  ]
+ },
+ {
+  "grup": "gejala:aktuator",
+  "triggers": [
+   "aktuator mati",
+   "suara tik-tik",
+   "aktuator rusak",
+   "mode nggak bisa ganti",
+   "AC tidak keluar angin"
+  ],
+  "keywords": [
+   "actuator"
+  ]
+ },
+ {
+  "grup": "gejala:selang-keriting",
+  "triggers": [
+   "selang bocor",
+   "selang putus",
+   "air masuk",
+   "kabel keluar",
+   "selang keriting aus"
+  ],
+  "keywords": [
+   "corrugated pipe",
+   "corrugated sheath"
+  ]
+ },
+ {
+  "grup": "gejala:pipa-balik-solar",
+  "triggers": [
+   "ngeteh",
+   "bocor solar",
+   "solar ngocor",
+   "pipa penyumbang",
+   "pipa balik buntu"
+  ],
+  "keywords": [
+   "fuel return pipe",
+   "oil return pipe",
+   "return pipe",
+   "return hose"
+  ]
+ },
+ {
+  "grup": "gejala:teromol",
+  "triggers": [
+   "rem ngejek",
+   "teromol panas",
+   "rem blong",
+   "rem bunyi ngocek",
+   "teromol gampang aus"
+  ],
+  "keywords": [
+   "brake drum"
+  ]
+ },
+ {
+  "grup": "gejala:piringan-rem",
+  "triggers": [
+   "vibrasi",
+   "rem ngaduk",
+   "bunyi ngocek",
+   "piringan goyang",
+   "piringan rem aus"
+  ],
+  "keywords": [
+   "brake disc"
+  ]
+ },
+ {
+  "grup": "gejala:kaliper-rem",
+  "triggers": [
+   "kaliper macet",
+   "kaliper bocor",
+   "bunyi decit",
+   "rem tidak ngejepit",
+   "rem kiri-kanan nggak sama"
+  ],
+  "keywords": [
+   "brake caliper"
+  ]
+ },
+ {
+  "grup": "gejala:slang-rem",
+  "triggers": [
+   "slang kempes",
+   "rem lembek",
+   "slang putus",
+   "slang rem bocor",
+   "rem nggak pakem"
+  ],
+  "keywords": [
+   "brake hose"
+  ]
+ },
+ {
+  "grup": "gejala:kampas-rem-tromol",
+  "triggers": [
+   "rem blong",
+   "bunyi cit",
+   "kampas habis",
+   "rem tidak pakem",
+   "pedal rem dalam"
+  ],
+  "keywords": [
+   "brake lining"
+  ]
+ },
+ {
+  "grup": "gejala:peleg",
+  "triggers": [
+   "getaran",
+   "velg benjol",
+   "setir goyang",
+   "velg retak",
+   "ban bocor"
+  ],
+  "keywords": [
+   "wheel rim"
+  ]
+ },
+ {
+  "grup": "gejala:seal-roda",
+  "triggers": [
+   "oli bocor",
+   "tetes oli",
+   "roda basah",
+   "minyak rembes",
+   "oli as belakang"
+  ],
+  "keywords": [
+   "wheel oil seal",
+   "hub oil seal"
+  ]
+ },
+ {
+  "grup": "gejala:panci-oli",
+  "triggers": [
+   "panci penyok",
+   "oli rembes",
+   "dengung bawah",
+   "oli habis",
+   "oli bocor bawah"
+  ],
+  "keywords": [
+   "oil pan",
+   "油底壳"
+  ]
+ },
+ {
+  "grup": "gejala:tutup-kepala-silinder",
+  "triggers": [
+   "gasket bocor",
+   "oli keluar",
+   "oli rembes atas",
+   "tutup kepala bocor",
+   "bunyi tik tik"
+  ],
+  "keywords": [
+   "valve cover",
+   "cylinder head cover"
+  ]
+ },
+ {
+  "grup": "gejala:paking-kepala-silinder",
+  "triggers": [
+   "mesin overheat",
+   "asap putih",
+   "busa oli",
+   "air radiator habis",
+   "campur oli air"
+  ],
+  "keywords": [
+   "cylinder head gasket"
+  ]
+ },
+ {
+  "grup": "gejala:tabung-seher",
+  "triggers": [
+   "ngelitik",
+   "suara ketukan",
+   "asap biru",
+   "tenaga turun",
+   "oli ruang bakar"
+  ],
+  "keywords": [
+   "cylinder liner"
+  ]
+ },
+ {
+  "grup": "gejala:klep-masuk",
+  "triggers": [
+   "brebet",
+   "ngempos",
+   "suara klep",
+   "kompresi bocor",
+   "tenaga loyo"
+  ],
+  "keywords": [
+   "intake valve"
+  ]
+ },
+ {
+  "grup": "gejala:klep-buang",
+  "triggers": [
+   "blawur",
+   "brebet",
+   "asap hitam",
+   "suara klep",
+   "tenaga loyo"
+  ],
+  "keywords": [
+   "exhaust valve"
+  ]
+ },
+ {
+  "grup": "gejala:dudukan-klep",
+  "triggers": [
+   "brebet",
+   "klep aus",
+   "kompresi bocor",
+   "suara dekik",
+   "bunyi tik tik"
+  ],
+  "keywords": [
+   "valve seat"
+  ]
+ },
+ {
+  "grup": "gejala:tutup-thermostat",
+  "triggers": [
+   "thermostat macet",
+   "bocor sambungan",
+   "air hilang",
+   "air radiator bocor"
+  ],
+  "keywords": [
+   "thermostat housing",
+   "thermostat cover"
+  ]
+ },
+ {
+  "grup": "gejala:sarang-radiator",
+  "triggers": [
+   "overheat",
+   "radiator mampet",
+   "tidak sirkulasi",
+   "sarang kotor",
+   "angin tidak"
+  ],
+  "keywords": [
+   "radiator core"
+  ]
+ },
+ {
+  "grup": "gejala:selang-radiator-atas",
+  "triggers": [
+   "selang bocor",
+   "air muncrat",
+   "selang menggelembung",
+   "selang keras",
+   "air hitam"
+  ],
+  "keywords": [
+   "radiator hose"
+  ]
+ },
+ {
+  "grup": "gejala:lampu-mundur",
+  "triggers": [
+   "redup",
+   "lampu mati",
+   "tidak nyala",
+   "soket kendor",
+   "kabel putus"
+  ],
+  "keywords": [
+   "reversing lamp"
+  ]
+ },
+ {
+  "grup": "gejala:reting",
+  "triggers": [
+   "sein mati",
+   "kedip cepat",
+   "kedip lambat",
+   "sein tidak kedip",
+   "sein nyala terus"
+  ],
+  "keywords": [
+   "steering lamp",
+   "turn signal"
+  ]
+ },
+ {
+  "grup": "gejala:lampu-kepala",
+  "triggers": [
+   "redup",
+   "putus",
+   "kedip-kedip",
+   "lampu malap",
+   "tidak nyala"
+  ],
+  "keywords": [
+   "head lamp",
+   "headlamp",
+   "front combination lamp"
+  ]
+ },
+ {
+  "grup": "gejala:kabel-bodi",
+  "triggers": [
+   "konslet",
+   "hubung singkat",
+   "nggak nyala",
+   "mati total",
+   "kabel putus",
+   "kabel terbakar"
+  ],
+  "keywords": [
+   "wiring harness"
+  ]
+ },
+ {
+  "grup": "gejala:motor-stater",
+  "triggers": [
+   "klik-klik",
+   "nggak muter",
+   "nggak bales",
+   "putar lambat",
+   "nggak stater"
+  ],
+  "keywords": [
+   "starter motor"
+  ]
+ },
+ {
+  "grup": "gejala:handel-pintu",
+  "triggers": [
+   "pegangan patah",
+   "rusak gembok",
+   "tarikan keras",
+   "nggak bisa buka"
+  ],
+  "keywords": [
+   "door handle"
+  ]
+ },
+ {
+  "grup": "gejala:slebor",
+  "triggers": [
+   "bolong",
+   "berkarat",
+   "bau terbakar",
+   "bunyi berisik"
+  ],
+  "keywords": [
+   "fender",
+   "mudguard"
+  ]
+ },
+ {
+  "grup": "gejala:bumper-depan",
+  "triggers": [
+   "baret",
+   "lepas",
+   "penyok"
+  ],
+  "keywords": [
+   "bumper"
+  ]
+ },
+ {
+  "grup": "gejala:injakan",
+  "triggers": [
+   "licin",
+   "berkarat",
+   "nggak pakem"
+  ],
+  "keywords": [
+   "step"
+  ]
+ },
+ {
+  "grup": "gejala:wiper-blade",
+  "triggers": [
+   "cetek",
+   "nggak bersih",
+   "karet rusak",
+   "nggak nempel"
+  ],
+  "keywords": [
+   "wiper blade",
+   "wiper arm"
+  ]
+ },
+ {
+  "grup": "gejala:laher-kopling",
+  "triggers": [
+   "getaran",
+   "bunyi gluduk",
+   "berisik kopling",
+   "nggak lepas",
+   "nggak presisi",
+   "pedal keras"
+  ],
+  "keywords": [
+   "release bearing"
+  ]
+ },
+ {
+  "grup": "gejala:laher-tengah",
+  "triggers": [
+   "bunyi gemuruh",
+   "nggak muter",
+   "bunyi gluduk"
+  ],
+  "keywords": [
+   "center bearing",
+   "intermediate bearing"
+  ]
+ },
+ {
+  "grup": "gejala:poros-kopel",
+  "triggers": [
+   "vibrasi",
+   "bunyi tak",
+   "nggak putar",
+   "bunyi gluduk"
+  ],
+  "keywords": [
+   "drive shaft"
+  ]
+ },
+ {
+  "grup": "gejala:kopel-salib",
+  "triggers": [
+   "bunyi kryk",
+   "bunyi kretek"
+  ],
+  "keywords": [
+   "universal joint",
+   "cross joint",
+   "十字轴"
+  ]
+ },
+ {
+  "grup": "gejala:poros-roda",
+  "triggers": [
+   "bengkok",
+   "vibrasi",
+   "bunyi ngik",
+   "nggak putar"
+  ],
+  "keywords": [
+   "axle shaft",
+   "half shaft"
+  ]
+ },
+ {
+  "grup": "gejala:nanas-gardan",
+  "triggers": [
+   "bunyi deru",
+   "nggak muter",
+   "bunyi gluduk"
+  ],
+  "keywords": [
+   "drive pinion"
+  ]
+ },
+ {
+  "grup": "gejala:teromol-gardan",
+  "triggers": [
+   "nggak muter",
+   "bunyi gemuruh"
+  ],
+  "keywords": [
+   "differential housing",
+   "differential case"
+  ]
+ },
+ {
+  "grup": "gejala:karet-per",
+  "triggers": [
+   "bunyi gluduk",
+   "bunyi kreak",
+   "per miring",
+   "suspensi keras"
+  ],
+  "keywords": [
+   "spring bushing"
+  ]
+ },
+ {
+  "grup": "gejala:balljoint",
+  "triggers": [
+   "bunyi gluduk",
+   "setir goyang",
+   "knock kemudi",
+   "ban aus sebelah"
+  ],
+  "keywords": [
+   "ball joint"
+  ]
+ },
+ {
+  "grup": "gejala:gajah-duduk",
+  "triggers": [
+   "setir goyang",
+   "bunyi gluduk",
+   "setir nyantol",
+   "roda goyang"
+  ],
+  "keywords": [
+   "tie rod"
+  ]
+ },
+ {
+  "grup": "gejala:gear-box-stir",
+  "triggers": [
+   "setir berat",
+   "setir main",
+   "setir macet",
+   "setir tidak pulang"
+  ],
+  "keywords": [
+   "steering gear"
+  ]
+ },
+ {
+  "grup": "gejala:feed-pump",
+  "triggers": [
+   "brebet",
+   "ngempos",
+   "tarikan berat",
+   "mesin mati"
+  ],
+  "keywords": [
+   "fuel pump"
+  ]
+ },
+ {
+  "grup": "gejala:tapak-shoe",
+  "triggers": [
+   "getaran",
+   "track kendor",
+   "bunyi besi",
+   "tapak aus"
+  ],
+  "keywords": [
+   "track plate"
+  ]
+ },
+ {
+  "grup": "gejala:lampu-besar",
+  "triggers": [
+   "lampu mati",
+   "lampu redup",
+   "lampu putus",
+   "tidak terang"
+  ],
+  "keywords": [
+   "head lamp",
+   "headlamp",
+   "front combination lamp"
+  ]
+ },
+ {
+  "grup": "gejala:lampu-rotary",
+  "triggers": [
+   "putus",
+   "lampu mati",
+   "tidak berputar",
+   "motor rotary mati"
+  ],
+  "keywords": [
+   "warning lamp"
+  ]
+ },
+ {
+  "grup": "gejala:lampu-kabin",
+  "triggers": [
+   "redup",
+   "putus",
+   "lampu mati",
+   "kabin gelap"
+  ],
+  "keywords": [
+   "ceiling lamp"
+  ]
+ },
+ {
+  "grup": "gejala:roller-bawah",
+  "triggers": [
+   "bunyi mendecit",
+   "roller panas",
+   "track kendor",
+   "macet putar"
+  ],
+  "keywords": [
+   "track roller"
+  ]
+ },
+ {
+  "grup": "gejala:roller-atas",
+  "triggers": [
+   "bunyi mendecit",
+   "roller macet",
+   "track melorot"
+  ],
+  "keywords": [
+   "carrier roller"
+  ]
+ },
+ {
+  "grup": "gejala:gigi-sprocket",
+  "triggers": [
+   "gigi aus",
+   "gigi oblak",
+   "rantai loncat",
+   "bunyi kletek",
+   "bunyi gemerincing"
+  ],
+  "keywords": [
+   "sprocket"
+  ]
+ },
+ {
+  "grup": "gejala:garu",
+  "triggers": [
+   "tumpul",
+   "bengkok",
+   "nggak nancap"
+  ],
+  "keywords": [
+   "ripper"
+  ]
+ },
+ {
+  "grup": "gejala:end-bit",
+  "triggers": [
+   "tipis",
+   "lepas",
+   "tumpul"
+  ],
+  "keywords": [
+   "end bit"
+  ]
+ },
+ {
+  "grup": "gejala:mata-pisau",
+  "triggers": [
+   "tumpul",
+   "bengkok",
+   "nggak motong"
+  ],
+  "keywords": [
+   "cutting edge",
+   "blade"
+  ]
+ },
+ {
+  "grup": "gejala:bucket",
+  "triggers": [
+   "penyok",
+   "suara gluduk"
+  ],
+  "keywords": [
+   "bucket"
+  ]
+ },
+ {
+  "grup": "gejala:boom",
+  "triggers": [
+   "molor",
+   "bunyi kretek",
+   "tidak angkat"
+  ],
+  "keywords": [
+   "boom"
+  ]
+ },
+ {
+  "grup": "gejala:final-drive",
+  "triggers": [
+   "bocor oli",
+   "tidak jalan",
+   "bunyi dengung"
+  ],
+  "keywords": [
+   "final drive"
+  ]
+ },
+ {
+  "grup": "gejala:swing-bearing",
+  "triggers": [
+   "bunyi ngik",
+   "susah muter"
+  ],
+  "keywords": [
+   "swing bearing"
+  ]
+ },
+ {
+  "grup": "gejala:karter",
+  "triggers": [
+   "bocor oli",
+   "karter penyok",
+   "oli keluar",
+   "tambalan karter",
+   "baut karter copot"
+  ],
+  "keywords": [
+   "oil pan",
+   "oil pan assembly",
+   "油底壳"
+  ]
+ },
+ {
+  "grup": "gejala:bushing",
+  "triggers": [
+   "limbung",
+   "bunyi krek",
+   "bunyi gluduk"
+  ],
+  "keywords": [
+   "bushing",
+   "bush"
+  ]
+ },
+ {
+  "grup": "gejala:nipel-grease",
+  "triggers": [
+   "grease macet",
+   "bunyi kering",
+   "nipel mampat",
+   "tidak keluar grease"
+  ],
+  "keywords": [
+   "grease nipple"
+  ]
+ },
+ {
+  "grup": "gejala:center-bolt",
+  "triggers": [
+   "per geser",
+   "bunyi blak",
+   "mobil miring",
+   "per pecah",
+   "center bolt patah"
+  ],
+  "keywords": [
+   "center bolt"
+  ]
+ },
+ {
+  "grup": "gejala:sekring",
+  "triggers": [
+   "putus",
+   "mati listrik",
+   "sekring leleh",
+   "lampu mati",
+   "nggak ada daya"
+  ],
+  "keywords": [
+   "fuse"
+  ]
+ },
+ {
+  "grup": "gejala:elbow",
+  "triggers": [
+   "ngebul",
+   "bunyi desis",
+   "air ngeresap"
+  ],
+  "keywords": [
+   "elbow",
+   "exhaust elbow",
+   "coolant elbow"
+  ]
+ },
+ {
+  "grup": "gejala:idler",
+  "triggers": [
+   "vibrasi",
+   "bunyi gluduk",
+   "gigi selip",
+   "gigi ngelitik"
+  ],
+  "keywords": [
+   "idler",
+   "idler shaft"
+  ]
+ },
+ {
+  "grup": "gejala:spline",
+  "triggers": [
+   "bunyi gluduk",
+   "oli bocor"
+  ],
+  "keywords": [
+   "spline"
+  ]
+ },
+ {
+  "grup": "gejala:backing-plate",
+  "triggers": [
+   "berdecit",
+   "rem blong",
+   "rem tidak pakem"
+  ],
+  "keywords": [
+   "backing plate"
+  ]
+ },
+ {
+  "grup": "gejala:trim-panel",
+  "triggers": [
+   "lepas",
+   "panel goyang"
+  ],
+  "keywords": [
+   "trim panel",
+   "trim cover"
+  ]
+ },
+ {
+  "grup": "gejala:sensor-ketinggian",
+  "triggers": [
+   "error",
+   "level rendah",
+   "level tinggi",
+   "lampu menyala",
+   "air kurang"
+  ],
+  "keywords": [
+   "level sensor"
+  ]
+ },
+ {
+  "grup": "gejala:module",
+  "triggers": [
+   "error",
+   "mati total",
+   "nggak nyala",
+   "lampu merah",
+   "mesin mati"
+  ],
+  "keywords": [
+   "module"
+  ]
+ },
+ {
+  "grup": "gejala:controller",
+  "triggers": [
+   "error",
+   "nggak respon",
+   "mesin ngadat",
+   "sensor error",
+   "lampu check engine"
+  ],
+  "keywords": [
+   "controller"
+  ]
+ },
+ {
+  "grup": "gejala:pen-per",
+  "triggers": [
+   "ngitik",
+   "ngadat",
+   "bunyi gluduk",
+   "per goyang"
+  ],
+  "keywords": [
+   "spring pin"
+  ]
+ },
+ {
+  "grup": "gejala:tanki-solar",
+  "triggers": [
+   "solar rembes",
+   "tanki bocor",
+   "solar kotor",
+   "bau solar",
+   "air di solar"
+  ],
+  "keywords": [
+   "fuel tank"
+  ]
+ },
+ {
+  "grup": "gejala:paking-karter",
+  "triggers": [
+   "oli rembes",
+   "oli meleleh",
+   "oli netes",
+   "paking bocor",
+   "oli habis"
+  ],
+  "keywords": [
+   "oil pan gasket"
+  ]
+ },
+ {
+  "grup": "gejala:lampu",
+  "triggers": [
+   "lampu mati",
+   "lampu redup",
+   "lampu putus",
+   "lampu kedip",
+   "lampu malap"
+  ],
+  "keywords": [
+   "head lamp",
+   "headlamp",
+   "rear lamp",
+   "fog lamp",
+   "warning lamp"
+  ]
+ },
+ {
+  "grup": "gejala:cross-member",
+  "triggers": [
+   "bunyi gluduk dari tengah",
+   "mobil terasa patah",
+   "getaran keras di lantai kabin",
+   "bunyi kreak-kreak waktu belok"
+  ],
+  "keywords": [
+   "cross beam",
+   "cross member"
+  ]
+ },
+ {
+  "grup": "gejala:sasis",
+  "triggers": [
+   "sasis retak",
+   "mobil oleng parah",
+   "sasis bengkok",
+   "frame patah"
+  ],
+  "keywords": [
+   "chassis",
+   "frame"
+  ]
+ },
+ {
+  "grup": "gejala:laher-jarum",
+  "triggers": [
+   "bunyi berdecit di transmisi",
+   "getaran saat gas",
+   "laher aus bunyi ngerung"
+  ],
+  "keywords": [
+   "needle roller bearing",
+   "needle bearing"
+  ]
+ },
+ {
+  "grup": "gejala:shield",
+  "triggers": [
+   "suara berisik dari bawah",
+   "heat shield lepas",
+   "heat shield bunyi",
+   "shield karatan jebol"
+  ],
+  "keywords": [
+   "shield",
+   "heat shield"
+  ]
+ }
+]

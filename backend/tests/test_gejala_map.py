@@ -77,3 +77,37 @@ def test_file_gejala_korup_diabaikan(kamus, tmp_path):
     kamus("sinonim.json", KURASI)
     (tmp_path / "sinonim" / "gejala_map.json").write_text("{rusak", encoding="utf-8")
     assert sinonim.entries() == KURASI
+
+
+# ── Mutu trigger (aturan di tools/build_gejala_map.py) ──────────────────────
+
+@pytest.fixture(scope="module")
+def builder():
+    import importlib.util
+    from pathlib import Path
+    p = Path(__file__).resolve().parents[1] / "tools" / "build_gejala_map.py"
+    spec = importlib.util.spec_from_file_location("build_gejala_uji", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_kata_sifat_tunggal_ditolak(builder):
+    """expand_query menyuntikkan keyword SETIAP grup yang cocok, jadi satu
+    trigger generik mencemari pencarian. Uji nyata: 'bunyi' menarik
+    'Right door', 'berat' menarik 'fuel filter'."""
+    for buruk in ("bunyi", "berat", "bocor", "keras", "mesin", "asap", "rusak"):
+        assert builder._trigger_layak(buruk) is False, buruk
+
+
+def test_gejala_khas_tunggal_diterima(builder):
+    """Yang paling sering diketik montir justru pendek — aturan panjang minimum
+    yang tumpul (>=5 huruf) sempat membuang 'loyo'."""
+    for baik in ("loyo", "ngelitik", "ngebul", "brebet", "selip", "ngempos"):
+        assert builder._trigger_layak(baik) is True, baik
+
+
+def test_frasa_dua_kata_selalu_diterima(builder):
+    """Konteksnya sudah membatasi sendiri — 'bunyi gluduk' tak seperti 'bunyi'."""
+    for baik in ("bunyi gluduk", "asap hitam", "setir berat", "rem blong"):
+        assert builder._trigger_layak(baik) is True, baik

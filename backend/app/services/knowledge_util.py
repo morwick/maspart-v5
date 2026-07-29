@@ -49,7 +49,14 @@ def load_json(path: Path | str, default=None):
     p = Path(path)
     key = str(p.resolve()) if p.is_absolute() else str(p)
     try:
-        mt = p.stat().st_mtime if p.exists() else None
+        st = p.stat() if p.exists() else None
+        # UKURAN ikut jadi kunci, bukan mtime saja. Resolusi mtime di beberapa
+        # filesystem hanya ~1 detik, sehingga pola "tulis lalu baca segera"
+        # (mis. ai_belajar.resolve_gap menghapus satu gap lalu membaca ulang)
+        # mengembalikan ISI BASI — perubahannya terlihat hilang begitu saja.
+        # Ukuran hampir selalu berubah saat isinya berubah; kombinasinya jauh
+        # lebih sulit ditipu daripada mtime sendirian.
+        mt = (st.st_mtime, st.st_size) if st else None
     except OSError:
         mt = None
     with _LOAD_LOCK:

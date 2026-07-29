@@ -114,6 +114,26 @@ _PROSEDUR_RE = re.compile(
     r"^(pemeriksaan|periksa|langkah|tes |test |cek |ukur|pengukuran|penggantian|"
     r"ganti |prosedur|pemasangan|pembongkaran)", re.I)
 
+# Kata SIFAT/kualitas yang, berdiri SENDIRI, tidak menunjuk sistem mana pun.
+# Uji nyata: trigger "bunyi" menarik keyword 'Right door', "berat" menarik
+# 'fuel filter' — expand_query menyuntikkan keyword SETIAP grup yang cocok, jadi
+# satu trigger generik langsung mencemari pencarian dengan istilah tak relevan.
+# Sebagai BAGIAN frasa dua kata ("bunyi gluduk", "asap hitam", "setir berat")
+# kata-kata ini justru bagus — yang dilarang hanya pemakaian tunggal.
+# Daftar ini menampung kata yang tak menunjuk sistem apa pun bila berdiri
+# sendiri. Perhatikan yang SENGAJA TIDAK ada di sini: 'loyo', 'ngelitik',
+# 'ngebul', 'brebet', 'selip' — itu gejala khas yang justru paling sering
+# diketik montir, dan aturan panjang minimum yang tumpul (≥5 huruf) sempat
+# membuang 'loyo' begitu saja. Yang menentukan bukan panjangnya, melainkan
+# apakah kata itu mempersempit ke satu sistem.
+_GENERIK_TUNGGAL = frozenset("""
+bunyi suara berisik berat ringan panas dingin putih hitam biru abu asap keras
+lembek bocor getar goyang macet longgar kendor susah cepat lambat rusak mati
+hidup aus retak patah pecah oleng miring kasar halus boros lemah turun naik
+kurang lebih tidak kadang sering jarang mesin truk mobil unit part kondisi
+masalah gangguan klik grem kaku sulit jelek parah aneh
+""".split())
+
 
 def _benih(batas: int) -> list[dict]:
     """Benih = tiap ENTRI kamus kurasi beserta keyword katalognya.
@@ -203,6 +223,19 @@ def _llm(batch: list[dict], gap: list[str]) -> list[dict]:
     return [i for i in (items or []) if isinstance(i, dict)]
 
 
+def _trigger_layak(s: str) -> bool:
+    """Trigger yang boleh masuk dataset.
+
+    Satu kata hanya diterima bila ia benar-benar menunjuk gejala khas
+    ('ngelitik', 'ngebul', 'loyo', 'brebet') — bukan kata sifat umum. Frasa dua
+    kata ke atas selalu diterima: konteksnya sudah membatasi sendiri."""
+    kata = s.split()
+    if len(kata) >= 2:
+        return True
+    w = kata[0].casefold() if kata else ""
+    return len(w) >= 4 and w not in _GENERIK_TUNGGAL
+
+
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(s or "").casefold()).strip("-")[:40] or "umum"
 
@@ -216,7 +249,8 @@ def _bersihkan(usulan: list[dict], benih: list[dict]) -> tuple[list[dict], dict]
     peta = {b["kunci"]: b for b in benih}
     entri: list[dict] = []
     stat = {"masuk": len(usulan), "conf_rendah": 0, "grup_asing": 0,
-            "tanpa_trigger_baru": 0, "tanpa_keyword_valid": 0, "keyword_dibuang": 0}
+            "tanpa_trigger_baru": 0, "tanpa_keyword_valid": 0, "keyword_dibuang": 0,
+            "trigger_generik": 0}
     grup_terpakai: set[str] = set()
     for u in usulan:
         try:
@@ -239,6 +273,9 @@ def _bersihkan(usulan: list[dict], benih: list[dict]) -> tuple[list[dict], dict]
             if not s or k in lama or k in seen or len(s) < 4:
                 continue
             if _PROSEDUR_RE.match(s):   # instruksi bengkel, bukan keluhan
+                continue
+            if not _trigger_layak(s):   # kata sifat tunggal → mencemari pencarian
+                stat["trigger_generik"] += 1
                 continue
             seen.add(k)
             triggers.append(s)
