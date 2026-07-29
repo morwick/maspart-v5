@@ -10,7 +10,7 @@ const APK_URL = "/maspart.apk";
 // — angka di sini ditulis tangan, jadi mudah tertinggal (sempat 2.0.0 saat
 // aplikasinya sudah 2.1.4). Varian yang dilayani: arm64-v8a (--split-per-abi).
 const APK_SIZE = "21 MB";
-const APP_VERSION = "2.1.8";
+const APP_VERSION = "2.1.9";
 
 export default function DownloadPage() {
   return (
