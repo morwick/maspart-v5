@@ -4,9 +4,13 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-07-23** (APK 2.1.8 rilis — paritas web↔mobile penuh;
-> entri update terakhir = blok **2026-07-18 s/d 2026-07-23** di ujung changelog ini.
-> Struktur kode asisten: `backend/app/services/ai_parts/` + loader `ai_assistant.py`).
+> Terakhir diverifikasi: **2026-07-29** (EMPAT rilis dalam satu hari — memori sesi asisten,
+> APK 2.1.9, 4 temuan observabilitas, UI/UX web Fase 1; semua LIVE & terverifikasi di
+> container. Entri terakhir = blok **2026-07-29** di ujung changelog ini).
+> ⚠️ BACA DULU sebelum bekerja: aturan pemilik **jangan sentuh/jalankan `backend/evals/`
+> dan jangan panggil LLM/API model apa pun** — saldo DeepSeek kritis & tanpa provider
+> cadangan (detail di ujung changelog).
+> Struktur kode asisten: `backend/app/services/ai_parts/` + loader `ai_assistant.py`.
 > Ditambah **§3.5 — Cara Kerja Aplikasi (deep-dive fungsional)** pada 2026-06-25 agar AI/dev
 > langsung paham domain, alur data, logika pencarian + sinonim, AI tools, API & frontend.
 > Update **2026-06-27**: tambah fitur **Repair Kit Transmisi** (data + tool AI + endpoint +
@@ -1865,4 +1869,103 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       - Latensi p50 11,5 dtk / p90 31,6 dtk. Outcome: ok 155, empty 5, sanitized 2, not_found 1.
       - Fase 0 (2026-07-17): data mati dihapus — `data/part_image_index_rows.csv.bak-20260708`
         (316,5 MB) + `data/embeddings.parquet` (80 MB); keduanya tak direferensikan kode.
+
+  2026-07-29 — EMPAT RILIS DALAM SATU HARI (semua LIVE & terverifikasi di container)
+
+  (A) MEMORI SESI ASISTEN + retrieval gejala — `e75f28a` + `6e9f744`
+      Audit menyeluruh 9 modul `ai_parts/p1..p9`. Kesimpulannya: arsitekturnya sangat
+      kuat MENCEGAH KEBOHONGAN, dan justru itu yang membatasi kepintarannya.
+      - `services/ai_session.py` (BARU): ingatan singkat SERVER per `conversation_id`
+        (in-memory, TTL 12 jam, kuota per-user). Menutup bug "asisten MENYANGKAL
+        DATANYA SENDIRI": PN dari `bom_dari_rangka` sering HANYA ada di EPC, bukan
+        katalog lokal, sehingga follow-up "harganya berapa?" disanitasi guard jadi
+        "⟨PN tak terverifikasi⟩". Sumbernya SERVER (bukan riwayat kiriman klien) →
+        memperKETAT model ancaman forgery, bukan melonggarkan. Kill-switch
+        `AI_SESSION_MEMORY=0`. Slot nomor MESIN Weichai baru (sebelumnya tak ada).
+      - `_recent_rangka` kini USER-ONLY. Dulu ikut membaca tabel armada/klaim buatan
+        asisten yang penuh kolom Frame 8-char → "rangka aktif" tertukar unit ORANG LAIN.
+        Guard EPC-FIRST sudah ditambal begitu saat insiden 148 dtk; fungsi ini terlewat.
+      - `data/sinonim/gejala_map.json` (BARU, 296 entri via `tools/build_gejala_map.py`):
+        keluhan lapangan → istilah katalog. Skema SAMA dgn sinonim.json → expand_query/
+        subset kamus/penjaga istilah ikut pintar TANPA kode runtime baru.
+      - `migrations/025` `ai_chat_log.session_id` (fail-soft 5 tingkat) → kegagalan
+        follow-up akhirnya bisa direkonstruksi. 👎 masuk `ai_belajar` (watermark sendiri).
+      - `run_evals.py`: retry jaringan + mode `steps` bersesi + `evals/history.jsonl`.
+      ⚠️ 5 JEBAKAN yang ditemukan saat mengerjakan (jangan diulang):
+        1. `grup` di sinonim.json itu KATEGORI luas → memakainya sbg kunci meruntuhkan
+           327 entri jadi 22.  2. `sinonim.hit` cocok FRASA UTUH → trigger panjang
+           praktis mati; wajib 1-2 kata.  3. Trigger satu-kata generik MERUSAK
+           (expand_query menyuntik keyword SETIAP grup cocok: "bunyi"→Right door).
+        4. `populasi` hanya memuat unit TERDAFTAR → bukan orakel "frame valid".
+        5. Benih gejala dari judul manual = PROSEDUR perbaikan, bukan keluhan.
+
+  (B) APK 2.1.9 — repo mobile akhirnya punya riwayat (`66fbc2b` commit awal, `ae218ec`)
+      Aplikasi sudah dipakai produksi berbulan-bulan tanpa SATU pun commit.
+      ⚠️ Repo `D:\src\maspart_mobile` masih TANPA REMOTE — commit hanya ada di laptop.
+      - Tanda tangan SHA-256 `9d30e94e…` COCOK → pengguna tak perlu uninstall.
+      - `.gitignore` diperluas: `/build/` bawaan Flutter hanya menutup AKAR; Gradle juga
+        menulis `android/build/` & `android/*/build/`.
+      - Ukuran APK identik byte dgn 2.1.8 — dibuktikan BUKAN build gagal lewat
+        `aapt2 dump badging` + grep string di `libapp.so`.
+      - Aplikasi membandingkan **`latest_name`** (semver), BUKAN `latest_code` (legacy).
+
+  (C) EMPAT TEMUAN OBSERVABILITAS — `279882e` (dari analisis 812 giliran log produksi)
+      Dua dari empat ternyata BUG LOGIKA, bukan kekurangan data.
+      - `cek_massal_part` + BERAT (selalu, nol jaringan) & DIMENSI (opt-in, plafon 40,
+        HTTP live SIMS per-PN tanpa API batch). 9 giliran meminta berat/dimensi daftar
+        PN → model memanggil `detail_part` 167× (satu giliran 50×, 70 dtk). Model BENAR:
+        toolnya memang belum punya field itu. `sims.get_part_spec_cached` BARU.
+      - 🔴 REM ANTI-LOOP BOCOR & BERBOHONG: gate `>= _MAX_CALLS_PER_TOOL` dibaca sebelum
+        eksekusi, dinaikkan sesudah, TANPA lock, sementara batch di ThreadPoolExecutor(4)
+        → plafon efektif ~6. Dan penolakannya (found=False) terbaca "nf" sehingga model
+        diberi nota "lookup gagal" → menyimpulkan 44+ PN yang DITOLAK REM itu tak ada di
+        data. Kini reservasi slot dalam lock + kind baru **`brake`** (peringkat
+        brake < nf < err) yang TIDAK menyalakan `lookup_gagal`.
+      - DTC: `SPN 444 FMI 14` sudah ada (EOL menyimpan SPN/FMI di dalam string `kode`,
+        kolomnya None); `SPN 520264 FMI 11` sudah ada sbg `sumber="kartu"` yang tak pernah
+        keluar lewat `_proj()`. → `dtc_codes.search_spn_fmi` BARU (lintas sumber, fallback
+        SPN-saja) tanpa menyentuh shim legacy. `tools/build_eol_csv.py` BARU (arsip
+        `D:/CNHTC_Data/*.csv` yang tak pernah dibaca) → store **7.778 → 9.908**.
+        `test_dtc_codes` jumlah eksak → **lantai `>=`**.
+      - EPC: ⭐ ambang keyword `len>=3` (heuristik ASCII) MEMBUNUH keyword Mandarin
+        2-hanzi 衬套/支架/座椅/板簧 — persis istilah kasus-kasus nihil. `epc_bom.kw_layak`
+        di 3 lokasi. Indeks item basi (>7 hari) tak lagi dibuang → **stale-serve +
+        refresh latar** (kelima unit cache sudah kedaluwarsa → tiap query bayar cold-build
+        56-84 dtk). `assembly_components_from_items` BARU sbg fallback dari `dari_assembly`.
+        `gambar_exploded` kategori tak lagi wajib → jalur `reverse_find_in_unit`
+        (flag `EPC_EXPLODED_REVERSE`).
+      ⭐ KONTRAK KEJUJURAN EPC: "bushing untuk front spring" nihil karena EPC MEMANG tak
+        memodelkannya sbg elemen terpisah (front spring = 48 elemen, nol bushing).
+        Perbaikannya bukan mencari lebih keras — melainkan BERHENTI MEMBALAS KOSONG:
+        kembalikan 48 elemen nyata + `catatan_kejujuran`.
+
+  (D) UI/UX WEB Fase 1 — `cfc82c6` (+ paritas mobile `8658b4b`)
+      Audit 43 halaman: fondasinya SEHAT (token terpusat & dipakai — 649 `var(--)` di TSX,
+      bahasa komponen CSS konsisten, dark mode jalan, /toko sudah sangat baik). Yang rusak
+      spesifik di dua tempat paling dipakai. Migrasi 1.109 inline style SENGAJA tak dikejar.
+      - Autoscroll MEMAKSA: effect bergantung `msgs` yang berubah tiap event SSE → tiap
+        langkah menyeret user ke bawah saat ia membaca ke atas. → `stickBottom` 120px.
+      - DUA indikator memuat bersamaan; dots DIPINDAH ke placeholder (bukan dihapus).
+      - Textarea DIKUNCI selama menunggu → kini hanya tombol Kirim yang diblokir.
+      - TIDAK ADA cara membatalkan (nol AbortController) → `signal` + tombol Stop.
+        Penjagaan `isAbort` SEBELUM fallback /chat, tanpa itu Stop memicu request kedua.
+      - Kegagalan tak lagi menghapus pertanyaan user + tombol "Coba lagi"; penghitung
+        detik berjalan; `aria-live`/`role="alert"`.
+      - 🔴 `keranjang:331` `overflow:hidden` pada tabel 6 kolom MEMOTONG tombol hapus di
+        375px → pembeli TAK BISA menghapus item di HP. → `overflowX:auto`. Sama di
+        `admin/orders:52`.
+      Paritas Flutter (`8658b4b`): Stop + konfirmasi hapus + autoscroll cerdas. Dua item
+      lain SUDAH benar di sana (`enabled: !_locked`, pesan user tak dihapus saat gagal).
+      ⚠️ BELUM sampai ke pengguna sampai ada rilis APK baru.
+
+  ⚠️ ATURAN PEMILIK 2026-07-29: JANGAN sentuh/jalankan `backend/evals/`, JANGAN panggil
+     LLM/API model apa pun. Saldo DeepSeek **USD 0,77** (~4 hari) dan **TIDAK ada provider
+     cadangan** (`ai_fallback_configured: False`) → saat saldo habis DeepSeek balas 402 dan
+     asisten MATI TOTAL, bukan melambat. Verifikasi cukup `pytest` (1.656 test, offline).
+     ⚠️ Biaya eval & skrip builder TIDAK tercatat di `ai_chat_log` (`run_evals.py:45`
+     me-no-op `log_turn`; builder memanggil API langsung) → estimasi biaya dari tabel itu
+     SELALU lebih rendah dari kenyataan.
+     Attribusi biaya nyata: 85% token input kena prompt-cache tapi hanya 9% tagihan;
+     **79% tagihan dari cache-MISS**. Konsekuensi: "hemat 20-25rb token/panggilan" lewat
+     seleksi tool dinamis adalah hadiah SEMU (skenario terbaik ~$0,80/bulan).
 ```
