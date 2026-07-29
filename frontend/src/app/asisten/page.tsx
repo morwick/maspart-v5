@@ -198,12 +198,23 @@ function fmtTime(at?: number): string {
   }
 }
 
+/** Pembatalan lewat AbortController muncul sebagai DOMException "AbortError";
+ * sebagian browser/polyfill memakai pesan berbeda, jadi dicek dua-duanya. */
+function isAbort(e: unknown): boolean {
+  return (
+    (e instanceof DOMException && e.name === "AbortError") ||
+    (e instanceof Error && e.name === "AbortError")
+  );
+}
+
 export default function AsistenPage() {
   const router = useRouter();
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Pertanyaan terakhir yang gagal/dibatalkan → tombol "Coba lagi".
+  const [retry, setRetry] = useState<string | null>(null);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [allowed, setAllowed] = useState(true);   // menu 'ai' dimatikan admin? (Menu Control)
   // Mode perbaikan global (Menu Control → Asisten AI). Server yang memutuskan
@@ -226,6 +237,13 @@ export default function AsistenPage() {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const sheetRef = useRef<HTMLInputElement>(null);
   const firstSave = useRef(true);
+  // Menempel di bawah atau tidak. Jawaban asisten butuh 14-46 dtk dan status
+  // langkahnya masuk lewat SSE, jadi `msgs` berubah BERKALI-KALI selama menunggu.
+  // Tanpa penanda ini, tiap langkah menyeret user kembali ke bawah persis saat ia
+  // sedang menggulir ke atas membaca tabel sebelumnya.
+  const stickBottom = useRef(true);
+  // Pembatalan giliran yang sedang berjalan (tombol Stop).
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const token = getToken();
@@ -249,9 +267,22 @@ export default function AsistenPage() {
       });
   }, [router]);
 
+  // Ikuti ke bawah HANYA bila user memang sedang di bawah. Saat menunggu jawaban
+  // (busy) pakai "auto": animasi halus yang dipicu tiap event SSE membuat layar
+  // terus bergerak dan user seolah bertarung melawan scroll.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    if (!stickBottom.current) return;
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: busy ? "auto" : "smooth",
+    });
   }, [msgs, busy]);
+
+  function onScrollChat() {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }
 
   // Muat chat tersimpan saat halaman dibuka kembali (mis. balik dari menu lain).
   useEffect(() => {
@@ -309,6 +340,7 @@ export default function AsistenPage() {
     setInput("");
     resetTextarea();
     setBusy(true);
+    stickBottom.current = true;   // mengirim = user memang ingin melihat jawabannya
     // Placeholder jawaban yang menampilkan STATUS langkah live selama streaming.
     setMsgs((m) => [...m, { role: "assistant", content: "", streamStatus: [], at: Date.now() }]);
 
@@ -328,6 +360,8 @@ export default function AsistenPage() {
         return copy;
       });
 
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
       const payload: AIChatTurn[] = next.map((m) => ({ role: m.role, content: m.content }));
       const convId = getConversationId();
@@ -350,27 +384,45 @@ export default function AsistenPage() {
               return copy;
             }),
           convId,
+          ac.signal,
         );
       } catch (streamErr) {
+        // Pembatalan BUKAN kegagalan streaming — tanpa penjagaan ini, tombol Stop
+        // justru memicu permintaan KEDUA lewat jalur non-stream.
+        if (isAbort(streamErr)) throw streamErr;
         // Streaming gagal (mis. proxy buffering / SSE tak didukung) → fallback ke /chat.
         if (streamErr instanceof ApiError && streamErr.status === 401) throw streamErr;
         res = await aiChat(token, payload, sheetId, convId);
       }
       applyResult(res);
     } catch (err) {
+      if (isAbort(err)) {
+        // Dibatalkan user: buang placeholder SAJA. Pertanyaannya tetap di
+        // transkrip (dan bisa diulang lewat "Coba lagi") — bukan kesalahan.
+        setMsgs((m) => m.slice(0, -1));
+        setRetry(body);
+        return;
+      }
       if (err instanceof ApiError && err.status === 401) {
         clearSession();
         return router.replace("/login");
       }
       const msg = err instanceof Error ? err.message : "Gagal menghubungi asisten.";
       setError(msg);
-      // Kembalikan input agar bisa coba lagi; buang placeholder + pesan user.
-      setInput(body);
-      setMsgs((m) => m.slice(0, -2));
+      // Buang PLACEHOLDER saja. Dulu pesan user ikut dihapus (slice(0,-2)),
+      // sehingga setelah menunggu lama lalu gagal, pertanyaannya lenyap dari
+      // layar dan chat seolah "mundur" — membingungkan.
+      setMsgs((m) => m.slice(0, -1));
+      setRetry(body);
     } finally {
+      abortRef.current = null;
       setBusy(false);
       taRef.current?.focus();
     }
+  }
+
+  function stopGiliran() {
+    abortRef.current?.abort();
   }
 
   // Unggah Excel: server membaca kolomnya & menyimpan sheet (TTL 2 jam) → sheet_id
@@ -430,6 +482,13 @@ export default function AsistenPage() {
   }
 
   function clearChat() {
+    // Satu klik dulu menghapus transkrip panjang SEKALIGUS mereset memori sesi
+    // server — tanpa peringatan dan tanpa cara mengembalikannya.
+    if (msgs.length > 0 && !window.confirm(
+      "Hapus percakapan ini? Riwayat di layar dan ingatan asisten untuk sesi ini akan direset."
+    )) return;
+    abortRef.current?.abort();   // giliran yang masih berjalan ikut dihentikan
+    setRetry(null);
     setMsgs([]);
     setError(null);
     setSheetId("");
@@ -667,6 +726,7 @@ export default function AsistenPage() {
           {/* Area pesan */}
           <div
             ref={scrollRef}
+            onScroll={onScrollChat}
             className="chat-scroll"
             style={{
               flex: 1,
@@ -735,22 +795,34 @@ export default function AsistenPage() {
               ))
             )}
 
-            {busy && (
-              <div className="chat-bubble-in chat-row-ai">
-                <div className="chat-bubble-ai">
-                  <span className="typing-dots">
-                    <span />
-                    <span />
-                    <span />
-                  </span>
-                </div>
-              </div>
-            )}
+            {/* Indikator memuat TIDAK dirender terpisah di sini: bubble placeholder
+                (lihat AiBubble, cabang `!m.content && m.streamStatus`) sudah
+                menampilkan dots + status langkah. Dulu keduanya tampil bersamaan
+                sehingga ada dua gelembung tumpang tindih selama 14-254 detik. */}
           </div>
 
           {error && (
-            <div className="alert alert-error" style={{ margin: "8px 12px 0" }}>
-              {error}
+            <div
+              className="alert alert-error"
+              role="alert"
+              style={{ margin: "8px 12px 0", display: "flex", alignItems: "center", gap: 10 }}
+            >
+              <span style={{ flex: 1, minWidth: 0 }}>{error}</span>
+              {retry && !busy && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ flexShrink: 0 }}
+                  onClick={() => {
+                    const q = retry;
+                    setRetry(null);
+                    setError(null);
+                    if (q) send(q);
+                  }}
+                >
+                  Coba lagi
+                </button>
+              )}
             </div>
           )}
 
@@ -830,8 +902,11 @@ export default function AsistenPage() {
               <button
                 className="btn btn-ghost"
                 title="Lampirkan Excel (.xlsx) — asisten bisa isi stok/nama part/harga"
+                aria-label="Lampirkan file Excel"
                 onClick={() => sheetRef.current?.click()}
-                disabled={busy || available === false}
+                // Sejalan dgn textarea: menyiapkan lampiran boleh selagi menunggu;
+                // yang diblokir hanya pengirimannya.
+                disabled={available === false}
                 style={{ padding: "0 10px", color: "var(--ink-600)" }}
               >
                 <Icon d={IC.paperclip} size={18} />
@@ -851,7 +926,11 @@ export default function AsistenPage() {
                       ? "Mau diapakan filenya? mis. “isikan stok di kolom D”"
                       : "Tulis pertanyaan…"
                 }
-                disabled={busy || available === false}
+                // TIDAK dikunci saat `busy`: jawaban butuh 14-46 detik, dan
+                // mengunci input berarti user hanya bisa menatap layar. Ia boleh
+                // menyusun/menempel pertanyaan berikutnya sambil menunggu —
+                // yang diblokir hanyalah tombol Kirim.
+                disabled={available === false}
                 rows={1}
                 style={{
                   flex: 1,
@@ -866,15 +945,38 @@ export default function AsistenPage() {
                   color: "var(--ink-800)",
                 }}
               />
-              <button
-                className="btn btn-primary"
-                onClick={() => send(input)}
-                // Ada lampiran menunggu → boleh kirim walau teks kosong.
-                disabled={busy || (!input.trim() && !pendingSheet) || available === false}
-                style={{ gap: 6 }}
-              >
-                <Icon d={IC.send} size={14} /> Kirim
-              </button>
+              {busy ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={stopGiliran}
+                  title="Hentikan giliran ini"
+                  aria-label="Hentikan"
+                  style={{ gap: 6 }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 2,
+                      background: "currentColor",
+                      display: "inline-block",
+                    }}
+                  />
+                  Stop
+                </button>
+              ) : (
+                <button
+                  className="btn btn-primary"
+                  onClick={() => send(input)}
+                  // Ada lampiran menunggu → boleh kirim walau teks kosong.
+                  disabled={(!input.trim() && !pendingSheet) || available === false}
+                  style={{ gap: 6 }}
+                >
+                  <Icon d={IC.send} size={14} /> Kirim
+                </button>
+              )}
             </div>
             <div
               style={{
@@ -1313,6 +1415,31 @@ function RepairKitDownloads({ models }: { models: string[] }) {
   );
 }
 
+/** Penghitung waktu berjalan di gelembung "sedang memproses".
+ *
+ * Jawaban asisten butuh 14 detik (separuh kasus) sampai 254 detik (terburuk) dan
+ * SENGAJA tidak di-stream token demi token — guard harus menyaring jawaban utuh
+ * dulu. Akibatnya user menatap layar tanpa satu huruf pun muncul. Angka yang
+ * berjalan tidak mempercepat apa pun, tapi mengubah "aplikasinya hang?" menjadi
+ * "masih jalan, sudah 20 detik". Muncul setelah 3 detik supaya jawaban cepat
+ * tidak ikut berkedip. */
+function Elapsed({ since }: { since?: number }) {
+  const [detik, setDetik] = useState(0);
+  useEffect(() => {
+    if (!since) return;
+    const tick = () => setDetik(Math.floor((Date.now() - since) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [since]);
+  if (!since || detik < 3) return null;
+  return (
+    <div style={{ fontSize: 11, color: "var(--ink-500)", marginTop: 6 }}>
+      {detik} detik{detik >= 45 ? " · pertanyaan ini butuh beberapa langkah" : ""}
+    </div>
+  );
+}
+
 function CopyBtn({ text }: { text: string }) {
   const [ok, setOk] = useState(false);
   return (
@@ -1504,9 +1631,27 @@ function Bubble({
     return (
       <div className="chat-bubble-in chat-row-ai">
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="chat-bubble-ai">
+          {/* Satu-satunya indikator memuat. aria-live: selama 14-254 detik inilah
+              satu-satunya informasi yang berjalan — pengguna pembaca layar dulu
+              tak mendengar apa pun sama sekali. */}
+          <div className="chat-bubble-ai" aria-live="polite" aria-busy="true">
             {steps.length === 0 ? (
-              <span style={{ color: "var(--ink-500)", fontSize: 13 }}>Memproses pertanyaan…</span>
+              <span
+                style={{
+                  color: "var(--ink-500)",
+                  fontSize: 13,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span className="typing-dots">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                Memproses pertanyaan…
+              </span>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {steps.map((s, i) => {
@@ -1516,7 +1661,7 @@ function Bubble({
                       key={i}
                       style={{
                         fontSize: 13,
-                        color: last ? "var(--ink-800)" : "var(--ink-400)",
+                        color: last ? "var(--ink-800)" : "var(--ink-500)",
                         display: "flex",
                         alignItems: "center",
                         gap: 7,
@@ -1529,6 +1674,7 @@ function Bubble({
                 })}
               </div>
             )}
+            <Elapsed since={m.at} />
           </div>
         </div>
       </div>

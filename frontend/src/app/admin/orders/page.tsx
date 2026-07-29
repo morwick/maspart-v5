@@ -49,7 +49,9 @@ export default function AdminOrdersPage() {
             Belum ada pesanan.
           </div>
         ) : (
-          <div className="surface" style={{ overflow: "hidden" }}>
+          <div className="surface" style={{ overflowX: "auto", overflowY: "hidden" }}>
+            {/* 7 kolom → `overflow:hidden` dulu memotong Bukti & Tanggal di layar
+                kecil tanpa cara menggesernya. Lihat catatan sama di /keranjang. */}
             <table className="tbl">
               <thead>
                 <tr>

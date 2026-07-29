@@ -2127,6 +2127,9 @@ export async function aiChatStream(
   sheetId: string | undefined,
   onProgress: (label: string) => void,
   conversationId?: string,
+  // Pembatalan dari sisi klien. Satu giliran bisa berjalan sampai 4 menit; tanpa
+  // ini satu-satunya jalan keluar user adalah me-refresh halaman.
+  signal?: AbortSignal,
 ): Promise<AIChatResult> {
   const res = await fetch(`${API_BASE}/api/ai/chat-stream`, {
     method: "POST",
@@ -2136,6 +2139,7 @@ export async function aiChatStream(
       sheet_id: sheetId || "",
       conversation_id: conversationId || "",
     }),
+    signal,
   });
   if (!res.ok || !res.body) throw new ApiError(res.status, await parseError(res));
 

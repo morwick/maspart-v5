@@ -27,6 +27,9 @@ export default function ChatThread({
   const me = (getUser()?.username || "").toLowerCase();
   const listRef = useRef<HTMLDivElement>(null);
   const lastCount = useRef(0);
+  // Daftar ini di-poll tiap 7 detik. Tanpa penanda ini, pesan baru menyeret user
+  // ke bawah persis saat ia sedang menggulir ke atas membaca percakapan lama.
+  const stickBottom = useRef(true);
 
   useEffect(() => {
     if (disabled) {
@@ -48,9 +51,15 @@ export default function ChatThread({
     if (messages.length !== lastCount.current) {
       lastCount.current = messages.length;
       const el = listRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (el && stickBottom.current) el.scrollTop = el.scrollHeight;
     }
   }, [messages]);
+
+  function onScrollList() {
+    const el = listRef.current;
+    if (!el) return;
+    stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }
 
   async function doSend() {
     const body = text.trim();
@@ -71,7 +80,7 @@ export default function ChatThread({
 
   return (
     <div className="surface" style={{ overflow: "hidden", display: "flex", flexDirection: "column", height: "100%" }}>
-      <div ref={listRef} style={{ flex: 1, minHeight: 320, maxHeight: "60vh", overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8, background: "var(--ink-50)" }}>
+      <div ref={listRef} onScroll={onScrollList} style={{ flex: 1, minHeight: 320, maxHeight: "60vh", overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8, background: "var(--ink-50)" }}>
         {disabled ? (
           <div style={{ textAlign: "center", color: "var(--ink-400)", fontSize: 12.5, padding: "24px 0" }}>
             Pilih percakapan di samping.

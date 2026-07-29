@@ -328,7 +328,11 @@ export default function KeranjangPage() {
               </div>
             )}
 
-            <div className="surface" style={{ overflow: "hidden" }}>
+            {/* overflowX auto, BUKAN hidden: tabelnya 6 kolom (min ≈530px), jadi
+                di layar 375px `hidden` MEMOTONG kolom Subtotal & tombol hapus —
+                pembeli tak bisa menghapus item dari keranjang di HP sama sekali.
+                overflowY hidden dipertahankan agar sudut kartu tetap terklip. */}
+            <div className="surface" style={{ overflowX: "auto", overflowY: "hidden" }}>
               <table className="tbl">
                 <thead>
                   <tr>
