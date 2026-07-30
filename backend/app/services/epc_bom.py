@@ -1122,6 +1122,88 @@ def assembly_components_global(pn: str, max_figures: int = 10,
             "figure_dicoba": dicoba}
 
 
+def _pn_sama(a: str, b: str) -> bool:
+    """PN sama walau beda suffix varian ('…402/1' vs '…402') / tanda baca."""
+    na = re.sub(r"[^A-Z0-9]", "", str(a or "").upper())
+    nb = re.sub(r"[^A-Z0-9]", "", str(b or "").upper())
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    ba = re.sub(r"[^A-Z0-9]", "", str(a or "").upper().split("/", 1)[0])
+    bb = re.sub(r"[^A-Z0-9]", "", str(b or "").upper().split("/", 1)[0])
+    return bool(ba) and ba == bb
+
+
+def figure_global(pn: str, max_figures: int = 4) -> dict:
+    """FIGURE exploded view yang MEMUAT sebuah PN — TANPA nomor rangka.
+
+    Jalur global: home/reverse/part?t=global (daftar figure induk pemakai PN, lintas
+    semua model) → part/tree/item?type=model (isi figure + d2s SVG + ballNum).
+
+    ⚠️ Beda tujuan dari `assembly_components_global`, yang menjawab "apa isi assembly
+    ini" dan karena itu MEMBUANG PN yang dicari dari daftar anak — sehingga nomor
+    balonnya tak pernah ketemu. Di sini PN itu justru yang DICARI, supaya balonnya
+    bisa disorot di gambar.
+
+    ⚠️ Figure yang terpilih memuat PN itu dari MODEL MANA PUN — bukan unit tertentu.
+    Untuk unit spesifik, tetap pakai jalur per-VIN (figure_for_instance).
+
+    {found, svg, balon, figure_pn, figure_nama, nama_item, sumber_model,
+     jumlah_model_pemakai, jumlah_figure, jumlah_item} | {found:False, _err?}
+    """
+    pnu = (pn or "").strip().upper()
+    if not pnu:
+        return {"found": False, "_err": "input"}
+    res = _get_auto(_REVERSE_URL, {"t": "global", "k": pnu})
+    if "_err" in res:
+        return {"found": False, "_err": res["_err"]}
+    rows = [d for d in (res.get("data") or []) if isinstance(d, dict)]
+    figures: dict[str, dict] = {}
+    for d in rows:
+        fig = (d.get("partCode") or "").strip()
+        if fig and fig not in figures:
+            figures[fig] = d
+
+    cadangan = None       # figure ber-SVG tapi PN-nya tak terdeteksi (balon kosong)
+    for fig, d in list(figures.items())[:max_figures]:
+        rid, pid, plid = d.get("rootId"), d.get("partId"), d.get("partListId")
+        if not (rid and pid):
+            continue
+        r = _get_auto(_ATLAS_ITEM_URL, {
+            "id": plid or 0, "partId": pid, "parentId": rid, "rootId": rid,
+            "partCode": fig, "type": "model", "isSearch": "0"})
+        if "_err" in r:
+            continue
+        data = r.get("data") if isinstance(r.get("data"), dict) else {}
+        items = data.get("items") or []
+        svgs = [s for s in (data.get("d2s") or []) if isinstance(s, str)]
+        if not svgs:
+            continue
+        balon = nama_item = None
+        for p in items:
+            if _pn_sama(p.get("code"), pnu):
+                balon = p.get("ballNum")
+                nama_item = " ".join(str(p.get("name") or "").split())
+                break
+        hasil = {
+            "found": True, "part_number": pnu, "svg": svgs[0], "balon": balon,
+            "figure_pn": fig,
+            "figure_nama": " ".join(str(d.get("partName") or "").split()),
+            "nama_item": nama_item,
+            "sumber_model": " ".join(str(d.get("model") or "").split()),
+            "jumlah_model_pemakai": len(rows), "jumlah_figure": len(figures),
+            "jumlah_item": len(items),
+        }
+        if balon:
+            return hasil          # figure yang PN-nya benar-benar terdeteksi → utamakan
+        cadangan = cadangan or hasil
+    if cadangan:
+        return cadangan
+    return {"found": False, "part_number": pnu,
+            "jumlah_model_pemakai": len(rows), "jumlah_figure": len(figures)}
+
+
 def category_top(rangka: str) -> dict:
     """Daftar kategori/assembly TINGKAT-ATAS untuk 1 unit (1 panggilan + cache).
     Sukses → {found, frame_number, order_no, root_id, jumlah, kategori:[norm_cat...]}.

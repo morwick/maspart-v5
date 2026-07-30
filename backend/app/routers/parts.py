@@ -1,7 +1,10 @@
 """Router parts: pencarian Part Number + status/refresh index."""
 from __future__ import annotations
 
+import base64
 import re
+import threading
+import time
 from urllib.parse import urlparse
 
 import requests
@@ -28,7 +31,8 @@ from ..schemas import (
     PartPhotos,
     SearchResponse,
 )
-from ..services import accurate, catalog, compare, gudang, image_search, part_index, permissions, reservations, search_log, sims
+from ..services import (accurate, ai_export, catalog, compare, epc_bom, gudang, image_search,
+                        part_index, permissions, reservations, search_log, sims)
 from ..services.supabase_client import fetch_part_photos, get_user_gudang
 
 _MAX_IMAGE_BYTES = 15 * 1024 * 1024  # 15 MB
@@ -462,6 +466,87 @@ def compare_parts(
     if pn1.strip().upper() == pn2.strip().upper():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part Number tidak boleh sama.")
     return compare.compare(pn1, pn2)
+
+
+# ── Exploded view TANPA nomor rangka (jalur GLOBAL EPC) ─────────────────────
+# Terverifikasi 2026-07-30: `assembly_components_global` memakai
+# home/reverse/part?t=global + part/tree/item?type=model — sama sekali tak butuh
+# rangka. Dua konsekuensi yang JUJUR harus disampaikan ke user:
+#  1) LAMBAT: 10-60 dtk (PN umum dipakai belasan ribu model; WG9000361402 →
+#     17.185 model). Karena itu endpoint ini TIDAK dipanggil otomatis saat halaman
+#     dibuka — hanya saat user menekan tombol — dan hasilnya di-cache.
+#  2) LINTAS MODEL: figure yang terpilih memuat PN itu tapi dari model MANA PUN,
+#     bukan unit tertentu. Untuk unit spesifik, jalur per-VIN (rangka) tetap yang
+#     benar. Field `catatan` membawa peringatan ini ke UI.
+_EXPLODED_TTL = 24 * 3600     # figure EPC praktis statis
+_EXPLODED_MAX = 48            # ~100 KB/PNG → cap ±5 MB (RAM server 3,8 GB)
+_exploded_cache: "dict[str, dict]" = {}
+_exploded_lock = threading.Lock()
+
+
+@router.get("/exploded-figure")
+def exploded_figure_global(
+    pn: str = Query(..., min_length=3, description="Part Number (tanpa nomor rangka)."),
+    _user: dict = Depends(get_current_user),
+):
+    """Gambar exploded view untuk SATU PN TANPA nomor rangka.
+
+    ⚠️ Sengaja dipanggil ON-DEMAND (tombol), bukan saat halaman dibuka: bisa
+    memakan 10-60 detik pada panggilan pertama."""
+    key = re.sub(r"[^A-Z0-9]", "", (pn or "").upper())
+    if not key:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part Number kosong.")
+    with _exploded_lock:
+        c = _exploded_cache.get(key)
+        if c and (time.monotonic() - c["at"] < _EXPLODED_TTL):
+            return c["val"]
+
+    try:
+        # figure_global (BUKAN assembly_components_global): yang dicari adalah figure
+        # yang MEMUAT PN ini + nomor balonnya, bukan isi assembly-nya.
+        d = epc_bom.figure_global(pn.strip(), max_figures=3)
+    except Exception:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                            "EPC sedang tak bisa diakses. Coba lagi sebentar.")
+    if not d.get("found") or not d.get("svg"):
+        # Kegagalan TIDAK di-cache: bisa karena EPC ngadat sesaat.
+        return {"found": False, "part_number": pn.strip().upper(),
+                "alasan": ("Figure exploded view untuk PN ini tidak ditemukan di EPC "
+                           "(jalur lintas-model). Coba lewat nomor rangka unitnya.")}
+
+    balon = d.get("balon")
+    png = None
+    try:
+        png = ai_export.exploded_png(d["svg"], balon)
+    except Exception:
+        png = None
+    if not png:
+        return {"found": False, "part_number": pn.strip().upper(),
+                "alasan": "Berkas gambar figure gagal diunduh/dirender dari EPC."}
+
+    out = {
+        "found": True,
+        "part_number": pn.strip().upper(),
+        "svg": d.get("svg"),
+        "figure_pn": d.get("figure_pn"),
+        "figure_nama": d.get("figure_nama"),
+        "nama_item": d.get("nama_item"),
+        "balon": balon,
+        "jumlah_item": d.get("jumlah_item"),
+        "sumber_model": d.get("sumber_model"),
+        "jumlah_model_pemakai": d.get("jumlah_model_pemakai"),
+        "png_base64": base64.b64encode(png).decode("ascii"),
+        "catatan": (
+            "Gambar ini diambil lintas-model (figure EPC mana pun yang memuat PN ini)"
+            + (f", contoh model: {d.get('sumber_model')}" if d.get("sumber_model") else "")
+            + ". Untuk unit tertentu, gambar & PN pasti tetap harus lewat nomor rangka."
+        ),
+    }
+    with _exploded_lock:
+        if len(_exploded_cache) >= _EXPLODED_MAX:
+            _exploded_cache.pop(next(iter(_exploded_cache)), None)
+        _exploded_cache[key] = {"at": time.monotonic(), "val": out}
+    return out
 
 
 @router.get("/photos", response_model=PartPhotos)

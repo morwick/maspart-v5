@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import ImageLightbox from "@/components/ImageLightbox";
-import { ApiError, cekPartDiUnit, getAccurateStock, getPartExploded, getPartPhotos, getPartSpec, getBuyerLocations, partImageUrl, searchParts, type AccurateStock, type BuyerLocation, type CekUnitResult, type PartResult, type PartSpec } from "@/lib/api";
+import { ApiError, cekPartDiUnit, getAccurateStock, getPartExploded, getPartExplodedFigure, getPartPhotos, getPartSpec, getBuyerLocations, partImageUrl, searchParts, type AccurateStock, type BuyerLocation, type CekUnitResult, type PartExplodedFigure, type PartResult, type PartSpec } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { ensurePerms } from "@/lib/perms";
 import { addToCart, hasPrice, hasWeight } from "@/lib/cart";
@@ -33,6 +33,12 @@ export default function PartDetailPage() {
   const [isBuyer, setIsBuyer] = useState(false);
   const [buyerLocs, setBuyerLocs] = useState<BuyerLocation[]>([]);
   const [accStock, setAccStock] = useState<AccurateStock | null>(null);
+  // Exploded view TANPA nomor rangka. SENGAJA tidak dimuat saat halaman dibuka:
+  // panggilan pertama bisa 10-60 dtk (PN umum dipakai belasan ribu model), dan
+  // gambar hanya ditampilkan bila user memang meminta.
+  const [exploded, setExploded] = useState<PartExplodedFigure | null>(null);
+  const [explodedBusy, setExplodedBusy] = useState(false);
+  const [explodedErr, setExplodedErr] = useState<string | null>(null);
 
   useEffect(() => {
     const b = getUser()?.role === "pembeli";
@@ -146,6 +152,25 @@ export default function PartDetailPage() {
     const byLabel = buyerStock ? buyerLocs.find((l) => l.label === buyerStock.loc)?.key : undefined;
     return byLabel ?? getUser()?.gudang ?? null;
   }, [isBuyer, buyerLocs, buyerStock]);
+
+  async function loadExploded() {
+    if (explodedBusy || exploded) return;
+    const token = getToken();
+    if (!token) return router.replace("/login");
+    setExplodedBusy(true);
+    setExplodedErr(null);
+    try {
+      setExploded(await getPartExplodedFigure(token, pn));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearSession();
+        return router.replace("/login");
+      }
+      setExplodedErr(err instanceof Error ? err.message : "Gagal memuat exploded view.");
+    } finally {
+      setExplodedBusy(false);
+    }
+  }
 
   return (
     <AppShell
@@ -370,6 +395,80 @@ export default function PartDetailPage() {
                 {isBuyer && <CekUnitCard pn={main.part_number} />}
               </section>
             </div>
+
+            {/* Exploded view EPC tanpa nomor rangka — dimuat HANYA saat diminta */}
+            <section className="surface surface-pad mt-5">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <h2 style={{ fontSize: 13, fontWeight: 600 }}>Exploded View</h2>
+                <span className="pill">sumber: EPC</span>
+                {exploded?.found && exploded.balon != null && (
+                  <span className="pill">balon {exploded.balon}</span>
+                )}
+                {!exploded && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost ml-auto"
+                    onClick={loadExploded}
+                    disabled={explodedBusy}
+                    style={{ fontSize: 12 }}
+                  >
+                    {explodedBusy ? "memuat… (bisa 1 menit)" : "Tampilkan exploded view"}
+                  </button>
+                )}
+              </div>
+
+              {!exploded && !explodedBusy && !explodedErr && (
+                <div style={{ fontSize: 12, color: "var(--ink-500)", lineHeight: 1.6 }}>
+                  Gambar rakitan resmi EPC yang memuat part ini, tanpa perlu nomor rangka.
+                  Tidak dimuat otomatis karena pencarian pertamanya bisa memakan sampai
+                  satu menit.
+                </div>
+              )}
+              {explodedBusy && (
+                <div className="img-ph" style={{ height: 200 }}>
+                  mencari figure di EPC…
+                </div>
+              )}
+              {explodedErr && (
+                <div style={{ fontSize: 12, color: "var(--danger, #dc2626)" }}>{explodedErr}</div>
+              )}
+              {exploded && !exploded.found && (
+                <div style={{ fontSize: 12, color: "var(--ink-500)", lineHeight: 1.6 }}>
+                  {exploded.alasan || "Figure exploded view tidak ditemukan untuk part ini."}
+                </div>
+              )}
+              {exploded?.found && exploded.png_base64 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setLightbox(`data:image/png;base64,${exploded.png_base64}`)}
+                    className="w-full overflow-hidden"
+                    style={{ cursor: "zoom-in", borderRadius: 8, border: "1px solid var(--ink-200)", background: "#fff" }}
+                    title="Klik untuk perbesar"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`data:image/png;base64,${exploded.png_base64}`}
+                      alt={`Exploded view ${main.part_number}`}
+                      className="w-full"
+                      style={{ objectFit: "contain", maxHeight: 520 }}
+                    />
+                  </button>
+                  <div className="mt-2" style={{ fontSize: 12, color: "var(--ink-600)", lineHeight: 1.6 }}>
+                    {exploded.figure_nama && (
+                      <div>
+                        Figure: <b>{exploded.figure_nama}</b>
+                        {exploded.figure_pn ? ` (${exploded.figure_pn})` : ""}
+                        {exploded.jumlah_item ? ` · ${exploded.jumlah_item} part di gambar` : ""}
+                      </div>
+                    )}
+                    {exploded.catatan && (
+                      <div className="mt-1" style={{ color: "var(--ink-500)" }}>⚠️ {exploded.catatan}</div>
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
           </>
         )}
       </div>

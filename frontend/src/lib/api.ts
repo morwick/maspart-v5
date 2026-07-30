@@ -2239,6 +2239,42 @@ export async function resolveAiFeedback(
   return res.json();
 }
 
+/** Exploded view sebuah PN TANPA nomor rangka (jalur global EPC). */
+export type PartExplodedFigure = {
+  found: boolean;
+  part_number: string;
+  /** PNG base64 — balon PN ini disorot kuning bila nomornya terdeteksi. */
+  png_base64?: string;
+  svg?: string;
+  figure_pn?: string;
+  figure_nama?: string;
+  nama_item?: string;
+  balon?: number | string | null;
+  jumlah_item?: number;
+  sumber_model?: string;
+  jumlah_model_pemakai?: number;
+  /** Peringatan lintas-model — WAJIB ditampilkan apa adanya. */
+  catatan?: string;
+  alasan?: string;
+};
+
+/**
+ * Ambil exploded view untuk satu PN tanpa nomor rangka.
+ * ⚠️ LAMBAT (10-60 dtk, pernah 105 dtk) pada panggilan pertama karena PN umum
+ * dipakai belasan ribu model; hasilnya di-cache server 24 jam. Karena itu HANYA
+ * dipanggil saat user menekan tombol, jangan saat halaman dibuka.
+ */
+export async function getPartExplodedFigure(
+  token: string,
+  pn: string,
+): Promise<PartExplodedFigure> {
+  const res = await fetch(`${API_BASE}/api/parts/exploded-figure?pn=${encodeURIComponent(pn)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 // Chat dengan LAMPIRAN EXCEL: server membaca kolomnya, asisten bisa mengisi
 // stok/nama/harga lalu mengeluarkan Excel baru. Balasan memuat `sheet_id` yang
 // harus dikirim ulang di giliran berikutnya agar file tetap terlampir.
