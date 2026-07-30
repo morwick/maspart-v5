@@ -73,7 +73,7 @@ def _pakai_require_ai(route) -> bool:
 
 
 def test_semua_jalur_pemakaian_asisten_dijaga_izin():
-    dijaga = {"ai_chat", "ai_chat_image", "ai_chat_sheet", "export_ai_excel",
+    dijaga = {"ai_chat", "ai_chat_sheet", "export_ai_excel",
               "export_banding_rangka"}
     ketemu = {getattr(r, "name", ""): _pakai_require_ai(r) for r in ai_router.router.routes
               if getattr(r, "name", "") in dijaga}

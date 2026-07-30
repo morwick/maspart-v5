@@ -1387,10 +1387,11 @@ def _foto_kecilkan(data: bytes) -> bytes:
 def _t_foto_resmi_part(args: dict, user: dict) -> dict:
     """FOTO RESMI SIMS sebuah/beberapa PN → tampil INLINE di jawaban.
 
-    Gunanya: model ini TIDAK bisa melihat foto. Verifikasi visual karena itu
-    diserahkan ke USER — asisten menyodorkan foto resmi kandidat, user yang
-    memutuskan cocok/tidak dengan barang di tangannya. Ini yang mengubah dugaan
-    Cari-by-Foto (skor kemiripan tak bisa dipercaya) menjadi kepastian.
+    Gunanya: model ini TIDAK bisa melihat foto, jadi verifikasi visual diserahkan
+    ke USER — asisten menyodorkan foto resmi PN yang dibahas, user yang memutuskan
+    itu benar barang yang dia maksud atau bukan. Arahnya PN → foto (deterministik),
+    BUKAN foto → PN (jalur itu dibuang dari asisten 2026-07-30; pengenalan part
+    dari foto ada di menu terpisah 'Cari by Foto').
     """
     raw = args.get("part_number") or args.get("part_numbers") or ""
     if isinstance(raw, str):
@@ -1459,12 +1460,11 @@ def _t_foto_resmi_part(args: dict, user: dict) -> dict:
         "gambar": gambar,
         "catatan": (
             "Foto resmi SIMS SIAP — tampil OTOMATIS (inline) di bawah jawabanmu; "
-            "⛔ JANGAN buat link/gambar/URL sendiri. TUGASMU: minta user "
-            "MEMBANDINGKAN foto ini dengan barang di tangannya lalu memberi tahu mana "
-            "yang cocok — kamu tidak bisa melihat foto, jadi keputusan kecocokan ADA "
-            "DI USER. Sebut PN tiap foto, dan tegaskan PN belum final sampai user "
-            "mengonfirmasi. Catatan: sebagian 'foto' SIMS berupa SCAN DOKUMEN teknis "
-            "(mis. notifikasi perubahan part) — itu tetap berguna, sebutkan bila muncul."
+            "⛔ JANGAN buat link/gambar/URL sendiri. Sebut PN tiap foto, dan minta user "
+            "memastikan itu memang barang yang dia maksud — kamu tidak bisa melihat "
+            "foto, jadi keputusan kecocokan ADA DI USER. Catatan: sebagian 'foto' SIMS "
+            "berupa SCAN DOKUMEN teknis (mis. notifikasi perubahan part) — itu tetap "
+            "berguna, sebutkan bila muncul."
         ),
     }
 

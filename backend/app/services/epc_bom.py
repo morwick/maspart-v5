@@ -94,31 +94,6 @@ def _frame(rangka: str) -> str:
     return n[-8:] if len(n) >= 11 else n
 
 
-# VIN penuh (17 char) atau frame number Sinotruk (2 huruf + 6 digit, mis. 'RT108820').
-_TEKS_VIN_RE = re.compile(r"[A-HJ-NPR-Z0-9]{17}")
-_TEKS_FRAME_RE = re.compile(r"[A-Z]{2}[0-9]{6}")
-
-
-def frame_dari_teks(teks: str) -> str:
-    """Ambil frame number dari teks bebas (mis. pesan chat "cari part ini untuk
-    unit LZZ5DMSDXRT108820"). Mengembalikan '' bila tak ada yang meyakinkan.
-
-    Dipakai jalur FOTO: bila user menyebut rangka, kandidat Cari-by-Foto disaring
-    ke BOM unit itu. Ambil kecocokan TERAKHIR — pada percakapan, rangka yang
-    disebut paling baru yang relevan.
-    """
-    t = re.sub(r"[^A-Z0-9]+", " ", (teks or "").upper())
-    kandidat = [m.group(0) for m in _TEKS_VIN_RE.finditer(t)]
-    # VIN asli campur huruf+angka; tolak token 17 char yang cuma angka/huruf saja
-    # (mis. deretan kode Excel) agar tidak memicu fetch EPC sia-sia.
-    kandidat = [k for k in kandidat
-                if sum(c.isdigit() for c in k) >= 4 and sum(c.isalpha() for c in k) >= 2]
-    if kandidat:
-        return _frame(kandidat[-1])
-    frames = [m.group(0) for m in _TEKS_FRAME_RE.finditer(t)]
-    return frames[-1] if frames else ""
-
-
 def _token() -> str:
     """Token EPC dari data/epc_token.txt (boleh isi 'Bearer xxx' atau cuma 'xxx').
     '' bila file tak ada/kosong."""

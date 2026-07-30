@@ -58,13 +58,6 @@ _AGG_STRONG_TH = 0.70
 _AGG_BOOST_PER_MATCH = 0.04
 _AGG_BOOST_CAP = 0.10
 
-# Jendela kandidat saat hasil DISARING ke daftar PN tertentu (BOM satu unit).
-# Harus jauh lebih lebar dari top_k*MULT: part yang benar bisa duduk di peringkat
-# puluhan pada galeri penuh, dan baru naik ke atas SETELAH disaring.
-# Ukuran nyata (uji foto lapangan 2026-07-30, galeri 37.910 embedding): PN benar
-# WG9725550198 ada di peringkat #58 global (0,441) — top-1 global justru SALAH
-# (peredam kejut, 0,555). Setelah disaring ke 3.966 baris BOM unit → jadi #2.
-_RESTRICT_FETCH_MIN = 6000
 
 # ── Model singleton ──────────────────────────────────────────────────
 _model_lock = threading.Lock()
@@ -492,45 +485,12 @@ def _fetch_candidates(query_vec: list[float], distance_threshold: float, fetch_c
 
 
 # ── Search (agregasi per PN — identik image_search.py) ───────────────
-def pn_key(pn: str) -> str:
-    """Kunci normalisasi PN untuk mencocokkan antar-sumber (galeri foto ↔ BOM EPC):
-    huruf besar, buang semua non-alfanumerik."""
-    return re.sub(r"[^A-Z0-9]", "", (pn or "").upper())
-
-
-def pn_keys(pn: str) -> set[str]:
-    """Semua kunci yang sah untuk satu PN: bentuk UTUH dan bentuk DASAR (sebelum
-    '/'). Katalog memakai suffix varian ('…004/2') sedangkan sumber lain memakai
-    PN dasar, padahal part FISIKNYA sama — jadi keduanya harus dianggap cocok."""
-    p = (pn or "").upper().strip()
-    if not p:
-        return set()
-    return {k for k in (pn_key(p), pn_key(p.split("/", 1)[0])) if k}
-
-
 def search_by_image(
     image_bytes: bytes,
     top_k: int = 12,
     threshold: float = 0.30,
     use_tta: bool = False,
-    restrict_pns: set[str] | None = None,
-    sisa_global: int = 0,
 ) -> list[dict]:
-    """Cari part termirip dari sebuah foto.
-
-    `restrict_pns`: bila diisi (kumpulan kunci dari `pn_keys()`), hasil DISARING
-    ke PN itu saja — dipakai untuk membatasi kandidat ke BOM satu unit bila user
-    menyebut nomor rangka. Ini lever akurasi terbesar yang terukur: skor cosine
-    DINOv2 di rentang 0,40–0,60 TIDAK membedakan benar/salah, sehingga part asing
-    yang kebetulan mirip bisa mengalahkan part yang benar. Menyaring dulu ke part
-    yang MEMANG terpasang di unit itu membuang seluruh kelas kesalahan tersebut.
-
-    `sisa_global`: jumlah kandidat DI LUAR restrict_pns yang tetap disertakan
-    (ditandai `di_bom_unit: False`). ⚠️ WAJIB > 0 pada jalur nyata: Loading List EPC
-    itu DATAR — part servis yang tersembunyi di dalam assembly TIDAK muncul di sana,
-    jadi penyaringan keras bisa membuang part yang sebetulnya milik unit itu (belum
-    lagi part aftermarket). Satu kali hitung embedding untuk kedua kelompok.
-    """
     # Butuh galeri lokal (CSV) ATAU Supabase terkonfigurasi.
     if not local_index_available() and not get_settings().supabase_configured:
         return []
@@ -539,21 +499,8 @@ def search_by_image(
 
     distance_threshold = max(0.0, min(1.0 - threshold, 2.0))
     fetch_count = max(int(top_k) * _AGG_FETCH_MULT, _AGG_FETCH_MIN)
-    if restrict_pns:
-        fetch_count = max(fetch_count, _RESTRICT_FETCH_MIN)
 
     rows = _fetch_candidates(query_vec, distance_threshold, fetch_count)
-    if restrict_pns:
-        luar = [r for r in rows
-                if not (pn_keys(r.get("part_number") or "") & restrict_pns)]
-        rows = [r for r in rows
-                if pn_keys(r.get("part_number") or "") & restrict_pns]
-        hasil = [dict(a, di_bom_unit=True)
-                 for a in _agregasi(rows, top_k, threshold)]
-        if sisa_global > 0:
-            hasil += [dict(a, di_bom_unit=False)
-                      for a in _agregasi(luar, sisa_global, threshold)]
-        return hasil
     return _agregasi(rows, top_k, threshold)
 
 

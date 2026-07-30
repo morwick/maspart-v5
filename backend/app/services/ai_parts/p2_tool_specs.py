@@ -405,12 +405,11 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "foto_resmi_part",
                 "description": (
-                    "FOTO RESMI SIMS untuk 1–3 Part Number → tampil INLINE di jawaban "
-                    "supaya USER membandingkannya dengan barang di tangannya. WAJIB "
-                    "dipakai untuk MEMASTIKAN dugaan dari foto yang diunggah user "
-                    "(Cari-by-Foto): kamu tidak bisa melihat gambar, jadi keputusan "
-                    "cocok/tidak ada di user — skor kemiripan TIDAK bisa dijadikan "
-                    "bukti. Berguna juga untuk 'PN X bentuknya seperti apa'. "
+                    "FOTO RESMI SIMS untuk 1–3 Part Number → tampil INLINE di jawaban, "
+                    "supaya USER bisa memastikan bentuk barangnya sendiri. Pakai untuk "
+                    "'PN X bentuknya seperti apa', 'perlihatkan fotonya', atau saat user "
+                    "ragu part yang kamu sebut itu benar barang yang dia maksud — kamu "
+                    "tidak bisa melihat gambar, jadi keputusan cocok/tidak ada di user. "
                     "⛔ Bukan sumber stok/harga (pakai cari_part/detail_part)."
                 ),
                 "parameters": {
