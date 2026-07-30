@@ -8,6 +8,7 @@ import Markdown from "@/components/Markdown";
 import {
   ApiError,
   aiChat,
+  aiChatImage,
   aiChatSheet,
   aiChatStream,
   downloadBlob,
@@ -21,12 +22,16 @@ import {
   type AIChatTurn,
   type AIExcelExport,
   type AIExplodedImage,
+  type AIPhotoCandidate,
   type AISheetSummary,
 } from "@/lib/api";
 import { clearSession, getToken } from "@/lib/auth";
 
 type Msg = AIChatTurn & {
   tools?: string[];
+  photo?: string;   // preview blob foto yang dikirim user di pesan ini
+  photoCandidates?: AIPhotoCandidate[]; // kandidat Cari-by-Foto + tanda BOM unit
+  photoUnit?: { frame: string; n_part_bom: number };
   sheetName?: string;  // nama file Excel yang dilampirkan user di pesan ini
   sheet?: AISheetSummary; // ringkasan kolom hasil deteksi server
   repairkitModels?: string[];
@@ -153,6 +158,8 @@ function Icon({ d, size = 16, sw = 1.8 }: { d: string; size?: number; sw?: numbe
 }
 const IC = {
   send: "M22 2 11 13 M22 2 15 22 11 13 2 9 22 2",
+  camera:
+    "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z M16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0z",
   trash:
     "M3 6h18 M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6",
   copy:
@@ -235,6 +242,7 @@ export default function AsistenPage() {
   const dragDepth = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const sheetRef = useRef<HTMLInputElement>(null);
   const firstSave = useRef(true);
   // Menempel di bawah atau tidak. Jawaban asisten butuh 14-46 dtk dan status
@@ -425,6 +433,65 @@ export default function AsistenPage() {
     abortRef.current?.abort();
   }
 
+  // Kirim FOTO part ke asisten. Server mengenali foto via Cari-by-Foto (DINOv2),
+  // dan bila pesan menyebut NOMOR RANGKA kandidatnya disaring ke BOM unit itu —
+  // ini yang membuat akurasinya melonjak, jadi riwayat dikirim apa adanya.
+  // Model teks tak bisa 'melihat' foto: asisten akan menampilkan foto RESMI
+  // kandidat dan meminta user memastikan sendiri mana yang cocok.
+  async function sendWithPhoto(file: File) {
+    if (busy) return;
+    const token = getToken();
+    if (!token) return router.replace("/login");
+    if (!file.type.startsWith("image/")) {
+      setError("File harus berupa gambar.");
+      return;
+    }
+    setError(null);
+    const caption = input.trim();
+    const userText = caption || "Tolong kenali part di foto ini.";
+    const preview = URL.createObjectURL(file);
+    const next: Msg[] = [
+      ...msgs,
+      { role: "user", content: userText, photo: preview, at: Date.now() },
+    ];
+    setMsgs(next);
+    setInput("");
+    resetTextarea();
+    setBusy(true);
+    try {
+      const payload: AIChatTurn[] = next.map((m) => ({ role: m.role, content: m.content }));
+      const res = await aiChatImage(token, payload, file, getConversationId());
+      setMsgs((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: res.reply || "(tidak ada jawaban)",
+          tools: res.tools_used,
+          photoCandidates: res.photo_candidates,
+          photoUnit: res.photo_unit,
+          repairkitModels: res.repairkit_models,
+          bandingExports: res.banding_exports,
+          excelExports: res.excel_exports,
+          explodedImages: res.exploded_images,
+          at: Date.now(),
+        },
+      ]);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearSession();
+        return router.replace("/login");
+      }
+      setError(err instanceof Error ? err.message : "Gagal mengirim foto.");
+      // Kembalikan teks agar user tak perlu menulis ulang.
+      setInput(caption);
+      setMsgs((m) => m.slice(0, -1));
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+      taRef.current?.focus();
+    }
+  }
+
   // Unggah Excel: server membaca kolomnya & menyimpan sheet (TTL 2 jam) → sheet_id
   // dipakai giliran berikutnya ("isikan stoknya di kolom D"). Dipanggil dari send()
   // saat user menekan Kirim — memilih file hanya MELAMPIRKAN, tidak mengirim.
@@ -548,6 +615,7 @@ export default function AsistenPage() {
   }
 
   // ── Seret-lepas file ke area chat ──────────────────────────────────────────
+  // Gambar → langsung dikirim sbg foto part (perilaku tombol kamera).
   // Excel .xlsx/.xlsm → hanya DILAMPIRKAN (perilaku tombol klip) — user mengetik
   // maunya dulu, baru tekan Kirim.
   function dragHasFiles(e: React.DragEvent) {
@@ -583,13 +651,17 @@ export default function AsistenPage() {
     if (busy || available === false) return;
     const f = e.dataTransfer.files?.[0];
     if (!f) return;
+    if (f.type.startsWith("image/")) {
+      sendWithPhoto(f);
+      return;
+    }
     if (/\.(xlsx|xlsm)$/i.test(f.name)) {
       setError(null);
       setPendingSheet(f);
       taRef.current?.focus();
       return;
     }
-    setError("File tidak didukung — seret file Excel .xlsx atau .xlsm.");
+    setError("File tidak didukung — seret foto part (gambar) atau Excel .xlsx/.xlsm.");
   }
 
   return (
@@ -682,6 +754,7 @@ export default function AsistenPage() {
                   Lepaskan file di sini
                 </div>
                 <div style={{ fontSize: 12, color: "var(--ink-500)", lineHeight: 1.5 }}>
+                  Foto part langsung dikenali — sebut nomor rangka agar akurat ·<br />
                   Excel .xlsx/.xlsm terlampir dulu, kirim setelah mengetik perintah
                 </div>
               </div>
@@ -753,7 +826,7 @@ export default function AsistenPage() {
                       }}
                     >
                       Cek stok per gudang, harga, part per unit (EPC per-VIN), kode kesalahan,
-                      hingga repair kit — semua dari data live.
+                      repair kit, hingga pengenalan part dari <b>foto</b> — semua dari data live.
                     </div>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
@@ -881,6 +954,26 @@ export default function AsistenPage() {
             )}
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
               <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) sendWithPhoto(f);
+                }}
+              />
+              <button
+                className="btn btn-ghost"
+                title="Cari part dari foto — sebut nomor rangka (VIN) di pesan agar akurat"
+                aria-label="Kirim foto part"
+                onClick={() => fileRef.current?.click()}
+                disabled={busy || available === false}
+                style={{ padding: "0 10px", color: "var(--ink-600)" }}
+              >
+                <Icon d={IC.camera} size={19} />
+              </button>
+              <input
                 ref={sheetRef}
                 type="file"
                 accept=".xlsx,.xlsm"
@@ -991,7 +1084,7 @@ export default function AsistenPage() {
               <span className="chat-kbd-hint">
                 <span className="kbd">Enter</span> kirim · <span className="kbd">Shift+Enter</span> baris baru
               </span>
-              <span>Seret file Excel ke area chat untuk melampirkan.</span>
+              <span>Seret foto part atau Excel ke area chat untuk melampirkan.</span>
               <span>Jawaban part paling akurat bila menyertakan nomor rangka (VIN).</span>
             </div>
           </div>
@@ -1006,6 +1099,72 @@ export default function AsistenPage() {
 // /api/ai/excel/{id} (butuh auth) → fetch blob → objectURL utk <img>. Klik → lightbox.
 // Batas selaras dgn backend (_MAX_EXPLODED_FIGURES).
 const MAX_EXPLODED = 6;
+/**
+ * Kandidat hasil Cari-by-Foto, apa adanya + jujur soal keterbatasannya.
+ * Skor kemiripan DINOv2 di rentang 40–60% TIDAK membedakan benar/salah (terukur:
+ * part benar 44%, part salah 56%), jadi skor ditampilkan sebagai INFO — bukan
+ * peringkat yang boleh dipercaya. Tanda "di BOM unit" jauh lebih berarti.
+ */
+function AiPhotoCandidates({
+  cands,
+  unit,
+}: {
+  cands?: AIPhotoCandidate[];
+  unit?: { frame: string; n_part_bom: number };
+}) {
+  const list = (cands || []).slice(0, 9);
+  if (list.length === 0) return null;
+  const disaring = list.some((c) => c.di_bom_unit === true);
+  return (
+    <div style={{ marginTop: 8, fontSize: 12 }}>
+      <div style={{ color: "var(--ink-500)", marginBottom: 5 }}>
+        Kandidat dari foto
+        {unit?.frame ? (
+          <>
+            {" "}— disaring ke BOM unit <b>{unit.frame}</b>
+            {unit.n_part_bom ? ` (${unit.n_part_bom} part)` : ""}
+          </>
+        ) : (
+          " — sebut nomor rangka (VIN) agar bisa disaring ke unit Anda"
+        )}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {list.map((c) => {
+          const luar = disaring && c.di_bom_unit === false;
+          return (
+            <span
+              key={c.part_number}
+              title={
+                (c.part_name || "") +
+                (luar
+                  ? " — di luar BOM unit; belum tentu salah (part di dalam assembly tak tercatat di Loading List)"
+                  : "")
+              }
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                padding: "3px 8px",
+                borderRadius: 999,
+                border: "1px solid var(--line)",
+                background: luar ? "transparent" : "var(--surface-2)",
+                opacity: luar ? 0.72 : 1,
+                fontFamily: "var(--font-mono, monospace)",
+              }}
+            >
+              {c.di_bom_unit === true && <span title="ada di BOM unit ini">✓</span>}
+              {c.part_number}
+              <span style={{ color: "var(--ink-500)", fontFamily: "inherit" }}>
+                {Math.round((c.similarity || 0) * 100)}%
+              </span>
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AiExplodedImages({ images }: { images?: AIExplodedImage[] }) {
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [err, setErr] = useState(false);
@@ -1594,6 +1753,19 @@ function Bubble({
             boxShadow: "var(--shadow-1)",
           }}
         >
+          {m.photo && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={m.photo}
+              alt="foto part"
+              onError={(e) => {
+                // URL blob foto bisa mati setelah refresh penuh — sembunyikan
+                // agar tidak tampil ikon gambar rusak.
+                (e.currentTarget as HTMLImageElement).style.display = "none";
+              }}
+              style={{ maxWidth: 200, borderRadius: 10, marginBottom: m.content ? 8 : 0, display: "block" }}
+            />
+          )}
           {m.sheetName && (
             <div
               style={{
@@ -1698,6 +1870,9 @@ function Bubble({
         ))}
         {/* Gambar exploded view → tampil BESAR & inline. Thumbnail foto part
             (PartThumbs) tetap dimatikan atas permintaan pemilik (2026-07-08). */}
+        {m.photoCandidates && m.photoCandidates.length > 0 && (
+          <AiPhotoCandidates cands={m.photoCandidates} unit={m.photoUnit} />
+        )}
         {m.explodedImages && m.explodedImages.length > 0 && (
           <AiExplodedImages images={m.explodedImages} />
         )}
