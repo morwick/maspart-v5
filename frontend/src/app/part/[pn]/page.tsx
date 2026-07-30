@@ -412,7 +412,7 @@ export default function PartDetailPage() {
                     disabled={explodedBusy}
                     style={{ fontSize: 12 }}
                   >
-                    {explodedBusy ? "memuat… (bisa 1 menit)" : "Tampilkan exploded view"}
+                    {explodedBusy ? "memuat… (1–2 menit)" : "Tampilkan exploded view"}
                   </button>
                 )}
               </div>
@@ -420,13 +420,14 @@ export default function PartDetailPage() {
               {!exploded && !explodedBusy && !explodedErr && (
                 <div style={{ fontSize: 12, color: "var(--ink-500)", lineHeight: 1.6 }}>
                   Gambar rakitan resmi EPC yang memuat part ini, tanpa perlu nomor rangka.
-                  Tidak dimuat otomatis karena pencarian pertamanya bisa memakan sampai
-                  satu menit.
+                  Tidak dimuat otomatis karena pencarian pertamanya bisa memakan 1–2 menit
+                  (terukur 94 detik untuk part yang dipakai belasan ribu model). Sesudah itu
+                  tersimpan di server 24 jam, jadi pembukaan berikutnya seketika.
                 </div>
               )}
               {explodedBusy && (
                 <div className="img-ph" style={{ height: 200 }}>
-                  mencari figure di EPC…
+                  mencari figure di EPC… (1–2 menit, jangan tutup halaman)
                 </div>
               )}
               {explodedErr && (
