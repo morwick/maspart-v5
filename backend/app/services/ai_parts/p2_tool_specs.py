@@ -405,11 +405,14 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "foto_resmi_part",
                 "description": (
-                    "FOTO RESMI SIMS untuk 1–3 Part Number → tampil INLINE di jawaban, "
-                    "supaya USER bisa memastikan bentuk barangnya sendiri. Pakai untuk "
-                    "'PN X bentuknya seperti apa', 'perlihatkan fotonya', atau saat user "
-                    "ragu part yang kamu sebut itu benar barang yang dia maksud — kamu "
-                    "tidak bisa melihat gambar, jadi keputusan cocok/tidak ada di user. "
+                    "FOTO RESMI SIMS untuk 1–3 Part Number → tampil INLINE di jawaban. "
+                    "⛔ HANYA saat user MEMINTA foto/gambar secara eksplisit — mis. "
+                    "'perlihatkan/tampilkan fotonya', 'ada fotonya?', 'PN X bentuknya "
+                    "seperti apa', 'kirim gambar part ini'. Foto TIDAK auto-nempel di "
+                    "tiap cek part: ⛔ JANGAN memanggil tool ini atas inisiatif sendiri "
+                    "saat menyebut PN, menyajikan hasil cari_part/detail_part, atau saat "
+                    "kamu merasa user perlu memastikan bentuknya — TUNGGU user meminta. "
+                    "⛔ Jangan pula menawarkannya berulang di akhir jawaban. "
                     "⛔ Bukan sumber stok/harga (pakai cari_part/detail_part)."
                 ),
                 "parameters": {

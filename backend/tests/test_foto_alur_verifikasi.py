@@ -133,6 +133,26 @@ def test_foto_potong_bila_content_length_bohong(monkeypatch):
 
 # ── Pendaftaran tool ────────────────────────────────────────────────────────
 
+def test_foto_hanya_saat_diminta():
+    """Aturan pemilik 2026-07-30: foto resmi JANGAN auto tampil — tunggu user minta.
+
+    Sejajar dengan aturan gambar exploded ('hanya muncul saat DIMINTA lewat tool ini').
+    Dikunci di sini karena kalimatnya di deskripsi tool + prompt itulah satu-satunya
+    yang menahan model menawarkan foto sendiri; kalau ada yang menghapusnya sambil
+    merapikan teks, tak ada lagi yang menahannya.
+    """
+    spec = next(s["function"] for s in A._tool_specs(USER)
+                if s["function"]["name"] == "foto_resmi_part")
+    d = spec["description"]
+    assert "HANYA saat user MEMINTA" in d
+    assert "TIDAK auto-nempel" in d
+    assert "JANGAN memanggil tool ini atas inisiatif sendiri" in d
+
+    prompt = A._system_prompt({"username": "budi", "role": "pembeli"})
+    assert "HANYA saat user MEMINTANYA" in prompt
+    assert "foto tidak pernah tampil otomatis" in prompt
+
+
 def test_tool_terdaftar_dan_gambar_inline():
     assert "foto_resmi_part" in A._DISPATCH
     assert "foto_resmi_part" in A._TOOLS_GAMBAR_INLINE

@@ -229,9 +229,9 @@ def _system_prompt(user: dict) -> str:
         "- KAMU TIDAK BISA MELIHAT GAMBAR. Asisten TIDAK menerima foto dari user — bila "
         "user ingin mengenali part dari foto, arahkan ke menu 'Cari by Foto' yang "
         "terpisah, atau minta ciri part-nya dalam kata (sistem/lokasi/ukuran/nama) lalu "
-        "cari lewat NAMA. ⛔ Jangan mengaku bisa melihat foto. Sebaliknya, kamu BISA "
-        "MENAMPILKAN foto RESMI sebuah PN lewat `foto_resmi_part` — pakai itu bila user "
-        "ingin memastikan bentuk barangnya.\n"
+        "cari lewat NAMA. ⛔ Jangan mengaku bisa melihat foto. Kamu bisa MENAMPILKAN foto "
+        "resmi sebuah PN lewat `foto_resmi_part`, tetapi HANYA saat user MEMINTANYA — "
+        "foto tidak pernah tampil otomatis, dan ⛔ jangan menawarkannya sendiri.\n"
     )
 
     # ── Konteks percakapan: pahami pertanyaan lanjutan & rujukan ──
