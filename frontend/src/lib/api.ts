@@ -1958,13 +1958,6 @@ export type AIPhotoCandidate = {
   part_name: string;
   similarity: number;
   sims_url: string;
-  /**
-   * true  = PN ini ADA di BOM pabrik unit yang disebut user (kandidat kuat).
-   * false = di luar BOM — belum tentu salah: Loading List EPC datar, part di dalam
-   *         assembly tak tercatat di sana; bisa juga part aftermarket.
-   * null/undefined = kandidat tidak disaring (user belum menyebut nomor rangka).
-   */
-  di_bom_unit?: boolean | null;
 };
 export type AIBandingExport = {
   rangka_1: string;
@@ -1990,8 +1983,6 @@ export type AIChatResult = {
   reply: string;
   tools_used: string[];
   photo_candidates?: AIPhotoCandidate[];
-  /** Unit yang dipakai menyaring kandidat foto (frame + jumlah part BOM-nya). */
-  photo_unit?: { frame: string; n_part_bom: number };
   /** Model transmisi yg dibahas → tampilkan tombol unduh Excel repair kit. */
   repairkit_models?: string[];
   /** Perbandingan rangka → kartu unduh Excel hasil perbandingan. */
@@ -2244,29 +2235,6 @@ export async function resolveAiFeedback(
     `${API_BASE}/api/ai/feedback/${id}/resolve?resolved=${resolved}`,
     { method: "POST", headers: { Authorization: `Bearer ${token}` } },
   );
-  if (!res.ok) throw new ApiError(res.status, await parseError(res));
-  return res.json();
-}
-
-// Chat dengan FOTO part: server mengenali foto via Cari-by-Foto (DINOv2) lalu
-// menyuntikkan kandidat PN ke asisten. Bila pesan user menyebut nomor rangka,
-// kandidat DISARING ke BOM unit itu (akurasi jauh naik) — jadi kirimkan riwayat
-// apa adanya, di situlah nomor rangkanya terbaca.
-export async function aiChatImage(
-  token: string,
-  messages: AIChatTurn[],
-  file: File,
-  conversationId?: string,
-): Promise<AIChatResult> {
-  const form = new FormData();
-  form.append("messages", JSON.stringify(messages));
-  form.append("file", file);
-  if (conversationId) form.append("conversation_id", conversationId);
-  const res = await fetch(`${API_BASE}/api/ai/chat-image`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: form,
-  });
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
 }
