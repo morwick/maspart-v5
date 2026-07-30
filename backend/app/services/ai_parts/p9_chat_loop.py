@@ -531,6 +531,62 @@ _MAX_EMPTY_RETRIES = 2
 # SATU daftar untuk semua: sebelumnya logikanya tersebar di dua cabang elif
 # _capture_meta dan `cari_pengetahuan` terlewat — gambar di-stash lalu hilang
 # diam-diam. Menambah tool bergambar baru = tambahkan namanya DI SINI saja.
+# ── tanya_user: pagar anti ping-pong ────────────────────────────────────────
+# Kunci = username|conversation_id (bukan username saja: user bisa buka 2 tab dan
+# tab kedua tak boleh ikut kena pagar tab pertama). Best-effort di memori: tanpa
+# conversation_id pagar ini dilewati, dan hanya pagar STRUKTURAL (satu kartu per
+# giliran) yang berlaku.
+_TANYA_TERAKHIR: "dict[str, float]" = {}
+_TANYA_GUARD_TTL = 15 * 60.0
+_TANYA_GUARD_MAKS = 500          # pagar RAM (dict kecil, cuma timestamp)
+_TANYA_LANJUT_NOTE = (
+    "[SISTEM] Kamu BARU SAJA bertanya ke user di giliran sebelumnya, jadi kartu "
+    "pertanyaan kali ini TIDAK ditampilkan. Jangan bertanya lagi sekarang: "
+    "lanjutkan bekerja dengan ASUMSI paling wajar (pakai tool bila perlu) dan "
+    "SEBUTKAN asumsimu di jawaban supaya user bisa mengoreksi."
+)
+
+
+def _tanya_kunci(user: dict, conversation_id: str) -> str:
+    cid = (conversation_id or "").strip()
+    return f"{user.get('username') or ''}|{cid}" if cid else ""
+
+
+def _tanya_baru_saja(kunci: str) -> bool:
+    """True bila percakapan ini SUDAH bertanya di giliran sebelumnya."""
+    if not kunci:
+        return False
+    now = time.monotonic()
+    for k in [k for k, t in _TANYA_TERAKHIR.items() if now - t > _TANYA_GUARD_TTL]:
+        _TANYA_TERAKHIR.pop(k, None)      # buang yang kedaluwarsa dulu…
+    return kunci in _TANYA_TERAKHIR       # …jadi sisa entri = "baru saja bertanya"
+
+
+def _tanya_catat(kunci: str) -> None:
+    if not kunci:
+        return
+    if len(_TANYA_TERAKHIR) >= _TANYA_GUARD_MAKS:
+        _TANYA_TERAKHIR.pop(next(iter(_TANYA_TERAKHIR)), None)
+    _TANYA_TERAKHIR[kunci] = time.monotonic()
+
+
+def _teks_pertanyaan(kartu: list[dict]) -> str:
+    """`reply` teks untuk giliran-bertanya.
+
+    Kartu interaktif hanyalah BONUS: klien lama (dan mobile yang belum dirilis)
+    harus tetap berguna, dan log/umpan-balik tetap bermakna. Karena itu pertanyaan
+    + opsi bernomor selalu ditulis sebagai teks biasa."""
+    baris: list[str] = []
+    for i, q in enumerate(kartu, 1):
+        judul = q.get("teks") or ""
+        baris.append(f"**{judul}**" if len(kartu) == 1 else f"**{i}. {judul}**")
+        for j, o in enumerate(q.get("opsi") or [], 1):
+            baris.append(f"{j}. {o}")
+        baris.append("")
+    baris.append("_Pilih salah satu di atas, atau balas langsung dengan jawabanmu._")
+    return "\n".join(baris).strip()
+
+
 _TOOLS_GAMBAR_INLINE = frozenset({
     "gambar_exploded", "gambar_exploded_mesin", "uraikan_mesin", "uraikan_assembly",
     "part_aus_dari_rangka", "diagram_wiring", "cari_manual",
@@ -1436,10 +1492,11 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         elif name in _KLAIM_TOOLS:
             klaim_pns.update(res_pns)
 
-    def _finalize(reply: str, part_pns=None) -> dict:
+    def _finalize(reply: str, part_pns=None, pertanyaan=None) -> dict:
         """Bungkus payload jawaban + catat observabilitas (best-effort). Dipanggil
         di SEMUA titik return agar setiap giliran chat terekam."""
         outcome_for = (
+            "tanya" if pertanyaan else
             "not_found" if reply == _NOT_FOUND_REPLY else
             "empty" if reply == _EMPTY_FINAL_MSG else
             "sanitized" if "tak terverifikasi" in (reply or "") else "ok"
@@ -1470,10 +1527,13 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 session_id=conversation_id)
         except Exception:
             pass
-        return {"reply": reply, "tools_used": tools_used,
-                "repairkit_models": repairkit_models, "banding_exports": banding_exports,
-                "excel_exports": excel_exports, "exploded_images": exploded_images,
-                "part_pns": part_pns if part_pns is not None else _mentioned_part_pns(reply, grounded)}
+        out = {"reply": reply, "tools_used": tools_used,
+               "repairkit_models": repairkit_models, "banding_exports": banding_exports,
+               "excel_exports": excel_exports, "exploded_images": exploded_images,
+               "part_pns": part_pns if part_pns is not None else _mentioned_part_pns(reply, grounded)}
+        if pertanyaan:
+            out["pertanyaan"] = pertanyaan
+        return out
 
     # Anggaran RONDE TOOL (produktif: model benar-benar memanggil tool) DIPISAH
     # dari anggaran RETRY (kosong/guard: tak menjalankan tool). Dulu semuanya
@@ -1746,8 +1806,13 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         else:
             executed = [_exec_call(tool_calls[0])]
 
+        kartu_tanya = None            # sentinel tanya_user giliran ini (maks SATU)
         for tc, name, args, result in executed:
             tools_used.append(name)
+            # tanya_user: kartu pertanyaan. Ambil yang PERTAMA saja — dua kartu
+            # dalam satu giliran akan menumpuk di layar user.
+            if isinstance(result, dict) and result.get("_tanya") and kartu_tanya is None:
+                kartu_tanya = result["_tanya"]
             if _args_has_rangka(args):
                 rangka_tool_attempted = True
             if name in ("cari_kode_kesalahan", "diagnosa"):
@@ -1779,6 +1844,24 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             # angka utk lookup yang gagal. Reset flag agar tak menumpuk tiap ronde.
             messages.append({"role": "user", "content": _LOOKUP_GAGAL_NOTE})
             lookup_gagal = False
+
+        if kartu_tanya:
+            _k_tanya = _tanya_kunci(user, conversation_id)
+            if _tanya_baru_saja(_k_tanya):
+                # Pagar anti ping-pong: giliran sebelumnya SUDAH bertanya. Kartunya
+                # dibuang dan model disuruh lanjut dgn asumsi — bukan return, supaya
+                # giliran ini tetap menghasilkan JAWABAN.
+                logger.info("tanya_user ditahan (baru saja bertanya) user=%s",
+                            user.get("username") or "?")
+                messages.append({"role": "user", "content": _TANYA_LANJUT_NOTE})
+            else:
+                # Bertanya = AKHIR giliran. Berhenti SEBELUM _post_chat berikutnya:
+                # tak ada gunanya menyuruh model menulis jawaban atas pertanyaannya
+                # sendiri, dan itu justru menghemat satu panggilan model.
+                _tanya_catat(_k_tanya)
+                _emit(on_progress, "Menunggu jawabanmu…")
+                return _finalize(_teks_pertanyaan(kartu_tanya), part_pns=[],
+                                 pertanyaan=kartu_tanya)
         # Hasil tool sudah masuk → panggilan berikut kemungkinan menulis jawaban.
         _emit(on_progress, "Menyusun jawaban…")
 

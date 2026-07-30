@@ -1328,6 +1328,85 @@ def _t_harga_sims(args: dict, user: dict) -> dict:
         return {"error": "gagal ambil harga SIMS (gangguan internal/jaringan)"}
 
 
+# ── tanya_user: asisten BERTANYA balik dgn pilihan (kartu di klien) ─────────
+# Batas sengaja kecil: kartu harus terbaca di HP, dan opsi yang terlalu banyak
+# membuat user malah bingung (mockup pemilik: 4 opsi + "Lainnya" + "Lewati").
+_TANYA_MAKS_PERTANYAAN = 3
+_TANYA_MAKS_OPSI = 4
+_TANYA_MAKS_TEKS = 120
+_TANYA_MAKS_OPSI_TEKS = 60
+# "Lainnya"/"Lewati" DISEDIAKAN UI — kalau model ikut mengarangnya, opsinya dobel.
+_TANYA_OPSI_TERLARANG = {"lainnya", "lain", "other", "lewati", "skip", "tidak tahu",
+                         "gak tahu", "terserah"}
+
+
+def _t_tanya_user(args: dict, user: dict) -> dict:
+    """ASISTEN BERTANYA BALIK ke user dengan pilihan (dirender sbg kartu di klien).
+
+    Mengembalikan sentinel `_tanya` yang dibaca chat loop untuk MENGAKHIRI giliran
+    di titik itu — tak ada panggilan model lagi, jadi giliran-bertanya lebih murah
+    daripada giliran menjawab. Prefiks `_` menandai ini alamat internal, bukan data
+    untuk model.
+
+    Validasi di sini DETERMINISTIK: kartu yang cacat (opsi < 2, teks kosong,
+    opsi 'Lainnya' karangan) ditolak dengan pesan yang menyuruh model LANJUT
+    BEKERJA + sebutkan asumsinya — bukan malah bertanya setengah jadi.
+    """
+    raw = args.get("pertanyaan")
+    if raw is None:
+        raw = args.get("pertanyaan_list") or args.get("questions") or []
+    if isinstance(raw, (str, dict)):
+        raw = [raw]
+    if not isinstance(raw, list):
+        raw = []
+
+    kartu: list[dict] = []
+    for item in raw[:_TANYA_MAKS_PERTANYAAN]:
+        if isinstance(item, str):
+            teks, opsi = item, []
+        elif isinstance(item, dict):
+            teks = (item.get("teks") or item.get("pertanyaan")
+                    or item.get("question") or item.get("judul") or "")
+            opsi = (item.get("opsi") or item.get("options")
+                    or item.get("pilihan") or [])
+        else:
+            continue
+        teks = " ".join(str(teks or "").split())[:_TANYA_MAKS_TEKS]
+        if not teks:
+            continue
+        if isinstance(opsi, str):
+            opsi = re.split(r"[\n|;]+", opsi)
+        if not isinstance(opsi, (list, tuple)):
+            opsi = []
+        bersih: list[str] = []
+        seen: set[str] = set()
+        for o in opsi:
+            if isinstance(o, dict):        # model kadang kirim {label: ...}
+                o = o.get("label") or o.get("teks") or o.get("value") or ""
+            s = " ".join(str(o or "").split())[:_TANYA_MAKS_OPSI_TEKS]
+            k = s.lower()
+            if not s or k in seen or k in _TANYA_OPSI_TERLARANG:
+                continue
+            seen.add(k)
+            bersih.append(s)
+            if len(bersih) >= _TANYA_MAKS_OPSI:
+                break
+        if len(bersih) < 2:
+            continue                       # satu opsi bukan pertanyaan pilihan
+        kartu.append({"teks": teks, "opsi": bersih})
+
+    if not kartu:
+        logger.info("tanya_user DITOLAK (kartu cacat) user=%s args=%r",
+                    user.get("username") or "?", str(args)[:200])
+        return {
+            "error": ("Kartu pertanyaan tak sah: tiap pertanyaan butuh teks + MINIMAL "
+                      "2 opsi singkat (maks 4), dan JANGAN sertakan 'Lainnya'/'Lewati' "
+                      "(disediakan tampilan). Jangan coba lagi — lanjutkan bekerja "
+                      "dengan ASUMSI paling wajar dan SEBUTKAN asumsimu di jawaban."),
+        }
+    return {"found": True, "_tanya": kartu}
+
+
 _FOTO_RESMI_MAKS_PN = 3
 _FOTO_RESMI_MAKS_PER_PN = 2
 # Foto SIMS ada yang 30-40 MB (mis. WG9725550199 → 37 MB, 6000×4000). RAM server

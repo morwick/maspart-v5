@@ -403,6 +403,52 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "tanya_user",
+                "description": (
+                    "BERTANYA BALIK ke user dengan PILIHAN — muncul sebagai kartu "
+                    "bernomor yang bisa diklik (user juga tetap bisa mengetik bebas). "
+                    "⚠️ Memanggil tool ini MENGAKHIRI giliranmu: jangan digabung "
+                    "dengan tool lain, dan jangan menulis jawaban setelahnya.\n"
+                    "PAKAI bila jawabanmu akan BERBEDA ARAH tergantung info yang "
+                    "belum kamu punya DAN info itu tak bisa didapat dari tool — mis. "
+                    "posisi (depan/belakang), unit yang mana, tujuan (cuma tanya vs "
+                    "mau beli), atau gejala mana yang dialami.\n"
+                    "⛔ JANGAN dipakai: (1) untuk hal yang bisa dicari sendiri lewat "
+                    "tool (stok/harga/BOM/kode kesalahan) — kerjakan dulu; (2) sebelum "
+                    "mencoba satu tool pun, kecuali data wajibnya memang belum ada "
+                    "(mis. part per-unit tanpa nomor rangka); (3) dua giliran "
+                    "berturut-turut; (4) untuk hal yang tak mengubah tindakanmu. "
+                    "Bertanya BUKAN pengganti bekerja — kalau ragu tapi masih ada "
+                    "yang bisa dicoba, coba dulu.\n"
+                    "⛔ JANGAN membuat opsi 'Lainnya'/'Lewati'/'Terserah' — tampilan "
+                    "sudah menyediakannya."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pertanyaan": {
+                            "type": "array",
+                            "description": "1-3 pertanyaan. Biasanya CUKUP SATU.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "teks": {"type": "string", "description": "Pertanyaannya, singkat & jelas (maks ~120 char) — mis. 'Kampas rem posisi mana?'."},
+                                    "opsi": {
+                                        "type": "array", "items": {"type": "string"},
+                                        "description": "2-4 pilihan SINGKAT (maks ~60 char each) — mis. ['Depan','Belakang','Belum tahu, cek dari rangka'].",
+                                    },
+                                },
+                                "required": ["teks", "opsi"],
+                            },
+                        },
+                    },
+                    "required": ["pertanyaan"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "foto_resmi_part",
                 "description": (
                     "FOTO RESMI SIMS untuk 1–3 Part Number → tampil INLINE di jawaban. "

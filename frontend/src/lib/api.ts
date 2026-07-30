@@ -1986,9 +1986,22 @@ export type AIExplodedImage = {
   nama_figure?: string;
   kategori?: string;
 };
+/** Satu pertanyaan balik dari asisten (tool `tanya_user`) → kartu pilihan. */
+export type AIPertanyaan = {
+  teks: string;
+  /** 2-4 pilihan singkat. "Lainnya"/"Lewati" DISEDIAKAN UI, bukan oleh model. */
+  opsi: string[];
+};
+
 export type AIChatResult = {
   reply: string;
   tools_used: string[];
+  /**
+   * Asisten bertanya balik: giliran BERHENTI di sini menunggu jawaban user.
+   * `reply` sudah memuat pertanyaan + opsi sebagai teks, jadi klien yang belum
+   * merender kartu pun tetap berguna.
+   */
+  pertanyaan?: AIPertanyaan[];
   photo_candidates?: AIPhotoCandidate[];
   /** Model transmisi yg dibahas → tampilkan tombol unduh Excel repair kit. */
   repairkit_models?: string[];

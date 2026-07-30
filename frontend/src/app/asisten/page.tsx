@@ -21,12 +21,14 @@ import {
   type AIChatTurn,
   type AIExcelExport,
   type AIExplodedImage,
+  type AIPertanyaan,
   type AISheetSummary,
 } from "@/lib/api";
 import { clearSession, getToken } from "@/lib/auth";
 
 type Msg = AIChatTurn & {
   tools?: string[];
+  pertanyaan?: AIPertanyaan[]; // asisten bertanya balik -> kartu pilihan
   sheetName?: string;  // nama file Excel yang dilampirkan user di pesan ini
   sheet?: AISheetSummary; // ringkasan kolom hasil deteksi server
   repairkitModels?: string[];
@@ -225,6 +227,12 @@ export default function AsistenPage() {
   // File yang sudah DIPILIH tapi BELUM dikirim — user mengetik dulu maunya apa
   // ("isikan stok"), baru tekan Kirim. Gaya Claude.
   const [pendingSheet, setPendingSheet] = useState<File | null>(null);
+  // Kartu pertanyaan asisten: hanya pesan TERAKHIR yang interaktif (kartu lama
+  // jadi riwayat teks saja), jadi cukup satu set state di tingkat halaman.
+  const [tanyaIdx, setTanyaIdx] = useState(0);      // pertanyaan ke-berapa
+  const [tanyaSorot, setTanyaSorot] = useState(0);  // opsi yang di-highlight
+  const [tanyaJawab, setTanyaJawab] = useState<string[]>([]);
+  const [tanyaTutup, setTanyaTutup] = useState(false);
   // Lampiran Excel aktif: dipegang server (TTL 2 jam). Dikirim ulang tiap giliran
   // agar follow-up "isikan stoknya" tetap mengacu ke file yang sama.
   const [sheetId, setSheetId] = useState("");
@@ -335,6 +343,7 @@ export default function AsistenPage() {
     if (!token) return router.replace("/login");
 
     setError(null);
+    resetKartu();                 // kartu lama tak boleh ikut ke giliran baru
     const next: Msg[] = [...msgs, { role: "user", content: body, at: Date.now() }];
     setMsgs(next);
     setInput("");
@@ -355,6 +364,7 @@ export default function AsistenPage() {
           bandingExports: res.banding_exports,
           excelExports: res.excel_exports,
           explodedImages: res.exploded_images,
+          pertanyaan: res.pertanyaan,
           at: Date.now(),
         };
         return copy;
@@ -540,7 +550,76 @@ export default function AsistenPage() {
     }
   }
 
+  // ── Kartu pertanyaan asisten (tool `tanya_user`) ───────────────────────────
+  // Aktif HANYA bila pesan terakhir dari asisten membawa `pertanyaan` dan user
+  // belum menutupnya. Kartu di pesan lama sengaja mati: pertanyaannya sudah
+  // basi, dan dua kartu hidup sekaligus membingungkan.
+  const kartuMsgIdx = msgs.length - 1;
+  const kartuAktif =
+    !tanyaTutup && !busy && msgs[kartuMsgIdx]?.role === "assistant"
+      ? msgs[kartuMsgIdx]?.pertanyaan
+      : undefined;
+  const kartuQ = kartuAktif?.[Math.min(tanyaIdx, kartuAktif.length - 1)];
+
+  function resetKartu() {
+    setTanyaIdx(0);
+    setTanyaSorot(0);
+    setTanyaJawab([]);
+    setTanyaTutup(false);
+  }
+
+  /** Pilih satu opsi. Pertanyaan terakhir → kirim; sisanya → maju ke berikutnya. */
+  function jawabKartu(opsi: string) {
+    if (!kartuAktif) return;
+    const jawab = [...tanyaJawab];
+    jawab[tanyaIdx] = opsi;
+    if (tanyaIdx + 1 < kartuAktif.length) {
+      setTanyaJawab(jawab);
+      setTanyaIdx(tanyaIdx + 1);
+      setTanyaSorot(0);
+      return;
+    }
+    // Satu pertanyaan → kirim jawabannya apa adanya (paling alami di transkrip).
+    // Beberapa pertanyaan → sertakan teks pertanyaannya supaya tak ambigu.
+    const teks =
+      kartuAktif.length === 1
+        ? jawab[0]
+        : kartuAktif.map((q, i) => `${q.teks} ${jawab[i] || "(dilewati)"}`).join("\n");
+    setTanyaTutup(true);
+    send(teks);
+  }
+
+  function lewatiKartu() {
+    setTanyaTutup(true);
+    send("(lewati) Lanjutkan dengan asumsi terbaik, dan sebutkan asumsinya.");
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Navigasi kartu HANYA saat input kosong — kalau user sudah mengetik,
+    // Enter tetap mengirim teksnya seperti dulu (perilaku lama tak berubah).
+    if (kartuQ && !input.trim()) {
+      const n = kartuQ.opsi.length;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setTanyaSorot((v) => (e.key === "ArrowDown" ? (v + 1) % n : (v - 1 + n) % n));
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        jawabKartu(kartuQ.opsi[Math.min(tanyaSorot, n - 1)]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setTanyaTutup(true);
+        return;
+      }
+      if (/^[1-9]$/.test(e.key) && Number(e.key) <= n) {
+        e.preventDefault();
+        jawabKartu(kartuQ.opsi[Number(e.key) - 1]);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send(input);
@@ -826,6 +905,99 @@ export default function AsistenPage() {
             </div>
           )}
 
+          {/* Kartu pertanyaan asisten — DI ATAS kolom input (sesuai mockup pemilik),
+              bukan di dalam bubble: posisinya persis di jalur mata user saat mau
+              mengetik, dan user tetap bisa mengabaikannya lalu membalas bebas. */}
+          {kartuAktif && kartuQ && (
+            <div style={{ padding: "0 12px", marginTop: 8 }}>
+              <div
+                className="surface"
+                style={{ borderRadius: 12, overflow: "hidden", boxShadow: "var(--shadow-1)" }}
+              >
+                <div
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "10px 12px", fontSize: 13.5, fontWeight: 550,
+                  }}
+                >
+                  <span style={{ flex: 1, minWidth: 0 }}>{kartuQ.teks}</span>
+                  {kartuAktif.length > 1 && (
+                    <span style={{ fontSize: 11.5, color: "var(--ink-500)", whiteSpace: "nowrap" }}>
+                      {tanyaIdx + 1} dari {kartuAktif.length}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    title="Tutup pertanyaan"
+                    aria-label="Tutup pertanyaan"
+                    onClick={() => setTanyaTutup(true)}
+                    style={{ padding: "0 6px", color: "var(--ink-500)" }}
+                  >
+                    x
+                  </button>
+                </div>
+                {kartuQ.opsi.map((o, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => jawabKartu(o)}
+                    onMouseEnter={() => setTanyaSorot(i)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10, width: "100%",
+                      padding: "9px 12px", fontSize: 13.5, textAlign: "left",
+                      border: "none", cursor: "pointer",
+                      borderTop: "1px solid var(--ink-150)",
+                      background: i === tanyaSorot ? "var(--surface-2)" : "transparent",
+                      color: "var(--ink-900)",
+                    }}
+                  >
+                    <span
+                      style={{
+                        minWidth: 20, height: 20, borderRadius: 5, flexShrink: 0,
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 11.5, color: "var(--ink-600)",
+                        background: i === tanyaSorot ? "var(--ink-150)" : "transparent",
+                      }}
+                    >
+                      {i + 1}
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0 }}>{o}</span>
+                  </button>
+                ))}
+                <div
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "8px 12px", borderTop: "1px solid var(--ink-150)",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => taRef.current?.focus()}
+                    style={{
+                      flex: 1, textAlign: "left", background: "transparent", border: "none",
+                      cursor: "pointer", fontSize: 13, color: "var(--ink-500)", padding: 0,
+                    }}
+                  >
+                    Lainnya — tulis sendiri di bawah
+                  </button>
+                  <button type="button" className="btn btn-secondary"
+                          style={{ flexShrink: 0, fontSize: 12 }} onClick={lewatiKartu}>
+                    Lewati
+                  </button>
+                </div>
+              </div>
+              <div
+                style={{
+                  marginTop: 5, textAlign: "center", fontSize: 11,
+                  color: "var(--ink-400)",
+                }}
+              >
+                &#8593;&#8595; untuk navigasi &middot; Enter untuk memilih &middot; atau ketik di bawah
+              </div>
+            </div>
+          )}
+
           {/* Input */}
           <div style={{ borderTop: "1px solid var(--ink-150)", background: "var(--paper)", padding: "10px 12px 8px" }}>
             {/* File dipilih tapi BELUM dikirim — kartu pratinjau gaya Claude.
@@ -924,7 +1096,9 @@ export default function AsistenPage() {
                     ? "Asisten belum aktif…"
                     : pendingSheet
                       ? "Mau diapakan filenya? mis. “isikan stok di kolom D”"
-                      : "Tulis pertanyaan…"
+                      : kartuQ
+                        ? "Atau balas langsung…"
+                        : "Tulis pertanyaan…"
                 }
                 // TIDAK dikunci saat `busy`: jawaban butuh 14-46 detik, dan
                 // mengunci input berarti user hanya bisa menatap layar. Ia boleh
