@@ -149,28 +149,87 @@ def _sanitize_history(history: list[dict]) -> list[dict]:
     return out
 
 
-def _photo_note(candidates: list[dict] | None) -> str:
+def _photo_note(candidates: list[dict] | None, unit: dict | None = None) -> str:
     """Bangun konteks hasil Cari-by-Foto (DINOv2) untuk disuntikkan ke pesan user,
-    karena model teks tidak bisa 'melihat' foto. AI memakai PN kandidat ini untuk
-    cek stok/harga/kecocokan via tool."""
+    karena model teks tidak bisa 'melihat' foto. AI memakai PN kandidat ini sebagai
+    DUGAAN AWAL, lalu memverifikasinya lewat tool.
+
+    ⛔ Skor kemiripan SENGAJA tidak dipakai sebagai ambang keyakinan. Ukuran nyata
+    (uji foto lapangan 2026-07-30, galeri 37.910 embedding): part yang BENAR berskor
+    0,441 sementara part yang SALAH menempati peringkat 1 dengan 0,555 — di rentang
+    0,40–0,60 skor tidak membedakan benar/salah. Aturan lama "ragu bila <50%" karena
+    itu justru meloloskan jawaban salah sebagai "dugaan utama" dengan yakin.
+    Penggantinya: verifikasi VISUAL oleh user (`foto_resmi_part`) + bukti keberadaan
+    di BOM unit + satu pertanyaan penyempit bila masih kabur.
+    """
+    unit = unit or {}
+    frame = (unit.get("frame") or "").strip()
+    disaring = bool(frame and not unit.get("saringan_kosong"))
+    if disaring:
+        asal = (f"DISARING ke BOM unit {frame} "
+                f"({unit.get('n_part_bom') or 0} part terpasang di unit itu)")
+    elif frame:
+        asal = (f"dari SELURUH galeri — penyaringan ke BOM unit {frame} tidak "
+                "menyisakan kandidat, jadi part di foto BELUM terbukti milik unit itu")
+    else:
+        asal = "dari SELURUH galeri (user belum menyebut nomor rangka)"
+
+    minta_rangka = "" if frame else (
+        "0. MINTA NOMOR RANGKA/VIN unitnya lebih dulu — dengan rangka, kandidat "
+        "disaring ke part yang benar-benar terpasang di unit itu dan akurasinya "
+        "melonjak. Ini langkah paling berdampak.\n")
+
     if not candidates:
         return (
-            "[FOTO PART TERLAMPIR] Sistem Cari-by-Foto tidak menemukan part yang mirip "
-            "di galeri. Sampaikan ke user bahwa fotonya belum dikenali; minta foto yang "
-            "lebih jelas (fokus, terang, satu part) atau ketik nomor/nama part."
+            "[FOTO PART TERLAMPIR] Cari-by-Foto tidak menemukan part yang cukup mirip "
+            f"({asal}). JANGAN mengarang PN.\n" + minta_rangka +
+            "1. Minta foto yang lebih baik: fokus, terang, SATU part, latar bersih, dan "
+            "pakai fitur crop agar part memenuhi bingkai (crop terbukti menaikkan "
+            "peringkat kandidat yang benar).\n"
+            "2. Ajukan SATU pertanyaan penyempit: part ini dari sistem/bagian mana "
+            "(bahan bakar, angin/pneumatik, pendingin, kelistrikan, rem, mesin)? "
+            "Jawabannya memangkas ribuan part jadi puluhan.\n"
+            "3. Setelah user menjawab, pakai nama itu lewat cari_part_di_unit "
+            "(bila rangka diketahui) atau cari_part — jangan bergantung pada foto saja."
         )
-    lines = []
-    for i, c in enumerate(candidates[:6], 1):
-        pct = round(float(c.get("similarity") or 0) * 100)
-        nm = c.get("part_name") or "(nama tak diketahui)"
-        lines.append(f"{i}. {c.get('part_number')} — {nm} (kemiripan {pct}%)")
+
+    def _baris(daftar: list[dict]) -> str:
+        out = []
+        for i, c in enumerate(daftar, 1):
+            pct = round(float(c.get("similarity") or 0) * 100)
+            nm = c.get("part_name") or "(nama tak diketahui)"
+            out.append(f"{i}. {c.get('part_number')} — {nm} (kemiripan {pct}%)")
+        return "\n".join(out)
+
+    # Kandidat DI LUAR BOM tetap disertakan: Loading List EPC itu DATAR, part servis
+    # yang tersembunyi di dalam assembly tidak muncul di sana — jadi "tak ada di BOM"
+    # BUKAN bukti part itu bukan milik unit ini.
+    di_bom = [c for c in candidates[:9] if c.get("di_bom_unit") is not False]
+    luar = [c for c in candidates[:9] if c.get("di_bom_unit") is False]
+    daftar = _baris(di_bom)
+    if luar:
+        daftar += ("\n— DI LUAR daftar BOM unit (jangan langsung dibuang: Loading List "
+                   "EPC datar, part di dalam assembly tak tercatat di sana; bisa juga "
+                   "part aftermarket) —\n" + _baris(luar))
+
     return (
-        "[FOTO PART TERLAMPIR] Sistem Cari-by-Foto (DINOv2) mengenali kandidat part "
-        "berikut dari foto yang diunggah user:\n" + "\n".join(lines) + "\n\n"
-        "TUGAS: ambil kandidat dengan kemiripan TERTINGGI sebagai dugaan utama, lalu CEK "
-        "stok per gudang, harga, dan unit pemakaian via tool (cari_part/detail_part pakai "
-        "Part Number kandidat). Sebut Part Number-nya. Bila kemiripan tertinggi rendah "
-        "(<50%), katakan kurang yakin dan tampilkan beberapa kandidat agar user memilih."
+        f"[FOTO PART TERLAMPIR] Kandidat Cari-by-Foto (DINOv2), {asal}:\n"
+        + daftar + "\n\n"
+        "⚠️ SKOR KEMIRIPAN BUKAN BUKTI — sudah terukur bahwa part yang benar bisa "
+        "berskor 44% sementara part yang salah berskor 56%. ⛔ JANGAN menyatakan part "
+        "sudah pasti hanya karena skornya tertinggi, dan jangan langsung menawarkan "
+        "harga seolah PN-nya sudah final.\n"
+        "ALUR WAJIB:\n" + minta_rangka +
+        "1. Panggil `foto_resmi_part` untuk 2–3 kandidat teratas → foto resmi SIMS "
+        "tampil di jawaban; minta user membandingkan dengan barang di tangannya dan "
+        "memilih mana yang cocok. Inilah pengganti 'mata' yang tidak kamu punya.\n"
+        "2. Bila kandidat masih kabur, ajukan SATU pertanyaan penyempit (part ini dari "
+        "sistem/bagian mana?), lalu pakai cari_part_di_unit / bom_dari_rangka untuk "
+        "mempersempit lewat NAMA, bukan lewat foto.\n"
+        "3. Cek stok & harga (cari_part/detail_part) untuk PN yang SUDAH dikonfirmasi "
+        "user — bukan untuk semua kandidat.\n"
+        "4. Selalu sebut Part Number + namanya, dan katakan terang-terangan bahwa ini "
+        "masih DUGAAN sampai user mengonfirmasi kecocokan fotonya."
     )
 
 
@@ -562,6 +621,7 @@ _TOOLS_GAMBAR_INLINE = frozenset({
     "cari_pengetahuan", "buka_pengetahuan",
     "diagnosa",      # fan-out pengetahuan_internal ikut membawa gambar (18451fd)
     "detail_klaim",  # foto klaim garansi SIMS (2026-07-22)
+    "foto_resmi_part",  # foto resmi SIMS utk verifikasi visual oleh user (2026-07-30)
 })
 
 # Budget output lebih besar untuk panggilan yang WAJIB menulis jawaban (bukan ronde
@@ -1123,13 +1183,16 @@ def _emit(cb, label: str) -> None:
 
 
 def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = None,
-         sheet_id: str = "", on_progress=None, conversation_id: str = "") -> dict:
+         sheet_id: str = "", on_progress=None, conversation_id: str = "",
+         photo_unit: dict | None = None) -> dict:
     """
     Jalankan satu giliran percakapan.
     `history`: list {role: 'user'|'assistant', content: str} — termasuk pesan
     terbaru dari user di posisi akhir.
     `photo_candidates`: bila user mengunggah foto, hasil Cari-by-Foto (search_by_image)
     yang disuntikkan sebagai konteks ke pesan user terakhir.
+    `photo_unit`: konteks unit untuk jalur foto — {frame, n_part_bom, saringan_kosong}
+    dari router; menentukan apakah kandidat sudah disaring ke BOM satu unit.
     `sheet_id`: bila user melampirkan Excel, id sheet di stash server (ai_sheet).
     Hanya dengan ini tool `sheet_*` ditawarkan & bisa dieksekusi.
     `conversation_id`: id percakapan dari klien → memori sesi server (ai_session):
@@ -1143,7 +1206,7 @@ def chat(user: dict, history: list[dict], photo_candidates: list[dict] | None = 
     _pertanyaan = next((m.get("content") or "" for m in reversed(history)
                         if (m or {}).get("role") == "user"), "")
     if photo_candidates is not None:
-        note = _photo_note(photo_candidates)
+        note = _photo_note(photo_candidates, photo_unit)
         if history and (history[-1] or {}).get("role") == "user":
             base = (history[-1].get("content") or "").strip()
             history[-1] = {**history[-1], "content": (base + "\n\n" + note).strip() if base else note}

@@ -12,7 +12,8 @@ from pydantic import BaseModel, Field
 from ..core.config import get_settings
 from ..core.ratelimit import limit
 from ..deps import get_current_user, require_admin, require_menu
-from ..services import ai_assistant, ai_export, ai_feedback, ai_sheet, app_config, image_search
+from ..services import (ai_assistant, ai_export, ai_feedback, ai_sheet, app_config, epc_bom,
+                        image_search)
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -245,6 +246,39 @@ def export_ai_excel(export_id: str, _user: dict = Depends(require_ai)):
     )
 
 
+def _unit_dari_riwayat(history: list[dict]) -> dict:
+    """Cari nomor rangka yang disebut user di percakapan → kumpulan kunci PN dari
+    BOM pabrik unit itu, untuk menyaring kandidat Cari-by-Foto.
+
+    Alasannya terukur (uji foto lapangan 2026-07-30): pada galeri 37.910 embedding,
+    part yang BENAR duduk di peringkat #58 dengan skor 0,441 sementara peringkat 1
+    diisi part asing berskor 0,555 — jadi top-6 global MELEWATKAN jawaban yang benar
+    dan menyajikan yang salah dengan skor lebih tinggi. Disaring ke BOM unit, part
+    yang benar naik ke peringkat #2.
+
+    Return {frame, n_part_bom, pn_keys} — `frame` '' bila user tak menyebut rangka
+    (jalur lama: tanpa penyaringan). Kegagalan EPC ditelan: fitur foto tetap jalan
+    seperti sebelumnya, hanya tanpa penyaringan.
+    """
+    teks = "\n".join((m.get("content") or "") for m in (history or [])
+                     if (m or {}).get("role") == "user")
+    frame = ""
+    try:
+        frame = epc_bom.frame_dari_teks(teks)
+    except Exception:
+        frame = ""
+    if not frame:
+        return {"frame": "", "n_part_bom": 0, "pn_keys": set()}
+    try:
+        parts = (epc_bom.loading_list(frame) or {}).get("parts") or []
+    except Exception:
+        parts = []
+    keys: set[str] = set()
+    for p in parts:
+        keys |= image_search.pn_keys((p or {}).get("pn") or "")
+    return {"frame": frame, "n_part_bom": len(parts), "pn_keys": keys}
+
+
 @router.post("/chat-image", dependencies=[Depends(limit("ai_image", 20, 60))])
 async def ai_chat_image(
     messages: str = Form("[]", description="Riwayat chat (JSON list {role, content})."),
@@ -270,13 +304,25 @@ async def ai_chat_image(
     if len(data) > _MAX_PHOTO_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Foto maksimal 12 MB.")
 
+    # Bila user menyebut nomor rangka, saring kandidat ke BOM unit itu dulu.
+    unit = _unit_dari_riwayat(history)
     try:
-        candidates = image_search.search_by_image(data, top_k=6, threshold=0.30)
+        candidates = image_search.search_by_image(
+            data, top_k=6, threshold=0.30,
+            restrict_pns=(unit.get("pn_keys") or None),
+            # Loading List EPC datar → sisakan kursi untuk part di luar BOM
+            # (tersembunyi dalam assembly / aftermarket), ditandai di_bom_unit=False.
+            sisa_global=(3 if unit.get("pn_keys") else 0))
     except Exception:
         candidates = []
+    if unit.get("frame") and not any(c.get("di_bom_unit") for c in candidates):
+        # Penyaringan BOM tak menyisakan apa pun → beri tahu modelnya bahwa kandidat
+        # yang tersaji TIDAK terbukti milik unit tsb (jangan diam-diam).
+        unit["saringan_kosong"] = True
 
     try:
         result = ai_assistant.chat(user, history, photo_candidates=candidates,
+                                   photo_unit=unit,
                                    conversation_id=(conversation_id or "").strip())
     except ai_assistant.AINotConfigured:
         raise HTTPException(
@@ -293,9 +339,13 @@ async def ai_chat_image(
             "part_name": c.get("part_name"),
             "similarity": c.get("similarity"),
             "sims_url": c.get("sims_url"),
+            # True/False hanya bila kandidat disaring pakai BOM unit; None = tak disaring.
+            "di_bom_unit": c.get("di_bom_unit"),
         }
-        for c in (candidates or [])[:6]
+        for c in (candidates or [])[:9]
     ]
+    result["photo_unit"] = {"frame": unit.get("frame") or "",
+                            "n_part_bom": unit.get("n_part_bom") or 0}
     return result
 
 

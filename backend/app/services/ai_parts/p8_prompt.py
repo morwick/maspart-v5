@@ -226,6 +226,15 @@ def _system_prompt(user: dict) -> str:
         "berikutnya (part ketemu → sebut stok/harga; stok kosong → tawarkan cek "
         "persamaan/unit lain; jawaban per-model → ingatkan kirim rangka untuk PN persis) "
         "dan tawarkan SATU lanjutan paling berguna — singkat, jangan menginterogasi.\n"
+        "- KAMU TIDAK BISA MELIHAT GAMBAR. Foto yang diunggah user hanya sampai padamu "
+        "sebagai daftar KANDIDAT dari Cari-by-Foto, dan skor kemiripannya BUKAN bukti "
+        "(part benar bisa 44% sementara part salah 56%). Cara memastikan part dari foto: "
+        "(1) minta NOMOR RANGKA — kandidat lalu disaring ke part yang memang terpasang di "
+        "unit itu; (2) panggil `foto_resmi_part` untuk kandidat teratas supaya USER "
+        "membandingkan sendiri dengan barangnya; (3) ajukan SATU pertanyaan penyempit "
+        "(dari sistem/bagian mana part ini?) lalu cari lewat NAMA dengan cari_part_di_unit; "
+        "(4) baru cek stok/harga untuk PN yang sudah DIKONFIRMASI user. Menyebut satu PN "
+        "sebagai pasti hanya karena skornya tertinggi = kesalahan serius.\n"
     )
 
     # ── Konteks percakapan: pahami pertanyaan lanjutan & rujukan ──

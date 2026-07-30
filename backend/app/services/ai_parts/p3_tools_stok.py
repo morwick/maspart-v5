@@ -1328,6 +1328,147 @@ def _t_harga_sims(args: dict, user: dict) -> dict:
         return {"error": "gagal ambil harga SIMS (gangguan internal/jaringan)"}
 
 
+_FOTO_RESMI_MAKS_PN = 3
+_FOTO_RESMI_MAKS_PER_PN = 2
+# Foto SIMS ada yang 30-40 MB (mis. WG9725550199 → 37 MB, 6000×4000). RAM server
+# cuma 3,8 GB (backend 2500m) → jalur normal melewati foto raksasa dan mencoba URL
+# lain yang lebih ringan. TAPI ada PN yang SEMUA fotonya raksasa; kalau pagarnya
+# mutlak, PN itu dilaporkan "tak punya foto" padahal punya. Karena itu: bila satu PN
+# berakhir NOL foto, ulangi SEKALI dengan pagar longgar (satu unduhan besar saja,
+# berurutan — bukan paralel — jadi puncak RAM tetap terbatas).
+_FOTO_RESMI_MAKS_BYTE = 12 * 1024 * 1024
+_FOTO_RESMI_MAKS_BYTE_LONGGAR = 48 * 1024 * 1024
+_FOTO_RESMI_SISI_MAKS = 1400
+
+
+def _foto_sims_unduh(url: str, maks_byte: int = _FOTO_RESMI_MAKS_BYTE) -> bytes | None:
+    """Unduh satu foto SIMS dengan pagar ukuran. None bila gagal/kebesaran."""
+    try:
+        r = requests.get(url, timeout=45, stream=True,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None
+        try:
+            if int(r.headers.get("Content-Length") or 0) > maks_byte:
+                return None
+        except (TypeError, ValueError):
+            pass
+        buf = bytearray()
+        for chunk in r.iter_content(256 * 1024):
+            buf += chunk
+            if len(buf) > maks_byte:
+                return None
+        return bytes(buf) or None
+    except Exception:
+        return None
+
+
+def _foto_kecilkan(data: bytes) -> bytes:
+    """Perkecil foto agar hemat RAM & cepat tampil di HP. Gagal → apa adanya."""
+    try:
+        import io as _io
+        from PIL import Image
+        im = Image.open(_io.BytesIO(data))
+        # draft(): untuk JPEG, decode LANGSUNG pada skala kecil — hemat RAM, bukan
+        # decode penuh dulu baru diperkecil.
+        try:
+            im.draft("RGB", (_FOTO_RESMI_SISI_MAKS, _FOTO_RESMI_SISI_MAKS))
+        except Exception:
+            pass
+        im = im.convert("RGB")
+        im.thumbnail((_FOTO_RESMI_SISI_MAKS, _FOTO_RESMI_SISI_MAKS))
+        buf = _io.BytesIO()
+        im.save(buf, format="JPEG", quality=82, optimize=True)
+        return buf.getvalue() or data
+    except Exception:
+        return data
+
+
+def _t_foto_resmi_part(args: dict, user: dict) -> dict:
+    """FOTO RESMI SIMS sebuah/beberapa PN → tampil INLINE di jawaban.
+
+    Gunanya: model ini TIDAK bisa melihat foto. Verifikasi visual karena itu
+    diserahkan ke USER — asisten menyodorkan foto resmi kandidat, user yang
+    memutuskan cocok/tidak dengan barang di tangannya. Ini yang mengubah dugaan
+    Cari-by-Foto (skor kemiripan tak bisa dipercaya) menjadi kepastian.
+    """
+    raw = args.get("part_number") or args.get("part_numbers") or ""
+    if isinstance(raw, str):
+        pns = [p.strip() for p in re.split(r"[,\n;]+", raw) if p.strip()]
+    elif isinstance(raw, list):
+        pns = [str(p).strip() for p in raw if str(p or "").strip()]
+    else:
+        pns = []
+    pns = [p.upper() for p in pns][:_FOTO_RESMI_MAKS_PN]
+    if not pns:
+        return {"found": False, "error": "part_number kosong"}
+    if not sims.available():
+        return {"found": False, "error": "SIMS belum terkonfigurasi/aktif."}
+
+    try:
+        maks = int(args.get("maks_per_part") or _FOTO_RESMI_MAKS_PER_PN)
+    except (TypeError, ValueError):
+        maks = _FOTO_RESMI_MAKS_PER_PN
+    maks = max(1, min(maks, _FOTO_RESMI_MAKS_PER_PN))
+
+    gambar: list[dict] = []
+    tanpa_foto: list[str] = []
+    for pn in pns:
+        try:
+            urls = sims.get_images(pn) or []
+        except Exception:
+            urls = []
+        diambil = 0
+
+        def _ambil(daftar_url, pagar, batas) -> None:
+            nonlocal diambil
+            for u in daftar_url:
+                if diambil >= batas:
+                    return
+                data = _foto_sims_unduh(u, pagar)
+                if not data:
+                    continue
+                aman = re.sub(r"[^A-Z0-9]", "", pn) or "PART"
+                image_id, filename = ai_export.stash_raw(
+                    f"Foto resmi SIMS — {pn}", _foto_kecilkan(data),
+                    f"sims_{aman}_{diambil + 1}.jpg")
+                gambar.append({"image_id": image_id, "filename": filename, "pn": pn,
+                               "nama_figure": f"Foto resmi {pn}", "kategori": "Foto SIMS"})
+                diambil += 1
+
+        _ambil(urls, _FOTO_RESMI_MAKS_BYTE, maks)
+        if diambil == 0 and urls:
+            # Semua foto PN ini raksasa → satu percobaan longgar, cukup 1 foto.
+            _ambil(urls[:1], _FOTO_RESMI_MAKS_BYTE_LONGGAR, 1)
+        if diambil == 0:
+            tanpa_foto.append(pn)
+
+    if not gambar:
+        logger.info("MISS foto_resmi_part pns=%r user=%s", pns,
+                    user.get("username") or "?")
+        return {
+            "found": False, "jumlah": 0, "pn_tanpa_foto": tanpa_foto,
+            "catatan": ("Tidak ada foto resmi SIMS untuk PN ini. Sampaikan apa adanya "
+                        "(⛔ jangan mengarang gambar/link) dan verifikasi lewat cara lain: "
+                        "minta user menyebut sistem/lokasi part, atau bandingkan dengan "
+                        "gambar_exploded / diagram_wiring bila relevan."),
+        }
+    return {
+        "found": True, "jumlah": len(gambar),
+        "pn": pns, "pn_tanpa_foto": tanpa_foto,
+        "gambar": gambar,
+        "catatan": (
+            "Foto resmi SIMS SIAP — tampil OTOMATIS (inline) di bawah jawabanmu; "
+            "⛔ JANGAN buat link/gambar/URL sendiri. TUGASMU: minta user "
+            "MEMBANDINGKAN foto ini dengan barang di tangannya lalu memberi tahu mana "
+            "yang cocok — kamu tidak bisa melihat foto, jadi keputusan kecocokan ADA "
+            "DI USER. Sebut PN tiap foto, dan tegaskan PN belum final sampai user "
+            "mengonfirmasi. Catatan: sebagian 'foto' SIMS berupa SCAN DOKUMEN teknis "
+            "(mis. notifikasi perubahan part) — itu tetap berguna, sebutkan bila muncul."
+        ),
+    }
+
+
 def _penawaran_core(nama_pel: str, barang: list, tanggal: str = "",
                     catatan: str = "") -> dict:
     """INTI pembuatan Penawaran Accurate + PDF resmi (dipakai buat_penawaran &

@@ -403,6 +403,35 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "foto_resmi_part",
+                "description": (
+                    "FOTO RESMI SIMS untuk 1–3 Part Number → tampil INLINE di jawaban "
+                    "supaya USER membandingkannya dengan barang di tangannya. WAJIB "
+                    "dipakai untuk MEMASTIKAN dugaan dari foto yang diunggah user "
+                    "(Cari-by-Foto): kamu tidak bisa melihat gambar, jadi keputusan "
+                    "cocok/tidak ada di user — skor kemiripan TIDAK bisa dijadikan "
+                    "bukti. Berguna juga untuk 'PN X bentuknya seperti apa'. "
+                    "⛔ Bukan sumber stok/harga (pakai cari_part/detail_part)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "part_number": {
+                            "type": ["string", "array"], "items": {"type": "string"},
+                            "description": "1–3 PN — array ATAU string dipisah koma/baris.",
+                        },
+                        "maks_per_part": {
+                            "type": "integer",
+                            "description": "Jumlah foto per PN (1–2, default 2).",
+                        },
+                    },
+                    "required": ["part_number"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "repair_kit_transmisi",
                 "description": (
                     "Daftar REPAIR KIT / perpak TRANSMISI (gearbox) per model — komponen "
