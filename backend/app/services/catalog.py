@@ -16,6 +16,20 @@ from . import part_index, sims
 
 _MAX_BATCH = 300  # batas PN per batch (jaga waktu/proses)
 
+# Cap KHUSUS bila kolom "exploded" dipilih. Satu PN yang belum pernah dibuka =
+# 1 panggilan reverse global (respons bisa belasan ribu baris) + s/d 3 tree/item +
+# unduh SVG + render resvg; terukur 94 detik untuk PN yang dipakai 17.185 model.
+# Publik (tanpa underscore) karena router memang perlu membacanya.
+MAX_BATCH_EXPLODED = 25
+
+# Gambar TEKNIK: batas 200 px milik kolom `foto` membuat nomor balon tak terbaca.
+# PNG-nya TIDAK di-resample — hanya ukuran TAMPIL yang diatur, jadi zoom & cetak
+# di Excel tetap tajam (pola sama dengan ai_export.katalog_excel).
+_EXPLODED_IMG_W = 620      # px lebar tampil
+_EXPLODED_IMG_H = 500      # px tinggi tampil maks
+_EXPLODED_COL_WIDTH = 88   # satuan lebar openpyxl (±7 px/satuan pada Calibri 11)
+_MAX_ROW_PT = 409          # batas KERAS tinggi baris Excel = 409,5 pt (±546 px)
+
 # Cegah Excel/CSV formula injection: nama part dari SIMS/lokal bisa diawali
 # = + - @ → Excel menganggapnya FORMULA/DDE. Escape dgn prefiks ' → jadi teks.
 _FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r", "\n")
@@ -94,10 +108,22 @@ _COLUMN_DEFS: dict[str, tuple[str, int]] = {
     "harga_sims": ("Harga SIMS", 18),
     "harga_accurate": ("Harga Jual Accurate", 22),
     "harga_daftar": ("Harga (Daftar)", 18),
+    # Kolom TEKS pendamping gambar exploded (nama figure, nomor balon, peringatan
+    # lintas-model). Bukan chip tersendiri di UI — dinyalakan otomatis oleh
+    # 'exploded' lewat _TURUNAN, jadi header/lebar/perataannya ikut mesin yang ada.
+    "exploded_info": ("Info Exploded View", 46),
 }
 _COLUMN_ORDER = [
-    "nama", "kecocokan", "stok", "harga_sims", "harga_accurate", "harga_daftar", "foto",
+    "nama", "kecocokan", "stok", "harga_sims", "harga_accurate", "harga_daftar",
+    "exploded_info",        # teks dulu…
+    "foto", "exploded",     # …lalu gambar (foto SIMS, baru exploded EPC)
 ]
+# Satu chip di UI → beberapa kolom di Excel.
+_TURUNAN = {"exploded": ("exploded_info",)}
+# Kolom gambar: bukan kolom teks, jadi TIDAK ada di _COLUMN_DEFS (pola `foto`).
+_IMG_COLUMNS = ("foto", "exploded")
+# Teks panjang/multi-baris → rata kiri.
+_ALIGN_LEFT = ("nama", "kecocokan", "exploded_info")
 # Default bila user tidak memilih apa pun (perilaku ramah: identitas + foto + stok).
 _DEFAULT_COLUMNS = ("nama", "foto", "stok")
 
@@ -108,12 +134,41 @@ PRICE_COLUMNS = frozenset({"harga_sims", "harga_accurate", "harga_daftar"})
 
 def clean_columns(cols) -> list[str]:
     """Saring pilihan kolom user → hanya kunci sah, urut sesuai _COLUMN_ORDER.
-    Kosong/tak sah → _DEFAULT_COLUMNS."""
+    Kosong/tak sah → _DEFAULT_COLUMNS. Kolom TURUNAN dinyalakan otomatis
+    (mis. 'exploded' → ikut membawa kolom teks 'exploded_info')."""
     if not cols:
         return list(_DEFAULT_COLUMNS)
     want = {str(c).strip().lower() for c in cols}
+    for induk, anak in _TURUNAN.items():
+        if induk in want:
+            want.update(anak)
     out = [c for c in _COLUMN_ORDER if c in want]
     return out or list(_DEFAULT_COLUMNS)
+
+
+def _teks_info_exploded(d: dict) -> str:
+    """Isi sel "Info Exploded View".
+
+    Tak ditemukan / gagal render / kehabisan anggaran waktu → tulis ALASANNYA apa
+    adanya. ⛔ Jangan pernah mengisi nama figure atau nomor balon karangan."""
+    if not d:
+        return "—"
+    if not d.get("found"):
+        return d.get("alasan") or "Figure exploded view tidak ditemukan di EPC."
+    baris = []
+    if d.get("figure_nama"):
+        baris.append(f"Figure: {d['figure_nama']}"
+                     + (f" ({d['figure_pn']})" if d.get("figure_pn") else ""))
+    bal = d.get("balon")
+    baris.append(f"Balon: {bal}" if bal not in (None, "")
+                 else "Balon: tidak terdeteksi di figure ini")
+    if d.get("nama_item"):
+        baris.append(f"Nama di EPC: {d['nama_item']}")
+    if d.get("jumlah_item"):
+        baris.append(f"{d['jumlah_item']} part di gambar")
+    if d.get("catatan"):
+        baris.append("⚠️ " + d["catatan"])
+    return "\n".join(b for b in baris if str(b).strip())
 
 
 def _fmt_qty(v) -> str:
@@ -134,8 +189,17 @@ def build_catalog_excel(part_numbers: list[str], columns=None, on_progress=None)
     from . import accurate, harga
 
     cols = clean_columns(columns)
-    text_cols = [c for c in cols if c != "foto"]   # kolom teks terpilih, terurut
+    text_cols = [c for c in cols if c not in _IMG_COLUMNS]  # kolom teks, terurut
     has_foto = "foto" in cols
+    has_exploded = "exploded" in cols
+
+    # Prefetch PARALEL semua gambar exploded dulu (pola ai_export.katalog_excel):
+    # loop baris di bawah tetap deterministik & cepat. Cache dibagi dengan halaman
+    # detail part, jadi PN yang sudah pernah dibuka praktis gratis.
+    exp_map: dict[str, dict] = {}
+    if has_exploded:
+        from . import exploded_view          # impor lokal: konsisten dgn modul lain
+        exp_map = exploded_view.png_batch(part_numbers)
     need_accurate = "stok" in cols or "harga_accurate" in cols
     need_sims_price = "harga_sims" in cols
 
@@ -160,11 +224,15 @@ def build_catalog_excel(part_numbers: list[str], columns=None, on_progress=None)
     # Susun header dinamis: Part Number + kolom teks terpilih + (Gambar 1, Gambar 2).
     headers = ["Part Number"] + [_COLUMN_DEFS[c][0] for c in text_cols]
     widths = [20] + [_COLUMN_DEFS[c][1] for c in text_cols]
-    img_col_1 = None
+    img_col_1 = exp_col = None
     if has_foto:
-        img_col_1 = len(text_cols) + 2          # indeks 1-based kolom "Gambar 1"
+        img_col_1 = len(headers) + 1            # indeks 1-based kolom "Gambar 1"
         headers += ["Gambar 1", "Gambar 2"]
         widths += [38, 38]
+    if has_exploded:
+        exp_col = len(headers) + 1
+        headers += ["Exploded View (EPC · lintas model)"]
+        widths += [_EXPLODED_COL_WIDTH]
     for ci, (h, w) in enumerate(zip(headers, widths), start=1):
         c = ws.cell(row=1, column=ci, value=h)
         c.font = header_font
@@ -191,6 +259,16 @@ def build_catalog_excel(part_numbers: list[str], columns=None, on_progress=None)
         xl = XLImage(bio)
         xl.width, xl.height = w_px, h_px
         return xl, h_px
+
+    def _xl_image_exploded(png: bytes):
+        """Gambar exploded: TANPA resample — hanya ukuran tampil yang diatur supaya
+        zoom/cetak tetap tajam. Di-clamp DUA sisi: tinggi baris Excel maksimum
+        409,5 pt (±546 px), jadi figure portrait harus ikut menyusut."""
+        xl = XLImage(io.BytesIO(png))
+        w, h = int(xl.width or 1), int(xl.height or 1)
+        skala = min(_EXPLODED_IMG_W / w, _EXPLODED_IMG_H / h, 1.0)
+        xl.width, xl.height = max(1, int(w * skala)), max(1, int(h * skala))
+        return xl, xl.height
 
     row_idx = 2
     total = len(part_numbers)
@@ -238,8 +316,8 @@ def build_catalog_excel(part_numbers: list[str], columns=None, on_progress=None)
                 part_name = dname
 
         # Gambar (hanya bila kolom foto dipilih — melewati ini mempercepat batch).
-        img_d = img_e = None
-        row_height = 80 if has_foto else 22
+        img_d = img_e = img_exp = None
+        row_height = 80 if (has_foto or has_exploded) else 22
         if has_foto:
             urls = sims.get_images(pn)
             if urls:
@@ -260,6 +338,19 @@ def build_catalog_excel(part_numbers: list[str], columns=None, on_progress=None)
                     except Exception:
                         pass
 
+        # Gambar exploded (sudah diambil paralel di atas — di sini cuma menempel).
+        if has_exploded:
+            d_exp = exp_map.get(exploded_view.kunci_pn(pn)) or {}
+            if d_exp.get("found") and d_exp.get("png"):
+                try:
+                    img_exp, h_exp = _xl_image_exploded(d_exp["png"])
+                    row_height = max(row_height,
+                                     min(_MAX_ROW_PT, int(h_exp * 0.75) + 10))
+                except Exception:
+                    img_exp = None
+            # Kolom teks: APA ADANYA — PN tanpa figure tidak dikarang.
+            vals["exploded_info"] = _teks_info_exploded(d_exp)
+
         # Nama dari SIMS kalau masih kosong (upaya terakhir, jaringan).
         if "nama" in cols and not part_name:
             try:
@@ -275,7 +366,7 @@ def build_catalog_excel(part_numbers: list[str], columns=None, on_progress=None)
         c.fill, c.border, c.alignment, c.font = fill, border, center, Font(name="Arial", size=10)
         # Tulis kolom teks terpilih (nama/kecocokan rata kiri, sisanya tengah).
         for offset, key in enumerate(text_cols, start=2):
-            aln = left if key in ("nama", "kecocokan") else center
+            aln = left if key in _ALIGN_LEFT else center
             c = ws.cell(row=row_idx, column=offset, value=_xlsafe(vals.get(key, "")))
             c.fill, c.border, c.alignment, c.font = fill, border, aln, Font(name="Arial", size=10)
         # Kolom gambar: sel kosong bergaya + tempel gambar.
@@ -287,6 +378,11 @@ def build_catalog_excel(part_numbers: list[str], columns=None, on_progress=None)
                 ws.add_image(img_d, f"{get_column_letter(img_col_1)}{row_idx}")
             if img_e:
                 ws.add_image(img_e, f"{get_column_letter(img_col_1 + 1)}{row_idx}")
+        if exp_col:
+            c = ws.cell(row=row_idx, column=exp_col, value="")
+            c.fill, c.border, c.alignment = fill, border, center
+            if img_exp:
+                ws.add_image(img_exp, f"{get_column_letter(exp_col)}{row_idx}")
 
         ws.row_dimensions[row_idx].height = row_height
         row_idx += 1

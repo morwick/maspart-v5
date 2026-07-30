@@ -741,6 +741,13 @@ export async function fetchBatchTemplate(token: string): Promise<Blob> {
   return res.blob();
 }
 
+/**
+ * Batch katalog Excel. `columns` generik, jadi kolom baru tak butuh perubahan di sini.
+ * WASPADA: dengan kolom "exploded" request bisa berjalan 5-15 MENIT (gambar exploded
+ * diambil satu per satu dari server EPC, ~30-90 dtk per PN baru; backend membatasi
+ * 25 PN). `fetch` SENGAJA tanpa AbortSignal.timeout — memutusnya di tengah jalan
+ * hanya membuang pekerjaan server yang tetap berlanjut sampai tuntas.
+ */
 export async function buildBatchCatalog(
   token: string,
   opts: { text?: string; file?: File | null; columns?: string[] },

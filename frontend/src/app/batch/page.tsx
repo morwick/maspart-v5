@@ -22,8 +22,13 @@ const COLUMN_OPTS: { key: string; label: string; desc: string }[] = [
   { key: "harga_accurate", label: "Harga Jual Accurate", desc: "Harga jual dari Accurate" },
   { key: "harga_daftar", label: "Harga (Daftar)", desc: "Dari daftar harga internal" },
   { key: "kecocokan", label: "Kecocokan", desc: "File katalog lokal yang cocok" },
+  { key: "exploded", label: "Exploded View",
+    desc: "Gambar rakitan resmi EPC yang memuat part ini (lintas model) - SANGAT lambat, maks 25 PN" },
 ];
 const DEFAULT_COLUMNS = ["nama", "foto", "stok"];
+// Cap khusus kolom Exploded View - cermin catalog.MAX_BATCH_EXPLODED di backend.
+// Satu PN yang belum pernah dibuka bisa 90 detik (server EPC + 1 vCPU).
+const MAX_PN_EXPLODED = 25;
 // Kolom harga: hanya admin & akun 'mas' (di-enforce juga di backend).
 const PRICE_KEYS = ["harga_sims", "harga_accurate", "harga_daftar"];
 
@@ -97,6 +102,16 @@ export default function BatchPage() {
       setError("Pilih minimal satu kolom untuk disertakan.");
       return;
     }
+    // Cap exploded dicek di sini HANYA untuk input teks (jumlahnya diketahui) supaya
+    // user tak menunggu lama lalu ditolak. Untuk unggahan file, pesan backend yang bicara.
+    if (columns.includes("exploded") && !file && lineCount > MAX_PN_EXPLODED) {
+      setError(
+        `Kolom Exploded View maksimum ${MAX_PN_EXPLODED} PN (sekarang ${lineCount} baris). ` +
+          "Gambar exploded diambil satu per satu dari server EPC. Kurangi part number, " +
+          "atau matikan kolom Exploded View untuk memakai batas 300 PN.",
+      );
+      return;
+    }
     setError(null);
     setLoading(true);
     try {
@@ -115,7 +130,8 @@ export default function BatchPage() {
       <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-7">
         <p style={{ marginBottom: 16, fontSize: 13.5, color: "var(--ink-500)" }}>
           Masukkan banyak part number sekaligus → unduh katalog Excel. Pilih sendiri kolom yang
-          disertakan (nama, foto, stok, harga). Maksimum 300 PN per batch.
+          disertakan (nama, foto, stok, harga). Maksimum 300 PN per batch - atau 25 PN bila
+          kolom Exploded View dipilih.
         </p>
 
         <button onClick={handleTemplate} className="btn btn-secondary" style={{ marginBottom: 18 }}>
@@ -165,6 +181,20 @@ export default function BatchPage() {
           <p style={{ marginTop: 8, fontSize: 11.5, color: "var(--ink-400)" }}>
             Tip: matikan <b>Foto</b> agar proses jauh lebih cepat bila hanya butuh stok/harga.
           </p>
+          {columns.includes("exploded") && (
+            <div
+              className="alert"
+              style={{ marginTop: 10, fontSize: 12, lineHeight: 1.6 }}
+            >
+              <b>Exploded View aktif.</b> Gambar diambil satu per satu dari server EPC:
+              sekitar 30-90 detik untuk tiap PN yang belum pernah dibuka, jadi{" "}
+              <b>25 PN bisa 5-15 menit</b>. Jangan tutup tab ini selama proses.
+              <br />
+              PN yang exploded view-nya sudah pernah dibuka di halaman detail part dalam 24
+              jam terakhir diproses seketika. Gambarnya bersifat <b>lintas model</b> - memuat
+              part ini dari model mana pun, bukan gambar unit tertentu.
+            </div>
+          )}
         </section>
 
         {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
@@ -224,9 +254,11 @@ export default function BatchPage() {
         </button>
         {loading && (
           <p style={{ marginTop: 8, textAlign: "center", fontSize: 12, color: "var(--ink-400)" }}>
-            {columns.includes("foto") || columns.includes("harga_sims")
-              ? "Mengambil data dari SIMS untuk tiap part — bisa beberapa menit untuk banyak PN."
-              : "Menyusun katalog — sebentar lagi selesai."}
+            {columns.includes("exploded")
+              ? "Mencari figure exploded view di EPC untuk tiap part - 5-15 menit untuk 25 PN. Jangan tutup halaman."
+              : columns.includes("foto") || columns.includes("harga_sims")
+                ? "Mengambil data dari SIMS untuk tiap part - bisa beberapa menit untuk banyak PN."
+                : "Menyusun katalog - sebentar lagi selesai."}
           </p>
         )}
       </div>

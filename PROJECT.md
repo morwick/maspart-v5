@@ -1193,7 +1193,7 @@ Hasil diagregasi per `part_number` + confidence boost. Foto part di-proxy via
 | Router (prefix) | Endpoint utama |
 |---|---|
 | **auth** `/api/auth` | `POST /login`, `GET /me`, `GET /permissions` |
-| **parts** `/api/parts` | `GET /search` (PN), `GET /search-name`, `POST /search-image`, `GET /compare`, `GET /photos`, `GET /spec` (berat/dimensi SIMS), `GET /accurate-stock` (stok live Accurate +per gudang, §3.5.5i), `GET /image-proxy`, `GET /batch-template`, `POST /batch-catalog`, `GET/POST /index/status·refresh` |
+| **parts** `/api/parts` | `GET /search` (PN), `GET /search-name`, `POST /search-image`, `GET /compare`, `GET /photos`, `GET /spec` (berat/dimensi SIMS), `GET /accurate-stock` (stok live Accurate +per gudang, §3.5.5i), `GET /image-proxy`, `GET /batch-template`, `POST /batch-catalog`, `GET /exploded-figure` (exploded view per-PN TANPA rangka, jalur global EPC, cache 24 jam), `GET/POST /index/status·refresh` |
 | **harga** `/api/harga` | `GET /list·/list/export·/rate·/cari`, `POST /batch·/batch/export·/refresh` |
 | **stok** `/api/stok` | `GET /list·/list/export` (daftar stok live Accurate, §3.5.5l), `POST /refresh` (admin) |
 | **opname** `/api/opname` | `GET /draft·/history`, `POST /draft/from-upload·/finalize`, `PUT/DELETE /draft`, `DELETE /history/{id}` |
@@ -1272,7 +1272,7 @@ di bawah **sudah LIVE & terverifikasi**; tes regresi di `tests/test_security_har
   Referrer-Policy; frontend (`next.config.ts`) **CSP** + header keamanan (produksi).
 - **SRI pin Leaflet** dari unpkg (SHA-384) — CDN/paket terkompromi/MITM tak bisa suntik JS.
 - **Token ikut "Ingat saya"** (`lib/auth.ts`): `sessionStorage` bila tak dicentang.
-- **Cap upload** `batch-catalog` 8 MB (anti zip-bomb/OOM).
+- **Cap upload** `batch-catalog` 8 MB (anti zip-bomb/OOM); **cap 300 PN**, turun jadi **25 PN** bila kolom `exploded` dipilih (gambar exploded ~30-90 dtk per PN baru; terukur 94 dtk untuk PN yang dipakai 17.185 model). `batch-catalog` kini rate-limited (6/5 mnt), dijalankan di luar event loop (`asyncio.to_thread`), dan digerbang **satu batch sekaligus** (→ 429) karena server 1 vCPU.
 - Menyusul: **CSP mengizinkan Google Fonts** (`fonts.googleapis.com`/`gstatic.com`) —
   memperbaiki regresi font Geist/JetBrains Mono yang sempat diblokir CSP.
 

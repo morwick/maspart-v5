@@ -1,10 +1,10 @@
 """Router parts: pencarian Part Number + status/refresh index."""
 from __future__ import annotations
 
+import asyncio
 import base64
+import logging
 import re
-import threading
-import time
 from urllib.parse import urlparse
 
 import requests
@@ -31,8 +31,8 @@ from ..schemas import (
     PartPhotos,
     SearchResponse,
 )
-from ..services import (accurate, ai_export, catalog, compare, epc_bom, gudang, image_search,
-                        part_index, permissions, reservations, search_log, sims)
+from ..services import (accurate, ai_export, catalog, compare, epc_bom, exploded_view, gudang,
+                        image_search, part_index, permissions, reservations, search_log, sims)
 from ..services.supabase_client import fetch_part_photos, get_user_gudang
 
 _MAX_IMAGE_BYTES = 15 * 1024 * 1024  # 15 MB
@@ -281,7 +281,18 @@ def batch_template(_user: dict = Depends(get_current_user)):
     )
 
 
-@router.post("/batch-catalog")
+_log_batch = logging.getLogger("maspart.batch")
+
+
+def _log_progres_batch(i: int, total: int, pn: str) -> None:
+    """Hidupkan `on_progress` builder yang selama ini tak pernah dipasang router —
+    supaya request yang bisa 15 menit tetap bisa dipantau lewat `docker logs`."""
+    if i % 5 == 0 or i == total - 1:
+        _log_batch.info("batch-catalog %d/%d — %s", i + 1, total, pn)
+
+
+@router.post("/batch-catalog",
+             dependencies=[Depends(limit("batch_catalog", 6, 300))])
 async def batch_catalog(
     text: str = Form("", description="Daftar part number, 1 per baris"),
     file: UploadFile | None = File(None, description="File Excel/CSV berisi PN di kolom A"),
@@ -327,8 +338,41 @@ async def batch_catalog(
     # Menu Control: kolom stok ikut centang col_stok (harga sudah lebih ketat di atas).
     if not permissions.boleh_stok(user):
         col_list = [c for c in col_list if c != "stok"]
+
+    # Cap KHUSUS kolom Exploded View — jauh lebih rendah dari 300. Satu PN yang
+    # belum pernah dibuka terukur sampai 94 detik (PN umum dipakai 17.185 model)
+    # dan server hanya 1 vCPU; 300 PN akan berjalan berjam-jam.
+    if ("exploded" in {c.lower() for c in col_list}
+            and len(part_numbers) > catalog.MAX_BATCH_EXPLODED):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Kolom Exploded View maksimum {catalog.MAX_BATCH_EXPLODED} PN per batch "
+            f"(diberikan {len(part_numbers)}). Gambar exploded diambil satu per satu "
+            f"dari server EPC — sekitar 30-90 detik untuk tiap PN yang belum pernah "
+            f"dibuka. Kurangi jumlah PN, atau matikan kolom Exploded View untuk "
+            f"memakai batas {catalog._MAX_BATCH} PN.",
+        )
+
     try:
-        xls = catalog.build_catalog_excel(part_numbers, columns=col_list)
+        # asyncio.to_thread: build_catalog_excel SINKRON dan berat (HTTP ke SIMS/
+        # Accurate/EPC + openpyxl + PIL). Dulu dipanggil langsung di `async def`,
+        # jadi satu batch membekukan SELURUH server — cacat yang jadi fatal begitu
+        # kolom exploded bisa berjalan 15 menit.
+        xls = await asyncio.to_thread(
+            exploded_view.bangun_dengan_gerbang,
+            catalog.build_catalog_excel, part_numbers,
+            columns=col_list, on_progress=_log_progres_batch,
+        )
+    except exploded_view.SedangSibuk:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Sedang ada satu Batch Download yang berjalan di server (hanya boleh satu "
+            "sekaligus — server 1 vCPU dan server EPC mudah menolak permintaan "
+            "berbarengan). Tunggu sampai yang berjalan selesai, lalu coba lagi.",
+            headers={"Retry-After": "300"},
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Gagal membuat katalog: {e}")
 
@@ -469,19 +513,11 @@ def compare_parts(
 
 
 # ── Exploded view TANPA nomor rangka (jalur GLOBAL EPC) ─────────────────────
-# Terverifikasi 2026-07-30: `assembly_components_global` memakai
-# home/reverse/part?t=global + part/tree/item?type=model — sama sekali tak butuh
-# rangka. Dua konsekuensi yang JUJUR harus disampaikan ke user:
-#  1) LAMBAT: 10-60 dtk (PN umum dipakai belasan ribu model; WG9000361402 →
-#     17.185 model). Karena itu endpoint ini TIDAK dipanggil otomatis saat halaman
-#     dibuka — hanya saat user menekan tombol — dan hasilnya di-cache.
-#  2) LINTAS MODEL: figure yang terpilih memuat PN itu tapi dari model MANA PUN,
-#     bukan unit tertentu. Untuk unit spesifik, jalur per-VIN (rangka) tetap yang
-#     benar. Field `catatan` membawa peringatan ini ke UI.
-_EXPLODED_TTL = 24 * 3600     # figure EPC praktis statis
-_EXPLODED_MAX = 48            # ~100 KB/PNG → cap ±5 MB (RAM server 3,8 GB)
-_exploded_cache: "dict[str, dict]" = {}
-_exploded_lock = threading.Lock()
+# Komposisi + cache-nya kini MILIK services/exploded_view supaya DIBAGI dengan
+# kolom "Exploded View" di Batch Download: membuka gambar di sini menghangatkan
+# batch, dan sebaliknya. Alias di bawah menunjuk ke dict yang SAMA (bukan salinan)
+# agar test/kode lama yang mem-clear-nya tetap sah.
+_exploded_cache = exploded_view.CACHE
 
 
 @router.get("/exploded-figure")
@@ -491,61 +527,23 @@ def exploded_figure_global(
 ):
     """Gambar exploded view untuk SATU PN TANPA nomor rangka.
 
-    ⚠️ Sengaja dipanggil ON-DEMAND (tombol), bukan saat halaman dibuka: bisa
-    memakan 10-60 detik pada panggilan pertama."""
-    key = re.sub(r"[^A-Z0-9]", "", (pn or "").upper())
-    if not key:
+    ⚠️ Sengaja dipanggil ON-DEMAND (tombol), bukan saat halaman dibuka: panggilan
+    pertama terukur sampai 94 detik. ⚠️ Figure bersifat LINTAS MODEL — field
+    `catatan` membawa peringatan itu ke UI."""
+    if not exploded_view.kunci_pn(pn):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part Number kosong.")
-    with _exploded_lock:
-        c = _exploded_cache.get(key)
-        if c and (time.monotonic() - c["at"] < _EXPLODED_TTL):
-            return c["val"]
-
     try:
-        # figure_global (BUKAN assembly_components_global): yang dicari adalah figure
-        # yang MEMUAT PN ini + nomor balonnya, bukan isi assembly-nya.
-        d = epc_bom.figure_global(pn.strip(), max_figures=3)
+        d = exploded_view.figure_untuk_pn(pn)
     except Exception:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY,
                             "EPC sedang tak bisa diakses. Coba lagi sebentar.")
-    if not d.get("found") or not d.get("svg"):
-        # Kegagalan TIDAK di-cache: bisa karena EPC ngadat sesaat.
-        return {"found": False, "part_number": pn.strip().upper(),
-                "alasan": ("Figure exploded view untuk PN ini tidak ditemukan di EPC "
-                           "(jalur lintas-model). Coba lewat nomor rangka unitnya.")}
-
-    balon = d.get("balon")
-    png = None
-    try:
-        png = ai_export.exploded_png(d["svg"], balon)
-    except Exception:
-        png = None
-    if not png:
-        return {"found": False, "part_number": pn.strip().upper(),
-                "alasan": "Berkas gambar figure gagal diunduh/dirender dari EPC."}
-
-    out = {
-        "found": True,
-        "part_number": pn.strip().upper(),
-        "svg": d.get("svg"),
-        "figure_pn": d.get("figure_pn"),
-        "figure_nama": d.get("figure_nama"),
-        "nama_item": d.get("nama_item"),
-        "balon": balon,
-        "jumlah_item": d.get("jumlah_item"),
-        "sumber_model": d.get("sumber_model"),
-        "jumlah_model_pemakai": d.get("jumlah_model_pemakai"),
-        "png_base64": base64.b64encode(png).decode("ascii"),
-        "catatan": (
-            "Gambar ini diambil lintas-model (figure EPC mana pun yang memuat PN ini)"
-            + (f", contoh model: {d.get('sumber_model')}" if d.get("sumber_model") else "")
-            + ". Untuk unit tertentu, gambar & PN pasti tetap harus lewat nomor rangka."
-        ),
-    }
-    with _exploded_lock:
-        if len(_exploded_cache) >= _EXPLODED_MAX:
-            _exploded_cache.pop(next(iter(_exploded_cache)), None)
-        _exploded_cache[key] = {"at": time.monotonic(), "val": out}
+    if not d.get("found"):
+        return d
+    # ⚠️ WAJIB salin: `d` BOLEH JADI objek di dalam cache. Tanpa dict(), pop("png")
+    # mencabut gambarnya dari cache → pemakai berikutnya (Batch Download) dapat
+    # cache-hit TANPA gambar.
+    out = dict(d)
+    out["png_base64"] = base64.b64encode(out.pop("png")).decode("ascii")
     return out
 
 
