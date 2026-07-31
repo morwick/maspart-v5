@@ -708,10 +708,12 @@ def replace_part(part_number: str, rangka: str = "") -> dict:
                            "(mis. 'cek piston unit <rangka>') agar token aktif, lalu ulangi."}
 
     records: list[dict] = []
+    err_api = ""      # error jaringan/API yang menghentikan paginasi
     for page in range(1, 6):   # ambil s/d ~250 record (cukup)
         r = _get(_REPLACE_URL, {"pageNo": page, "pageSize": 50, "keyword": "",
                                 "partNumber": pn, "dhhNumber": ""}, token)
         if "_err" in r:
+            err_api = str(r.get("_err") or "api")
             break
         d = r.get("data") or {}
         lst = d.get("list") if isinstance(d, dict) else d
@@ -728,6 +730,15 @@ def replace_part(part_number: str, rangka: str = "") -> dict:
             break
 
     if not records:
+        # Gagal di halaman PERTAMA tanpa satu record pun = kita TIDAK TAHU apa-apa
+        # tentang PN ini. Dulu jalur ini jatuh ke pesan "tidak ada data pengganti"
+        # — sebuah kegagalan jaringan menyamar jadi pernyataan tentang DATA, dan
+        # pemanggil (pengganti_part) meneruskannya ke user sebagai vonis yakin.
+        if err_api:
+            return {"found": False, "part_number": pn, "reason": "gagal",
+                    "message": f"Gagal menghubungi EPC Weichai saat mengecek PN '{pn}' "
+                               f"({err_api}). Ini BUKAN pernyataan bahwa penggantinya "
+                               "tidak ada — coba lagi sebentar."}
         return {"found": False, "part_number": pn,
                 "message": f"Tidak ada data pengganti untuk PN '{pn}' di EPC Weichai "
                            "(kemungkinan part masih berlaku / bukan part Weichai)."}

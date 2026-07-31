@@ -1,7 +1,9 @@
 """Supersession/pengganti part: SIMS partEquivalentQuery (Sinotruk sasis) +
 EPC Weichai (mesin) digabung di tool pengganti_part. Jaringan di-mock.
 """
-from app.services import sims, ai_assistant as ai
+import pytest
+
+from app.services import epc_weichai, sims, ai_assistant as ai
 
 ADMIN = {"username": "admin", "role": "admin"}
 
@@ -148,3 +150,134 @@ def test_cari_part_sisip_pengganti(monkeypatch):
     it = next(x for x in res["hasil"] if x["part_number"] == "OLDPN")
     assert it.get("pengganti") == [{"pn": "NEWPN", "nama": "New Pedal"}]
     assert "info_pengganti" in res
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  "sudah dicek, memang tak ada"  vs  "GAGAL mengecek"
+# ═══════════════════════════════════════════════════════════════════════
+# Dulu keduanya menghasilkan kalimat yang PERSIS SAMA — "(dicek SIMS Sinotruk &
+# EPC Weichai)" — diklaim tanpa syarat walau sumbernya gagal diperiksa. Untuk
+# pertanyaan supersession itu berbahaya: mekanik dijawab yakin "tidak ada
+# pengganti", lalu memesan part yang sebenarnya sudah disupersede.
+
+@pytest.fixture
+def _no_katalog(monkeypatch):
+    monkeypatch.setattr(ai.part_index, "rows_for_pns", lambda pns: {})
+
+
+def _hitung_miss(monkeypatch):
+    """Ganti search_log.record_miss dgn penghitung — 'Pencarian Nihil' & loop
+    belajar sinonim hanya boleh belajar dari BUKTI."""
+    n = {"c": 0}
+    monkeypatch.setattr(ai.search_log, "record_miss",
+                        lambda q, mode="", source="": n.__setitem__("c", n["c"] + 1))
+    return n
+
+
+def test_sims_gagal_tidak_mengklaim_sudah_dicek(monkeypatch, _no_katalog):
+    # Indeks dingin → jalur live; `{}` = tak terkonfigurasi/exception = TIDAK dicek.
+    monkeypatch.setattr(ai.sims, "equivalents_count", lambda: 0)
+    monkeypatch.setattr(ai.sims, "get_part_equivalents", lambda pn: {})
+    monkeypatch.setattr(ai.epc_weichai, "replace_part", lambda pn, rangka: {"found": False})
+    n = _hitung_miss(monkeypatch)
+
+    r = ai._t_pengganti_part({"part_number": "OLD1"}, ADMIN)
+
+    assert r["found"] is False
+    assert r["sumber_dicek"]["sims"] == "gagal"
+    assert r["sumber_dicek"]["weichai"] == "ok"
+    assert r["sumber_gagal"] == ["sims"]
+    assert "sudah dicek SIMS" not in r["error"]          # klaim palsu itu HILANG
+    assert "BUKAN pernyataan" in r["error"]
+    # Telemetri: 'err' (gagal cek), BUKAN 'nf' (data memang tak ada).
+    assert ai._tool_fail_kind(r) == "err"
+    assert n["c"] == 0                                   # tak mencemari Pencarian Nihil
+
+
+def test_weichai_tanpa_sesi_dianggap_belum_dicek(monkeypatch, _no_katalog):
+    monkeypatch.setattr(ai.sims, "equivalents_count", lambda: 17000)
+    monkeypatch.setattr(ai.sims, "equivalents_for", lambda pn: {})
+    monkeypatch.setattr(ai.epc_weichai, "replace_part", lambda pn, rangka: {
+        "found": False, "reason": "no_session", "message": "Sesi EPC Weichai belum aktif."})
+    n = _hitung_miss(monkeypatch)
+
+    r = ai._t_pengganti_part({"part_number": "1007167053"}, ADMIN)
+
+    assert r["sumber_dicek"] == {"sims": "ok", "weichai": "tanpa_sesi"}
+    assert ai._tool_fail_kind(r) == "err"
+    assert n["c"] == 0
+
+
+def test_weichai_exception_dianggap_gagal(monkeypatch, _no_katalog):
+    monkeypatch.setattr(ai.sims, "equivalents_count", lambda: 17000)
+    monkeypatch.setattr(ai.sims, "equivalents_for", lambda pn: {})
+
+    def _boom(pn, rangka):
+        raise RuntimeError("jaringan putus")
+
+    monkeypatch.setattr(ai.epc_weichai, "replace_part", _boom)
+    r = ai._t_pengganti_part({"part_number": "X"}, ADMIN)
+    assert r["sumber_dicek"]["weichai"] == "gagal"
+    assert ai._tool_fail_kind(r) == "err"
+
+
+def test_dua_sumber_sehat_dan_nihil_tetap_nf(monkeypatch, _no_katalog):
+    """Kasus SAH: keduanya benar-benar dicek & memang tak ada → 'nf', dan
+    klaim 'sudah dicek' kini JUJUR."""
+    monkeypatch.setattr(ai.sims, "equivalents_count", lambda: 17000)
+    monkeypatch.setattr(ai.sims, "equivalents_for", lambda pn: {})
+    monkeypatch.setattr(ai.epc_weichai, "replace_part", lambda pn, rangka: {
+        "found": False, "part_number": "X",
+        "message": "Tidak ada data pengganti untuk PN 'X' di EPC Weichai"})
+    n = _hitung_miss(monkeypatch)
+
+    r = ai._t_pengganti_part({"part_number": "X"}, ADMIN)
+
+    assert r["sumber_dicek"] == {"sims": "ok", "weichai": "ok"}
+    assert "_cek_tak_lengkap" not in r
+    assert "sudah dicek SIMS Sinotruk & EPC Weichai" in r["error"]
+    assert ai._tool_fail_kind(r) == "nf"
+    assert n["c"] == 1                                   # bukti sah → boleh dicatat
+
+
+def test_ketemu_tapi_satu_sumber_gagal_diberi_catatan_cakupan(monkeypatch, _no_katalog):
+    """SIMS menemukan pengganti, Weichai gagal → hasil berguna TAPI daftarnya
+    belum tentu lengkap. Katakan, jangan diam-diam."""
+    monkeypatch.setattr(ai.sims, "equivalents_count", lambda: 17000)
+    monkeypatch.setattr(ai.sims, "equivalents_for", lambda pn: {
+        "digantikan_oleh": [{"pn": "NEW1", "nama": "Baru"}], "menggantikan": []})
+    monkeypatch.setattr(ai.epc_weichai, "replace_part", lambda pn, rangka: {
+        "found": False, "reason": "gagal", "message": "Gagal menghubungi EPC Weichai"})
+
+    r = ai._t_pengganti_part({"part_number": "OLD1"}, ADMIN)
+
+    assert r["found"] is True
+    assert r["sumber_dicek"]["weichai"] == "gagal"
+    assert "BELUM LENGKAP" in r["catatan_cakupan"]
+    assert ai._tool_fail_kind(r) == ""                   # ketemu = bukan kegagalan
+
+
+# ── epc_weichai.replace_part: error jaringan ≠ "tidak ada data" ──────────────
+def test_weichai_error_halaman_pertama_bukan_tidak_ada_data(monkeypatch):
+    monkeypatch.setattr(epc_weichai, "_ensure_token", lambda rangka="": "TOKEN")
+    monkeypatch.setattr(epc_weichai, "_get",
+                        lambda url, params, token: {"_err": "network"})
+
+    r = epc_weichai.replace_part("1007167053")
+
+    assert r["found"] is False
+    assert r["reason"] == "gagal"
+    assert "Tidak ada data pengganti" not in r["message"]
+    assert "BUKAN pernyataan" in r["message"]
+
+
+def test_weichai_kosong_asli_tetap_bilang_tidak_ada(monkeypatch):
+    monkeypatch.setattr(epc_weichai, "_ensure_token", lambda rangka="": "TOKEN")
+    monkeypatch.setattr(epc_weichai, "_get",
+                        lambda url, params, token: {"data": {"list": [], "total": 0}})
+
+    r = epc_weichai.replace_part("WG9100443050")
+
+    assert r["found"] is False
+    assert "reason" not in r
+    assert "Tidak ada data pengganti" in r["message"]

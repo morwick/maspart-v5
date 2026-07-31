@@ -2686,17 +2686,30 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
         seen.add(k)
         dst.append({"pn": pn_, "nama": nama, **extra})
 
+    # STATUS PER SUMBER. Dulu kedua blok di bawah menelan exception jadi `{}`,
+    # lalu pesan akhirnya tetap mengklaim "dicek SIMS Sinotruk & EPC Weichai"
+    # TANPA SYARAT — kegagalan mengecek tak terbedakan dari "memang tak ada".
+    # Untuk pertanyaan supersession itu berbahaya: user memesan part yang
+    # sebenarnya sudah disupersede karena dijawab yakin "tidak ada pengganti".
+    sumber_dicek = {"sims": "ok", "weichai": "ok"}
+
     # 1) SIMS (Sinotruk/HOWO sasis) — INDEKS in-memory dulu (instan, tabel penuh
     #    17rb baris, pemaaf PN dasar); query live per-PN hanya FALLBACK saat
     #    indeks belum siap. (Fix produksi 2026-07-17: query live rentan
     #    timeout/sesi kedaluwarsa → tool tercatat gagal 45% giliran.)
     try:
         if sims.equivalents_count() > 0:
+            # Indeks hangat: lookup deterministik in-memory, mustahil "gagal".
             sres = sims.equivalents_for(pn) or {}
         else:
+            # Jalur live. Bentuk kembaliannya SUDAH membedakan: `{}` = tak
+            # terkonfigurasi/exception (TIDAK dicek); `{"found": ...}` = dicek.
             sres = sims.get_part_equivalents(pn)
+            if not sres:
+                sumber_dicek["sims"] = "gagal"
     except Exception:
         sres = {}
+        sumber_dicek["sims"] = "gagal"
     for x in (sres.get("digantikan_oleh") or []):
         _add(diganti, seen_d, x.get("pn"), x.get("nama"), sumber="SIMS")
     for x in (sres.get("menggantikan") or []):
@@ -2707,6 +2720,15 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
         wres = epc_weichai.replace_part(pn, rangka)
     except Exception:
         wres = {}
+        sumber_dicek["weichai"] = "gagal"
+    if not wres:
+        sumber_dicek["weichai"] = "gagal"
+    elif not wres.get("found"):
+        _alasan = (wres.get("reason") or "").strip()
+        if _alasan == "no_session":
+            sumber_dicek["weichai"] = "tanpa_sesi"
+        elif _alasan == "gagal":
+            sumber_dicek["weichai"] = "gagal"
     if wres.get("found"):
         for x in (wres.get("digantikan_oleh") or []):
             _add(diganti, seen_d, x.get("pn"), None, tanggal=x.get("tanggal"), tipe=x.get("tipe"), sumber="Weichai")
@@ -2714,12 +2736,37 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
             _add(lama, seen_m, x.get("pn"), None, tanggal=x.get("tanggal"), tipe=x.get("tipe"), sumber="Weichai")
 
     if not diganti and not lama:
-        try:
-            search_log.record_miss(pn, "pn", "pengganti_part")
-        except Exception:
-            pass
-        out = {"found": False, "part_number": pn,
-               "error": "Tidak ada data persamaan/pengganti untuk PN ini (dicek SIMS Sinotruk & EPC Weichai)."}
+        _gagal = [k for k, v in sumber_dicek.items() if v != "ok"]
+        # 'Pencarian Nihil' & loop belajar sinonim hanya boleh belajar dari BUKTI.
+        # Dulu record_miss dipanggil tanpa syarat — PN yang GAGAL dicek ikut
+        # tercatat sebagai "nihil", mengajari sistem dari bukan-bukti.
+        if not _gagal:
+            try:
+                search_log.record_miss(pn, "pn", "pengganti_part")
+            except Exception:
+                pass
+        if _gagal:
+            _nama = {"sims": "SIMS Sinotruk (sasis)", "weichai": "EPC Weichai (mesin)"}
+            _belum = ", ".join(_nama[k] for k in _gagal)
+            _sudah = ", ".join(_nama[k] for k in sumber_dicek if k not in _gagal)
+            out = {
+                "found": False, "part_number": pn,
+                # Dibaca _tool_fail_kind → 'err', BUKAN 'nf'. Bedanya penting:
+                # 'nf' berarti "data memang tidak ada"; di sini kita tidak tahu.
+                "_cek_tak_lengkap": True,
+                "sumber_gagal": _gagal,
+                "error": (f"BELUM bisa memastikan: sumber {_belum} gagal diperiksa"
+                          + (f" (yang berhasil dicek: {_sudah}, nihil)" if _sudah else "")
+                          + ". ⛔ Ini BUKAN pernyataan bahwa penggantinya tidak ada — "
+                            "sampaikan apa adanya ke user bahwa pengecekan belum tuntas "
+                            "dan minta coba lagi sebentar; JANGAN simpulkan 'tidak ada "
+                            "pengganti'."),
+            }
+        else:
+            out = {"found": False, "part_number": pn,
+                   "error": "Tidak ada data persamaan/pengganti untuk PN ini "
+                            "(sudah dicek SIMS Sinotruk & EPC Weichai)."}
+        out["sumber_dicek"] = sumber_dicek
         # Tetap beri info PN yang DITANYA (katalog/stok) supaya jawaban berguna:
         # "tak ada supersession" ≠ "part tak dikenal" — sering PN-nya masih aktif.
         try:
@@ -2778,11 +2825,23 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
                 row["catatan"] = "belum ada di katalog/stok lokal"
         return row
 
+    # Ketemu di satu sumber TAPI sumber lain gagal: jawabannya berguna, namun
+    # daftarnya belum tentu lengkap — katakan, jangan diam-diam.
+    _gagal_ok = [k for k, v in sumber_dicek.items() if v != "ok"]
+    _peringatan = (
+        {"sumber_gagal": _gagal_ok,
+         "catatan_cakupan": ("Daftar ini mungkin BELUM LENGKAP — sumber "
+                             + ", ".join(_gagal_ok) + " gagal diperiksa. Sebutkan "
+                             "keterbatasan itu bila menyampaikan hasilnya.")}
+        if _gagal_ok else {}
+    )
     return {
         "found": True, "part_number": pn,
         "digantikan_oleh": [_row(x) for x in diganti],
         "menggantikan": [_row(x) for x in lama],
         "sumber": sorted({x.get("sumber") for x in (diganti + lama) if x.get("sumber")}),
+        "sumber_dicek": sumber_dicek,
+        **_peringatan,
         "catatan": ("'digantikan_oleh' = PN PENGGANTI (part baru) — sarankan ini bila PN yang "
                     "ditanya diskontinu/kosong stok; cek 'stok_total' mana yang ready. "
                     "'menggantikan' = PN LAMA yang digantikan part ini. 'sumber' SIMS = data "

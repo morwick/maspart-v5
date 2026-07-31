@@ -548,6 +548,12 @@ def _tool_fail_kind(result) -> str:
         return "brake"
     if result.get("denied") or result.get("_token_issue"):
         return "err"
+    # Tool yang menggabung BEBERAPA sumber dan salah satunya gagal diperiksa:
+    # hasilnya found=False, tapi itu BUKAN pernyataan "data tidak ada" — sumbernya
+    # memang belum sempat ditanya. Field eksplisit, bukan pencocokan substring
+    # pada kalimat prosa (_FAIL_INFRA_MARKERS): itu rapuh & sulit dites.
+    if result.get("_cek_tak_lengkap"):
+        return "err"
     for k in ("found", "ditemukan", "tersedia"):
         if result.get(k) is False:
             err = str(result.get("error") or "").lower()
