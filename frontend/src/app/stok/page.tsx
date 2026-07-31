@@ -13,6 +13,7 @@ import {
   type StokListResponse,
 } from "@/lib/api";
 import { clearSession, getToken } from "@/lib/auth";
+import { EmptyIcon, EmptyState, TableSkeleton } from "@/components/States";
 
 const PAGE_SIZE = 50;
 
@@ -168,6 +169,13 @@ export default function StokPage() {
           </div>
         )}
 
+        {/* Memuat: rangka tabel setinggi baris asli, bukan layar kosong. */}
+        {loading && !data && !error && !notConfigured && (
+          <div className="surface" style={{ marginTop: 12 }}>
+            <TableSkeleton rows={10} cols={4} />
+          </div>
+        )}
+
         {data && data.rows.length > 0 && (
           <div className="surface" style={{ marginTop: 12, overflow: "auto" }}>
             <table className="tbl">
@@ -201,9 +209,31 @@ export default function StokPage() {
         )}
 
         {data && data.configured !== false && !sessionExpired && !fetchError && data.rows.length === 0 && (
-          <p style={{ marginTop: 16, fontSize: 13, color: "var(--ink-500)" }}>
-            Tidak ada barang yang cocok.
-          </p>
+          <div className="surface" style={{ marginTop: 12 }}>
+            <EmptyState
+              icon={EmptyIcon.box}
+              title="Tidak ada barang yang cocok"
+              sub={
+                q
+                  ? <>Tidak ada part yang mengandung <b>{q}</b> di indeks Accurate.</>
+                  : "Indeks Accurate tidak mengembalikan baris apa pun untuk saringan ini."
+              }
+              action={
+                q ? (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      setQInput("");
+                      setQ("");
+                      load(1, "", sort);
+                    }}
+                  >
+                    Tampilkan semua
+                  </button>
+                ) : null
+              }
+            />
+          </div>
         )}
 
         {data && data.rows.length > 0 && (

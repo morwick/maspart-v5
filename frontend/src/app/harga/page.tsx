@@ -17,6 +17,7 @@ import {
 } from "@/lib/api";
 import { clearSession, getToken } from "@/lib/auth";
 import { ensurePerms } from "@/lib/perms";
+import { EmptyIcon, EmptyState, TableSkeleton } from "@/components/States";
 
 type Sub = "list" | "cari" | "batch";
 const PAGE_SIZE = 50;
@@ -203,6 +204,41 @@ function ListHarga({
             <b className="mono" style={{ color: "var(--ink-800)" }}>{data.total_filtered.toLocaleString("id-ID")}</b>
           </span>
           <button className="btn btn-secondary btn-sm" onClick={handleExport} disabled={data.total_filtered === 0}>⬇ Export Excel</button>
+        </div>
+      )}
+
+      {/* Memuat: rangka tabel, bukan halaman kosong yang lalu tiba-tiba terisi. */}
+      {loading && !data && !error && (
+        <div className="surface" style={{ marginTop: 12 }}>
+          <TableSkeleton rows={10} cols={3} />
+        </div>
+      )}
+
+      {data && data.rows.length === 0 && !error && (
+        <div className="surface" style={{ marginTop: 12 }}>
+          <EmptyState
+            icon={EmptyIcon.doc}
+            title="Tidak ada harga yang cocok"
+            sub={
+              q
+                ? <>Tidak ada part yang mengandung <b>{q}</b> di daftar harga.</>
+                : "Daftar harga tidak mengembalikan baris apa pun."
+            }
+            action={
+              q ? (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setQInput("");
+                    setQ("");
+                    load(1, "", sort);
+                  }}
+                >
+                  Tampilkan semua
+                </button>
+              ) : null
+            }
+          />
         </div>
       )}
 

@@ -13,6 +13,7 @@ import {
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { ensurePerms } from "@/lib/perms";
 import { addToCart, hasPrice, hasWeight } from "@/lib/cart";
+import { EmptyIcon, EmptyState, TableSkeleton } from "@/components/States";
 
 const PAGE_SIZES = [20, 50, 100];
 const FETCH_SIZE = 200;       // ukuran per request saat memuat semua hasil
@@ -300,39 +301,16 @@ export default function SearchPage() {
                 <div className="stat-label">{refine.trim() ? "Hasil saring" : "Hasil"}</div>
                 <div className="stat-value">{shown.toLocaleString("id-ID")}</div>
               </div>
+              {/* Saat hasil NOL, keterangannya pindah ke empty state di badan
+                  tabel — dulu ia jadi teks 12,5px abu-abu terselip di baris meta
+                  dan mudah terlewat, lalu di bawahnya cuma ada ruang kosong. */}
               <div style={{ fontSize: 12.5, color: "var(--ink-500)" }}>
-                {shown > 0
-                  ? `Menampilkan ${from}–${to}${refine.trim() ? ` dari ${shown.toLocaleString("id-ID")} hasil saring` : ""} · klik baris untuk detail`
-                  : refine.trim()
-                    ? `Tidak ada hasil cocok dengan saringan "${refine.trim()}"`
-                    : "Tidak ada part yang cocok"}
+                {shown > 0 &&
+                  `Menampilkan ${from}–${to}${refine.trim() ? ` dari ${shown.toLocaleString("id-ID")} hasil saring` : ""} · klik baris untuk detail`}
                 {truncated && !refine.trim() && (
                   <span style={{ color: "var(--warn-600)" }}>
                     {` · memuat ${allResults.length.toLocaleString("id-ID")} dari ${totalCount.toLocaleString("id-ID")} — persempit kata kunci utama`}
                   </span>
-                )}
-                {shown === 0 && !refine.trim() && saran.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    <span style={{ fontWeight: 600, color: "var(--ink-700)" }}>Mungkin maksud Anda: </span>
-                    {saran.map((s) => (
-                      <button
-                        key={`${s.part_number}|${s.part_name}`}
-                        className="pill"
-                        style={{ marginRight: 6, marginTop: 4, cursor: "pointer", fontSize: 11.5 }}
-                        title={s.part_name || s.part_number}
-                        onClick={() => {
-                          // PN → cari ulang mode PN; hanya-nama → cari ulang mode nama.
-                          const term = s.part_number || s.part_name;
-                          const m: SearchMode = s.part_number ? "pn" : "name";
-                          setMode(m);
-                          setQ(term);
-                          runSearch(term, m);
-                        }}
-                      >
-                        {s.part_number ? `${s.part_number}${s.part_name ? ` — ${s.part_name}` : ""}` : s.part_name}
-                      </button>
-                    ))}
-                  </div>
                 )}
               </div>
               <div className="grow" />
@@ -352,6 +330,68 @@ export default function SearchPage() {
                 </label>
               )}
             </div>
+
+            {/* Memuat: rangka tabel, bukan tulisan "Memuat…". Tinggi barisnya
+                sama dengan baris asli sehingga tata letak tidak melompat saat
+                data tiba. */}
+            {loading && pageItems.length === 0 && (
+              <TableSkeleton rows={8} cols={3 + (showStok ? 1 : 0) + (showHarga ? 1 : 0)} />
+            )}
+
+            {!loading && shown === 0 && (
+              <EmptyState
+                icon={EmptyIcon.search}
+                title={
+                  refine.trim()
+                    ? "Saringan tidak menyisakan hasil"
+                    : "Tidak ada part yang cocok"
+                }
+                sub={
+                  refine.trim() ? (
+                    <>
+                      Tidak ada baris yang mengandung <b>{refine.trim()}</b> di antara{" "}
+                      {allResults.length.toLocaleString("id-ID")} hasil pencarian.
+                    </>
+                  ) : (
+                    <>
+                      Coba kata kunci lain, atau beralih ke mode{" "}
+                      <b>{mode === "pn" ? "Nama Part" : "Part Number"}</b>.
+                    </>
+                  )
+                }
+                action={
+                  refine.trim() ? (
+                    <button className="btn btn-secondary btn-sm" onClick={() => setRefine("")}>
+                      Hapus saringan
+                    </button>
+                  ) : saran.length > 0 ? (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", maxWidth: 460 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-700)", width: "100%" }}>
+                        Mungkin maksud Anda:
+                      </span>
+                      {saran.map((s) => (
+                        <button
+                          key={`${s.part_number}|${s.part_name}`}
+                          className="pill"
+                          style={{ cursor: "pointer", fontSize: 11.5 }}
+                          title={s.part_name || s.part_number}
+                          onClick={() => {
+                            // PN → cari ulang mode PN; hanya-nama → cari ulang mode nama.
+                            const term = s.part_number || s.part_name;
+                            const m: SearchMode = s.part_number ? "pn" : "name";
+                            setMode(m);
+                            setQ(term);
+                            runSearch(term, m);
+                          }}
+                        >
+                          {s.part_number ? `${s.part_number}${s.part_name ? ` — ${s.part_name}` : ""}` : s.part_name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null
+                }
+              />
+            )}
 
             {pageItems.length > 0 && (
               <div style={{ overflow: "auto" }}>

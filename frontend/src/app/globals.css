@@ -874,6 +874,209 @@ main > div.mx-auto[class*="max-w-"] {
   }
 }
 
+/* ============================================================
+   Lapisan polish — hal-hal kecil yang membedakan "halaman admin"
+   dari "produk". Ditaruh paling akhir agar menimpa aturan di atas.
+   ============================================================ */
+
+/* ── Fokus keyboard ──
+   Dulu TIDAK ADA sama sekali: user keyboard menekan Tab dan tidak melihat
+   apa pun bergerak. `:focus-visible` hanya menyala untuk keyboard, jadi klik
+   mouse tetap bersih. Input/select/textarea punya gaya fokusnya sendiri
+   (border + ring brand) — dikecualikan supaya tidak ada dua cincin. */
+:focus-visible {
+  outline: 2px solid var(--brand-500);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+.input:focus-visible,
+.select:focus-visible,
+.textarea:focus-visible {
+  outline: none;
+}
+/* Sidebar gelap: cincin hijau terang tetap kontras di atas #131815. */
+.cc-nav-item:focus-visible,
+.cc-rail-item:focus-visible {
+  outline-color: #1ea83a;
+  outline-offset: -2px;
+}
+
+/* ── Seleksi teks ── warna merek, bukan biru bawaan sistem. */
+::selection {
+  background: var(--brand-100);
+  color: var(--ink-900);
+}
+
+/* ── Scrollbar ──
+   Bawaan Windows lebar & putih terang — di mode gelap ia jadi garis menyala
+   di tepi tiap tabel. `.cc-noscroll` (sidebar) menang karena spesifisitas
+   kelas, jadi sidebar tetap tanpa scrollbar. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-300) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--ink-300);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-400);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── Micro-interaction tombol ── umpan balik tekan; tanpa ini tombol terasa
+   seperti gambar, bukan kontrol. */
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.btn {
+  transition: background 0.12s, border-color 0.12s, opacity 0.12s, transform 0.06s;
+}
+
+/* ── Skeleton ── pengganti tulisan "Memuat…" saat menunggu data.
+   Pakai <div class="skeleton" style="height:16px"> — bentuknya meniru konten
+   yang akan datang, jadi tata letak tidak melompat saat data tiba. */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--ink-100) 25%,
+    var(--ink-150) 37%,
+    var(--ink-100) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+  border-radius: var(--r-xs);
+}
+@keyframes shimmer {
+  from { background-position: 100% 50%; }
+  to { background-position: 0 50%; }
+}
+
+/* ── Empty state ── satu bentuk konsisten untuk "belum ada data". */
+.empty-state {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 44px 20px;
+  text-align: center;
+  color: var(--ink-500);
+}
+.empty-state .empty-ic {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--ink-100);
+  color: var(--ink-400);
+}
+.empty-state .empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-800);
+}
+.empty-state .empty-sub {
+  font-size: 12.5px;
+  line-height: 1.6;
+  max-width: 340px;
+}
+
+/* ── Tepi gulir sidebar ──
+   Nav admin punya 16 item dan scrollbar-nya sengaja disembunyikan, jadi item
+   yang terpotong di bawah tak punya petunjuk apa pun. Gradien tipis ini
+   memberi tahu "masih ada lagi". pointer-events none agar klik tetap tembus. */
+.cc-nav-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%; /* sidebar rail memakai items-center — tanpa ini ia menyusut */
+  display: flex;
+  flex-direction: column;
+}
+.cc-nav-wrap::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 30px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  background: linear-gradient(to top, #0f1411, transparent);
+}
+/* Hanya menyala saat memang MASIH ADA menu di bawah — gradien permanen akan
+   meredupkan item terakhir walau daftarnya sudah habis, dan itu berbohong. */
+.cc-nav-wrap[data-more="1"]::after {
+  opacity: 1;
+}
+
+/* ── Tombol lompat ke bawah (chat) ── */
+.chat-jump {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 14px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 99px;
+  border: 1px solid var(--ink-200);
+  background: var(--paper);
+  color: var(--ink-700);
+  font-size: 12.5px;
+  font-weight: 550;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: var(--shadow-2);
+  animation: jumpIn 0.16s ease-out;
+}
+.chat-jump:hover {
+  border-color: var(--ink-300);
+  color: var(--ink-900);
+}
+.chat-jump.baru {
+  background: var(--brand-600);
+  border-color: var(--brand-600);
+  color: #fff;
+}
+@keyframes jumpIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to { opacity: 1; transform: translateX(-50%); }
+}
+
+/* ── Hormati "kurangi gerakan" ──
+   Indikator memuat berdenyut selama 14-254 detik; bagi sebagian orang itu
+   memicu pusing. Sistem operasi sudah punya saklarnya — kita tinggal patuh. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .btn:active:not(:disabled) {
+    transform: none;
+  }
+}
+
 /* Saat mencetak: sembunyikan elemen non-cetak & ratakan lembar ke kertas. */
 @media print {
   .no-print {

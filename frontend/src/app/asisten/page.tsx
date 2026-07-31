@@ -169,6 +169,7 @@ const IC = {
   paperclip:
     "M21.4 11.05 12.25 20.2a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48",
   x: "M18 6 6 18 M6 6l12 12",
+  arrowDown: "M12 5v14 M19 12l-7 7-7-7",
 };
 
 function Avatar({ size = 30 }: { size?: number }) {
@@ -250,6 +251,12 @@ export default function AsistenPage() {
   // Tanpa penanda ini, tiap langkah menyeret user kembali ke bawah persis saat ia
   // sedang menggulir ke atas membaca tabel sebelumnya.
   const stickBottom = useRef(true);
+  // Cerminan `stickBottom` untuk render: begitu user menggulir ke atas, ia
+  // kehilangan jalan kembali — dan selama 14-254 detik menunggu, ia juga tak
+  // tahu jawabannya sudah datang. Dua state, bukan satu, supaya tombolnya bisa
+  // berubah dari "turun" jadi "jawaban baru".
+  const [jauhDariBawah, setJauhDariBawah] = useState(false);
+  const [adaBaru, setAdaBaru] = useState(false);
   // Pembatalan giliran yang sedang berjalan (tombol Stop).
   const abortRef = useRef<AbortController | null>(null);
 
@@ -279,7 +286,12 @@ export default function AsistenPage() {
   // (busy) pakai "auto": animasi halus yang dipicu tiap event SSE membuat layar
   // terus bergerak dan user seolah bertarung melawan scroll.
   useEffect(() => {
-    if (!stickBottom.current) return;
+    if (!stickBottom.current) {
+      // Tertinggal di atas: tandai ada isi baru supaya tombol lompat berubah
+      // jadi ajakan hijau, bukan sekadar panah.
+      setAdaBaru(true);
+      return;
+    }
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: busy ? "auto" : "smooth",
@@ -289,7 +301,19 @@ export default function AsistenPage() {
   function onScrollChat() {
     const el = scrollRef.current;
     if (!el) return;
-    stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    const dekat = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    stickBottom.current = dekat;
+    setJauhDariBawah(!dekat);
+    if (dekat) setAdaBaru(false);
+  }
+
+  function turunKeBawah() {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickBottom.current = true;
+    setJauhDariBawah(false);
+    setAdaBaru(false);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }
 
   // Muat chat tersimpan saat halaman dibuka kembali (mis. balik dari menu lain).
@@ -802,7 +826,10 @@ export default function AsistenPage() {
             )}
           </div>
 
-          {/* Area pesan */}
+          {/* Area pesan — dibungkus kontainer relatif agar tombol "lompat ke
+              bawah" menempel di tepi bawah DAFTAR PESAN, bukan di bawah kolom
+              input. */}
+          <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex" }}>
           <div
             ref={scrollRef}
             onScroll={onScrollChat}
@@ -878,6 +905,21 @@ export default function AsistenPage() {
                 (lihat AiBubble, cabang `!m.content && m.streamStatus`) sudah
                 menampilkan dots + status langkah. Dulu keduanya tampil bersamaan
                 sehingga ada dua gelembung tumpang tindih selama 14-254 detik. */}
+          </div>
+
+          {/* Jalan kembali ke bawah. Muncul hanya saat user memang tertinggal di
+              atas; berubah hijau bila ada jawaban yang belum ia lihat. */}
+          {jauhDariBawah && msgs.length > 0 && (
+            <button
+              type="button"
+              onClick={turunKeBawah}
+              className={"chat-jump" + (adaBaru ? " baru" : "")}
+              title="Ke pesan terbaru"
+            >
+              <Icon d={IC.arrowDown} size={14} />
+              {adaBaru ? "Jawaban baru" : "Ke bawah"}
+            </button>
+          )}
           </div>
 
           {error && (
@@ -1597,7 +1639,7 @@ function RepairKitDownloads({ models }: { models: string[] }) {
  * berjalan tidak mempercepat apa pun, tapi mengubah "aplikasinya hang?" menjadi
  * "masih jalan, sudah 20 detik". Muncul setelah 3 detik supaya jawaban cepat
  * tidak ikut berkedip. */
-function Elapsed({ since }: { since?: number }) {
+function Elapsed({ since, inline }: { since?: number; inline?: boolean }) {
   const [detik, setDetik] = useState(0);
   useEffect(() => {
     if (!since) return;
@@ -1607,10 +1649,12 @@ function Elapsed({ since }: { since?: number }) {
     return () => clearInterval(id);
   }, [since]);
   if (!since || detik < 3) return null;
+  const teks = `${detik} detik${detik >= 45 ? " · pertanyaan ini butuh beberapa langkah" : ""}`;
+  if (inline) {
+    return <span style={{ fontSize: 11, color: "var(--ink-500)", flexShrink: 0 }}>· {teks}</span>;
+  }
   return (
-    <div style={{ fontSize: 11, color: "var(--ink-500)", marginTop: 6 }}>
-      {detik} detik{detik >= 45 ? " · pertanyaan ini butuh beberapa langkah" : ""}
-    </div>
+    <div style={{ fontSize: 11, color: "var(--ink-500)", marginTop: 6 }}>{teks}</div>
   );
 }
 
@@ -1808,47 +1852,26 @@ function Bubble({
           {/* Satu-satunya indikator memuat. aria-live: selama 14-254 detik inilah
               satu-satunya informasi yang berjalan — pengguna pembaca layar dulu
               tak mendengar apa pun sama sekali. */}
-          <div className="chat-bubble-ai" aria-live="polite" aria-busy="true">
-            {steps.length === 0 ? (
-              <span
-                style={{
-                  color: "var(--ink-500)",
-                  fontSize: 13,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                <span className="typing-dots">
-                  <span />
-                  <span />
-                  <span />
-                </span>
-                Memproses pertanyaan…
-              </span>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {steps.map((s, i) => {
-                  const last = i === steps.length - 1;
-                  return (
-                    <div
-                      key={i}
-                      style={{
-                        fontSize: 13,
-                        color: last ? "var(--ink-800)" : "var(--ink-500)",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 7,
-                      }}
-                    >
-                      <span>{last ? "⏳" : "✓"}</span>
-                      <span>{s}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            <Elapsed since={m.at} />
+          {/* SATU baris saja — teksnya berganti mengikuti langkah terakhir,
+              tidak menumpuk ke bawah (permintaan pemilik 2026-07-31). */}
+          <div
+            className="chat-bubble-ai"
+            aria-live="polite"
+            aria-busy="true"
+            style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}
+          >
+            <span className="typing-dots" style={{ flexShrink: 0 }}>
+              <span />
+              <span />
+              <span />
+            </span>
+            <span
+              className="truncate"
+              style={{ fontSize: 13, color: "var(--ink-800)", minWidth: 0 }}
+            >
+              {steps.length === 0 ? "Memproses pertanyaan…" : steps[steps.length - 1]}
+            </span>
+            <Elapsed since={m.at} inline />
           </div>
         </div>
       </div>

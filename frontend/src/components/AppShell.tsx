@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { clearSession, getUser } from "@/lib/auth";
@@ -47,6 +47,45 @@ const I = {
 
 type NavItem = { key?: string; href: string; label: string; icon: ReactNode; badge?: number };
 type NavSection = { label: string; items: NavItem[] };
+
+/* Pembungkus nav sidebar dengan gradien "masih ada lagi" di tepi bawah.
+   Scrollbar sidebar sengaja disembunyikan (cc-noscroll), jadi tanpa ini menu
+   admin yang terpotong — dari 16 item, ~6 di antaranya — tak punya petunjuk
+   apa pun bahwa ia ada. Gradien hanya menyala saat memang belum mentok bawah. */
+function NavScroll({ className, children }: { className?: string; children: ReactNode }) {
+  const ref = useRef<HTMLElement | null>(null);
+  const [more, setMore] = useState(false);
+
+  const ukur = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    setMore(el.scrollHeight - el.scrollTop - el.clientHeight > 8);
+  }, []);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    ukur();
+    // Daftar menu tumbuh belakangan (izin menu datang dari server), dan
+    // sidebar ikut berubah tinggi saat jendela di-resize.
+    const ro = new ResizeObserver(ukur);
+    ro.observe(el);
+    for (const anak of Array.from(el.children)) ro.observe(anak);
+    window.addEventListener("resize", ukur);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", ukur);
+    };
+  }, [ukur, children]);
+
+  return (
+    <div className="cc-nav-wrap" data-more={more ? "1" : "0"}>
+      <nav ref={ref} onScroll={ukur} className={className}>
+        {children}
+      </nav>
+    </div>
+  );
+}
 
 const NAV_DASHBOARD: NavItem = { href: "/dashboard", label: "Dashboard", icon: I.dashboard };
 // Beranda ringkas untuk staf internal (user/cabang) — bukan Command Center admin.
@@ -284,14 +323,14 @@ export default function AppShell({
   const sidebarExpanded = (
     <aside className="cc-side flex w-56 shrink-0 flex-col">
       {BrandBlock}
-      <nav className="cc-noscroll flex-1 overflow-auto px-3 pb-4">
+      <NavScroll className="cc-noscroll flex-1 overflow-auto px-3 pb-4">
         {sections.map((sec) => (
           <div key={sec.label}>
             <div className="cc-side-label">{sec.label}</div>
             <div className="flex flex-col gap-0.5">{sec.items.map(NavLink)}</div>
           </div>
         ))}
-      </nav>
+      </NavScroll>
       <div className="p-3" style={{ borderTop: "1px solid #1b211d" }}>
         <div className="flex items-center gap-2.5 rounded-lg p-2" style={{ background: "#1b211d" }}>
           <div className="grid place-items-center rounded-full" style={{ width: 30, height: 30, background: "var(--brand-700)", color: "#d3edd7", fontWeight: 650, fontSize: 12.5 }}>
@@ -313,13 +352,13 @@ export default function AppShell({
   const sidebarRail = (
     <aside className="cc-side flex w-16 shrink-0 flex-col items-center py-3.5">
       <div className="mono grid place-items-center" style={{ width: 32, height: 32, borderRadius: 8, background: "var(--brand-600)", color: "#fff", fontWeight: 700, fontSize: 15, marginBottom: 14 }}>M</div>
-      <nav className="cc-noscroll flex-1 overflow-auto flex flex-col gap-1 items-center w-full py-1">
+      <NavScroll className="cc-noscroll flex-1 overflow-auto flex flex-col gap-1 items-center w-full py-1">
         {flatItems.map((it) => (
           <Link key={it.href} href={it.href} title={it.label} className={"cc-rail-item" + (it.href === active ? " active" : "")}>
             <span style={{ display: "inline-flex", opacity: it.href === active ? 1 : 0.75 }}>{it.icon}</span>
           </Link>
         ))}
-      </nav>
+      </NavScroll>
       <button onClick={logout} title="Keluar" className="cc-rail-item" style={{ marginTop: 8, border: "none", background: "transparent" }}>{I.logout}</button>
     </aside>
   );
