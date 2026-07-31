@@ -4,7 +4,9 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-07-31** (hari terpadat sepanjang proyek — fitur RAK &
+> Terakhir diverifikasi: **2026-08-01** (lingkaran belajar MENUTUP: tawaran ajar dari
+> topik yang gagal + rute istilah ke Kamus Sinonim — blok **2026-08-01** di ujung
+> changelog). Sebelumnya: **2026-07-31** (hari terpadat sepanjang proyek — fitur RAK &
 > KARTU STOK + kewenangan `users.gudang_kelola`, fitur AJARKAN LEWAT CHAT, salvage
 > jawaban kosong, telemetri sebab guard, pengganti_part jujur, kompresi foto server,
 > saringan durasi WO garansi, polish UI menyeluruh, APK **2.2.0**; migrasi 026-028
@@ -2084,4 +2086,37 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       berikutnya; isi `gudang_kelola` akun staf nyata (tanpa itu menu Rak hanya
       terlihat admin); router `opname.py` TIDAK terdaftar di main.py (bug lama,
       dilaporkan — /api/opname kemungkinan 404 sejak awal).
+
+  2026-08-01 — LINGKARAN BELAJAR MENUTUP (`2c2ec1a`, mobile `b5e64a1`)
+
+  (A) RUTE ISTILAH → KAMUS SINONIM. Catatan pengetahuan hanya BAHAN BACAAN
+      model; mesin pencarian part (expand_query) cuma membaca KAMUS — "simpang
+      empat itu universal joint" yang nyasar jadi catatan berarti "cari simpang
+      empat" nihil selamanya. Kini model mengisi `istilah_trigger`/
+      `istilah_keywords` saat ajarannya pemetaan murni → kartu menawarkan
+      [Simpan ke Kamus Sinonim][Jadi catatan saja][Batal]; `aksi=simpan_kamus`
+      menulis via `sinonim.add` (jalur teruji menu admin + loop belajar; reload
+      per-mtime → aktif seketika). Pagar: trigger yang SUDAH di kamus tak
+      ditawarkan ulang (pemetaan lamanya disebut); pelajaran kamus 07-29
+      ditegakkan MESIN (trigger ≤3 kata, satu-kata ≥4 huruf); duplikat ditolak
+      store → dijawab jujur. Pegangan utk tim: istilah → kamus (pencarian ikut
+      mengerti), fakta/prosedur → catatan, angka stok/harga → ditolak.
+  (B) TAWARAN AJAR (`topik_gagal`). Penambang gap `ai_belajar` sudah lama
+      mendeteksi pertanyaan berulang gagal (≥3×, 👎 berbobot 3) tapi daftarnya
+      diam di endpoint admin yang jarang dibuka — lingkaran berhenti di
+      "terdeteksi". Kini: tool `topik_gagal` (gerbang `_can_mengajar`; daftar
+      urut tersering + CONTOH pertanyaan asli; `tandai_selesai`/`bukan_gap` →
+      `resolve_gap`) + `/api/ai/status` menyertakan `gap_ajar` untuk yang boleh
+      mengajar → layar pembuka chat menampilkan chip "💡 N topik berulang gagal
+      saya jawab — Ajari saya?" → klik → model menyajikan daftar → menyusun
+      DRAF dari contoh pertanyaannya → kartu konfirmasi ajarkan yang sama →
+      tandai selesai. Gagal → terdeteksi → ditawarkan → diajarkan → tak gagal
+      lagi. Draf disusun SAAT diklik (menumpang giliran chat berjalan — bukan
+      batch malam untuk topik yang mungkin tak pernah disentuh). Peta kelemahan
+      hanya dibocorkan ke yang bisa memperbaikinya; gagal baca gap tak pernah
+      menjatuhkan /status. Paritas mobile ter-commit (chip di layar kosong,
+      ikut APK berikutnya). 20 test baru → **1.840**.
+      ⚠️ Operasional: harness AI membunuh proses latar panjang makin agresif —
+      pytest pun kena; jalur yang TERBUKTI kebal = jalankan perintah panjang DI
+      DALAM tool Monitor (pytest paruh-2 & push.sh sukses lewat situ).
 ```
