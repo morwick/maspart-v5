@@ -34,7 +34,7 @@ from . import (abs_scr_codes, accurate, ai_chat_log, ai_export, ai_knowledge, ai
                dtc_diagnosa, eol_dtc, epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref,
                gudang, gudang_config, harga, knowledge_links, maintenance_ref, manual_media,
                manual_teks, orders, part_index, part_taxonomy, pengetahuan, pin_ecu, populasi,
-               repairkit, reservations, search_log, sims, sims_eol, sims_warranty, sinonim,
+               rak, repairkit, reservations, search_log, sims, sims_eol, sims_warranty, sinonim,
                skema_ref, telematics, wiring_ref)
 
 logger = logging.getLogger("maspart.ai")
@@ -221,7 +221,33 @@ def _hide_gudang_for_buyer(result: dict, user: dict) -> dict:
     di tempat + kembalikan result agar enak dirangkai."""
     if _is_pembeli(user):
         result.pop("stok_per_gudang", None)
+        # Lokasi rak = peta isi gudang internal. Ia menyebut nama cabang satu per
+        # satu persis seperti stok_per_gudang, jadi tanpa baris ini penyembunyian
+        # di atas cuma pindah kebocoran ke field sebelahnya.
+        result.pop("rak_gudang", None)
     return result
+
+
+def _rak_untuk(pn: str, user: dict) -> dict:
+    """{label gudang → 'A-12'} untuk disisipkan ke hasil tool. {} untuk pembeli.
+
+    Foto kartu stok SENGAJA tidak diikutkan: model tak bisa melihat gambar di
+    jalur ini dan URL-nya cuma membakar token — foto urusan UI. Best-effort:
+    rak yang gagal dibaca tak boleh menjatuhkan info stok/harga."""
+    if _is_pembeli(user):
+        return {}
+    try:
+        data = rak.get_for_pn(pn)
+    except Exception:
+        return {}
+    out: dict[str, str] = {}
+    for label, row in (data or {}).items():
+        teks = (row.get("rak") or "").strip()
+        if not teks:
+            continue
+        cat = (row.get("catatan") or "").strip()
+        out[label] = f"{teks} (catatan: {cat})" if cat else teks
+    return out
 
 
 # Lookup sinonim TERPUSAT di services/sinonim.py (rombakan 2026-07-17).

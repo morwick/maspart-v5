@@ -1,17 +1,61 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import {
   ApiError,
   createUser,
   deleteUser,
+  getAdminGudang,
   listUsers,
   updateUser,
   type AdminUser,
 } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
+
+/** Multi-centang label gudang — dipakai form tambah user & editor per-baris. */
+function GudangCentang({
+  opsi,
+  nilai,
+  onChange,
+}: {
+  opsi: string[];
+  nilai: string[];
+  onChange: (v: string[]) => void;
+}) {
+  if (!opsi.length) {
+    return (
+      <span className="text-xs text-zinc-400">
+        Daftar gudang belum tersedia (indeks Accurate / config gudang belum siap).
+      </span>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
+      {opsi.map((g) => (
+        <label key={g} className="flex cursor-pointer items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={nilai.includes(g)}
+            onChange={(e) =>
+              onChange(e.target.checked ? [...nilai, g] : nilai.filter((x) => x !== g))
+            }
+          />
+          <span className="mono text-zinc-600">{g}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+/** "01.Jakarta, 06.B80 H1" (bentuk simpan DB) → daftar label. */
+function parseKelola(s?: string | null): string[] {
+  return (s || "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
 
 export default function AdminUsersPage() {
   const router = useRouter();
@@ -24,6 +68,13 @@ export default function AdminUsersPage() {
   const [nu, setNu] = useState("");
   const [np, setNp] = useState("");
   const [nr, setNr] = useState("user");
+  const [nk, setNk] = useState<string[]>([]); // gudang kelola user baru
+  // Semua label gudang yang dikenal — sumber centang "Gudang Kelola" (hak tulis
+  // Rak & Kartu Stok). Label PENUH ("01.Jakarta"), sama dengan yang divalidasi
+  // backend; salah ketik manual akan ditolak, jadi disediakan sebagai daftar.
+  const [gudangOpsi, setGudangOpsi] = useState<string[]>([]);
+  const [editKelola, setEditKelola] = useState<string | null>(null);
+  const [draftKelola, setDraftKelola] = useState<string[]>([]);
 
   const me = getUser()?.username;
 
@@ -49,6 +100,14 @@ export default function AdminUsersPage() {
       return;
     }
     load();
+    const token = getToken();
+    if (token) {
+      // Non-fatal: gagal memuat daftar gudang hanya menyembunyikan centang,
+      // sisa halaman (role/password/status) tetap berfungsi.
+      getAdminGudang(token)
+        .then((d) => setGudangOpsi(d.gudang.map((g) => g.label)))
+        .catch(() => setGudangOpsi([]));
+    }
   }, [router, load]);
 
   function notify(ok: string) {
@@ -71,11 +130,12 @@ export default function AdminUsersPage() {
     if (!token) return;
     setBusy(true);
     try {
-      await createUser(token, { username: nu, password: np, role: nr });
+      await createUser(token, { username: nu, password: np, role: nr, gudang_kelola: nk });
       notify(`User '${nu.toLowerCase()}' ditambahkan.`);
       setNu("");
       setNp("");
       setNr("user");
+      setNk([]);
       await load();
     } catch (err) {
       fail(err);
@@ -116,6 +176,24 @@ export default function AdminUsersPage() {
     try {
       await updateUser(token, u.username, { password: pw });
       notify(`Password '${u.username}' diganti.`);
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  /** Simpan hak tulis Rak & Kartu Stok. [] = mencabut semua. */
+  async function saveKelola(u: AdminUser, labels: string[]) {
+    const token = getToken();
+    if (!token) return;
+    try {
+      await updateUser(token, u.username, { gudang_kelola: labels });
+      notify(
+        labels.length
+          ? `Gudang kelola '${u.username}': ${labels.join(", ")}.`
+          : `Hak kelola gudang '${u.username}' dicabut.`,
+      );
+      setEditKelola(null);
+      await load();
     } catch (err) {
       fail(err);
     }
@@ -191,6 +269,14 @@ export default function AdminUsersPage() {
           >
             + Tambah
           </button>
+          {/* Hak TULIS Rak & Kartu Stok — kolom users.gudang_kelola, bukan role
+              baru. Kosong = user biasa (menu Rak tak muncul). */}
+          <div className="w-full">
+            <label className="mb-1 block text-xs text-zinc-500">
+              Gudang Kelola (hak tulis Rak & Kartu Stok — boleh lebih dari satu)
+            </label>
+            <GudangCentang opsi={gudangOpsi} nilai={nk} onChange={setNk} />
+          </div>
         </form>
 
         <div className="overflow-x-auto rounded-xl ring-1 ring-zinc-200">
@@ -200,12 +286,14 @@ export default function AdminUsersPage() {
                 <th className="px-3 py-2 font-medium">Username</th>
                 <th className="px-3 py-2 font-medium">Role</th>
                 <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Gudang Kelola</th>
                 <th className="px-3 py-2 text-right font-medium">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 bg-white">
               {users.map((u) => (
-                <tr key={u.username} className="hover:bg-zinc-50">
+                <Fragment key={u.username}>
+                <tr className="hover:bg-zinc-50">
                   <td className="px-3 py-2 font-medium">
                     {u.username}
                     {u.username === me && (
@@ -230,6 +318,23 @@ export default function AdminUsersPage() {
                       <span className="text-green-600">aktif</span>
                     ) : (
                       <span className="text-zinc-400">nonaktif</span>
+                    )}
+                  </td>
+                  {/* Ringkas dulu — daftar gudang bisa panjang; klik melebar
+                      jadi centang + Simpan supaya tabel tetap terbaca. */}
+                  <td
+                    className="px-3 py-2 text-xs"
+                    style={{ cursor: "pointer", maxWidth: 220 }}
+                    title="Klik untuk mengubah gudang yang boleh ditulis akun ini"
+                    onClick={() => {
+                      setDraftKelola(parseKelola(u.gudang_kelola));
+                      setEditKelola((v) => (v === u.username ? null : u.username));
+                    }}
+                  >
+                    {parseKelola(u.gudang_kelola).length ? (
+                      <span className="mono text-zinc-600">{parseKelola(u.gudang_kelola).join(", ")}</span>
+                    ) : (
+                      <span className="text-zinc-400">— (bukan pengelola gudang)</span>
                     )}
                   </td>
                   <td className="space-x-1 whitespace-nowrap px-3 py-2 text-right text-xs">
@@ -265,6 +370,32 @@ export default function AdminUsersPage() {
                     )}
                   </td>
                 </tr>
+                {editKelola === u.username && (
+                  <tr className="bg-zinc-50">
+                    <td colSpan={5} className="px-3 py-3">
+                      <div className="mb-2 text-xs text-zinc-500">
+                        Gudang yang boleh <b>ditulis</b> akun ini di menu Rak &amp; Kartu Stok
+                        (melihat rak tetap terbuka untuk semua staf internal).
+                      </div>
+                      <GudangCentang opsi={gudangOpsi} nilai={draftKelola} onChange={setDraftKelola} />
+                      <div className="mt-2 space-x-1 text-xs">
+                        <button
+                          onClick={() => saveKelola(u, draftKelola)}
+                          className="rounded bg-brand px-3 py-1 font-semibold text-white hover:bg-green-700"
+                        >
+                          Simpan
+                        </button>
+                        <button
+                          onClick={() => setEditKelola(null)}
+                          className="rounded border border-zinc-300 px-2 py-1 font-medium text-zinc-600 hover:bg-zinc-50"
+                        >
+                          Batal
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

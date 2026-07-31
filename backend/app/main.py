@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 
 from .core.config import get_settings
 from .routers import (admin, ai, app_meta, auth, branch, buyer, chat, geo, harga, orders, parts,
-                      populasi, repairkit, stok)
+                      populasi, rak, repairkit, stok)
 from .services import (accurate, ai_chat_log, ai_sinonim_learn, geocode, image_search,
                        part_index, sims, sims_weights)
 from .services import orders as orders_service   # NB: `orders` di atas = ROUTER
@@ -169,6 +169,7 @@ app.include_router(chat.router)
 app.include_router(ai.router)
 app.include_router(repairkit.router)
 app.include_router(app_meta.router)
+app.include_router(rak.router)
 
 
 @app.exception_handler(Exception)

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import accurate, ai_chat_log, ai_sinonim_learn, app_config, catalog_bom, customer_map, gudang, gudang_config, harga, image_search, login_history, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, reservations, search_log, session_policy, sinonim
+from ..services import accurate, ai_chat_log, ai_sinonim_learn, app_config, catalog_bom, customer_map, gudang, gudang_config, harga, image_search, login_history, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, rak, reservations, search_log, session_policy, sinonim
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -53,12 +53,35 @@ class CreateUserRequest(BaseModel):
     username: str
     password: str
     role: str = "user"
+    # Gudang yang boleh DITULIS akun ini di Rak & Kartu Stok (label penuh).
+    # None = tak diubah; [] = dicabut. Sengaja list (bukan string) supaya UI
+    # multi-centang tak perlu tahu format simpan koma-spasi.
+    gudang_kelola: list[str] | None = None
 
 
 class UpdateUserRequest(BaseModel):
     role: str | None = None
     password: str | None = None
     is_active: bool | None = None
+    gudang_kelola: list[str] | None = None
+
+
+def _validasi_gudang_kelola(labels: list[str]) -> str | None:
+    """Label harus ada di daftar gudang yang DIKENAL (indeks Accurate ∪ config).
+
+    Tanpa ini, satu salah ketik ('01.Jakartaa') memberi hak tulis ke gudang yang
+    tak pernah muncul di mana pun — pemiliknya mengira sudah dapat akses, padahal
+    tiap penyimpanan tetap 403. Return bentuk simpan koma-spasi (None bila kosong)."""
+    bersih = rak.parse_kelola(", ".join(str(x) for x in (labels or [])))
+    if bersih:
+        dikenal = set(part_index.gudang_names()) | set(gudang_config.coords_map())
+        # Set kosong = indeks & config belum siap → jangan menolak (admin tetap
+        # bisa menugaskan saat cold start; nilai yang salah tetap tak berefek).
+        asing = [lb for lb in bersih if lb not in dikenal] if dikenal else []
+        if asing:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Gudang tidak dikenal: {', '.join(asing)}")
+    return rak.format_kelola(bersih)
 
 
 def _check_kind(kind: str):
@@ -351,9 +374,20 @@ def create_user(body: CreateUserRequest, _admin: dict = Depends(require_admin)):
     pw_hash = hash_password(body.password)
     if not pw_hash:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Gagal hash password.")
+    simpan_kelola = _validasi_gudang_kelola(body.gudang_kelola or []) if body.gudang_kelola is not None else None
     ok, msg = sb.create_user(uname, pw_hash, body.role)
     if not ok:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, msg)
+    if body.gudang_kelola is not None:
+        # Ditulis TERPISAH setelah akun jadi: create_user memakai INSERT dengan
+        # kolom tetap, dan kolom baru yang belum dimigrasi akan menggagalkan
+        # SELURUH pembuatan akun. Kalau langkah ini gagal, akunnya tetap ada —
+        # katakan apa adanya supaya admin tak mengira hak tulisnya tersimpan.
+        ok2, msg2 = sb.update_user(uname, {"gudang_kelola": simpan_kelola})
+        rak.invalidate(uname)
+        if not ok2:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Akun dibuat, tapi gudang kelola gagal disimpan: {msg2}")
     return {"ok": True}
 
 
@@ -372,11 +406,17 @@ def update_user(username: str, body: UpdateUserRequest, _admin: dict = Depends(r
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Gagal hash password.")
         data["password_hash"] = pw_hash
         data["password"] = None  # hapus plaintext legacy
+    if body.gudang_kelola is not None:
+        data["gudang_kelola"] = _validasi_gudang_kelola(body.gudang_kelola)
     if not data:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tidak ada perubahan.")
     ok, msg = sb.update_user(username, data)
     if not ok:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, msg)
+    if body.gudang_kelola is not None:
+        # Cache 60 dtk di services/rak → tanpa ini pencabutan hak baru berlaku
+        # semenit kemudian, tepat saat admin sedang memeriksa hasilnya.
+        rak.invalidate(username.strip().lower())
     return {"ok": True}
 
 

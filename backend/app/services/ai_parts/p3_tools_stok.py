@@ -493,19 +493,31 @@ def _t_stok_gudang(args: dict, user: dict) -> dict:
     # panggilan live per-PN. want_g = nama basis gudang utk cocok lintas penamaan
     # (config vs Accurate warehouseName sama-sama 'NN.Nama').
     want_g = _norm_gudang(gudang_kanonik)
+    # Peta rak SATU gudang ditarik SEKALI (bukan per-PN): daftar hasil bisa 40
+    # baris, dan satu round-trip per baris membuat tool ini berkali lipat lambat
+    # hanya untuk kolom pelengkap.
+    try:
+        _rak_map = {r["pn_key"]: r for r in rak.get_for_gudang(gudang_kanonik, limit=2000)}
+    except Exception:
+        _rak_map = {}
     hasil: list[dict] = []
     for pn, meta in cand.items():
         br = accurate.gudang_breakdown(pn)
         qty = next((_acc_qty(v) for g, v in br.items() if _norm_gudang(g) == want_g), 0)
         if qty <= 0:
             continue
-        hasil.append({
+        baris = {
             "part_number": pn,
             "part_name": meta.get("part_name") or part_index.name_for(pn),
             "stok_di_gudang": qty,
             "stok_total": sum(_acc_qty(v) for v in br.values()),
             "harga_lokal": meta.get("harga") or None,
-        })
+        }
+        if _rak_map:
+            _r = _rak_map.get(rak.pn_key(pn)) or {}
+            if (_r.get("rak") or "").strip():
+                baris["rak"] = _r["rak"].strip()
+        hasil.append(baris)
     hasil.sort(key=lambda x: x["stok_di_gudang"], reverse=True)
     ditampilkan = hasil[:40]
 
@@ -634,6 +646,12 @@ def _t_detail_part(args: dict, user: dict) -> dict:
             if acc.get("price"):
                 out["harga_lokal"] = "Rp " + f"{int(acc['price']):,}".replace(",", ".")
                 out["sumber_harga"] = "Accurate (sinkron berkala)"
+            # Lokasi RAK (Rak & Kartu Stok) — 'berapa' saja tak menolong orang yang
+            # sedang berdiri di gudang mencari barangnya. _hide_gudang_for_buyer di
+            # baris berikut yang membuangnya lagi untuk pembeli.
+            _rg = _rak_untuk(pn, user)
+            if _rg:
+                out["rak_gudang"] = _rg
             return _hide_gudang_for_buyer(out, user)
         try:
             search_log.record_miss(pn, "pn", "detail_part")
@@ -701,6 +719,11 @@ def _t_detail_part(args: dict, user: dict) -> dict:
                 result["stok_total"] = f"{acc['available_to_sell']:.0f} {acc['unit']}".strip()
                 result["stok_per_gudang"] = {g["gudang"]: g["qty"] for g in (acc.get("per_gudang") or [])}
                 result["sumber_stok"] = "Accurate (sinkron berkala)"
+                # Lokasi RAK per gudang (Rak & Kartu Stok). Sudah di dalam cek
+                # non-pembeli, jadi tak perlu penyaring kedua di sini.
+                _rg = _rak_untuk(pn, user)
+                if _rg:
+                    result["rak_gudang"] = _rg
             if acc.get("price"):
                 result["harga_lokal"] = "Rp " + f"{int(acc['price']):,}".replace(",", ".")
                 result["sumber_harga"] = "Accurate (sinkron berkala)"

@@ -14,7 +14,7 @@ from __future__ import annotations
 import threading
 import time
 
-from . import gudang
+from . import gudang, rak
 from .supabase_client import list_users, perms_delete, perms_load, perms_save
 
 # ── Cache ber-TTL untuk pembacaan izin ───────────────────────────────
@@ -56,6 +56,9 @@ MENU_TABS: dict[str, str] = {
     "populasi": "Populasi Unit",
     "harga": "Harga",
     "stok": "Stok",
+    # Menu DATA (bukan ADMIN — staf gudang bukan admin): input rak + foto kartu
+    # stok. Muncul di Menu Control otomatis karena daftar ini yang dibaca.
+    "rak": "Rak & Kartu Stok",
 }
 COLUMN_KEYS: dict[str, str] = {
     "col_stok": "Kolom Stok",
@@ -146,6 +149,11 @@ def all_effective(username: str, role: str) -> dict:
         "branch": gudang.gudang_label(branch) if branch else None,
         # Boleh ekspor kolom harga di Batch Download — admin & akun 'mas' saja.
         "can_price": gudang.can_see_price(username, role),
+        # Gudang yang boleh DITULIS akun ini di Rak & Kartu Stok (label penuh).
+        # Frontend memakainya untuk (a) memunculkan menu Rak dan (b) menampilkan
+        # tombol "Ubah" hanya di baris gudang yang memang ia kelola. [] untuk
+        # pembeli & selama migrasi 027 belum jalan (fitur dorman, bukan error).
+        "gudang_kelola": [] if role == "pembeli" else rak.gudang_kelola_for(username),
     }
 
 

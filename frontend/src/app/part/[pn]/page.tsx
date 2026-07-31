@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import ImageLightbox from "@/components/ImageLightbox";
-import { ApiError, cekPartDiUnit, getAccurateStock, getPartExploded, getPartExplodedFigure, getPartPhotos, getPartSpec, getBuyerLocations, partImageUrl, searchParts, type AccurateStock, type BuyerLocation, type CekUnitResult, type PartExplodedFigure, type PartResult, type PartSpec } from "@/lib/api";
+import { ApiError, cekPartDiUnit, deleteRakFoto, getAccurateStock, getPartExploded, getPartExplodedFigure, getPartPhotos, getPartSpec, getBuyerLocations, getRakForPart, partImageUrl, saveRak, searchParts, uploadRakFoto, type AccurateStock, type BuyerLocation, type CekUnitResult, type PartExplodedFigure, type PartResult, type PartSpec, type RakInfo } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { ensurePerms } from "@/lib/perms";
 import { addToCart, hasPrice, hasWeight } from "@/lib/cart";
@@ -39,6 +39,12 @@ export default function PartDetailPage() {
   const [exploded, setExploded] = useState<PartExplodedFigure | null>(null);
   const [explodedBusy, setExplodedBusy] = useState(false);
   const [explodedErr, setExplodedErr] = useState<string | null>(null);
+  // Rak & kartu stok per gudang (staf internal saja). `kelola` = gudang yang
+  // boleh DITULIS akun ini; admin selalu boleh.
+  const [rakMap, setRakMap] = useState<Record<string, RakInfo>>({});
+  const [rakOpen, setRakOpen] = useState<string | null>(null);
+  const [kelola, setKelola] = useState<string[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const b = getUser()?.role === "pembeli";
@@ -50,10 +56,12 @@ export default function PartDetailPage() {
     // Admin selalu melihat stok & harga — izin kolom hanya membatasi staf bawahan,
     // bukan admin (samakan dgn backend yang memberi admin semua kolom).
     const admin = getUser()?.role === "admin";
+    setIsAdmin(admin);
     ensurePerms().then((p) => {
       if (p) {
         setShowStok(admin || p.columns.includes("col_stok"));
         setShowHarga(admin || p.columns.includes("col_harga"));
+        setKelola(p.gudang_kelola ?? []);
       }
     });
   }, []);
@@ -70,6 +78,26 @@ export default function PartDetailPage() {
     setAccStock(null);
     getAccurateStock(pn, t).then(setAccStock).catch(() => setAccStock(null));
   }, [pn]);
+
+  // Rak & kartu stok — hanya staf internal (backend 403 untuk pembeli) dan
+  // hanya bila kolom stok memang boleh dilihat. Non-fatal: gagal baca rak tak
+  // boleh menjatuhkan info stok/harga.
+  const muatRak = useCallback(async () => {
+    const t = getToken();
+    if (!pn || !t || isBuyer || !showStok) return;
+    try {
+      const r = await getRakForPart(t, pn);
+      setRakMap(r.rak || {});
+    } catch {
+      setRakMap({});
+    }
+  }, [pn, isBuyer, showStok]);
+
+  useEffect(() => {
+    setRakMap({});
+    setRakOpen(null);
+    void muatRak();
+  }, [muatRak]);
 
   useEffect(() => {
     const token = getToken();
@@ -134,6 +162,16 @@ export default function PartDetailPage() {
   const displayTotal = acc
     ? `${acc.available_to_sell.toLocaleString("id-ID")} ${acc.unit}`
     : (main?.stok ?? "—");
+  // Baris tabel gudang = UNION gudang berstok ∪ gudang yang punya data rak.
+  // Gudang ber-rak tapi stok 0 SENGAJA tetap tampil: justru saat barang habis
+  // orang paling butuh tahu rak lamanya (mau diisi ulang / cek sisa fisik).
+  const barisGudang: [string, number][] = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const [nama, qty] of displayGudang) m.set(nama, Number(qty) || 0);
+    for (const label of Object.keys(rakMap)) if (!m.has(label)) m.set(label, 0);
+    return [...m.entries()];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(displayGudang), rakMap]);
   // HARGA JUAL: Accurate = utama (juga isi part yg lokalnya kosong → jadi bisa dibeli),
   // `harga.xlsx` fallback. Berlaku semua peran (termasuk pembeli).
   const accHarga = accStock?.found && accStock.stock?.harga ? accStock.stock.harga : 0;
@@ -307,17 +345,30 @@ export default function PartDetailPage() {
                             <span style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-400)" }} title="Fetch Accurate gagal — memakai data Excel (export Accurate)">fallback Excel</span>
                           )}
                         </div>
-                        {displayGudang.length > 0 ? (
-                          <table className="tbl">
-                            <tbody>
-                              {displayGudang.map(([nama, qty]) => (
-                                <tr key={nama}>
-                                  <td style={{ color: "var(--ink-600)" }}>{nama}</td>
-                                  <td className="num" style={{ fontWeight: 550 }}>{Number(qty).toLocaleString("id-ID")}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                        {barisGudang.length > 0 ? (
+                          <>
+                            <table className="tbl">
+                              <tbody>
+                                {barisGudang.map(([nama, qty]) => (
+                                  <GudangRakRow
+                                    key={nama}
+                                    pn={main.part_number}
+                                    gudang={nama}
+                                    qty={qty}
+                                    info={rakMap[nama]}
+                                    boleh={isAdmin || kelola.includes(nama)}
+                                    open={rakOpen === nama}
+                                    onToggle={() => setRakOpen((g) => (g === nama ? null : nama))}
+                                    onChanged={muatRak}
+                                    onZoom={setLightbox}
+                                  />
+                                ))}
+                              </tbody>
+                            </table>
+                            <div className="px-4 py-2" style={{ fontSize: 11.5, color: "var(--ink-400)", borderTop: "1px solid var(--ink-150)" }}>
+                              Klik baris gudang untuk melihat lokasi rak & kartu stok.
+                            </div>
+                          </>
                         ) : (
                           <div className="px-4 py-3" style={{ fontSize: 13, color: "var(--ink-400)" }}>
                             Tidak ada rincian stok per gudang.
@@ -482,6 +533,227 @@ export default function PartDetailPage() {
         />
       )}
     </AppShell>
+  );
+}
+
+// ── Baris gudang + panel Rak & Kartu Stok ────────────────────────────────────
+// Pola expandable meniru StokRow (app/stok/page.tsx): baris diklik → panel di
+// bawahnya. MELIHAT terbuka untuk semua staf internal; tombol Ubah hanya muncul
+// bila akun ini memang mengelola gudang tersebut (label PENUH, mis. "01.Jakarta"
+// — bukan nama pendek pembeli).
+function tglSingkat(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function GudangRakRow({
+  pn,
+  gudang,
+  qty,
+  info,
+  boleh,
+  open,
+  onToggle,
+  onChanged,
+  onZoom,
+}: {
+  pn: string;
+  gudang: string;
+  qty: number;
+  info?: RakInfo;
+  boleh: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onChanged: () => Promise<void> | void;
+  onZoom: (url: string) => void;
+}) {
+  const [edit, setEdit] = useState(false);
+  const [rak, setRak] = useState(info?.rak ?? "");
+  const [catatan, setCatatan] = useState(info?.catatan ?? "");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Selama form tertutup, isian mengikuti data server (mis. sesudah disimpan
+  // oleh baris lain / dimuat ulang). Saat form terbuka jangan diganggu.
+  useEffect(() => {
+    if (!edit) {
+      setRak(info?.rak ?? "");
+      setCatatan(info?.catatan ?? "");
+    }
+  }, [info?.rak, info?.catatan, edit]);
+
+  async function simpan() {
+    const token = getToken();
+    if (!token) return;
+    if (!rak.trim()) {
+      setErr("Kode rak wajib diisi (mis. A-12, atau 'A-12 & C-03' bila terpecah).");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await saveRak(token, gudang, pn, { rak: rak.trim(), catatan: catatan.trim() });
+      // Foto diunggah SESUDAH baris ada — backend menolak foto untuk pasangan
+      // (pn × gudang) yang belum punya baris rak.
+      if (file) await uploadRakFoto(token, gudang, pn, file);
+      setFile(null);
+      setEdit(false);
+      await onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Gagal menyimpan rak.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function hapusFoto() {
+    const token = getToken();
+    if (!token || !window.confirm(`Hapus foto kartu stok ${pn} di ${gudang}?`)) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await deleteRakFoto(token, gudang, pn);
+      await onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Gagal menghapus foto.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <tr onClick={onToggle} style={{ cursor: "pointer" }} title="Klik untuk rak & kartu stok">
+        <td style={{ color: "var(--ink-600)" }}>
+          <span style={{ color: "var(--ink-400)", fontSize: 11, marginRight: 6 }}>{open ? "▾" : "▸"}</span>
+          {gudang}
+          {info?.rak && (
+            <span className="pill" style={{ marginLeft: 6, fontSize: 11 }} title="Lokasi rak">
+              rak {info.rak}
+            </span>
+          )}
+          {qty <= 0 && info?.rak && (
+            <span className="pill pill-warn" style={{ marginLeft: 6, fontSize: 11 }} title="Tidak ada stok, tapi rak-nya tercatat">
+              stok 0
+            </span>
+          )}
+        </td>
+        <td className="num" style={{ fontWeight: 550 }}>{Number(qty).toLocaleString("id-ID")}</td>
+      </tr>
+      {open && (
+        <tr>
+          <td colSpan={2} style={{ background: "var(--ink-50)", padding: "10px 14px" }}>
+            {err && <div className="alert alert-error" style={{ marginBottom: 8 }}>{err}</div>}
+
+            {!edit ? (
+              <div style={{ fontSize: 12.5, lineHeight: 1.7 }}>
+                {info ? (
+                  <>
+                    <div>
+                      Rak: <b className="mono">{info.rak || "—"}</b>
+                    </div>
+                    {info.catatan && (
+                      <div style={{ color: "var(--ink-600)" }}>Catatan: {info.catatan}</div>
+                    )}
+                    {info.foto_url && (
+                      <button
+                        type="button"
+                        onClick={() => onZoom(info.foto_url)}
+                        style={{ display: "block", marginTop: 6, padding: 0, border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", background: "var(--paper)", cursor: "zoom-in" }}
+                        title="Klik untuk perbesar kartu stok"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={partImageUrl(info.foto_url)}
+                          alt={`Kartu stok ${pn} di ${gudang}`}
+                          loading="lazy"
+                          style={{ width: 120, height: 120, objectFit: "cover", display: "block" }}
+                        />
+                      </button>
+                    )}
+                    {(info.updated_by || info.updated_at) && (
+                      <div style={{ color: "var(--ink-400)", fontSize: 11.5, marginTop: 4 }}>
+                        diperbarui {info.updated_by || "—"}
+                        {info.updated_at ? ` · ${tglSingkat(info.updated_at)}` : ""}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <span style={{ color: "var(--ink-500)" }}>
+                    Belum ada data rak untuk gudang ini.
+                  </span>
+                )}
+                {boleh && (
+                  <div className="flex flex-wrap gap-2" style={{ marginTop: 8 }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setEdit(true)}>
+                      ✏️ {info ? "Ubah" : "Isi rak"}
+                    </button>
+                    {info?.foto_url && (
+                      <button className="btn btn-secondary btn-sm" onClick={hapusFoto} disabled={busy}>
+                        Hapus foto
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2" style={{ fontSize: 12.5 }}>
+                <label className="flex flex-col gap-1">
+                  <span style={{ color: "var(--ink-500)" }}>Kode rak</span>
+                  <input
+                    className="input mono"
+                    style={{ height: 34, maxWidth: 320 }}
+                    value={rak}
+                    onChange={(e) => setRak(e.target.value)}
+                    placeholder="mis. A-12 (boleh 'A-12 & C-03')"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span style={{ color: "var(--ink-500)" }}>Catatan (opsional)</span>
+                  <input
+                    className="input"
+                    style={{ height: 34, maxWidth: 420 }}
+                    value={catatan}
+                    onChange={(e) => setCatatan(e.target.value)}
+                    placeholder="mis. sisa 2 pcs di rak bawah"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span style={{ color: "var(--ink-500)" }}>
+                    Foto kartu stok (jpg/png/webp, maks 10 MB) — mengganti foto lama
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    style={{ fontSize: 12 }}
+                  />
+                </label>
+                <div className="flex gap-2">
+                  <button className="btn btn-primary btn-sm" onClick={simpan} disabled={busy}>
+                    {busy ? "Menyimpan…" : "Simpan"}
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      setEdit(false);
+                      setFile(null);
+                      setErr(null);
+                    }}
+                    disabled={busy}
+                  >
+                    Batal
+                  </button>
+                </div>
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

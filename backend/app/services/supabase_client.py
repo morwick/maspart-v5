@@ -154,22 +154,32 @@ def list_users() -> list[dict]:
 
 
 # ── User CRUD (manajemen user) ───────────────────────────────────────
+_USERS_SELECT = "username,role,is_active,created_at"
+# `gudang_kelola` (migrasi 027) dipisah karena select PostgREST bersifat SEMUA
+# ATAU GAGAL: satu kolom yang belum ada (42703) membuat SELURUH daftar user
+# kosong — halaman Manajemen User & panel Monitoring ikut mati. Karena itu
+# dicoba dulu dengan kolom baru, lalu jatuh ke select lama.
+_USERS_SELECT_PLUS = _USERS_SELECT + ",gudang_kelola"
+
+
 def list_users_full() -> list[dict]:
     """Semua user (termasuk nonaktif) untuk manajemen."""
     s = get_settings()
     if not s.supabase_configured:
         return []
-    try:
-        resp = requests.get(
-            _rest_url(s.supabase_table),
-            headers=_service_headers(),
-            params={"select": "username,role,is_active,created_at", "order": "username.asc"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        return resp.json() or []
-    except Exception:
-        return []
+    for select in (_USERS_SELECT_PLUS, _USERS_SELECT):
+        try:
+            resp = requests.get(
+                _rest_url(s.supabase_table),
+                headers=_service_headers(),
+                params={"select": select, "order": "username.asc"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return resp.json() or []
+        except Exception:
+            return []
+    return []
 
 
 def create_user(username: str, password_hash: str, role: str) -> tuple[bool, str]:

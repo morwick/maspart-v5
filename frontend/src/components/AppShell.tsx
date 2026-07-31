@@ -101,6 +101,7 @@ const NAV_DATA: NavItem[] = [
   { key: "populasi", href: "/populasi", label: "Populasi Unit", icon: I.truck },
   { key: "harga", href: "/harga", label: "Harga", icon: I.money },
   { key: "stok", href: "/stok", label: "Stok", icon: I.grid },
+  { key: "rak", href: "/rak", label: "Rak & Kartu Stok", icon: I.clipboard },
 ];
 const NAV_ADMIN: NavItem[] = [
   { href: "/admin/orders", label: "Pesanan", icon: I.cart },
@@ -133,7 +134,7 @@ const NAV_BUYER: NavItem[] = [
   { href: "/pilih-lokasi", label: "Ganti Lokasi", icon: I.truck },
 ];
 // Halaman internal yang TIDAK boleh diakses pembeli.
-const BUYER_DENY = ["/search-image", "/compare", "/batch", "/populasi", "/harga", "/stok", "/cabang/pesanan", "/cabang/chat"];
+const BUYER_DENY = ["/search-image", "/compare", "/batch", "/populasi", "/harga", "/stok", "/rak", "/cabang/pesanan", "/cabang/chat"];
 
 const SIDEBAR_KEY = "maspart_sidebar_collapsed";
 
@@ -163,6 +164,10 @@ export default function AppShell({
   const [cartN, setCartN] = useState(0);
   const [branchLabel, setBranchLabel] = useState<string | null>(null);
   const [branchN, setBranchN] = useState(0);
+  // Gudang yang boleh DITULIS akun ini (Rak & Kartu Stok). Menu Rak hanya
+  // berguna bagi yang mengelola gudang — staf lain melihat rak dari halaman
+  // detail part, jadi menunya disembunyikan agar sidebar tak makin panjang.
+  const [kelola, setKelola] = useState<string[]>([]);
 
   useEffect(() => {
     try {
@@ -192,6 +197,7 @@ export default function AppShell({
         const menus = p ? p.menus : fallback;
         setAllowed(menus);
         setBranchLabel(p?.branch ?? null);
+        setKelola(p?.gudang_kelola ?? []);
         // Cocokkan ke PATH URL SUNGGUHAN, BUKAN prop `active`: sub-halaman
         // (mis. /part/[pn]) mengeset active="/search" hanya untuk menyorot menu
         // induknya — kalau `active` yang dipakai, menyembunyikan Cari Part ikut
@@ -265,9 +271,12 @@ export default function AppShell({
     const out: NavSection[] = [];
     // Ringkasan: admin → Command Center; staf internal → Beranda ringkas.
     out.push({ label: "Ringkasan", items: [isAdmin ? NAV_DASHBOARD : NAV_BERANDA] });
+    // Menu Rak butuh DUA syarat: izin menu (Menu Control) DAN memang mengelola
+    // gudang — admin selalu lolos syarat kedua.
+    const bolehRak = isAdmin || kelola.length > 0;
     out.push(
       { label: "Pencarian", items: NAV_PRIMARY.filter(show) },
-      { label: "Data", items: NAV_DATA.filter(show) },
+      { label: "Data", items: NAV_DATA.filter((it) => show(it) && (it.key !== "rak" || bolehRak)) },
     );
     if (branchLabel) {
       out.push({
@@ -282,7 +291,7 @@ export default function AppShell({
     if (isAdmin) out.push({ label: "Admin", items: NAV_ADMIN });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isBuyer, isAdmin, branchLabel, branchN, allowed]);
+  }, [isBuyer, isAdmin, branchLabel, branchN, allowed, kelola]);
 
   const flatItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
 

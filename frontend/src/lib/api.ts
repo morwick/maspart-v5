@@ -841,6 +841,10 @@ export type MyPermissions = {
   role: string;
   branch?: string | null; // label gudang bila akun cabang
   can_price?: boolean; // boleh ekspor kolom harga di Batch (admin & akun 'mas')
+  // Gudang yang boleh DITULIS akun ini di Rak & Kartu Stok (label PENUH,
+  // mis. "01.Jakarta"). [] untuk pembeli & selama migrasi 027 belum jalan —
+  // opsional supaya backend lama (tanpa field ini) tetap terparse.
+  gudang_kelola?: string[];
 };
 
 export async function getMyPermissions(token: string): Promise<MyPermissions> {
@@ -903,6 +907,9 @@ export type AdminUser = {
   role: string;
   is_active: boolean;
   created_at?: string;
+  // Label gudang comma-space ("01.Jakarta, 06.B80 H1") — bentuk SIMPAN di DB.
+  // Tak ada (undefined) bila migrasi 027 belum jalan; UI memperlakukannya kosong.
+  gudang_kelola?: string | null;
 };
 
 export async function listUsers(token: string): Promise<{ users: AdminUser[] }> {
@@ -915,7 +922,9 @@ export async function listUsers(token: string): Promise<{ users: AdminUser[] }> 
 
 export async function createUser(
   token: string,
-  body: { username: string; password: string; role: string },
+  // `gudang_kelola` dikirim sebagai LIST label penuh — backend yang merangkai
+  // bentuk simpan comma-space; UI multi-centang tak perlu tahu formatnya.
+  body: { username: string; password: string; role: string; gudang_kelola?: string[] },
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/admin/users`, {
     method: "POST",
@@ -928,7 +937,8 @@ export async function createUser(
 export async function updateUser(
   token: string,
   username: string,
-  body: { role?: string; password?: string; is_active?: boolean },
+  // gudang_kelola: [] = mencabut semua hak tulis rak; tak dikirim = tak diubah.
+  body: { role?: string; password?: string; is_active?: boolean; gudang_kelola?: string[] },
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/admin/users/${encodeURIComponent(username)}`, {
     method: "PUT",
@@ -1316,12 +1326,19 @@ export type ChatLogRow = {
   reply?: string;
   // Nama tool yang GAGAL giliran ini (migrasi 023, comma-space). undefined pada baris lama.
   tools_failed?: string;
+  // Guard mana yang menyala (migrasi 026, comma-space): pn/angka/subst/excel/dtc/epc.
+  // undefined pada baris lama — dan `guard_hit` baris lama UNDERCOUNT (dulu hanya
+  // guard anti-karangan yang terhitung), jadi jangan bandingkan lintas rilis.
+  guard_kinds?: string;
 };
 export type ChatLogSummary = {
   total: number;
   latensi_ms?: { p50: number; p90: number; maks: number };
   guard_menyala?: number;
   guard_rasio_persen?: number;
+  // Sebab guard → jumlah (migrasi 026). Memisahkan dugaan KARANGAN (pn/angka)
+  // dari SUBSTITUSI katalog-lokal (subst) dan guard wajib-tool (dtc/epc/excel).
+  guard_sebab?: Record<string, number>;
   tool_gagal?: number;
   tool_gagal_rasio_persen?: number;
   tool_tersering?: [string, number][];
@@ -1727,6 +1744,128 @@ export async function saveAdminGudang(
     body: JSON.stringify({ items }),
   });
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
+}
+
+// ── Rak & Kartu Stok (lokasi FISIK part per gudang) ─────────────────
+// ⚠️ Part Number bisa ber-suffix varian dengan garis miring ('WG9525160004/2').
+// Uvicorn men-decode %2F jadi '/' SEBELUM route dicocokkan, sehingga bentuk
+// `/part/{pn}/{gudang}` 404 untuk PN semacam itu. Karena itu SEMUA pemanggilan
+// di bawah memakai alias backend yang menaruh PN di posisi TERAKHIR
+// (`part-of/…`, `gudang/{g}/part/{pn}`, `foto/{g}/part/{pn}`).
+export type RakInfo = {
+  part_number: string;
+  pn_key: string;
+  gudang: string;
+  rak: string;
+  catatan: string;
+  foto_url: string;
+  updated_by: string;
+  updated_at: string;
+};
+
+/** Rak satu part di SEMUA gudang → {label gudang: baris}. */
+export async function getRakForPart(
+  token: string,
+  pn: string,
+): Promise<{ part_number: string; rak: Record<string, RakInfo> }> {
+  const res = await fetch(`${API_BASE}/api/rak/part-of/${encodeURIComponent(pn)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+/** Lookup TERBALIK: isi satu gudang (q = substring PN / rak / catatan). */
+export async function listRakGudang(
+  token: string,
+  gudang: string,
+  q = "",
+  limit = 300,
+): Promise<{ gudang: string; jumlah: number; items: RakInfo[] }> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (q) qs.set("q", q);
+  const res = await fetch(
+    `${API_BASE}/api/rak/gudang/${encodeURIComponent(gudang)}?${qs}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+/** Simpan/ubah rak satu pasangan (pn × gudang). 403 = bukan pengelola gudang itu. */
+export async function saveRak(
+  token: string,
+  gudang: string,
+  pn: string,
+  body: { rak: string; catatan?: string },
+): Promise<{ ok: boolean; part_number: string; gudang: string; rak: Partial<RakInfo> }> {
+  const res = await fetch(
+    `${API_BASE}/api/rak/gudang/${encodeURIComponent(gudang)}/part/${encodeURIComponent(pn)}`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ rak: body.rak, catatan: body.catatan ?? "" }),
+    },
+  );
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function deleteRak(token: string, gudang: string, pn: string): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/api/rak/gudang/${encodeURIComponent(gudang)}/part/${encodeURIComponent(pn)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+}
+
+/** Ganti foto kartu stok (hanya yang TERBARU disimpan) — jpg/jpeg/png/webp, maks 10 MB. */
+export async function uploadRakFoto(
+  token: string,
+  gudang: string,
+  pn: string,
+  file: File,
+): Promise<{ ok: boolean; foto_url: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(
+    `${API_BASE}/api/rak/foto/${encodeURIComponent(gudang)}/part/${encodeURIComponent(pn)}`,
+    { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form },
+  );
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function deleteRakFoto(token: string, gudang: string, pn: string): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/api/rak/foto/${encodeURIComponent(gudang)}/part/${encodeURIComponent(pn)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+}
+
+/** Impor massal satu gudang — kolom Part Number | Rak | Catatan. */
+export async function importRak(
+  token: string,
+  gudang: string,
+  file: File,
+): Promise<{
+  ok: boolean;
+  gudang: string;
+  tersimpan: number;
+  dilewati: { pn: string; alasan: string }[];
+  jumlah_dilewati: number;
+}> {
+  const form = new FormData();
+  form.append("gudang", gudang);
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/api/rak/import`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
 }
 
 // ── Lacak resi (manifest kurir) ─────────────────────────────────────────────

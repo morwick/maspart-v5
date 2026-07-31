@@ -6,8 +6,10 @@ import { getToken } from "./auth";
 // Versi cache — naikkan saat daftar menu/izin berubah agar cache lama otomatis
 // diabaikan (mis. penambahan menu "Asisten AI"). v4: format baru {at, data}
 // ber-TTL — perubahan centang oleh admin dulunya baru terlihat setelah
-// logout/login karena cache sesi tak pernah kadaluarsa.
-const SS_KEY = "maspart_perms_v4";
+// logout/login karena cache sesi tak pernah kadaluarsa. v5: payload memuat
+// `gudang_kelola` — cache v4 yang masih hidup akan menyembunyikan menu Rak &
+// tombol Ubah sampai tab ditutup.
+const SS_KEY = "maspart_perms_v5";
 
 // Umur maksimum cache. Admin mengubah centang untuk user LAIN sehingga tak ada
 // event client-side yang bisa dipakai — TTL pendek + refetch di mount halaman
