@@ -209,6 +209,66 @@ def test_tool_riwayat_klaim(dunia, monkeypatch):
     assert list(r.keys())[-1] == "catatan"
 
 
+# ── Saringan durasi ("WO lebih dari 72 jam, sebutkan 10") ────────────
+# Dihitung SERVER dari semua_klaim — bukan model membuka halaman demi halaman
+# lalu membanding angka sendiri (boros, kena rem anti-loop, rawan karang).
+_KLAIM_DURASI = [
+    {"no_wo": "RIDZ-A", "durasi_jam": 100.5, "status": "Selesai"},
+    {"no_wo": "RIDZ-B", "durasi_jam": 73, "status": "Selesai"},
+    {"no_wo": "RIDZ-C", "durasi_jam": 72, "status": "Selesai"},     # persis batas: < min → keluar
+    {"no_wo": "RIDZ-D", "durasi_jam": 5, "status": "Selesai"},
+    {"no_wo": "RIDZ-E", "status": "Order dibuka"},                  # tanpa durasi ≠ 0 jam
+    {"no_wo": "RIDZ-F", "durasi_jam": 200, "status": "Menunggu"},
+]
+
+
+def test_riwayat_saring_durasi_lebih_dari_72(dunia, monkeypatch):
+    monkeypatch.setattr(ai.sims_warranty, "semua_klaim",
+                        lambda **kw: {"total": 6, "klaim": list(_KLAIM_DURASI)})
+    r = ai._t_riwayat_klaim({"durasi_min_jam": 72.5, "limit": 10}, ADMIN)
+    assert r["found"] is True
+    # Urut TERLAMA dulu; 72 jam persis tidak lolos ambang 72.5.
+    assert [k["no_wo"] for k in r["klaim"]] == ["RIDZ-F", "RIDZ-A", "RIDZ-B"]
+    assert r["jumlah_cocok"] == 3 and r["jumlah_diperiksa"] == 6
+    # WO tanpa durasi DIHITUNG TERPISAH — bukan dianggap 0 jam lalu lolos/gugur diam-diam.
+    assert r["jumlah_tanpa_durasi"] == 1
+    assert "DIURUTKAN server" in r["catatan"]
+
+
+def test_riwayat_saring_durasi_limit_dipatuhi(dunia, monkeypatch):
+    banyak = [{"no_wo": f"R{i}", "durasi_jam": 80 + i} for i in range(30)]
+    monkeypatch.setattr(ai.sims_warranty, "semua_klaim",
+                        lambda **kw: {"total": 30, "klaim": banyak})
+    r = ai._t_riwayat_klaim({"durasi_min_jam": 72, "limit": 10}, ADMIN)
+    assert r["ditampilkan"] == 10 and len(r["klaim"]) == 10
+    assert r["jumlah_cocok"] == 30                     # totalnya tetap jujur
+    assert r["klaim"][0]["no_wo"] == "R29"             # terlama dulu
+
+
+def test_riwayat_saring_durasi_kosong_jujur(dunia, monkeypatch):
+    monkeypatch.setattr(ai.sims_warranty, "semua_klaim",
+                        lambda **kw: {"total": 2, "klaim": [
+                            {"no_wo": "R1", "durasi_jam": 5},
+                            {"no_wo": "R2"}]})
+    r = ai._t_riwayat_klaim({"durasi_min_jam": 72}, ADMIN)
+    assert r["found"] is False and r["jumlah_cocok"] == 0
+    assert r["jumlah_tanpa_durasi"] == 1
+    assert "jangan mengarang" in r["catatan"]
+
+
+def test_riwayat_tanpa_saringan_tetap_jalur_lama(dunia, monkeypatch):
+    """Regresi: tanpa durasi_min/maks, semua_klaim TAK boleh dipanggil
+    (jalur berhalaman yang murah tetap dipakai)."""
+    def _boom(**kw):
+        raise AssertionError("semua_klaim tak boleh dipanggil tanpa saringan durasi")
+    monkeypatch.setattr(ai.sims_warranty, "semua_klaim", _boom)
+    monkeypatch.setattr(ai.sims_warranty, "daftar_klaim",
+                        lambda **kw: {"total": 1, "halaman": 1,
+                                      "klaim": [{"no_wo": "RIDZ1"}]})
+    r = ai._t_riwayat_klaim({"rangka": "SJ394896"}, ADMIN)
+    assert r["found"] is True
+
+
 def test_tool_detail_klaim_lengkap(dunia, monkeypatch):
     monkeypatch.setattr(ai.sims_warranty, "daftar_klaim", lambda **kw: {
         "klaim": [{"no_wo": "RIDZ0052607121", "ro_id": "99", "frame": "ST131522",

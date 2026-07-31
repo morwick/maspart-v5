@@ -1423,7 +1423,13 @@ def _t_cek_garansi(args: dict, user: dict) -> dict:
 
 
 def _t_riwayat_klaim(args: dict, user: dict) -> dict:
-    """Daftar work order klaim garansi — per unit, per no WO, atau terbaru."""
+    """Daftar work order klaim garansi — per unit, per no WO, atau terbaru.
+
+    Saringan DURASI dihitung DI SINI, bukan oleh model: "WO yang lebih dari 72
+    jam" butuh menyisir SEMUA klaim (semua_klaim, cache 10 mnt) lalu membanding
+    angka — menyuruh model membuka halaman demi halaman itu boros token, kena
+    rem anti-loop, dan perbandingannya rawan karang. Pola yang sama dgn
+    hitung_part: angka dari data, saring/urut milik Python."""
     if not _can_garansi(user):
         return dict(_GARANSI_DENIED)
     if not sims_warranty.available():
@@ -1434,6 +1440,22 @@ def _t_riwayat_klaim(args: dict, user: dict) -> dict:
         halaman = max(int(args.get("halaman") or 1), 1)
     except (TypeError, ValueError):
         halaman = 1
+
+    def _angka(k):
+        v = args.get(k)
+        if v in (None, ""):
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    durasi_min = _angka("durasi_min_jam")
+    durasi_maks = _angka("durasi_maks_jam")
+    if durasi_min is not None or durasi_maks is not None:
+        return _riwayat_klaim_saring_durasi(rangka, durasi_min, durasi_maks,
+                                            _angka("limit"))
+
     d = sims_warranty.daftar_klaim(vin=rangka, ro_no=no_wo, halaman=halaman)
     if d is None:
         return {"error": "SIMS tidak merespons — coba lagi sebentar lagi."}
@@ -1453,6 +1475,66 @@ def _t_riwayat_klaim(args: dict, user: dict) -> dict:
         "tampilkan seperlunya."
     )
     return out
+
+
+_SARING_DURASI_DEFAULT = 10   # "sebutkan 10 saja" adalah permintaan lapangan khasnya
+_SARING_DURASI_MAKS = 50
+
+
+def _riwayat_klaim_saring_durasi(rangka: str, durasi_min: float | None,
+                                 durasi_maks: float | None,
+                                 limit: float | None) -> dict:
+    """Klaim tersaring durasi, urut TERLAMA dulu (yang bermasalah di atas)."""
+    d = sims_warranty.semua_klaim(vin=rangka)
+    if d is None:
+        return {"error": "SIMS tidak merespons — coba lagi sebentar lagi."}
+    semua = d.get("klaim") or []
+    tanpa_durasi = 0
+    cocok: list[dict] = []
+    for k in semua:
+        dj = k.get("durasi_jam")
+        if not isinstance(dj, (int, float)):
+            tanpa_durasi += 1          # WO belum selesai/terisi — bukan 0 jam!
+            continue
+        if durasi_min is not None and dj < durasi_min:
+            continue
+        if durasi_maks is not None and dj > durasi_maks:
+            continue
+        cocok.append(k)
+    cocok.sort(key=lambda k: float(k["durasi_jam"]), reverse=True)
+    n = int(limit) if limit and limit > 0 else _SARING_DURASI_DEFAULT
+    n = min(n, _SARING_DURASI_MAKS)
+
+    syarat = []
+    if durasi_min is not None:
+        syarat.append(f"≥ {durasi_min:g} jam")
+    if durasi_maks is not None:
+        syarat.append(f"≤ {durasi_maks:g} jam")
+    label_syarat = " dan ".join(syarat)
+    if not cocok:
+        return {"found": False, "jumlah_cocok": 0,
+                "jumlah_diperiksa": len(semua),
+                "jumlah_tanpa_durasi": tanpa_durasi,
+                "catatan": (f"Tidak ada WO berdurasi {label_syarat} dari "
+                            f"{len(semua)} klaim yang diperiksa. "
+                            f"{tanpa_durasi} WO tanpa data durasi (belum "
+                            "selesai/terisi) TIDAK ikut dinilai — sebutkan itu, "
+                            "jangan mengarang.")}
+    return {
+        "found": True,
+        "jumlah_cocok": len(cocok),
+        "jumlah_diperiksa": len(semua),
+        "jumlah_tanpa_durasi": tanpa_durasi,
+        "ditampilkan": len(cocok[:n]),
+        "klaim": cocok[:n],
+        "catatan": (
+            f"WO berdurasi {label_syarat}: {len(cocok)} dari {len(semua)} klaim "
+            f"(sudah DISARING & DIURUTKAN server, terlama dulu; ditampilkan "
+            f"{len(cocok[:n])}). {tanpa_durasi} WO tanpa data durasi tak ikut "
+            "dinilai — sebut angka-angka ini apa adanya, jangan menghitung "
+            "ulang. Detail satu WO → detail_klaim(no_wo)."
+        ),
+    }
 
 
 def _t_detail_klaim(args: dict, user: dict) -> dict:

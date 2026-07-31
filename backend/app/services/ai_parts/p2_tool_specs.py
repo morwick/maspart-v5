@@ -1328,14 +1328,20 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "no WO, tanggal, km saat rusak, GEJALA kerusakan, tindakan, status "
                     "pekerjaan (label Indonesia), nopol, pelapor, durasi jam. Pakai untuk "
                     "'unit X pernah klaim apa saja', 'klaim garansi terbaru', 'status WO "
-                    "RIDZxxx sampai mana'. Untuk isi lengkap satu WO pakai detail_klaim."
+                    "RIDZxxx sampai mana'. SARINGAN DURASI: 'WO yang lebih dari 72 jam' → "
+                    "durasi_min_jam=72; server menyisir SEMUA klaim, menyaring & "
+                    "mengurutkan terlama-dulu — ⛔ JANGAN saring/banding durasi sendiri "
+                    "dari halaman-halaman. Untuk isi lengkap satu WO pakai detail_klaim."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "rangka": {"type": "string", "description": "Opsional: nomor rangka unit (VIN/frame)."},
                         "no_wo": {"type": "string", "description": "Opsional: nomor work order persis (mis. RIDZ0052607123)."},
-                        "halaman": {"type": "integer", "description": "Halaman hasil (default 1)."},
+                        "halaman": {"type": "integer", "description": "Halaman hasil (default 1). Diabaikan saat memakai saringan durasi."},
+                        "durasi_min_jam": {"type": "number", "description": "Opsional: hanya WO berdurasi ≥ ini (jam). 'lebih dari 72 jam' → 72."},
+                        "durasi_maks_jam": {"type": "number", "description": "Opsional: hanya WO berdurasi ≤ ini (jam)."},
+                        "limit": {"type": "integer", "description": "Jumlah baris saat saringan durasi (default 10, maks 50). 'sebutkan 10 saja' → 10."},
                     },
                 },
             },
