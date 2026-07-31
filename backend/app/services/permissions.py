@@ -85,6 +85,10 @@ ASISTEN_KEYS: dict[str, str] = {
     # Paket garansi & klaim SIMS (cek_garansi/riwayat_klaim/detail_klaim):
     # data DMS pabrik — nilai klaim CNY, nama+HP pelapor, foto unit.
     "ai_garansi": "Garansi & Klaim SIMS",
+    # Mengajari asisten lewat chat (tool ajarkan_pengetahuan): entri yang dibuat
+    # dibaca SEMUA user lewat cari_pengetahuan, jadi ini kemampuan MENULIS ke
+    # pengetahuan bersama — bukan sekadar membaca data sensitif.
+    "ai_mengajar": "Mengajari Pengetahuan (chat)",
 }
 
 # kind → (perm_type, semua key+label, key yang selalu aktif)

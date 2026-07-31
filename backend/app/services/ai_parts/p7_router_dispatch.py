@@ -187,6 +187,7 @@ _DISPATCH = {
     "cari_manual": _t_cari_manual,
     "cari_pengetahuan": _t_cari_pengetahuan,
     "buka_pengetahuan": _t_buka_pengetahuan,
+    "ajarkan_pengetahuan": _t_ajarkan_pengetahuan,
     "template_excel_part": _t_template_excel,
     "sheet_jadi_penawaran": _t_sheet_jadi_penawaran,
     "pesanan_saya": _t_pesanan_saya,
@@ -338,6 +339,15 @@ def _run_tool(name: str, args: dict, user: dict, sheet_id: str = "") -> dict:
     # _sheet_id: kunci server, BUKAN dari model). Di-pop agar handler & log
     # tak pernah melihatnya; arity _run_tool tetap 4 (banyak test mem-patch).
     question = str(args.pop("_q_user", "") or "")
+    # `_cid` = conversation_id giliran ini, titipan chat loop dengan alasan yang
+    # sama: draf-tertunda `ajarkan_pengetahuan` dikunci per-percakapan, dan kunci
+    # itu TIDAK boleh datang dari model (kalau boleh, model bisa menunjuk draf
+    # percakapan orang lain). Di-pop lebih dulu supaya tool LAIN & log tak pernah
+    # melihatnya, lalu ditaruh kembali khusus untuk tool yang memang memakainya
+    # (pola `_sheet_id`).
+    cid = str(args.pop("_cid", "") or "")
+    if name == "ajarkan_pengetahuan":
+        args["_cid"] = cid
     if name.startswith("sheet_"):
         # sheet_id datang dari server (lampiran giliran ini), BUKAN dari model —
         # model tak boleh memilih file milik siapa pun lewat argumen.

@@ -85,6 +85,11 @@ export default function PengetahuanPage() {
   const [testQ, setTestQ] = useState("");
   const [testHasil, setTestHasil] = useState<PengetahuanChunk[] | null>(null);
 
+  // Saringan "dari chat" — entri yang diajarkan lewat chat asisten paling perlu
+  // ditengok admin (isinya diketik cepat saat kerja), jadi harus bisa dipisahkan
+  // dari tumpukan dokumen unggahan dengan satu klik.
+  const [hanyaChat, setHanyaChat] = useState(false);
+
   const load = useCallback(async () => {
     const token = getToken();
     if (!token) return router.replace("/login");
@@ -338,6 +343,11 @@ export default function PengetahuanPage() {
 
   const jobDoc = docs.find((d) => d.id === jobId);
 
+  // Satu sumber kebenaran untuk jumlah & baris tabel — supaya angka di header
+  // tidak pernah berbeda dari isi daftar saat saringan aktif.
+  const jumlahChat = docs.filter((d) => d.asal === "chat").length;
+  const shown = hanyaChat ? docs.filter((d) => d.asal === "chat") : docs;
+
   return (
     <AppShell
       active="/admin/pengetahuan"
@@ -530,8 +540,33 @@ export default function PengetahuanPage() {
               marginBottom: 8,
             }}
           >
-            <div style={{ fontWeight: 700, fontSize: 14 }}>
-              Pengetahuan tersimpan ({docs.length})
+            <div
+              style={{
+                fontWeight: 700,
+                fontSize: 14,
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <span>
+                Pengetahuan tersimpan ({shown.length}
+                {hanyaChat ? ` dari ${docs.length}` : ""})
+              </span>
+              {/* Chip hanya muncul bila memang ada entri chat — tak ada gunanya
+                  memajang saringan yang pasti kosong. */}
+              {jumlahChat > 0 && (
+                <button
+                  type="button"
+                  className={"pill" + (hanyaChat ? " pill-warn" : "")}
+                  onClick={() => setHanyaChat((v) => !v)}
+                  style={{ cursor: "pointer" }}
+                  title="Tampilkan hanya entri yang diajarkan lewat chat asisten"
+                >
+                  {hanyaChat ? "✕ " : ""}dari chat ({jumlahChat})
+                </button>
+              )}
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               {docs.some((d) => d.perlu_reindex) && (
@@ -553,9 +588,11 @@ export default function PengetahuanPage() {
 
           {loading ? (
             <div style={{ fontSize: 13, color: "var(--ink-500)" }}>Memuat…</div>
-          ) : docs.length === 0 ? (
+          ) : shown.length === 0 ? (
             <div style={{ fontSize: 13, color: "var(--ink-500)" }}>
-              Belum ada. Tambahkan lewat form di atas.
+              {hanyaChat
+                ? "Belum ada entri yang diajarkan lewat chat."
+                : "Belum ada. Tambahkan lewat form di atas."}
             </div>
           ) : (
             <table className="tbl">
@@ -571,7 +608,7 @@ export default function PengetahuanPage() {
                 </tr>
               </thead>
               <tbody>
-                {docs.map((d) => (
+                {shown.map((d) => (
                   <Fragment key={d.id}>
                     <tr style={{ opacity: d.aktif ? 1 : 0.55 }}>
                       <td>
@@ -589,9 +626,19 @@ export default function PengetahuanPage() {
                         )}
                       </td>
                       <td style={{ fontSize: 12 }}>
-                        {d.berkas?.length
-                          ? d.berkas.map((b) => b.nama).join(", ")
-                          : "diketik admin"}
+                        {d.berkas?.length ? (
+                          d.berkas.map((b) => b.nama).join(", ")
+                        ) : d.asal === "chat" ? (
+                          // Asal chat ditandai jelas: admin perlu tahu entri ini
+                          // lahir dari percakapan (dan oleh siapa), bukan diketik
+                          // di form ini.
+                          <>
+                            <span className="pill">💬 dari chat</span>
+                            {d.oleh ? ` · ${d.oleh}` : ""}
+                          </>
+                        ) : (
+                          "diketik admin"
+                        )}
                       </td>
                       <td>{d.jumlah_chunk}</td>
                       <td style={{ fontSize: 12 }}>

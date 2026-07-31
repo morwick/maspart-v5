@@ -1077,6 +1077,301 @@ def _t_buka_pengetahuan(args: dict, user: dict) -> dict:
     return out
 
 
+# ══════════════════════════════════════════════════════════════════════
+#  ajarkan_pengetahuan — admin MENGAJARI asisten lewat chat
+# ══════════════════════════════════════════════════════════════════════
+# Store-nya PERSIS store menu /admin/pengetahuan (add_dokumen + antre indexing);
+# yang dihapus fitur ini cuma GESEKAN-nya (buka menu → isi form → tunggu). Store
+# tipis hari ini bukan karena menunya tak ada, melainkan karena gesekan itu.
+#
+# ⛔ Tak ada penyimpanan diam-diam: draf DITAHAN server sampai user menekan
+# kartu konfirmasi. Draf disimpan di SERVER (bukan diketik ulang model) karena
+# balasan kartu adalah teks user biasa — kalau isi yang disimpan diambil dari
+# argumen giliran "Simpan", model bebas menulis ulang apa pun dan yang masuk
+# store bukan lagi yang dilihat & disetujui user.
+_AJAR_DRAF: "dict[str, dict]" = {}
+_AJAR_LOCK = threading.Lock()
+_AJAR_TTL = 30 * 60.0        # draf menganggur > 30 menit: user sudah pindah topik
+_AJAR_MAKS = 200             # pagar RAM (satu draf per percakapan, isinya kecil)
+_AJAR_MAKS_ISI = 2000        # lebih panjang dari ini = dokumen, bukan ajaran chat
+_AJAR_MAKS_JUDUL = 120
+_AJAR_MAKS_TAG = 8
+# Ambang "kembar" KONSERVATIF (3× ambang kecocokan lemah): salah menuduh kembar
+# lebih merugikan daripada melewatkan satu — kartunya mengajak admin menimpa
+# entri yang sebenarnya beda topik.
+_AJAR_AMBANG_KEMBAR = 3 * _SKOR_LEMAH
+
+# Angka yang BERGERAK (stok/harga) haram masuk store: pengetahuan tak punya
+# tanggal kedaluwarsa, jadi angka hari ini akan dibacakan asisten berbulan-bulan
+# kemudian sebagai fakta. Stok & harga sudah punya sumber hidup sendiri (indeks
+# Accurate/SIMS). Angka TEKNIS statis (torsi, kapasitas oli, ukuran) justru
+# ISI pengetahuan yang paling berguna — karena itu polanya menargetkan KATA
+# stok/harga/mata uang yang berdekatan dengan angka, bukan angka apa pun.
+_AJAR_ANGKA_HARAM = (
+    re.compile(r"\brp\.?\s*\d", re.I),
+    re.compile(r"(?:\b(?:cny|rmb|yuan|usd)\b\s*\d|\d\s*\b(?:cny|rmb|yuan|usd)\b)", re.I),
+    re.compile(r"(?:¥\s*\d|\d\s*¥|\$\s*\d)"),
+    # Jendela 40 char DALAM SATU KALIMAT ([^.\n]): "Stok minimal cucuk per di
+    # gudang 5 pcs" menaruh angkanya 29 char dari katanya. Kalimat yang menyebut
+    # stok/harga DAN sebuah angka sekaligus hampir selalu angka yang bergerak —
+    # ditolak dengan pesan yang menawarkan versi tanpa angka, bukan buntu.
+    re.compile(r"(?:\bstok\w*\b[^.\n]{0,40}\d|\d[^.\n]{0,40}\bstok\w*\b)", re.I),
+    re.compile(r"(?:\bharga\w*\b[^.\n]{0,40}\d|\d[^.\n]{0,40}\bharga\w*\b)", re.I),
+)
+# Rujukan GANTUNG: entri pengetahuan dibaca berbulan-bulan kemudian TANPA
+# percakapan ini, jadi "yang barusan"/"di atas" menunjuk ke ruang kosong.
+_AJAR_GANTUNG = re.compile(
+    r"\b(?:yang\s+barusan|barusan|tadi|di\s+atas|tersebut\s+di\s+atas|"
+    r"seperti\s+di\s+atas|yang\s+tadi|yang\s+saya\s+sebut\s+tadi)\b", re.I)
+
+
+def _ajar_kunci(user: dict, args: dict) -> str:
+    """Kunci draf-tertunda: username|conversation_id. `_cid` DITITIPKAN server
+    (pola `_q_user`/`_sheet_id`), BUKAN argumen model — kalau model boleh memilih
+    kuncinya, ia bisa menyimpan draf percakapan orang lain. Klien lama tanpa
+    conversation_id jatuh ke kunci per-user: fiturnya tetap jalan, hanya draf
+    antar-tab jadi satu (dan draf memang cuma satu per user pada satu waktu)."""
+    return f"{(user or {}).get('username') or ''}|{str(args.get('_cid') or '').strip()}"
+
+
+def _ajar_sapu(now: float) -> None:
+    """Buang draf kedaluwarsa. Dipanggil di dalam _AJAR_LOCK."""
+    for k in [k for k, d in _AJAR_DRAF.items() if now - d.get("t", 0.0) > _AJAR_TTL]:
+        _AJAR_DRAF.pop(k, None)
+
+
+def _ajar_set_draf(kunci: str, draf: dict) -> None:
+    """Satu draf per percakapan — draf baru MENIMPA yang lama (itulah alur
+    'Perbaiki dulu': user mengoreksi, model menyusun draf revisi)."""
+    with _AJAR_LOCK:
+        now = time.monotonic()
+        _ajar_sapu(now)
+        if kunci not in _AJAR_DRAF and len(_AJAR_DRAF) >= _AJAR_MAKS:
+            _AJAR_DRAF.pop(next(iter(_AJAR_DRAF)), None)
+        _AJAR_DRAF[kunci] = {**draf, "t": now}
+
+
+def _ajar_get_draf(kunci: str) -> dict | None:
+    with _AJAR_LOCK:
+        _ajar_sapu(time.monotonic())
+        d = _AJAR_DRAF.get(kunci)
+        return dict(d) if d else None
+
+
+def _ajar_hapus_draf(kunci: str) -> None:
+    with _AJAR_LOCK:
+        _AJAR_DRAF.pop(kunci, None)
+
+
+def _ajar_cari_kembar(judul: str, isi: str) -> dict | None:
+    """Entri lama yang kemungkinan membahas hal SAMA. Best-effort: store rusak /
+    belum ada indeks tak boleh mematikan pengajaran."""
+    try:
+        if not pengetahuan.available():
+            return None
+        berskor = pengetahuan.search_skor(f"{judul} {isi[:300]}", limit=3)
+    except Exception:
+        logger.exception("cek kembar pengetahuan gagal (dilewati)")
+        return None
+    if not berskor or berskor[0][0] < _AJAR_AMBANG_KEMBAR:
+        return None
+    skor, r = berskor[0]
+    return {"dok_id": r.get("dok_id") or "", "skor": round(skor, 1),
+            "judul": r.get("judul_id") or r.get("judul") or "(tanpa judul)"}
+
+
+def _ajar_teks_draf(draf: dict) -> str:
+    """Bubble jawaban yang DILIHAT user. Wajib berdiri sendiri & lengkap: inilah
+    satu-satunya kesempatan user memeriksa isi sebelum masuk store (jalur kartu
+    `_tanya` membuang teks tulisan model, lihat _tanya_pengantar di chat loop)."""
+    baris = ["📝 **Draf pengetahuan** (belum tersimpan):", "",
+             f"**Judul:** {draf['judul']}", "", draf["isi"]]
+    if draf.get("kata_kunci"):
+        baris += ["", "**Kata kunci:** " + ", ".join(draf["kata_kunci"])]
+    mirip = draf.get("mirip")
+    if mirip:
+        baris += ["", f"⚠️ Mirip dengan entri lama **{mirip['judul']}** — pilih "
+                      "memperbarui entri itu atau menyimpan ini sebagai entri baru."]
+    return "\n".join(baris)
+
+
+def _ajar_kartu(draf: dict) -> list[dict]:
+    if draf.get("mirip"):
+        opsi = ["Perbarui entri lama", "Simpan sebagai entri baru", "Batal"]
+    else:
+        opsi = ["Simpan", "Perbaiki dulu", "Batal"]
+    return [{"teks": "Simpan pengetahuan ini?", "opsi": opsi}]
+
+
+def _ajar_antre(dok_id: str) -> str:
+    """Antre indexing. Return catatan tambahan ('' bila mulus) — entri yang
+    tersimpan tapi gagal diantre TETAP harus dilaporkan jujur, bukan dianggap
+    aktif padahal chunk-nya belum ada."""
+    try:
+        pengetahuan_index.antre(dok_id)
+        return ""
+    except Exception:  # pragma: no cover
+        logger.exception("antre indexing pengetahuan gagal untuk %s", dok_id)
+        return (" ⚠️ Entri TERSIMPAN tapi antrean indexing gagal dijalankan — "
+                "sampaikan ke user agar admin menekan 'Indeks ulang' di menu "
+                "Pengetahuan AI supaya entri ini bisa dicari.")
+
+
+def _t_ajarkan_pengetahuan(args: dict, user: dict) -> dict:
+    """Admin MENGAJARI asisten lewat chat: susun draf → kartu konfirmasi → simpan.
+
+    Satu tool ber-`aksi` (bukan 4 tool terpisah) supaya model tak perlu memilih
+    di antara tool yang mirip, dan supaya seluruh alur punya satu tempat validasi.
+
+    Gerbang di-recek DI SINI meski `_run_tool` sudah menyaring lewat
+    `_allowed_tool_names` — dua lapis, pola yang sama dengan paket garansi.
+    """
+    if not _can_mengajar(user):
+        logger.warning("ajarkan_pengetahuan ditolak untuk %s/%s",
+                       (user or {}).get("role"), (user or {}).get("username"))
+        return {"denied": True,
+                "error": ("Akun ini tidak berhak menambah pengetahuan asisten. "
+                          "Sampaikan jujur ke user & arahkan minta admin "
+                          "mencentang 'Mengajari Pengetahuan (chat)' di Menu Control.")}
+
+    aksi = (args.get("aksi") or args.get("action") or "draf").strip().lower()
+    # Sinonim yang wajar dari model — jangan gagalkan alur hanya karena kata.
+    aksi = {"save": "simpan", "simpan_sebagai_baru": "simpan_baru",
+            "baru": "simpan_baru", "new": "simpan_baru", "update": "perbarui",
+            "cancel": "batal", "draft": "draf", "buat": "draf"}.get(aksi, aksi)
+    kunci = _ajar_kunci(user, args)
+    username = (user or {}).get("username") or ""
+
+    # ── batal ────────────────────────────────────────────────────────
+    if aksi == "batal":
+        ada = _ajar_get_draf(kunci) is not None
+        _ajar_hapus_draf(kunci)
+        return {"found": True, "dibatalkan": True,
+                "catatan": ("Draf dibuang, TIDAK ada yang disimpan. Konfirmasi "
+                            "singkat ke user lalu lanjutkan percakapan biasa."
+                            if ada else
+                            "Tidak ada draf tertunda — tak ada yang perlu dibatalkan. "
+                            "Sampaikan singkat & lanjutkan percakapan biasa.")}
+
+    # ── simpan / simpan_baru / perbarui: WAJIB ada draf tersimpan ────
+    if aksi in ("simpan", "simpan_baru", "perbarui"):
+        draf = _ajar_get_draf(kunci)
+        if not draf:
+            return {"found": False,
+                    "catatan": ("Tidak ada draf tertunda (belum dibuat atau sudah "
+                                "kedaluwarsa >30 menit). ⛔ JANGAN mengaku sudah "
+                                "menyimpan apa pun. Katakan jujur ke user bahwa "
+                                "drafnya kedaluwarsa dan minta ia mengulang "
+                                "kalimat 'catat: …'-nya, lalu panggil tool ini "
+                                "lagi dengan aksi='draf'.")}
+        # ⛔ Argumen `judul`/`isi` pada aksi ini DIABAIKAN — yang disimpan persis
+        # draf yang tadi DILIHAT & DISETUJUI user.
+        if aksi == "perbarui":
+            mirip = draf.get("mirip") or {}
+            dok_id = mirip.get("dok_id") or ""
+            if not dok_id:
+                return {"found": False,
+                        "catatan": ("Draf ini tidak menunjuk entri lama mana pun, "
+                                    "jadi tak ada yang bisa diperbarui. Tanyakan ke "
+                                    "user apakah mau disimpan sebagai entri BARU "
+                                    "(aksi='simpan_baru').")}
+            try:
+                d = pengetahuan.update_dokumen(
+                    dok_id, judul=draf["judul"], deskripsi=draf["isi"][:160],
+                    tag=draf["kata_kunci"], teks_admin=draf["isi"],
+                    pakai_ai=False, asal="chat",
+                    status="antre",
+                    progres={"langkah": "Menunggu giliran", "kini": 0,
+                             "total": 0, "persen": 0})
+            except KeyError:
+                _ajar_hapus_draf(kunci)
+                return {"found": False,
+                        "catatan": ("Entri lama itu sudah TIDAK ADA (mungkin baru "
+                                    "dihapus admin). Sampaikan jujur; user bisa "
+                                    "mengulang ajarannya sebagai entri baru.")}
+            catatan_antre = _ajar_antre(dok_id)
+            _ajar_hapus_draf(kunci)
+            logger.info("pengetahuan DIPERBARUI via chat id=%s oleh=%s", dok_id, username)
+            return {"found": True, "tersimpan": True, "diperbarui": True,
+                    "id": dok_id, "judul": d.get("judul"),
+                    "catatan": ("Entri LAMA berhasil diperbarui dengan isi draf & "
+                                "diantre indeks ulang; aktif dalam hitungan detik. "
+                                "Konfirmasi singkat ke user (sebut judulnya). ⛔ "
+                                "Jangan mengarang isi lain." + catatan_antre)}
+
+        try:
+            d = pengetahuan.add_dokumen(
+                draf["judul"], deskripsi=draf["isi"][:160], tag=draf["kata_kunci"],
+                untuk_pembeli=False,      # default aman: internal dulu
+                pakai_ai=False,           # judul+kata kunci sudah dikurasi giliran ini;
+                                          # pengayaan ulang = bakar saldo & memperlambat
+                oleh=username, teks_admin=draf["isi"], asal="chat")
+        except ValueError as e:
+            return {"error": f"Draf ditolak store: {e}"}
+        catatan_antre = _ajar_antre(d["id"])
+        _ajar_hapus_draf(kunci)
+        logger.info("pengetahuan BARU via chat id=%s oleh=%s judul=%r",
+                    d["id"], username, d["judul"])
+        return {"found": True, "tersimpan": True, "id": d["id"], "judul": d["judul"],
+                "catatan": ("Pengetahuan TERSIMPAN & diantre indexing; aktif dalam "
+                            "hitungan detik dan bisa dipakai semua staf lewat "
+                            "cari_pengetahuan. Konfirmasi singkat ke user (sebut "
+                            "judulnya + boleh diubah/hapus di menu Pengetahuan AI). "
+                            "⛔ Jangan mengarang isi lain." + catatan_antre)}
+
+    # ── draf (default) ───────────────────────────────────────────────
+    judul = " ".join(str(args.get("judul") or args.get("title") or "").split())
+    isi = str(args.get("isi") or args.get("teks") or args.get("konten") or "").strip()
+    kk = args.get("kata_kunci") or args.get("tag") or args.get("keywords") or []
+    if isinstance(kk, str):
+        kk = re.split(r"[;,]", kk)
+    kata_kunci = pengetahuan.clean_list(kk, _AJAR_MAKS_TAG)
+
+    if not judul or not isi:
+        return {"error": ("Draf butuh 'judul' (singkat, mudah dicari) DAN 'isi' "
+                          "(kalimat lengkap). Susun sendiri dari kalimat user — "
+                          "jangan tanyakan ke user hal yang sudah ia tulis.")}
+    if len(judul) > _AJAR_MAKS_JUDUL:
+        judul = judul[:_AJAR_MAKS_JUDUL].rstrip()
+    if len(isi) > _AJAR_MAKS_ISI:
+        return {"error": (f"Isi terlalu panjang ({len(isi)} char, batas "
+                          f"{_AJAR_MAKS_ISI}). Untuk materi sepanjang itu arahkan "
+                          "user mengunggah berkasnya di menu Pengetahuan AI — di "
+                          "sana isinya dipecah & diindeks per bagian. Atau ajarkan "
+                          "satu poin saja yang paling penting.")}
+    gabung = f"{judul}\n{isi}"
+    if any(p.search(gabung) for p in _AJAR_ANGKA_HARAM):
+        return {"error": ("Draf memuat angka STOK/HARGA. Angka seperti itu BERUBAH "
+                          "tiap hari sedangkan pengetahuan tersimpan permanen — "
+                          "asisten akan membacakannya sebagai fakta berbulan-bulan "
+                          "kemudian. Stok & harga sudah punya sumber hidup sendiri "
+                          "(indeks Accurate/SIMS). Jelaskan ini ke user & tawarkan "
+                          "menyimpan versi TANPA angka stok/harga. Angka TEKNIS "
+                          "statis (torsi, kapasitas oli, ukuran, interval servis) "
+                          "justru BOLEH.")}
+    if _AJAR_GANTUNG.search(gabung):
+        return {"error": ("Draf memuat rujukan GANTUNG ('yang barusan', 'di atas', "
+                          "'tadi'). Entri ini nanti dibaca TANPA percakapan ini, "
+                          "jadi rujukan itu menunjuk ruang kosong. Tulis ULANG "
+                          "drafnya berdiri sendiri: sebut nama part/istilah/kondisinya "
+                          "secara eksplisit, lalu panggil tool ini lagi.")}
+
+    draf = {"judul": judul, "isi": isi, "kata_kunci": kata_kunci,
+            "mirip": _ajar_cari_kembar(judul, isi)}
+    _ajar_set_draf(kunci, draf)
+    logger.info("draf pengetahuan disusun oleh=%s judul=%r kembar=%s",
+                username, judul, bool(draf["mirip"]))
+    return {
+        "found": True,
+        # Sentinel internal (prefiks `_`) yang dibaca chat loop: kartu konfirmasi,
+        # teks draf yang di-prepend ke reply, dan pembebasan pagar anti ping-pong
+        # (kartu konfirmasi atas aksi EKSPLISIT admin ≠ interogasi).
+        "_tanya": _ajar_kartu(draf),
+        "_tanya_pengantar": _ajar_teks_draf(draf),
+        "_tanya_bebas_pagar": True,
+    }
+
+
 def _t_jadwal_perawatan(args: dict, user: dict) -> dict:
     if not maintenance_ref.available():
         return {"error": "Data jadwal perawatan Shantui belum tersedia di server."}

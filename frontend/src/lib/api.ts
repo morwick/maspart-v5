@@ -1550,6 +1550,8 @@ export type PengetahuanDok = {
   pengayaan: string;
   error: string;
   oleh?: string;
+  /** "chat" = entri diajarkan lewat chat asisten; kosong/absen = entri lama. */
+  asal?: string;
   perlu_reindex?: boolean;
 };
 

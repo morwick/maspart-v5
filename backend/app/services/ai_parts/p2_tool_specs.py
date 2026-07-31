@@ -1408,6 +1408,57 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         })
 
+    # Mengajari pengetahuan lewat chat — gerbang Menu Control 'ai_mengajar':
+    # admin selalu; staf bila dicentang; pembeli tidak pernah (fail-closed).
+    if _can_mengajar(user):
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "ajarkan_pengetahuan",
+                "description": (
+                    "⭐ MENYIMPAN PENGETAHUAN BARU ke store pengetahuan internal, "
+                    "lewat percakapan. PANGGIL bila user bermaksud MENGAJARI kamu / "
+                    "menitipkan informasi: 'catat ya …', 'ingat ini …', 'ajarkan/"
+                    "tambahkan ke pengetahuanmu …', 'mulai sekarang kalau ada yang "
+                    "tanya X jawabnya Y', 'simpan info ini'.\n"
+                    "ALUR WAJIB 2 LANGKAH: (1) aksi='draf' — kamu SUSUN sendiri "
+                    "judul + isi + kata_kunci dari kalimat user, server menahannya "
+                    "dan menampilkan kartu konfirmasi; (2) user membalas kartu itu "
+                    "sebagai teks biasa → panggil lagi: balasan 'Simpan' atau "
+                    "'Simpan sebagai entri baru' → aksi='simpan'/'simpan_baru'; "
+                    "'Perbarui entri lama' → aksi='perbarui'; 'Perbaiki dulu' + "
+                    "koreksinya → aksi='draf' lagi dengan draf REVISI; 'Batal' → "
+                    "aksi='batal'.\n"
+                    "ISI DRAF WAJIB BERDIRI SENDIRI: entri ini akan dibaca "
+                    "berbulan-bulan kemudian TANPA percakapan ini — ⛔ jangan pakai "
+                    "'yang barusan/di atas/tadi', sebut nama part/istilah/kondisinya "
+                    "eksplisit, tulis kalimat utuh (bukan potongan chat). ⛔ JANGAN "
+                    "memasukkan angka STOK/HARGA (berubah tiap hari; sudah ada "
+                    "sumber hidupnya) — angka teknis statis (torsi, kapasitas, "
+                    "ukuran, interval) BOLEH.\n"
+                    "⛔ JANGAN PERNAH mengaku sudah mencatat/menyimpan/mengingat "
+                    "sesuatu bila tool ini belum mengembalikan tersimpan=true. "
+                    "Tanpa itu, TIDAK ADA yang tersimpan."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "aksi": {
+                            "type": "string",
+                            "enum": ["draf", "simpan", "simpan_baru", "perbarui", "batal"],
+                            "description": "Langkah alur. Default 'draf'. Aksi selain 'draf' memakai draf yang DITAHAN server — judul/isi tak perlu dikirim ulang.",
+                        },
+                        "judul": {"type": "string", "description": "aksi='draf': judul singkat & mudah dicari (mis. 'Istilah lapangan: cucuk per')."},
+                        "isi": {"type": "string", "description": "aksi='draf': isi pengetahuannya, kalimat lengkap yang berdiri sendiri (maks 2000 char)."},
+                        "kata_kunci": {
+                            "type": "array", "items": {"type": "string"},
+                            "description": "aksi='draf': 2-8 istilah pencarian (istilah LAPANGAN yang dipakai user + padanan resminya).",
+                        },
+                    },
+                },
+            },
+        })
+
     # Telematics / GPS armada (Sinotruk Fleet Service) — ADMIN-ONLY (bukan key
     # Menu Control): pelacakan real-time + operasi tulis ganti nama.
     if _is_admin(user):

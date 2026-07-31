@@ -165,11 +165,17 @@ def kode_dari_teks(teks: str, batas: int = 12) -> list[str]:
 # ── CRUD dokumen ─────────────────────────────────────────────────────
 def add_dokumen(judul: str, deskripsi: str = "", tag=None, untuk_pembeli: bool = False,
                 pakai_ai: bool = True, oleh: str = "", berkas=None,
-                teks_admin: str = "", tabel_admin=None) -> dict:
+                teks_admin: str = "", tabel_admin=None, asal: str = "") -> dict:
     """Daftarkan dokumen baru berstatus 'antre'. Chunk diisi belakangan oleh job.
 
     `teks_admin`/`tabel_admin` = isi yang diketik langsung di form (bukan berkas);
     disimpan di sini supaya re-index bisa mengulang tanpa admin mengetik lagi.
+
+    `asal` = KANAL masuknya entri ('' = form /admin/pengetahuan seperti dulu,
+    'chat' = diajarkan lewat asisten). Disimpan apa adanya di record supaya
+    respons GET membawanya ke web/mobile tanpa mengubah endpoint — admin bisa
+    membedakan mana yang diketik di menu dan mana yang lahir dari percakapan
+    (dan menyaringnya) tanpa menebak dari `oleh`.
     """
     j = (judul or "").strip()
     if not j:
@@ -193,6 +199,7 @@ def add_dokumen(judul: str, deskripsi: str = "", tag=None, untuk_pembeli: bool =
         "pengayaan": "",
         "error": "",
         "oleh": oleh or "",
+        "asal": (asal or "").strip(),
     }
     with _lock:
         rows = load_dokumen()
@@ -212,9 +219,14 @@ def dokumen_nonaktif() -> list[dict]:
 def update_dokumen(dok_id: str, **fields) -> dict:
     """Perbarui field dokumen. `untuk_pembeli` DIPROPAGASI ke semua chunk-nya
     supaya tak ada chunk yatim yang publik padahal dokumennya internal."""
+    # `asal` ikut boleh diperbarui: entri lama yang isinya DITIMPA lewat chat
+    # (aksi 'perbarui' tool ajarkan_pengetahuan) harus jujur berlabel 'chat' —
+    # kalau tidak, menu Pengetahuan AI menampilkannya sebagai "diketik admin"
+    # padahal isinya sudah berasal dari percakapan. Endpoint PATCH admin tidak
+    # ikut terbuka: body-nya dibatasi model PengetahuanPatch.
     boleh = {"judul", "deskripsi", "tag", "untuk_pembeli", "aktif", "pakai_ai",
              "status", "progres", "jumlah_chunk", "pengayaan", "error", "berkas",
-             "teks_admin", "tabel_admin"}
+             "teks_admin", "tabel_admin", "asal"}
     upd = {k: v for k, v in fields.items() if k in boleh}
     with _lock:
         rows = load_dokumen()

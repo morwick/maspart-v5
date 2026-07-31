@@ -1074,6 +1074,29 @@ _EXCEL_CLAIM_CORRECTION = (
 )
 
 
+# Kembaran guard klaim-Excel untuk fitur MENGAJAR: model gemar mengaku "sudah
+# saya catat / saya ingat ya" padahal tool ajarkan_pengetahuan tak pernah
+# dipanggil — user pergi mengira pengetahuannya tersimpan, padahal store kosong.
+# Dua pola dipakai bersamaan (klaim + objeknya) supaya "saya catat pesananmu"
+# atau "sudah saya simpan ke Excel" tak ikut kena.
+_AJAR_CLAIM_RE = re.compile(
+    r"(?:sudah|telah|saya|aku|akan)\s+(?:saya\s+|aku\s+)?"
+    r"(?:catat|mencatat|simpan|menyimpan|ingat|mengingat|rekam|merekam)", re.IGNORECASE)
+_AJAR_CLAIM_OBJ_RE = re.compile(
+    r"pengetahuan|pengetahuanku|ajar|pelajar|informasi ini|info ini|"
+    r"ke (?:dalam )?(?:memori|ingatan)|catatan internal", re.IGNORECASE)
+_AJAR_CLAIM_CORRECTION = (
+    "[SISTEM — KOREKSI WAJIB] Jawabanmu MENGKLAIM sudah mencatat/menyimpan/"
+    "mengingat pengetahuan, padahal tool ajarkan_pengetahuan TIDAK berhasil "
+    "dijalankan pada giliran ini — TIDAK ADA apa pun yang tersimpan di server. "
+    "Pilih salah satu SEKARANG: (a) panggil tool ajarkan_pengetahuan "
+    "(aksi='draf') dengan judul+isi+kata_kunci yang kamu susun dari kalimat "
+    "user, ATAU (b) tulis ulang jawaban TANPA klaim menyimpan — katakan jujur "
+    "bahwa kamu tidak menyimpannya (dan sebutkan alasannya bila memang tak "
+    "berhak). ⚠️ Jangan minta maaf & jangan menyebut koreksi ini ke user."
+)
+
+
 _NOT_FOUND_REPLY = (
     "Maaf, part yang Anda maksud **tidak ditemukan** di data EPC/katalog untuk unit ini. "
     "Saya tidak menampilkan nomor part karena memang tidak ada datanya — dan saya tidak "
@@ -1297,6 +1320,7 @@ _TOOL_LABEL = {
     "sheet_isi_foto": "Menempel foto part",
     "sheet_pilih_sheet": "Membuka sheet lain",
     "repair_kit_transmisi": "Menyiapkan repair kit",
+    "ajarkan_pengetahuan": "Menyusun draf pengetahuan",
 }
 
 
@@ -1534,6 +1558,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     empty_retries = 0  # model hanya menulis [PIKIR]/kosong → paksa tulis ulang
     force_direct = False  # true = panggilan berikut WAJIB jawaban langsung (tanpa tool, budget besar)
     excel_claim_retried = False  # klaim 'file Excel siap' tanpa kartu → 1x koreksi
+    ajar_claim_retried = False   # klaim 'sudah saya catat' tanpa tool ajar → 1x koreksi
+    ajar_tool_ok = False         # ajarkan_pengetahuan BERHASIL dijalankan turn ini
     lookup_gagal = False  # ada tool lookup yang error/tak ketemu → jangan mengarang angka
     tool_gagal_pernah = False  # untuk observabilitas: pernahkah ada tool gagal turn ini
     tools_failed: list[str] = []  # nama tool yang GAGAL turn ini (observabilitas per-tool)
@@ -1821,7 +1847,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                         rangka_tool_attempted = True
                     if name in ("cari_kode_kesalahan", "diagnosa"):
                         dtc_tool_attempted = True
-                    result = _run_tool_turn(name, {**lc_args, "_q_user": q_user_terakhir},
+                    result = _run_tool_turn(name, {**lc_args, "_q_user": q_user_terakhir,
+                                                   "_cid": conversation_id},
                                             user, sheet_id)
                     tools_used.append(name)
                     _dump = _dump_tool(result, name)
@@ -1847,6 +1874,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     })
                     _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
                     _kind = _tool_fail_kind(result)
+                    if name == "ajarkan_pengetahuan" and not _kind:
+                        ajar_tool_ok = True
                     if _kind:
                         tool_gagal_pernah = True
                         _catat_tool_gagal(tools_failed, name, _kind)
@@ -1897,6 +1926,17 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 _catat_guard("excel")
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": _EXCEL_CLAIM_CORRECTION})
+                continue
+            # GUARD KLAIM-AJAR (kembaran guard di atas): jawaban mengaku sudah
+            # MENCATAT/MENYIMPAN pengetahuan padahal tool ajarkan_pengetahuan tak
+            # pernah sukses giliran ini → user pergi mengira ajarannya tersimpan.
+            if (not ajar_claim_retried and not ajar_tool_ok
+                    and _AJAR_CLAIM_RE.search(reply)
+                    and _AJAR_CLAIM_OBJ_RE.search(reply)):
+                ajar_claim_retried = True
+                _catat_guard("ajar")
+                messages.append({"role": "assistant", "content": content})
+                messages.append({"role": "user", "content": _AJAR_CLAIM_CORRECTION})
                 continue
             # GUARD DTC-FIRST (bukti log: "SPN 520243 FMI 21" dijawab 'tidak
             # ditemukan' TANPA tool, padahal ada): pesan terakhir user memuat
@@ -2010,7 +2050,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         def _exec_call(tc: dict) -> tuple[dict, str, dict, dict]:
             name, args = _parse_call(tc)
             return tc, name, args, _run_tool_turn(
-                name, {**args, "_q_user": q_user_terakhir}, user, sheet_id)
+                name, {**args, "_q_user": q_user_terakhir, "_cid": conversation_id},
+                user, sheet_id)
 
         # PERCEPATAN: batch >1 tool dieksekusi PARALEL (model kerap memanggil
         # beberapa tool sekaligus, mis. detail_part 3 PN / EPC + katalog) —
@@ -2032,7 +2073,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             with ThreadPoolExecutor(max_workers=min(4, len(uniq))) as _ex:
                 uniq_res = dict(zip(uniq, _ex.map(
                     lambda i: _run_tool_turn(parsed[i][0],
-                                             {**parsed[i][1], "_q_user": q_user_terakhir},
+                                             {**parsed[i][1], "_q_user": q_user_terakhir,
+                                              "_cid": conversation_id},
                                              user, sheet_id), uniq)))
             executed = []
             for i, tc in enumerate(tool_calls):
@@ -2047,12 +2089,23 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             executed = [_exec_call(tool_calls[0])]
 
         kartu_tanya = None            # sentinel tanya_user giliran ini (maks SATU)
+        tanya_pengantar = ""          # teks yang ikut tampil DI ATAS kartu
+        tanya_bebas_pagar = False     # kartu konfirmasi aksi eksplisit user
         for tc, name, args, result in executed:
             tools_used.append(name)
             # tanya_user: kartu pertanyaan. Ambil yang PERTAMA saja — dua kartu
             # dalam satu giliran akan menumpuk di layar user.
             if isinstance(result, dict) and result.get("_tanya") and kartu_tanya is None:
                 kartu_tanya = result["_tanya"]
+                # Jalur kartu MEMBUANG tulisan model (reply = teks pertanyaan saja),
+                # jadi tool yang isinya WAJIB dilihat user — draf ajarkan_pengetahuan
+                # — menitipkannya di sini untuk di-prepend ke reply. Payload kartu ke
+                # klien TIDAK berubah: nol perubahan di web/mobile.
+                tanya_pengantar = str(result.get("_tanya_pengantar") or "")
+                # Bebas pagar: kartu KONFIRMASI atas aksi eksplisit user (mis. "catat
+                # ya: …") bukan interogasi — alur 'Perbaiki dulu → draf revisi → kartu
+                # lagi' harus boleh berjalan. Pagar tetap utuh untuk tanya_user.
+                tanya_bebas_pagar = bool(result.get("_tanya_bebas_pagar"))
             if _args_has_rangka(args):
                 rangka_tool_attempted = True
             if name in ("cari_kode_kesalahan", "diagnosa"):
@@ -2072,6 +2125,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             })
             _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
             _kind = _tool_fail_kind(result)
+            if name == "ajarkan_pengetahuan" and not _kind:
+                ajar_tool_ok = True
             if _kind:
                 # Lihat catatan jalur bocor di atas: "brake" tak menyalakan
                 # lookup_gagal — kalau ikut, model menyimpulkan puluhan PN yang
@@ -2088,7 +2143,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
 
         if kartu_tanya:
             _k_tanya = _tanya_kunci(user, conversation_id)
-            if _tanya_baru_saja(_k_tanya):
+            if not tanya_bebas_pagar and _tanya_baru_saja(_k_tanya):
                 # Pagar anti ping-pong: giliran sebelumnya SUDAH bertanya. Kartunya
                 # dibuang dan model disuruh lanjut dgn asumsi — bukan return, supaya
                 # giliran ini tetap menghasilkan JAWABAN.
@@ -2099,10 +2154,15 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 # Bertanya = AKHIR giliran. Berhenti SEBELUM _post_chat berikutnya:
                 # tak ada gunanya menyuruh model menulis jawaban atas pertanyaannya
                 # sendiri, dan itu justru menghemat satu panggilan model.
-                _tanya_catat(_k_tanya)
+                if not tanya_bebas_pagar:
+                    # Kartu bebas-pagar TIDAK dicatat: mencatatnya akan membuat
+                    # kartu berikutnya (revisi draf) tertahan 15 menit.
+                    _tanya_catat(_k_tanya)
                 _emit(on_progress, "Menunggu jawabanmu…")
-                return _finalize(_teks_pertanyaan(kartu_tanya), part_pns=[],
-                                 pertanyaan=kartu_tanya)
+                _teks = _teks_pertanyaan(kartu_tanya)
+                if tanya_pengantar:
+                    _teks = f"{tanya_pengantar}\n\n{_teks}"
+                return _finalize(_teks, part_pns=[], pertanyaan=kartu_tanya)
         # Hasil tool sudah masuk → panggilan berikut kemungkinan menulis jawaban.
         _emit(on_progress, "Menyusun jawaban…")
 

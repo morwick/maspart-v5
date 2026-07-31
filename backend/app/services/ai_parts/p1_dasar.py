@@ -33,7 +33,8 @@ from . import (abs_scr_codes, accurate, ai_chat_log, ai_export, ai_knowledge, ai
                catalog_bom, dtc_codes,
                dtc_diagnosa, eol_dtc, epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref,
                gudang, gudang_config, harga, knowledge_links, maintenance_ref, manual_media,
-               manual_teks, orders, part_index, part_taxonomy, pengetahuan, pin_ecu, populasi,
+               manual_teks, orders, part_index, part_taxonomy, pengetahuan,
+               pengetahuan_index, pin_ecu, populasi,
                rak, repairkit, reservations, search_log, sims, sims_eol, sims_warranty, sinonim,
                skema_ref, telematics, wiring_ref)
 
@@ -148,6 +149,14 @@ def _can_garansi(user: dict) -> bool:
     selalu; staf bila dicentang 'ai_garansi'; pembeli TIDAK PERNAH (boleh_ai
     fail-closed) — data klaim memuat nama+HP pelapor & nilai modal CNY."""
     return _is_admin(user) or _boleh_ai(user, "ai_garansi")
+
+
+def _can_mengajar(user: dict) -> bool:
+    """Mengajari pengetahuan lewat chat (tool ajarkan_pengetahuan): admin selalu;
+    staf bila dicentang 'ai_mengajar'; pembeli TIDAK PERNAH (boleh_ai fail-closed).
+    Beda dari gerbang lain yang menjaga BACA data sensitif — yang dijaga di sini
+    adalah MENULIS ke pengetahuan yang nanti dibaca semua orang."""
+    return _is_admin(user) or _boleh_ai(user, "ai_mengajar")
 
 
 def _boleh_isi_stok_harga(args: dict, user: dict) -> bool:
