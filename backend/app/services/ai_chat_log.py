@@ -47,14 +47,20 @@ def create_table_sql() -> str:
         "  guard_hit boolean not null default false,\n"
         "  tool_failed boolean not null default false,\n"
         "  reply_len int not null default 0,\n"
-        "  outcome text,\n"  # ok | not_found | empty | sanitized
+        # ok | not_found | empty | sanitized | tanya
+        # | salvage_llm    → jalur normal gagal, diselamatkan panggilan konteks-bersih
+        # | salvage_render → diselamatkan render deterministik dari hasil tool
+        # Kolom `text` bebas & agregasi di bawah dinamis → nilai baru TIDAK butuh
+        # migrasi maupun perubahan panel admin.
+        "  outcome text,\n"
         "  tokens_in int not null default 0,\n"         # migrations/021
         "  tokens_out int not null default 0,\n"
         "  tokens_cache_hit int not null default 0,\n"
         "  api_calls int not null default 0,\n"
         "  reply text,\n"                                # migrations/022 (teks jawaban AI)
         "  tools_failed text,\n"                         # migrations/023 (tool yang gagal)
-        "  session_id text\n"                            # migrations/025 (percakapan)
+        "  session_id text,\n"                           # migrations/025 (percakapan)
+        "  guard_kinds text\n"                           # migrations/026 (guard mana yg menyala)
         ");\n"
         "create index if not exists ai_chat_log_created_idx on ai_chat_log (created_at desc);\n"
         "create index if not exists ai_chat_log_session_idx on ai_chat_log (session_id);\n"
@@ -74,7 +80,8 @@ def log_turn(*, username: str | None, role: str | None, question: str,
              outcome: str, tokens_in: int = 0, tokens_out: int = 0,
              tokens_cache_hit: int = 0, api_calls: int = 0, reply: str = "",
              tools_failed: list[str] | None = None,
-             session_id: str = "") -> bool:
+             session_id: str = "",
+             guard_kinds: list[str] | None = None) -> bool:
     """Simpan satu baris observabilitas. Best-effort: False bila gagal/tabel absen,
     TAK melempar (pemanggil membungkus lagi, tapi tetap aman di sini).
 
@@ -84,9 +91,15 @@ def log_turn(*, username: str | None, role: str | None, question: str,
     (migrations/023). `session_id` = id percakapan (migrations/025) — tanpa ini tiap
     baris berdiri sendiri dan kegagalan FOLLOW-UP (kelas bug terbesar asisten) tak
     bisa direkonstruksi. Bila migrasi belum dijalankan, baris diulang berjenjang
-    TANPA kolom yang absen agar log tetap tercatat."""
+    TANPA kolom yang absen agar log tetap tercatat.
+
+    `guard_kinds` = guard MANA yang menyala (migrations/026). Tanpa ini `guard_hit`
+    hanya boolean dan — lebih buruk — dulu hanya dinaikkan guard anti-karangan,
+    sehingga guard yang justru paling berharga (DTC-FIRST: terbukti menghentikan
+    14 jawaban kode kesalahan SALAH pada 2026-07-16) sama sekali tak terlihat."""
     tools = tools_used or []
     gagal = tools_failed or []
+    guards = guard_kinds or []
     base = {
         "username": (username or None),
         "role": (role or None),
@@ -109,11 +122,13 @@ def log_turn(*, username: str | None, role: str | None, question: str,
     }
     with_reply = {**base, **tok, "reply": (reply or "")[:_REPLY_CAP] or None}
     with_failed = {**with_reply, "tools_failed": (", ".join(gagal) if gagal else None)}
-    full = {**with_failed, "session_id": (session_id or None)}
-    # 5 tingkat berjenjang: +session_id (025) → +tools_failed (023) → reply (022)
-    # → token (021) → base. Kolom absen (migrasi belum jalan) bikin PostgREST
-    # balas 400 → coba tingkat berikutnya (log tetap tercatat, degradasi bertahap).
-    for payload in (full, with_failed, with_reply, {**base, **tok}, base):
+    with_session = {**with_failed, "session_id": (session_id or None)}
+    full = {**with_session, "guard_kinds": (", ".join(guards) if guards else None)}
+    # 6 tingkat berjenjang: +guard_kinds (026) → +session_id (025) → +tools_failed
+    # (023) → reply (022) → token (021) → base. Kolom absen (migrasi belum jalan)
+    # bikin PostgREST balas 400 → coba tingkat berikutnya (log tetap tercatat,
+    # degradasi bertahap).
+    for payload in (full, with_session, with_failed, with_reply, {**base, **tok}, base):
         try:
             r = requests.post(
                 _rest_url("ai_chat_log"),
@@ -133,14 +148,16 @@ _SELECT_BASE = ("id,created_at,username,role,question,tools,tools_count,"
 _SELECT_TOKENS = _SELECT_BASE + ",tokens_in,tokens_out,tokens_cache_hit,api_calls"
 _SELECT_REPLY = _SELECT_TOKENS + ",reply"
 _SELECT_FAILED = _SELECT_REPLY + ",tools_failed"
-_SELECT_FULL = _SELECT_FAILED + ",session_id"
+_SELECT_SESSION = _SELECT_FAILED + ",session_id"
+_SELECT_FULL = _SELECT_SESSION + ",guard_kinds"
 
 
 def list_logs(limit: int = 200) -> list[dict]:
     """Baris observabilitas terbaru dulu (untuk halaman admin). Kolom terkaya dicoba
-    dulu (session_id=025, tools_failed=023, reply=022, token=021); skema lama →
-    fallback ke select yang lebih ramping."""
-    for sel in (_SELECT_FULL, _SELECT_FAILED, _SELECT_REPLY, _SELECT_TOKENS, _SELECT_BASE):
+    dulu (guard_kinds=026, session_id=025, tools_failed=023, reply=022, token=021);
+    skema lama → fallback ke select yang lebih ramping."""
+    for sel in (_SELECT_FULL, _SELECT_SESSION, _SELECT_FAILED, _SELECT_REPLY,
+                _SELECT_TOKENS, _SELECT_BASE):
         try:
             r = requests.get(
                 _rest_url("ai_chat_log"),
@@ -241,6 +258,9 @@ def summary() -> dict:
     tool_gagal_err: dict[str, int] = {}
     gagal_rincian = {"nf": 0, "err": 0, "legacy": 0}
     outcome_freq: dict[str, int] = {}
+    # Sebab guard (migrations/026). Baris SEBELUM rilis itu kosong — dan `guard`
+    # di atas pun undercount karena dulu hanya guard anti-karangan yang terhitung.
+    guard_freq: dict[str, int] = {}
     for r in rows:
         for t in (r.get("tools") or "").split(", "):
             t = t.strip()
@@ -260,6 +280,10 @@ def summary() -> dict:
                 tool_gagal_err[nama] = tool_gagal_err.get(nama, 0) + 1
             gagal_rincian["nf" if kind == "nf" else
                           "err" if kind == "err" else "legacy"] += 1
+        for g in (r.get("guard_kinds") or "").split(", "):
+            g = g.strip()
+            if g:
+                guard_freq[g] = guard_freq.get(g, 0) + 1
         o = (r.get("outcome") or "?").strip()
         outcome_freq[o] = outcome_freq.get(o, 0) + 1
 
@@ -295,6 +319,7 @@ def summary() -> dict:
         "latensi_ms": {"p50": _pct(50), "p90": _pct(90), "maks": lat[-1]},
         "guard_menyala": guard,
         "guard_rasio_persen": round(100 * guard / n, 1),
+        "guard_sebab": guard_freq,
         "tool_gagal": failed,
         "tool_gagal_rasio_persen": round(100 * failed / n, 1),
         "tool_tersering": sorted(tool_freq.items(), key=lambda kv: -kv[1])[:10],

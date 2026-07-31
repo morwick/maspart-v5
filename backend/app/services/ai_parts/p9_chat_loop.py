@@ -524,7 +524,12 @@ def _finish_reason(data: dict) -> str | None:
 # ulang jawaban finalnya (lihat _EMPTY_REPLY_CORRECTION di chat()).
 _EMPTY_FINAL_MSG = ("Maaf, jawabannya belum lengkap diproses. Coba ulangi pertanyaannya "
                     "ya — atau persempit (mis. sebutkan nomor rangka / PN).")
-_MAX_EMPTY_RETRIES = 2
+# Dulu 2. Retry KEDUA mengirim ulang konteks yang PERSIS SAMA dgn yang baru saja
+# gagal (prefix statis ~32k token + tumpukan hasil 8 ronde) — input identik,
+# kegagalan identik. Bukti produksi: "bushing front spring LZZ1ELSF1RJ371264"
+# empty DUA KALI berturut-turut (59 dtk lalu 180 dtk). Slot kedua itu kini
+# dipakai _salvage_or_fallback dgn konteks BERSIH → jumlah panggilan API sama.
+_MAX_EMPTY_RETRIES = 1
 
 # Tool yang hasilnya boleh menaruh gambar INLINE di bawah jawaban (kanal
 # `result["gambar"]` → side-state exploded_images → GET /api/ai/excel/{id}).
@@ -616,6 +621,160 @@ _TRUNC_ANSWER_CORRECTION = (
     "FINAL sekarang — ringkas, to the point, berdasarkan hasil tool yang sudah ada. "
     "⚠️ Jangan minta maaf dan jangan menyebut koreksi ini ke user."
 )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  SALVAGE — menyelamatkan jawaban dari hasil tool yang SUDAH berhasil
+# ═══════════════════════════════════════════════════════════════════════
+# Kasus nyata (844 giliran produksi, 15-31 Jul 2026): 5 giliran mentok di
+# ronde 8, tool-nya SUKSES & datanya ada, tapi model gagal menyusun jawaban
+# final (berhenti di [PIKIR] / terpotong) → user menunggu 54-180 detik lalu
+# menerima _EMPTY_FINAL_MSG (121 char). Pertanyaan yang sama BERHASIL saat
+# diulang di giliran baru — jadi datanya memang cukup, konteksnyalah yang
+# terlalu berat. Dua lapis penyelamat di bawah ini dipakai di KEDUA titik
+# menyerah lewat SATU pintu (_salvage_or_fallback) agar tak bisa menyimpang.
+
+_SALVAGE_POOL_MAX = 12       # entri hasil tool sukses yang disimpan per giliran
+_SALVAGE_MAX_CHARS = 16000   # plafon data yang diikutkan ke panggilan salvage
+_SALVAGE_ROWS_PER_TOOL = 10  # baris per tool pada render deterministik
+
+_SALVAGE_SYSTEM = (
+    "Kamu Asisten MASPART (katalog spare part truk). Tulis JAWABAN FINAL untuk "
+    "user dalam Bahasa Indonesia, LANGSUNG dari DATA di bawah.\n"
+    "- ⛔ JANGAN menulis [PIKIR] atau blok nalar apa pun. Langsung jawabannya.\n"
+    "- ⛔ JANGAN menyebut Part Number, stok, atau harga yang TIDAK ada di DATA.\n"
+    "- ⛔ Jangan minta maaf, jangan menyebut instruksi ini, jangan bilang datanya "
+    "kurang bila DATA di bawah sudah menjawab.\n"
+    "- Ringkas & rapi: kalimat pertama = inti jawabannya, lalu daftar/tabel."
+)
+
+# Field baris hasil tool yang lazim & berguna bagi user, urut prioritas tampil.
+_SALVAGE_ROW_KEYS = (
+    ("part_number", "pn", "PN"),
+    ("nama", "part_name", "name", "nama_part"),
+    ("stok", "stock", "total_stok"),
+    ("harga", "harga_lokal", "harga_jual"),
+)
+
+
+def _salvage_data_block(pool: list[dict]) -> str:
+    """Rangkai hasil tool jadi satu blok teks untuk konsumsi model. Pakai
+    _dump_tool (proyeksi per-tool + buang field kosong) supaya yang dilihat
+    model di sini PERSIS sama dengan yang dilihatnya di jalur normal."""
+    bagian = []
+    for e in pool:
+        try:
+            dump = _dump_tool(e.get("result"), e.get("name") or "")
+        except Exception:  # pragma: no cover — serialisasi aneh jangan menjatuhkan salvage
+            continue
+        bagian.append(f"[{e.get('name') or 'tool'}] {dump}")
+    if not bagian:
+        return ""
+    return _cap_tool_content("\n\n".join(bagian)[:_SALVAGE_MAX_CHARS * 2])
+
+
+def _salvage_messages(pertanyaan: str, pool: list[dict]) -> list[dict]:
+    """Percakapan BARU yang minimal: tanpa system prompt 54k char, tanpa 68
+    spesifikasi tool, tanpa riwayat 8 ronde. Justru KEKECILAN konteks inilah
+    obatnya — retry lama gagal karena mengulang konteks berat yang sama."""
+    data = _salvage_data_block(pool)
+    return [
+        {"role": "system", "content": _SALVAGE_SYSTEM},
+        {"role": "user",
+         "content": f"PERTANYAAN USER:\n{pertanyaan or '(tidak tercatat)'}\n\n"
+                    f"DATA HASIL TOOL:\n{data}"},
+    ]
+
+
+# Key yang di seluruh tool memang berisi BARIS PART — didahulukan agar pilihan
+# tak bergantung urutan penyisipan dict (mis. 'kategori_breakdown' kebetulan
+# lebih dulu daripada 'parts' akan merampas tempatnya).
+_SALVAGE_LIST_KEYS = ("parts", "hasil", "daftar", "items", "rows", "part",
+                      "komponen", "daftar_part", "hasil_eol")
+
+
+def _salvage_rows(result: dict) -> list[dict]:
+    """Ambil list-of-dict yang tampak seperti baris data dari hasil tool."""
+    def _ok(v):
+        return isinstance(v, list) and v and isinstance(v[0], dict)
+
+    res = result or {}
+    for k in _SALVAGE_LIST_KEYS:
+        if _ok(res.get(k)):
+            return res[k]
+    for v in res.values():           # cadangan: list-of-dict pertama apa pun
+        if _ok(v):
+            return v
+    return []
+
+
+def _render_hasil_tool(pool: list[dict]) -> str:
+    """LANTAI TERAKHIR — render deterministik, TANPA panggilan model (gratis).
+    Kasar, tapi berisi data sungguhan; itu selalu lebih berguna daripada
+    permintaan maaf setelah user menunggu tiga menit."""
+    blok: list[str] = []
+    for e in pool:
+        res = e.get("result")
+        if not isinstance(res, dict):
+            continue
+        rows = _salvage_rows(res)
+        if not rows:
+            continue
+        baris: list[str] = []
+        for r in rows[:_SALVAGE_ROWS_PER_TOOL]:
+            bagian = []
+            for kandidat in _SALVAGE_ROW_KEYS:
+                for k in kandidat:
+                    if r.get(k) not in (None, "", [], {}):
+                        bagian.append(f"{k}: {r[k]}")
+                        break
+            if bagian:
+                baris.append("- " + " · ".join(bagian))
+        if baris:
+            sisa = len(rows) - len(baris)
+            # Sengaja nama tool MENTAH, bukan _tool_label: label itu kalimat
+            # progres ("Memproses data") yang tak bermakna sebagai judul bagian.
+            judul = e.get("name") or "tool"
+            blok.append(f"**{judul}**\n" + "\n".join(baris)
+                        + (f"\n- …dan {sisa} baris lain" if sisa > 0 else ""))
+    if not blok:
+        return ""
+    return (
+        "Data untuk pertanyaan Anda **sudah ketemu**, tapi ringkasannya gagal "
+        "disusun. Ini hasil mentahnya:\n\n"
+        + "\n\n".join(blok)
+        + "\n\nBila kurang pas, persempit pertanyaannya (sebutkan nomor rangka "
+          "atau Part Number) — hasilnya akan jauh lebih rapi."
+    )
+
+
+def _salvage_or_fallback(pertanyaan: str, pool: list[dict],
+                         tok: dict) -> tuple[str, str]:
+    """SATU pintu menyerah — dipakai kedua titik yang dulu langsung memakai
+    _EMPTY_FINAL_MSG. Mengembalikan (reply, outcome).
+
+    Urutan: (1) tanpa hasil tool sama sekali → jujur menyerah seperti dulu;
+    (2) panggilan model konteks BERSIH; (3) render deterministik (gratis);
+    (4) baru menyerah. Sekali pool berisi, user tak akan pernah lagi menerima
+    permintaan maaf kosong."""
+    if not pool:
+        return _EMPTY_FINAL_MSG, "empty"
+    try:
+        data = _post_chat(_salvage_messages(pertanyaan, pool), [],
+                          max_tokens=_MAX_TOKENS_ANSWER)
+        _add_usage(tok, data)
+        teks = _strip_reasoning(
+            ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+        if teks:
+            return teks, "salvage_llm"
+    except Exception:
+        # Salvage adalah jaring pengaman — kegagalannya TIDAK boleh menjatuhkan
+        # giliran. Masih ada lantai deterministik di bawah.
+        logger.exception("salvage konteks-bersih gagal (lanjut ke render)")
+    render = _render_hasil_tool(pool)
+    if render:
+        return render, "salvage_render"
+    return _EMPTY_FINAL_MSG, "empty"
 
 
 def _strip_reasoning(text: str) -> str:
@@ -1360,12 +1519,36 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         grounded |= set(memo.get("pn") or {})
         grounded_nums |= set(memo.get("nums") or [])
     guard_retries = 0
+    # Jenis guard yang MENYALA giliran ini (urut, tanpa duplikat). Dulu telemetri
+    # hanya punya boolean `guard_hit`, dan itu pun HANYA dinaikkan blok guard
+    # anti-karangan — tiga guard lain (klaim-Excel, DTC-FIRST, EPC-FIRST) tak
+    # terekam sama sekali. Padahal bukti produksi menunjukkan DTC-FIRST-lah yang
+    # menghentikan 14 jawaban kode kesalahan SALAH pada 2026-07-16 (nol kambuh
+    # dalam 40 pertanyaan berikutnya) — guard paling berharga justru tak terlihat.
+    guard_kinds: list[str] = []
+
+    def _catat_guard(kind: str) -> None:
+        if kind not in guard_kinds:
+            guard_kinds.append(kind)
+
     empty_retries = 0  # model hanya menulis [PIKIR]/kosong → paksa tulis ulang
     force_direct = False  # true = panggilan berikut WAJIB jawaban langsung (tanpa tool, budget besar)
     excel_claim_retried = False  # klaim 'file Excel siap' tanpa kartu → 1x koreksi
     lookup_gagal = False  # ada tool lookup yang error/tak ketemu → jangan mengarang angka
     tool_gagal_pernah = False  # untuk observabilitas: pernahkah ada tool gagal turn ini
     tools_failed: list[str] = []  # nama tool yang GAGAL turn ini (observabilitas per-tool)
+    # Kolam SALVAGE: hasil tool yang BERHASIL, disimpan terpisah dari `messages`.
+    # Wajib punya salinan sendiri karena _trim_old_tool_messages menciutkan hasil
+    # ronde lama di `messages` jadi stub — pada saat model menyerah (ronde 8),
+    # hasil ronde 1-6 SUDAH HILANG dari sana. Lihat _salvage_or_fallback().
+    salvage_pool: list[dict] = []
+
+    def _catat_salvage(name: str, args: dict, result) -> None:
+        if not isinstance(result, dict) or _tool_fail_kind(result):
+            return                     # hasil gagal tak berguna untuk diselamatkan
+        salvage_pool.append({"name": name, "args": args or {}, "result": result})
+        if len(salvage_pool) > _SALVAGE_POOL_MAX:
+            del salvage_pool[:-_SALVAGE_POOL_MAX]
     # Guard EPC-FIRST: rangka disebut USER di percakapan TERKINI? + apakah model
     # sudah MENCOBA tool ber-argumen rangka (sukses/gagal sama-sama 'mencoba').
     # Jendela = 6 pesan terakhir (bukan hanya pesan terakhir): follow-up "kampas
@@ -1492,10 +1675,16 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         elif name in _KLAIM_TOOLS:
             klaim_pns.update(res_pns)
 
-    def _finalize(reply: str, part_pns=None, pertanyaan=None) -> dict:
+    def _finalize(reply: str, part_pns=None, pertanyaan=None,
+                  outcome: str = "") -> dict:
         """Bungkus payload jawaban + catat observabilitas (best-effort). Dipanggil
-        di SEMUA titik return agar setiap giliran chat terekam."""
-        outcome_for = (
+        di SEMUA titik return agar setiap giliran chat terekam.
+
+        `outcome` eksplisit dipakai jalur SALVAGE (salvage_llm/salvage_render):
+        teksnya tak bisa dikenali dari isi jawaban, dan membedakannya penting —
+        salvage = jalur normal GAGAL, jadi ia wajib terlihat di panel & masuk
+        gap miner meski user menerima jawaban berguna."""
+        outcome_for = outcome or (
             "tanya" if pertanyaan else
             "not_found" if reply == _NOT_FOUND_REPLY else
             "empty" if reply == _EMPTY_FINAL_MSG else
@@ -1519,7 +1708,11 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 username=user.get("username"), role=user.get("role"),
                 question=_pertanyaan, tools_used=tools_used,
                 rounds=tool_rounds, latency_ms=int((time.monotonic() - _t0) * 1000),
-                guard_hit=guard_retries > 0, tool_failed=tool_gagal_pernah,
+                # DULU `guard_retries > 0` → hanya guard anti-karangan yang
+                # terhitung; giliran yang diselamatkan DTC-FIRST/EPC-FIRST/
+                # klaim-Excel tercatat "tanpa guard". Angka lama UNDERCOUNT.
+                guard_hit=bool(guard_kinds), guard_kinds=guard_kinds,
+                tool_failed=tool_gagal_pernah,
                 reply_len=len(reply or ""), outcome=outcome_for,
                 tokens_in=_tok["in"], tokens_out=_tok["out"],
                 tokens_cache_hit=_tok["cache"], api_calls=_tok["calls"],
@@ -1534,6 +1727,30 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         if pertanyaan:
             out["pertanyaan"] = pertanyaan
         return out
+
+    def _sanitize_final(reply: str) -> str:
+        """Tiga guard kejujuran yang dipakai jalur TERMINAL (tanpa retry): PN
+        tak ter-ground disamarkan, PN katalog-lokal yang menyalip EPC per-VIN
+        diberi catatan, angka yang tak ada di hasil tool ditandai.
+
+        Difaktorkan agar jalur SALVAGE memakai rantai yang PERSIS sama — salvage
+        keluar dari loop lebih awal, jadi tanpa ini ia akan melewati ketiganya
+        dan jawaban hasil model bisa lolos tanpa diperiksa."""
+        bad = _drop_unit_tokens(_ungrounded_pns(reply, grounded))
+        if bad:
+            reply = _sanitize_ungrounded(reply, bad)
+        _suspect_pool = set(cari_local_pns)
+        if user_rangka_recent:
+            _suspect_pool |= hist_suspect
+        _suspect = _suspect_pool - epc_vin_pns
+        if _suspect and (epc_vin_used or (user_rangka_recent and hist_suspect)):
+            _subst = _drop_unit_tokens([p for p in _extract_pns(reply) if p in _suspect])
+            if _subst:
+                reply = _annotate_subst(reply, _subst)
+        _num_bad = sorted(_claimed_nums(reply) - grounded_nums)
+        if _num_bad:
+            reply = _annotate_unverified_nums(reply, _num_bad)
+        return reply
 
     # Anggaran RONDE TOOL (produktif: model benar-benar memanggil tool) DIPISAH
     # dari anggaran RETRY (kosong/guard: tak menjalankan tool). Dulu semuanya
@@ -1614,6 +1831,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     _track_pn_source(name, result, _res_pns)
                     _track_memori(name, lc["arguments"] or {}, result, _res_pns, _dump)
                     _capture_meta(name, lc["arguments"] or {}, result)
+                    _catat_salvage(name, lc["arguments"] or {}, result)
                     messages.append({
                         # role:system (bukan user) — ini hasil tool yg disuntik sistem,
                         # bukan ucapan user; role:tool mustahil tanpa tool_call_id (tool
@@ -1658,7 +1876,14 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     else:
                         messages.append({"role": "user", "content": _EMPTY_REPLY_CORRECTION})
                     continue
-                reply = _EMPTY_FINAL_MSG
+                # Retry konteks-penuh habis. SALVAGE bersifat TERMINAL: keluar
+                # sekarang juga. Kalau dibiarkan jatuh ke guard-guard di bawah,
+                # sebuah `continue` akan membuang hasil salvage yang baru saja
+                # dibayar — dan menyuruh model mengoreksi jawaban yang bukan
+                # tulisannya. Rantai kejujuran tetap jalan lewat _sanitize_final.
+                _sv_reply, _sv_outcome = _salvage_or_fallback(
+                    q_user_terakhir or _pertanyaan, salvage_pool, _tok)
+                return _finalize(_sanitize_final(_sv_reply), outcome=_sv_outcome)
             elif truncated:
                 reply += _TRUNCATED_NOTE
             # GUARD KLAIM FILE: jawaban menjanjikan Excel/kartu unduh padahal tak
@@ -1669,6 +1894,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     and _EXCEL_CLAIM_RE.search(reply)
                     and _EXCEL_CLAIM_DONE_RE.search(reply)):
                 excel_claim_retried = True
+                _catat_guard("excel")
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": _EXCEL_CLAIM_CORRECTION})
                 continue
@@ -1679,6 +1905,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             if (user_dtc_tokens and not dtc_tool_attempted and not dtc_first_retried
                     and any(t in reply.upper() for t in user_dtc_tokens)):
                 dtc_first_retried = True
+                _catat_guard("dtc")
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": _DTC_FIRST_CORRECTION})
                 continue
@@ -1692,6 +1919,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                              if p not in _rangka_tokens and p not in klaim_pns]
                 if _pn_reply:
                     epc_first_retried = True
+                    _catat_guard("epc")
                     messages.append({"role": "assistant", "content": content})
                     messages.append({"role": "user", "content": _EPC_FIRST_CORRECTION})
                     continue
@@ -1717,6 +1945,18 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             # tanpa tool (angka riwayat asisten sudah diground di atas → angka
             # lama sah diulang; angka BARU yang tiba-tiba muncul tertangkap).
             num_bad: list[str] = sorted(_claimed_nums(reply) - grounded_nums)
+            # Catat SEBAB-nya, bukan cuma "ada guard menyala". Tiga sebab ini
+            # dulu menyatu jadi satu boolean padahal artinya jauh berbeda:
+            # `pn`/`angka` = dugaan KARANGAN (serius), sedangkan `subst` = PN
+            # katalog per-model menyalip EPC per-VIN — kerap benar, kerap pula
+            # false positive. Tanpa dipisah, mustahil tahu mana yang perlu
+            # dilonggarkan dan mana yang justru menyelamatkan.
+            if bad:
+                _catat_guard("pn")
+            if subst:
+                _catat_guard("subst")
+            if num_bad:
+                _catat_guard("angka")
             if (bad or subst or num_bad) and guard_retries < _MAX_GUARD_RETRIES:
                 guard_retries += 1
                 messages.append({"role": "assistant", "content": content})
@@ -1824,6 +2064,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             _track_pn_source(name, result, _res_pns)
             _track_memori(name, args, result, _res_pns, _dump)
             _capture_meta(name, args, result)
+            _catat_salvage(name, args, result)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.get("id"),
@@ -1880,24 +2121,15 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         _add_usage(_tok, final)
         msg = (final.get("choices") or [{}])[0].get("message") or {}
         reply = _strip_reasoning(msg.get("content") or "")
+    _sv_outcome = ""
     if not reply:
-        reply = _EMPTY_FINAL_MSG
+        # Dua panggilan konteks-penuh sudah gagal → jangan ulangi konteks yang
+        # sama untuk ketiga kalinya; selamatkan dari hasil tool.
+        reply, _sv_outcome = _salvage_or_fallback(
+            q_user_terakhir or _pertanyaan, salvage_pool, _tok)
     elif _finish_reason(final) == "length":
         reply += _TRUNCATED_NOTE
-    bad = _drop_unit_tokens(_ungrounded_pns(reply, grounded))
-    if bad:
-        reply = _sanitize_ungrounded(reply, bad)
-    _suspect_pool = set(cari_local_pns)
-    if user_rangka_recent:
-        _suspect_pool |= hist_suspect
-    _suspect = _suspect_pool - epc_vin_pns
-    if _suspect and (epc_vin_used or (user_rangka_recent and hist_suspect)):
-        _subst = _drop_unit_tokens([p for p in _extract_pns(reply) if p in _suspect])
-        if _subst:
-            reply = _annotate_subst(reply, _subst)
-    _num_bad = sorted(_claimed_nums(reply) - grounded_nums)
-    if _num_bad:
-        reply = _annotate_unverified_nums(reply, _num_bad)
+    reply = _sanitize_final(reply)
     # Jalur terminal DULU lolos 3 guard kejujuran (Excel-claim / DTC-first /
     # EPC-first) karena tak ada ronde tersisa utk koreksi — mitigasi ringan:
     if (not (excel_exports or banding_exports or repairkit_models)
@@ -1911,5 +2143,5 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                    if p not in klaim_pns])):
         reply += ("\n\n⚠️ Jawaban ini belum sempat diverifikasi penuh ke database/EPC "
                   "— mohon tanyakan ulang untuk kepastian.")
-    return _finalize(reply)
+    return _finalize(reply, outcome=_sv_outcome)
 

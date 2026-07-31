@@ -30,6 +30,16 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
   );
 }
 
+// Arti tiap sebab guard (migrasi 026) — dipakai sebagai tooltip di panel.
+const GUARD_ARTI: Record<string, string> = {
+  pn: "Part Number di jawaban tak ada di hasil tool maupun riwayat — dugaan karangan",
+  angka: "Stok/harga/spesifikasi diklaim tanpa dasar hasil tool — dugaan karangan",
+  subst: "PN katalog per-model dipakai padahal EPC per-VIN sudah jalan",
+  excel: "Jawaban menjanjikan kartu unduh yang tak pernah dibuat",
+  dtc: "Pertanyaan kode kesalahan dijawab tanpa memanggil cari_kode_kesalahan",
+  epc: "User menyebut nomor rangka tapi PN dijawab tanpa tool EPC",
+};
+
 export default function ChatLogPage() {
   const router = useRouter();
   const [summary, setSummary] = useState<ChatLogSummary | null>(null);
@@ -202,6 +212,26 @@ export default function ChatLogPage() {
                       {(summary.tool_gagal_rincian.legacy ?? 0) > 0 && ` · lama: ${summary.tool_gagal_rincian.legacy}`}
                     </div>
                   )}
+                </div>
+              )}
+              {/* Sebab guard — memisahkan dugaan KARANGAN dari SUBSTITUSI dan
+                  dari guard wajib-tool. Dulu semuanya cuma satu angka, sehingga
+                  guard paling berharga (dtc) tak terlihat sama sekali. */}
+              {summary.guard_sebab && Object.keys(summary.guard_sebab).length > 0 && (
+                <div className="surface" style={{ padding: 14, flex: 1, minWidth: 240 }}>
+                  <div className="stat-label" style={{ marginBottom: 8 }}>Sebab guard menyala</div>
+                  {Object.entries(summary.guard_sebab)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([g, n]) => (
+                      <div key={g} className="flex items-center justify-between" style={{ fontSize: 12.5, padding: "2px 0" }}>
+                        <span title={GUARD_ARTI[g] || g}>{g}</span>
+                        <span style={{ color: "var(--ink-500)" }}>{n}</span>
+                      </div>
+                    ))}
+                  <div style={{ fontSize: 11, color: "var(--ink-500)", marginTop: 6, lineHeight: 1.5 }}>
+                    pn/angka = dugaan karangan · subst = PN per-model menyalip EPC ·
+                    dtc/epc/excel = jawaban tanpa tool wajib
+                  </div>
                 </div>
               )}
               <div className="surface" style={{ padding: 14, flex: 1, minWidth: 240 }}>

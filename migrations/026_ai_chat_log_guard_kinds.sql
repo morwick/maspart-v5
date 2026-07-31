@@ -1,0 +1,35 @@
+-- 026_ai_chat_log_guard_kinds.sql
+-- Observabilitas AI: catat GUARD MANA yang menyala per giliran, bukan cuma
+-- boolean `guard_hit`.
+--
+-- Kenapa perlu (audit 847 giliran, 15-31 Jul 2026):
+--   1. `guard_hit` dulu HANYA dinaikkan blok guard anti-karangan. Tiga guard
+--      lain — klaim-Excel, DTC-FIRST, EPC-FIRST — tak terekam sama sekali.
+--      Padahal DTC-FIRST-lah yang terbukti paling berharga: 14 pertanyaan kode
+--      kesalahan dijawab TANPA tool pada 2026-07-16 (uji silang ke database:
+--      5 dari 7 SALAH KOMPONEN — mis. SPN 1414 FMI 4 dijawab "sensor tekanan
+--      DPF" padahal database bilang "harness injektor silinder 5 korslet"),
+--      lalu NOL kekambuhan dalam 40 pertanyaan berikutnya. Guard yang menyetop
+--      kelas kesalahan paling berbahaya justru tak terlihat di panel mana pun.
+--   2. Yang 18,7% terekam itu pun menggabung tiga sebab yang artinya berbeda:
+--      `pn`/`angka` = dugaan KARANGAN (serius), `subst` = PN katalog per-model
+--      menyalip EPC per-VIN (kerap benar, kerap false positive). Guard menambah
+--      1,7 panggilan model & ~9 detik pada 160 giliran — tanpa memisahkan
+--      sebabnya, mustahil tahu mana yang perlu dilonggarkan.
+--
+--   guard_kinds : daftar sebab guard giliran ini (comma-space), nilai:
+--       pn     - Part Number di jawaban tak ada di hasil tool/riwayat
+--       angka  - stok/harga/spesifikasi diklaim tanpa dasar hasil tool
+--       subst  - PN katalog per-model dipakai padahal EPC per-VIN sudah jalan
+--       excel  - jawaban menjanjikan kartu unduh yang tak pernah dibuat
+--       dtc    - pertanyaan kode kesalahan dijawab tanpa cari_kode_kesalahan
+--       epc    - user menyebut rangka tapi PN dijawab tanpa tool EPC
+--
+-- Jalankan sekali di Supabase SQL Editor. Kolom lama tak berubah. Baris LAMA NULL.
+-- Kode tetap jalan bila migrasi ini BELUM dijalankan (log_turn turun tingkat).
+--
+-- CATATAN BACA DATA: mulai rilis ini `guard_hit` = ADA guard menyala (mana pun).
+-- Baris SEBELUM rilis ini UNDERCOUNT — hanya guard anti-karangan yang terhitung.
+-- Jadi jangan bandingkan langsung angka guard_hit lintas rilis.
+
+alter table ai_chat_log add column if not exists guard_kinds text;
