@@ -575,6 +575,18 @@ function GudangRakRow({
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Pratinjau foto TERPILIH sebelum disimpan — di HP mudah salah pilih dari
+  // galeri, dan yang salah unggah MENIMPA foto lama (tanpa riwayat).
+  const [preview, setPreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (!file) {
+      setPreview(null);
+      return;
+    }
+    const u = URL.createObjectURL(file);
+    setPreview(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
 
   // Selama form tertutup, isian mengikuti data server (mis. sesudah disimpan
   // oleh baris lain / dimuat ulang). Saat form terbuka jangan diganggu.
@@ -708,7 +720,15 @@ function GudangRakRow({
                     style={{ height: 34, maxWidth: 320 }}
                     value={rak}
                     onChange={(e) => setRak(e.target.value)}
+                    onKeyDown={(e) => {
+                      // Enter = simpan (<form> tidak sah di dalam <td> tabel induk).
+                      if (e.key === "Enter" && !busy) {
+                        e.preventDefault();
+                        void simpan();
+                      }
+                    }}
                     placeholder="mis. A-12 (boleh 'A-12 & C-03')"
+                    autoFocus
                   />
                 </label>
                 <label className="flex flex-col gap-1">
@@ -732,6 +752,24 @@ function GudangRakRow({
                     style={{ fontSize: 12 }}
                   />
                 </label>
+                {preview && (
+                  <div className="flex items-center gap-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={preview}
+                      alt="Pratinjau foto kartu stok"
+                      style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 8, border: "1px solid var(--ink-200)" }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setFile(null)}
+                      title="Batal pakai foto ini"
+                    >
+                      ✕ Lepas foto
+                    </button>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <button className="btn btn-primary btn-sm" onClick={simpan} disabled={busy}>
                     {busy ? "Menyimpan…" : "Simpan"}
