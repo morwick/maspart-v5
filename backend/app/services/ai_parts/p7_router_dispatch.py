@@ -188,6 +188,7 @@ _DISPATCH = {
     "cari_pengetahuan": _t_cari_pengetahuan,
     "buka_pengetahuan": _t_buka_pengetahuan,
     "ajarkan_pengetahuan": _t_ajarkan_pengetahuan,
+    "topik_gagal": _t_topik_gagal,
     "template_excel_part": _t_template_excel,
     "sheet_jadi_penawaran": _t_sheet_jadi_penawaran,
     "pesanan_saya": _t_pesanan_saya,

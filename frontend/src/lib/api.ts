@@ -2246,7 +2246,14 @@ export async function getPartExploded(token: string, id: string): Promise<Blob> 
 
 export async function getAiStatus(
   token: string,
-): Promise<{ available: boolean; allowed?: boolean; perbaikan?: boolean }> {
+): Promise<{
+  available: boolean;
+  allowed?: boolean;
+  perbaikan?: boolean;
+  // Tawaran belajar (hanya utk akun yang boleh MENGAJAR): topik yang berulang
+  // gagal dijawab asisten (penambang ai_belajar, ambang >=3 kegagalan).
+  gap_ajar?: { jumlah: number; topik: string[] };
+}> {
   const res = await fetch(`${API_BASE}/api/ai/status`, {
     headers: { Authorization: `Bearer ${token}` },
   });

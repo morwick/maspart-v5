@@ -1180,6 +1180,49 @@ def _ajar_cari_kembar(judul: str, isi: str) -> dict | None:
             "judul": r.get("judul_id") or r.get("judul") or "(tanpa judul)"}
 
 
+def _ajar_istilah(args: dict) -> tuple[dict | None, str]:
+    """Deteksi & validasi PEMETAAN ISTILAH ("simpang empat = universal joint").
+
+    Model mengisi `istilah_trigger`/`istilah_keywords` saat ajarannya murni
+    penerjemahan istilah. Kenapa penting dipisah: catatan pengetahuan hanya
+    BAHAN BACAAN model — mesin pencarian part (expand_query) cuma membaca
+    KAMUS SINONIM. Istilah yang nyasar jadi catatan = "cari simpang empat"
+    tetap nihil selamanya. Return (istilah|None, catatan_utk_pengantar).
+
+    Validasi mengikuti pelajaran kamus 2026-07-29 (jangan ditemukan ulang):
+    trigger cocok FRASA UTUH → maksimal 3 kata; trigger satu-kata generik
+    MERUSAK (expand_query menyuntik keyword tiap grup cocok) → satu-kata
+    minimal 4 huruf."""
+    def _daftar(v) -> list[str]:
+        if isinstance(v, str):
+            v = re.split(r"[;,]", v)
+        return [" ".join(str(x).split()).lower() for x in (v or []) if str(x).strip()]
+
+    trig = _daftar(args.get("istilah_trigger") or args.get("istilah"))[:4]
+    kw = _daftar(args.get("istilah_keywords") or args.get("istilah_keyword"))[:4]
+    if not trig or not kw:
+        return None, ""
+    for t in trig:
+        kata = t.split()
+        if len(kata) > 3 or (len(kata) == 1 and len(t) < 4):
+            return None, ""
+    # Istilah yang SUDAH ada di kamus jangan ditawarkan lagi — dua entri utk
+    # trigger yang sama membuat ekspansi pencarian tak terprediksi. Beri tahu
+    # jujur pemetaan lamanya; sisanya biar admin urus di menu Kamus Sinonim.
+    try:
+        lama = {str(t).lower(): e for e in sinonim.entries()
+                for t in (e.get("triggers") or [])}
+    except Exception:
+        lama = {}
+    sudah = [t for t in trig if t in lama]
+    if sudah:
+        e = lama[sudah[0]]
+        return None, (f"ℹ️ Istilah **{sudah[0]}** SUDAH ada di Kamus Sinonim "
+                      f"(→ {', '.join(e.get('keywords') or [])}) — tidak ditawarkan "
+                      "ulang; edit lewat menu Kamus Sinonim bila pemetaannya keliru.")
+    return {"triggers": trig, "keywords": kw}, ""
+
+
 def _ajar_teks_draf(draf: dict) -> str:
     """Bubble jawaban yang DILIHAT user. Wajib berdiri sendiri & lengkap: inilah
     satu-satunya kesempatan user memeriksa isi sebelum masuk store (jalur kartu
@@ -1188,15 +1231,30 @@ def _ajar_teks_draf(draf: dict) -> str:
              f"**Judul:** {draf['judul']}", "", draf["isi"]]
     if draf.get("kata_kunci"):
         baris += ["", "**Kata kunci:** " + ", ".join(draf["kata_kunci"])]
+    ist = draf.get("istilah")
+    if ist:
+        baris += ["",
+                  "🔀 Ini **pemetaan istilah** — dua pilihan tempat simpan:",
+                  f"- **Kamus Sinonim**: pencarian part ikut mengerti — "
+                  f"cari *{ist['triggers'][0]}* langsung menemukan "
+                  f"*{ist['keywords'][0]}*. (Disarankan)",
+                  "- **Catatan biasa**: asisten hanya bisa MENJELASKAN artinya; "
+                  "pencarian part tidak berubah."]
     mirip = draf.get("mirip")
     if mirip:
         baris += ["", f"⚠️ Mirip dengan entri lama **{mirip['judul']}** — pilih "
                       "memperbarui entri itu atau menyimpan ini sebagai entri baru."]
+    if draf.get("catatan_istilah"):
+        baris += ["", draf["catatan_istilah"]]
     return "\n".join(baris)
 
 
 def _ajar_kartu(draf: dict) -> list[dict]:
-    if draf.get("mirip"):
+    # Pemetaan istilah menang atas deteksi kembar-catatan: istilah memang
+    # seharusnya TIDAK jadi catatan, jadi opsi perbarui-catatan tak relevan.
+    if draf.get("istilah"):
+        opsi = ["Simpan ke Kamus Sinonim", "Jadi catatan saja", "Batal"]
+    elif draf.get("mirip"):
         opsi = ["Perbarui entri lama", "Simpan sebagai entri baru", "Batal"]
     else:
         opsi = ["Simpan", "Perbaiki dulu", "Batal"]
@@ -1238,7 +1296,9 @@ def _t_ajarkan_pengetahuan(args: dict, user: dict) -> dict:
     # Sinonim yang wajar dari model — jangan gagalkan alur hanya karena kata.
     aksi = {"save": "simpan", "simpan_sebagai_baru": "simpan_baru",
             "baru": "simpan_baru", "new": "simpan_baru", "update": "perbarui",
-            "cancel": "batal", "draft": "draf", "buat": "draf"}.get(aksi, aksi)
+            "cancel": "batal", "draft": "draf", "buat": "draf",
+            "kamus": "simpan_kamus", "simpan_ke_kamus": "simpan_kamus",
+            "simpan_sinonim": "simpan_kamus"}.get(aksi, aksi)
     kunci = _ajar_kunci(user, args)
     username = (user or {}).get("username") or ""
 
@@ -1252,6 +1312,40 @@ def _t_ajarkan_pengetahuan(args: dict, user: dict) -> dict:
                             if ada else
                             "Tidak ada draf tertunda — tak ada yang perlu dibatalkan. "
                             "Sampaikan singkat & lanjutkan percakapan biasa.")}
+
+    # ── simpan_kamus: pemetaan istilah → KAMUS SINONIM, bukan catatan ─
+    # Jalur tulisnya jalur lama yang teruji (sinonim.add — dipakai menu admin &
+    # loop belajar); reload otomatis per-mtime → pencarian langsung mengerti.
+    if aksi == "simpan_kamus":
+        draf = _ajar_get_draf(kunci)
+        if not draf:
+            return {"found": False,
+                    "catatan": ("Tidak ada draf tertunda (kedaluwarsa >30 menit?). "
+                                "⛔ JANGAN mengaku sudah menyimpan. Minta user "
+                                "mengulang 'catat: …'-nya.")}
+        ist = draf.get("istilah")
+        if not ist:
+            return {"found": False,
+                    "catatan": ("Draf ini BUKAN pemetaan istilah (tidak ada pasangan "
+                                "trigger→keyword), jadi tak bisa masuk Kamus Sinonim. "
+                                "Tawarkan menyimpannya sebagai catatan (aksi='simpan').")}
+        try:
+            e = sinonim.add("", ist["triggers"], ist["keywords"])
+        except ValueError as err:
+            _ajar_hapus_draf(kunci)
+            return {"found": False,
+                    "catatan": (f"Kamus menolak: {err} Sampaikan apa adanya ke user "
+                                "— entri serupa sudah ada, edit lewat menu Kamus "
+                                "Sinonim bila pemetaannya perlu diubah.")}
+        _ajar_hapus_draf(kunci)
+        logger.info("istilah masuk kamus via chat oleh=%s %r -> %r",
+                    username, e["triggers"], e["keywords"])
+        return {"found": True, "tersimpan_kamus": True,
+                "triggers": e["triggers"], "keywords": e["keywords"],
+                "catatan": ("Istilah TERSIMPAN ke Kamus Sinonim & langsung aktif — "
+                            "SEMUA pencarian part kini mengerti istilah itu (chat, "
+                            "menu Cari Part, di mana pun). Konfirmasi singkat ke "
+                            "user; entri bisa diedit di menu Kamus Sinonim.")}
 
     # ── simpan / simpan_baru / perbarui: WAJIB ada draf tersimpan ────
     if aksi in ("simpan", "simpan_baru", "perbarui"):
@@ -1356,11 +1450,13 @@ def _t_ajarkan_pengetahuan(args: dict, user: dict) -> dict:
                           "drafnya berdiri sendiri: sebut nama part/istilah/kondisinya "
                           "secara eksplisit, lalu panggil tool ini lagi.")}
 
+    istilah, catatan_istilah = _ajar_istilah(args)
     draf = {"judul": judul, "isi": isi, "kata_kunci": kata_kunci,
-            "mirip": _ajar_cari_kembar(judul, isi)}
+            "mirip": _ajar_cari_kembar(judul, isi),
+            "istilah": istilah, "catatan_istilah": catatan_istilah}
     _ajar_set_draf(kunci, draf)
-    logger.info("draf pengetahuan disusun oleh=%s judul=%r kembar=%s",
-                username, judul, bool(draf["mirip"]))
+    logger.info("draf pengetahuan disusun oleh=%s judul=%r kembar=%s istilah=%s",
+                username, judul, bool(draf["mirip"]), bool(istilah))
     return {
         "found": True,
         # Sentinel internal (prefiks `_`) yang dibaca chat loop: kartu konfirmasi,
@@ -1369,6 +1465,74 @@ def _t_ajarkan_pengetahuan(args: dict, user: dict) -> dict:
         "_tanya": _ajar_kartu(draf),
         "_tanya_pengantar": _ajar_teks_draf(draf),
         "_tanya_bebas_pagar": True,
+    }
+
+
+_GAP_MAKS_TAMPIL = 8
+
+
+def _t_topik_gagal(args: dict, user: dict) -> dict:
+    """TOPIK yang berulang GAGAL dijawab (penambang `ai_belajar`) → tawaran ajar.
+
+    Menyambung dua pipa yang sudah ada: gap miner (mendeteksi kebolongan dari
+    log produksi, ambang ≥3 kegagalan) dan ajarkan_pengetahuan (menambalnya).
+    Dulu daftarnya diam di endpoint admin yang jarang dibuka — lingkarannya
+    tidak pernah menutup: gagal → terdeteksi → ... berhenti di situ.
+
+    Gerbang sama dengan mengajar (_can_mengajar): daftar kegagalan adalah
+    peta kelemahan asisten — cukup dilihat orang yang bisa memperbaikinya."""
+    if not _can_mengajar(user):
+        return {"denied": True,
+                "error": ("Akun ini tidak berhak melihat topik gagal / mengajar. "
+                          "Arahkan minta admin mencentang 'Mengajari Pengetahuan "
+                          "(chat)' di Menu Control.")}
+
+    aksi = (args.get("aksi") or "daftar").strip().lower()
+    aksi = {"list": "daftar", "resolve": "tandai_selesai", "selesai": "tandai_selesai",
+            "hapus": "bukan_gap", "dismiss": "bukan_gap"}.get(aksi, aksi)
+
+    if aksi in ("tandai_selesai", "bukan_gap"):
+        topik = " ".join(str(args.get("topik") or "").split()).lower()
+        if not topik:
+            return {"error": "Sebutkan 'topik' persis seperti di daftar."}
+        ok = ai_belajar.resolve_gap(topik)
+        if not ok:
+            sisa = [g.get("topik") for g in ai_belajar.gaps()][:_GAP_MAKS_TAMPIL]
+            return {"found": False,
+                    "topik_tersisa": sisa,
+                    "catatan": (f"Topik '{topik}' tidak ada di daftar (mungkin sudah "
+                                "ditandai / ejaannya beda). Cocokkan dengan "
+                                "'topik_tersisa' lalu coba lagi — jangan menebak.")}
+        label = ("ditandai SELESAI (sudah diajarkan)" if aksi == "tandai_selesai"
+                 else "ditandai BUKAN gap (datanya memang tidak ada)")
+        return {"found": True, "dihapus": topik,
+                "catatan": (f"Topik '{topik}' {label} dan dikeluarkan dari daftar. "
+                            "Konfirmasi singkat ke user.")}
+
+    # ── daftar (default) ─────────────────────────────────────────────
+    rows = sorted(ai_belajar.gaps(), key=lambda g: -(g.get("jumlah") or 0))
+    if not rows:
+        return {"found": False, "jumlah": 0,
+                "catatan": ("Tidak ada topik yang berulang gagal saat ini — kabar "
+                            "baik, sampaikan apa adanya. Daftar ini diisi otomatis "
+                            "dari log (pertanyaan gagal ≥3×), jadi kosong = memang "
+                            "belum ada pola kegagalan berulang.")}
+    tampil = [{"topik": g.get("topik"), "jumlah": g.get("jumlah"),
+               "contoh_pertanyaan": g.get("contoh")} for g in rows[:_GAP_MAKS_TAMPIL]]
+    return {
+        "found": True, "jumlah": len(rows), "ditampilkan": len(tampil),
+        "topik": tampil,
+        "catatan": (
+            "Topik yang BERULANG gagal dijawab (dari log produksi, urut tersering). "
+            "Sajikan ringkas bernomor + contoh pertanyaannya, lalu tawarkan "
+            "mengajarkan salah satunya. Bila user memilih topik: susun DRAF dari "
+            "'contoh_pertanyaan' + data tool yang relevan (cari_part/pengetahuan/"
+            "manual), lalu panggil ajarkan_pengetahuan aksi='draf' — alur kartu "
+            "konfirmasinya sama. SETELAH entri tersimpan utk sebuah topik, panggil "
+            "topik_gagal aksi='tandai_selesai' dgn topik itu. Bila user bilang "
+            "datanya memang tidak ada → aksi='bukan_gap'. ⛔ Jangan mengarang topik "
+            "di luar daftar ini."
+        ),
     }
 
 

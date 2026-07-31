@@ -459,3 +459,96 @@ def test_spec_dan_prompt_memuat_pengikat():
     assert "tersimpan=true" in d
     prompt = ai._system_prompt(ADMIN)
     assert "ajarkan_pengetahuan" in prompt
+
+
+# ── Rute PEMETAAN ISTILAH → Kamus Sinonim (2026-07-31 malam) ────────────────
+# Catatan pengetahuan hanya BAHAN BACAAN model; mesin pencarian part
+# (expand_query) cuma membaca KAMUS. Istilah yang nyasar jadi catatan =
+# "cari simpang empat" nihil selamanya — maka kartu menawarkan laci yang benar.
+
+IST = {"istilah_trigger": ["simpang empat"], "istilah_keywords": ["universal joint"]}
+
+
+def test_istilah_valid_kartunya_menawarkan_kamus():
+    out = _draf(judul="Istilah: simpang empat", isi="Simpang empat adalah universal joint.",
+                **IST)
+    assert out["found"] is True
+    assert out["_tanya"][0]["opsi"] == ["Simpan ke Kamus Sinonim", "Jadi catatan saja", "Batal"]
+    assert "Kamus Sinonim" in out["_tanya_pengantar"]
+    assert "universal joint" in out["_tanya_pengantar"]
+    assert ai._AJAR_DRAF[ai._ajar_kunci(ADMIN, {"_cid": "c1"})]["istilah"] == {
+        "triggers": ["simpang empat"], "keywords": ["universal joint"]}
+
+
+def test_simpan_kamus_menulis_sinonim_bukan_catatan(monkeypatch):
+    """Klik 'Simpan ke Kamus Sinonim' → sinonim.add dgn pasangan yang DITAHAN
+    server; store pengetahuan TIDAK tersentuh; draf terhapus."""
+    ditulis = {}
+
+    def fake_add(grup, triggers, keywords):
+        ditulis.update(grup=grup, triggers=list(triggers), keywords=list(keywords))
+        return {"grup": grup or "umum", "triggers": list(triggers),
+                "keywords": list(keywords)}
+
+    monkeypatch.setattr(sinonim, "add", fake_add)
+    _draf(judul="Istilah: simpang empat", isi="Simpang empat adalah universal joint.",
+          **IST)
+    out = ai._t_ajarkan_pengetahuan({"aksi": "simpan_kamus", "_cid": "c1"}, ADMIN)
+
+    assert out["tersimpan_kamus"] is True
+    assert ditulis["triggers"] == ["simpang empat"]
+    assert ditulis["keywords"] == ["universal joint"]
+    assert pengetahuan.load_dokumen() == []          # BUKAN catatan
+    assert ai._AJAR_DRAF == {}                       # draf habis dipakai
+
+
+def test_simpan_kamus_duplikat_dijawab_jujur(monkeypatch):
+    def tolak(grup, triggers, keywords):
+        raise ValueError("Entri dengan istilah lapangan yang sama sudah ada.")
+    monkeypatch.setattr(sinonim, "add", tolak)
+    _draf(judul="Istilah: simpang empat", isi="Simpang empat adalah universal joint.",
+          **IST)
+    out = ai._t_ajarkan_pengetahuan({"aksi": "simpan_kamus", "_cid": "c1"}, ADMIN)
+    assert out["found"] is False and "sudah ada" in out["catatan"]
+    assert ai._AJAR_DRAF == {}
+
+
+def test_trigger_yang_sudah_di_kamus_tak_ditawarkan_ulang(monkeypatch):
+    """Dua entri utk trigger sama = ekspansi pencarian tak terprediksi —
+    kartu jatuh ke mode catatan + pengantar menyebut pemetaan lamanya."""
+    monkeypatch.setattr(sinonim, "entries", lambda: [
+        {"grup": "kopel", "triggers": ["simpang empat", "salib"],
+         "keywords": ["universal joint"]}])
+    out = _draf(judul="Istilah: simpang empat", isi="Simpang empat = universal joint.",
+                **IST)
+    assert out["_tanya"][0]["opsi"][0] == "Simpan"        # kartu catatan biasa
+    assert "SUDAH ada di Kamus Sinonim" in out["_tanya_pengantar"]
+
+
+@pytest.mark.parametrize("trigger", [
+    ["ini frasa yang jauh kepanjangan"],   # >3 kata: hit kamus cocok frasa utuh
+    ["as"],                                # satu kata <4 huruf: generik merusak
+])
+def test_istilah_tak_valid_diabaikan(trigger):
+    out = _draf(judul="Istilah aneh", isi="Sesuatu tentang istilah.",
+                istilah_trigger=trigger, istilah_keywords=["universal joint"])
+    assert out["_tanya"][0]["opsi"][0] == "Simpan"        # jatuh ke kartu catatan
+    kunci = ai._ajar_kunci(ADMIN, {"_cid": "c1"})
+    assert ai._AJAR_DRAF[kunci]["istilah"] is None
+
+
+def test_simpan_kamus_tanpa_istilah_dijawab_jujur():
+    _draf()                                               # draf catatan biasa
+    out = ai._t_ajarkan_pengetahuan({"aksi": "simpan_kamus", "_cid": "c1"}, ADMIN)
+    assert out["found"] is False and "BUKAN pemetaan istilah" in out["catatan"]
+
+
+def test_jadi_catatan_saja_tetap_bisa(bersih):
+    """Opsi kedua kartu istilah → aksi='simpan' biasa: draf ber-istilah tetap
+    sah disimpan sebagai catatan bila user memilih begitu."""
+    _draf(judul="Istilah: simpang empat", isi="Simpang empat adalah universal joint.",
+          **IST)
+    out = ai._t_ajarkan_pengetahuan({"aksi": "simpan", "_cid": "c1"}, ADMIN)
+    assert out["tersimpan"] is True
+    d = pengetahuan.load_dokumen()
+    assert len(d) == 1 and d[0]["asal"] == "chat"

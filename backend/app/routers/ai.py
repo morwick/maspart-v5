@@ -80,8 +80,26 @@ def ai_status(user: dict = Depends(get_current_user)):
     from ..services import permissions
     allowed = "ai" in permissions.effective("menu", user["username"], user.get("role", "user"))
     perbaikan = _perbaikan_untuk(user)
-    return {"available": get_settings().ai_configured and allowed and not perbaikan,
-            "allowed": allowed, "perbaikan": perbaikan}
+    out = {"available": get_settings().ai_configured and allowed and not perbaikan,
+           "allowed": allowed, "perbaikan": perbaikan}
+    # Tawaran belajar di layar pembuka — HANYA untuk yang boleh mengajar
+    # (peta kelemahan asisten cukup dilihat orang yang bisa memperbaikinya).
+    # Best-effort: gagal membaca gap tak boleh mematikan status asisten.
+    if out["available"]:
+        try:
+            role = (user.get("role") or "").lower()
+            boleh_ajar = role == "admin" or (
+                role != "pembeli"
+                and "ai_mengajar" in permissions.effective("asisten", user["username"], role))
+            if boleh_ajar:
+                from ..services import ai_belajar
+                rows = sorted(ai_belajar.gaps(), key=lambda g: -(g.get("jumlah") or 0))
+                if rows:
+                    out["gap_ajar"] = {"jumlah": len(rows),
+                                       "topik": [g.get("topik") for g in rows[:3]]}
+        except Exception:  # pragma: no cover — tawaran hilang, asisten tetap jalan
+            pass
+    return out
 
 
 @router.post("/chat", dependencies=[Depends(limit("ai_chat", 15, 60))])

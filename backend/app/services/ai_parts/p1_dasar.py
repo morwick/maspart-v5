@@ -29,7 +29,8 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 from ..core.config import get_settings
-from . import (abs_scr_codes, accurate, ai_chat_log, ai_export, ai_knowledge, ai_session, ai_sheet,
+from . import (abs_scr_codes, accurate, ai_belajar, ai_chat_log, ai_export, ai_knowledge,
+               ai_session, ai_sheet,
                catalog_bom, dtc_codes,
                dtc_diagnosa, eol_dtc, epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref,
                gudang, gudang_config, harga, knowledge_links, maintenance_ref, manual_media,

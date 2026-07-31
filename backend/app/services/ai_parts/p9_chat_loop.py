@@ -1321,6 +1321,7 @@ _TOOL_LABEL = {
     "sheet_pilih_sheet": "Membuka sheet lain",
     "repair_kit_transmisi": "Menyiapkan repair kit",
     "ajarkan_pengetahuan": "Menyusun draf pengetahuan",
+    "topik_gagal": "Melihat topik yang gagal dijawab",
 }
 
 

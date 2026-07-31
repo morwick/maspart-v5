@@ -259,6 +259,9 @@ export default function AsistenPage() {
   const [adaBaru, setAdaBaru] = useState(false);
   // Pembatalan giliran yang sedang berjalan (tombol Stop).
   const abortRef = useRef<AbortController | null>(null);
+  // Tawaran belajar (hanya terisi utk akun yang boleh mengajar): topik yang
+  // berulang gagal dijawab — lingkaran gagal→terdeteksi→diajarkan menutup di sini.
+  const [gapAjar, setGapAjar] = useState<{ jumlah: number; topik: string[] } | null>(null);
 
   useEffect(() => {
     const token = getToken();
@@ -267,6 +270,7 @@ export default function AsistenPage() {
       .then((s) => {
         setAvailable(s.available);
         setAllowed(s.allowed !== false);
+        setGapAjar(s.gap_ajar ?? null);
         if (s.perbaikan === true) {
           setPerbaikan(true);
           setPopupPerbaikan(true);
@@ -862,6 +866,40 @@ export default function AsistenPage() {
                       hingga repair kit — semua dari data live.
                     </div>
                   </div>
+                  {/* Tawaran belajar — hanya muncul utk yang boleh MENGAJAR dan
+                      hanya bila memang ada topik yang berulang gagal. Klik =
+                      kirim pertanyaan pembuka; model memanggil tool topik_gagal
+                      lalu memandu alur ajar (kartu konfirmasi yang sama). */}
+                  {gapAjar && gapAjar.jumlah > 0 && (
+                    <button
+                      onClick={() =>
+                        send("Tampilkan topik yang berulang gagal kamu jawab, lalu bantu saya mengajarkannya satu per satu.")
+                      }
+                      disabled={busy || available === false}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 10,
+                        maxWidth: 440,
+                        textAlign: "left",
+                        background: "var(--warn-50)",
+                        border: "1px solid #f6d9a8",
+                        borderRadius: 12,
+                        padding: "10px 14px",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      <span style={{ fontSize: 16, lineHeight: 1.3 }}>💡</span>
+                      <span style={{ fontSize: 12.5, lineHeight: 1.55, color: "var(--ink-800)" }}>
+                        <b>{gapAjar.jumlah} topik</b> berulang gagal saya jawab
+                        {gapAjar.topik.length > 0 && (
+                          <> — mis. <i>&quot;{gapAjar.topik[0]}&quot;</i></>
+                        )}
+                        . <span style={{ color: "var(--warn-600)", fontWeight: 600 }}>Ajari saya?</span>
+                      </span>
+                    </button>
+                  )}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
                     {SUGGESTIONS.map((s) => (
                       <button

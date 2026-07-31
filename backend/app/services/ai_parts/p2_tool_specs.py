@@ -1426,9 +1426,17 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "dan menampilkan kartu konfirmasi; (2) user membalas kartu itu "
                     "sebagai teks biasa → panggil lagi: balasan 'Simpan' atau "
                     "'Simpan sebagai entri baru' → aksi='simpan'/'simpan_baru'; "
-                    "'Perbarui entri lama' → aksi='perbarui'; 'Perbaiki dulu' + "
-                    "koreksinya → aksi='draf' lagi dengan draf REVISI; 'Batal' → "
-                    "aksi='batal'.\n"
+                    "'Simpan ke Kamus Sinonim' → aksi='simpan_kamus'; 'Jadi catatan "
+                    "saja' → aksi='simpan'; 'Perbarui entri lama' → aksi='perbarui'; "
+                    "'Perbaiki dulu' + koreksinya → aksi='draf' lagi dengan draf "
+                    "REVISI; 'Batal' → aksi='batal'.\n"
+                    "PEMETAAN ISTILAH: bila yang diajarkan MURNI penerjemahan istilah "
+                    "('simpang empat itu universal joint', 'kalau user bilang X "
+                    "maksudnya Y'), ISI JUGA istilah_trigger (istilah lapangan, 1-3 "
+                    "kata) + istilah_keywords (kata kunci katalog Inggris) pada "
+                    "aksi='draf' — kartu akan menawarkan menyimpannya ke KAMUS "
+                    "SINONIM supaya PENCARIAN PART ikut mengerti istilah itu "
+                    "(catatan biasa hanya bahan bacaanmu, pencarian tidak berubah).\n"
                     "ISI DRAF WAJIB BERDIRI SENDIRI: entri ini akan dibaca "
                     "berbulan-bulan kemudian TANPA percakapan ini — ⛔ jangan pakai "
                     "'yang barusan/di atas/tadi', sebut nama part/istilah/kondisinya "
@@ -1445,7 +1453,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "properties": {
                         "aksi": {
                             "type": "string",
-                            "enum": ["draf", "simpan", "simpan_baru", "perbarui", "batal"],
+                            "enum": ["draf", "simpan", "simpan_baru", "simpan_kamus", "perbarui", "batal"],
                             "description": "Langkah alur. Default 'draf'. Aksi selain 'draf' memakai draf yang DITAHAN server — judul/isi tak perlu dikirim ulang.",
                         },
                         "judul": {"type": "string", "description": "aksi='draf': judul singkat & mudah dicari (mis. 'Istilah lapangan: cucuk per')."},
@@ -1454,6 +1462,43 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                             "type": "array", "items": {"type": "string"},
                             "description": "aksi='draf': 2-8 istilah pencarian (istilah LAPANGAN yang dipakai user + padanan resminya).",
                         },
+                        "istilah_trigger": {
+                            "type": "array", "items": {"type": "string"},
+                            "description": "HANYA bila pemetaan istilah murni: istilah LAPANGAN-nya (1-3 kata per item, mis. ['simpang empat']).",
+                        },
+                        "istilah_keywords": {
+                            "type": "array", "items": {"type": "string"},
+                            "description": "Pasangan istilah_trigger: kata kunci KATALOG (Inggris) tujuannya (mis. ['universal joint']).",
+                        },
+                    },
+                },
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "topik_gagal",
+                "description": (
+                    "TOPIK yang BERULANG GAGAL kamu jawab (dari log produksi, "
+                    "ambang ≥3 kegagalan) — bahan untuk DIAJARKAN. Panggil bila "
+                    "user bertanya 'apa yang sering gagal kamu jawab', 'apa yang "
+                    "perlu diajarkan', 'topik apa yang bolong', atau saat user "
+                    "menanggapi tawaran belajar di layar pembuka. Alur: tampilkan "
+                    "daftar → user pilih topik → susun draf dari contoh "
+                    "pertanyaannya (+ tool data relevan) via ajarkan_pengetahuan "
+                    "aksi='draf' → setelah TERSIMPAN, panggil tool ini lagi "
+                    "aksi='tandai_selesai'. User bilang datanya memang tak ada → "
+                    "aksi='bukan_gap'."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "aksi": {
+                            "type": "string",
+                            "enum": ["daftar", "tandai_selesai", "bukan_gap"],
+                            "description": "Default 'daftar'. tandai_selesai = topik sudah diajarkan; bukan_gap = disingkirkan (data memang tidak ada).",
+                        },
+                        "topik": {"type": "string", "description": "Wajib utk tandai_selesai/bukan_gap: topik PERSIS seperti di daftar."},
                     },
                 },
             },
