@@ -4,9 +4,12 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-07-29** (EMPAT rilis dalam satu hari — memori sesi asisten,
-> APK 2.1.9, 4 temuan observabilitas, UI/UX web Fase 1; semua LIVE & terverifikasi di
-> container. Entri terakhir = blok **2026-07-29** di ujung changelog ini).
+> Terakhir diverifikasi: **2026-07-31** (hari terpadat sepanjang proyek — fitur RAK &
+> KARTU STOK + kewenangan `users.gudang_kelola`, fitur AJARKAN LEWAT CHAT, salvage
+> jawaban kosong, telemetri sebab guard, pengganti_part jujur, kompresi foto server,
+> saringan durasi WO garansi, polish UI menyeluruh, APK **2.2.0**; migrasi 026-028
+> dijalankan; semua LIVE & terverifikasi di container. Entri terakhir = blok
+> **2026-07-30/31** di ujung changelog ini).
 > ⚠️ BACA DULU sebelum bekerja: aturan pemilik **jangan sentuh/jalankan `backend/evals/`
 > dan jangan panggil LLM/API model apa pun** — saldo DeepSeek kritis & tanpa provider
 > cadangan (detail di ujung changelog).
@@ -1968,4 +1971,117 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
      Attribusi biaya nyata: 85% token input kena prompt-cache tapi hanya 9% tagihan;
      **79% tagihan dari cache-MISS**. Konsekuensi: "hemat 20-25rb token/panggilan" lewat
      seleksi tool dinamis adalah hadiah SEMU (skenario terbaik ~$0,80/bulan).
+
+  2026-07-30/31 — RAK & KARTU STOK · AJARKAN LEWAT CHAT · SALVAGE · GUARD_KINDS · APK 2.2.0
+
+  (Sesi 2026-07-30, ringkas — detail di memori sesi): asisten bisa BERTANYA balik dgn
+  kartu pilihan `tanya_user` (`d107b41` — sentinel `_tanya` mengakhiri giliran, pagar
+  anti ping-pong per conversation_id); exploded view TANPA rangka di detail part
+  (`6d6b30a`) + kolom di Batch Download (`04b29cf`, cache PNG dibagi, `asyncio.to_thread`
+  memperbaiki batch yang membekukan server); jalur FOTO asisten DIBUANG s/d backend
+  (`2b84a5f`, keputusan pemilik; `foto_resmi_part` dipertahankan). 1.665 test.
+
+  (A) POLISH UI MENYELURUH — `eac6c78` (+ mobile `122e6b8`), lalu `49f8f53`/`c7e7f6b`
+      Status streaming asisten jadi SATU baris berganti teks (dulu menumpuk); lapisan
+      polish yang selama ini bolong: `:focus-visible` (sebelumnya NOL), `::selection`,
+      scrollbar bertema token, `prefers-reduced-motion`, komponen bersama
+      `components/States.tsx` (EmptyState/TableSkeleton — dipasang di search/stok/harga;
+      ⭐ temuan: MOBILE justru sudah lebih maju — MasSkeleton/MasEmpty dipakai ~20 layar),
+      `NavScroll` (gradien "masih ada menu" di sidebar yang scrollbar-nya disembunyikan),
+      tombol lompat "Jawaban baru" di chat. ⚠️ frontend TANPA ESLint — gerbang kualitas =
+      `tsc --noEmit` + `next build`.
+
+  (B) TIGA PERBAIKAN KUALITAS ASISTEN dari audit 847 giliran log produksi
+      - SALVAGE jawaban kosong (`d898b44`): 5 giliran produksi mentok ronde 8 dgn tool
+        SUKSES tapi model gagal menyusun jawaban → user menunggu 54-180 dtk demi pesan
+        maaf 121 char; retry lama mengirim ulang konteks PERSIS SAMA (input identik =
+        gagal identik). Kini: kolam hasil tool terpisah (\_trim menciutkan ronde lama
+        jadi stub!), `_MAX_EMPTY_RETRIES` 2→1, slot kedua = panggilan konteks-BERSIH
+        (2 pesan, tanpa prompt 54k & 68 tool), lantai terakhir render deterministik
+        tanpa model. Outcome baru `salvage_llm`/`salvage_render`. Netral biaya API.
+      - PENGGANTI_PART JUJUR (`33c5445`): "sudah dicek SIMS & Weichai" dulu diklaim
+        TANPA SYARAT walau sumbernya gagal diperiksa (4 jalur gagal-diam). Kini status
+        per-sumber `sumber_dicek`, error jaringan Weichai ≠ "tidak ada data", field
+        `_cek_tak_lengkap` → telemetri `err` (bukan `nf`), `record_miss` hanya saat
+        kedua sumber benar-benar menjawab. 28 kejadian `pengganti_part:nf` berikutnya
+        jadi TERUKUR nf-vs-err.
+      - TELEMETRI SEBAB GUARD `guard_kinds` (`d898b44`, migrasi **026**): `guard_hit`
+        dulu HANYA dinaikkan guard anti-karangan — DTC-FIRST (terbukti menghentikan
+        14 jawaban kode kesalahan SALAH pada 16 Jul; uji silang DB: 5/7 salah KOMPONEN,
+        mis. SPN 1414 FMI 4 dijawab "sensor DPF" padahal "harness injektor sil. 5";
+        nol kambuh 40 pertanyaan berikutnya) tak terekam SAMA SEKALI. Kini 6 sebab
+        (pn/angka/subst/excel/dtc/epc → +ajar) + panel "Sebab guard menyala" web+mobile.
+        ⚠️ angka guard_hit lama UNDERCOUNT — jangan dibandingkan lintas rilis.
+      Audit biaya (847 giliran/17 hari): **USD 11,29 (~Rp 215/pertanyaan)**; cache-hit
+      85%; beban guard = 11,5% input & +9 dtk di 160 giliran → optimasi diarahkan ke
+      LATENSI & KEBENARAN, bukan token (pangkas tool spec = hadiah semu, konsisten
+      temuan 07-29).
+
+  (C) 🆕 FITUR RAK & KARTU STOK — `c3e2a97` (+`49f8f53` polish, `522ffb4` kompresi;
+      mobile `bc4f8c9`+`c7e7f6b`; migrasi **027** `users.gudang_kelola` + **028**
+      `rak_gudang`)
+      Sistem tahu BERAPA stok (Accurate) tapi tak tahu DI MANA barangnya. Kini: staf
+      gudang isi kode rak + foto kartu stok per (pn × gudang); tampil di detail part
+      (tabel Stok per Gudang expandable; gudang ber-rak stok 0 TETAP tampil), menu
+      "Rak & Kartu Stok" (kelola/impor Excel/lookup terbalik/chip "tanpa foto" sbg
+      daftar kerja), dan asisten AI ("stok 4 di 01.Jakarta, rak A-12" — injeksi hasil
+      tool `detail_part`/`stok_gudang`, prompt TAK disentuh; pembeli di-pop).
+      - KEWENANGAN TANPA ROLE BARU: kolom `users.gudang_kelola` (label PENUH,
+        multi — Jakarta punya 4 gudang) sekaligus saklar menu; kosong = menu tak
+        muncul; multi-centang di Manajemen User. 88 pemeriksaan role tak disentuh.
+        ⚠️ BUKAN `users.gudang` (migrasi 009 — key lokasi PEMBELI).
+      - Jebakan yang ditangani: pn_key pemaaf-suffix (indeks dingin → PAKSA PN dasar,
+        cegah baris yatim); ⚠️ Uvicorn decode %2F SEBELUM routing → PN 'WG…004/2' 404
+        di `{pn}` biasa → SEMUA klien pakai alias `{pn:path}` (`part-of/…`,
+        `gudang/{g}/part/…`); foto hanya TERBARU (objek lama dihapus, `foto_path`
+        disimpan utk itu); pra-migrasi = fitur DORMAN tanpa error.
+      - KOMPRESI FOTO server-side (`522ffb4`): 1600px JPEG q82 apa pun format masuk;
+        `exif_transpose` (anti kartu miring 90°) + EXIF/GPS DIBUANG (URL publik);
+        decode Pillow = validasi isi (bytes palsu ber-.jpg dulu lolos, kini 400).
+        Mobile sudah mengecilkan di sumber (image_picker 1600/85) — backend = penegak.
+      - SARINGAN DURASI WO GARANSI (`bc4fe1b`): "WO > 72 jam, sebutkan 10" →
+        `riwayat_klaim(durasi_min_jam/durasi_maks_jam/limit)` — server menyisir
+        `semua_klaim`, saring+urut terlama-dulu (pola hitung_part: angka milik Python).
+        WO tanpa durasi dihitung TERPISAH (bukan dianggap 0 jam). ❓ terbuka: apakah
+        SIMS mengisi `orderDuration` utk WO BERJALAN (menentukan bisa/tidaknya
+        peringatan dini "mendekati 72 jam" tanpa saringan umur).
+      ⏸️ DITAHAN pemilik: deteksi selisih kartu vs Accurate (desain siap: staf KETIK
+      angka sisa — TANPA OCR; selisih dihitung saat baca; label "layak dicek").
+
+  (D) 🆕 FITUR AJARKAN LEWAT CHAT — `420c4d0` (mobile `5472690`)
+      Admin mengetik "catat ya: cucuk per itu bushing…" → asisten menyusun DRAF →
+      kartu [Simpan][Perbaiki dulu][Batal] → tersimpan ke store Pengetahuan
+      (`asal="chat"`, `oleh`, `pakai_ai=False` — pengayaan LLM redundan) → aktif
+      giliran berikutnya via `cari_pengetahuan`. Menu Pengetahuan AI dapat pill
+      "💬 dari chat" + chip filter. Gerbang `ASISTEN_KEYS["ai_mengajar"]` fail-closed.
+      4 jebakan yang menentukan bentuk (jangan ditemukan ulang):
+      1. jalur sentinel `_tanya` MEMBUANG teks jawaban model → draf dititip
+         `_tanya_pengantar` (payload kartu klien TAK berubah → jalan di APK 2.2.0);
+      2. pagar ping-pong menahan kartu ke-2 15 mnt → kartu ajarkan
+         `_tanya_bebas_pagar` (lewati cek DAN tak dicatat; pagar tanya_user utuh);
+      3. model gemar bohong "sudah saya catat" → guard klaim-ajar (pola klaim-Excel),
+         sebab "ajar" di guard_kinds, + SATU aturan p8 (menumpang cache-miss spec);
+      4. conversation_id tak sampai ke handler → dititip `_cid` ala `_q_user`; kunci
+         draf `username|_cid` TTL 30 mnt; yang DISIMPAN persis draf server (argumen
+         model saat aksi simpan DIABAIKAN). Cek kembar via `search_skor` → kartu
+         [Perbarui entri lama][Simpan baru] (`teks_admin` terverifikasi di whitelist
+         `update_dokumen`); tolak angka stok/harga & rujukan gantung.
+
+  (E) APK 2.2.0+13 — `a68dc84` (mobile)
+      Membawa: Rak & Kartu Stok lengkap (+kamera utk foto kartu), kartu tanya_user,
+      panel Sebab guard, saring live. APK = `frontend/public/maspart.apk` (terpanggang
+      di image frontend); terverifikasi dilayani 22.177.518 byte. ⚠️ `latest_name=2.2.0`
+      di Config Aplikasi = langkah manual pemilik.
+      ⚠️ JEBAKAN OPERASIONAL sesi ini: (1) proses panjang yang di-background-kan harness
+      (flutter build, push.sh) bisa TERBUNUH — jalankan sbg proses Windows TERLEPAS
+      (path penuh Git Bash! `cmd /c bash` jatuh ke WSL kosong) + Monitor file log;
+      (2) ssh yang putus TIDAK selalu menghentikan build server — build.sh bisa selesai
+      sendiri; SELALU cek timestamp `docker images` sebelum mengulang dari nol.
+
+      Test: 1.665 → **1.820** (salvage 7, pengganti 7, guard_kinds 6+4, rak 36,
+      kompresi 4, durasi WO 4, ajarkan 35, dst). Migrasi 026/027/028 DIJALANKAN
+      (diverifikasi probe REST). Yang menunggu: label "dari chat" mobile ikut APK
+      berikutnya; isi `gudang_kelola` akun staf nyata (tanpa itu menu Rak hanya
+      terlihat admin); router `opname.py` TIDAK terdaftar di main.py (bug lama,
+      dilaporkan — /api/opname kemungkinan 404 sejak awal).
 ```
