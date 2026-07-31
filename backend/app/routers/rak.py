@@ -15,6 +15,7 @@ ber-'/' memakai alias.
 """
 from __future__ import annotations
 
+import io
 import secrets
 
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, Query,
@@ -30,8 +31,55 @@ router = APIRouter(prefix="/api/rak", tags=["rak"])
 # Foto kartu stok = FOTO, bukan dokumen: versi _IMG_MIME tanpa pdf (admin.py:489).
 # PDF sengaja ditolak — UI menampilkannya sebagai thumbnail + lightbox.
 _IMG_MIME = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
-_MAX_FOTO_BYTES = 10 * 1024 * 1024    # 10 MB, samakan dengan bukti transfer (orders.py)
+_MAX_FOTO_BYTES = 10 * 1024 * 1024    # 10 MB = batas TERIMA; yang DISIMPAN sudah terkompres
 _MAX_IMPORT_BYTES = 10 * 1024 * 1024  # file rak nyata hanya beberapa ratus KB
+
+# Kompresi server-side — titik PENEGAKAN untuk semua klien. Mobile sudah
+# mengecilkan di sumber (image_picker maxWidth/imageQuality), tapi web mengirim
+# file mentah: foto HP 12MP = 4-6 MB per kartu, padahal kartu stok difoto dari
+# jarak dekat dan 1600 px sudah sangat terbaca. Tanpa ini bucket membengkak
+# dan thumbnail 44px di /rak mengunduh berukuran penuh.
+_FOTO_MAX_DIM = 1600     # sisi terpanjang (samakan dgn maxWidth image_picker mobile)
+_FOTO_QUALITY = 82       # JPEG; kartu = teks di kertas, artefak q82 tak terbaca mata
+
+
+def _kompres_kartu(data: bytes, ext_asal: str) -> tuple[bytes, str]:
+    """(bytes hasil, ext hasil) — selalu JPEG kecuali hasilnya justru lebih besar.
+
+    Sekalian tiga hal yang bukan sekadar ukuran:
+    - `exif_transpose`: foto HP menyimpan rotasi di EXIF; tanpa ini kartu tampil
+      miring 90° di thumbnail/lightbox (browser <img> pada objectURL/proxy tidak
+      selalu menghormati EXIF).
+    - EXIF DIBUANG saat re-encode — termasuk koordinat GPS gudang yang ikut
+      terekam kamera HP; URL foto ini publik.
+    - Decode = VALIDASI: bytes yang bukan gambar (dulu lolos asal berekstensi
+      .jpg) sekarang tertolak di sini. ValueError → 400 di pemanggil.
+    """
+    from PIL import Image, ImageOps
+
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        img = ImageOps.exif_transpose(img)
+    except Exception:
+        raise ValueError("File bukan gambar yang valid (jpg/png/webp).")
+    if img.mode not in ("RGB", "L"):
+        # PNG transparan → ratakan ke putih (kartu stok = kertas putih).
+        if "A" in img.getbands():
+            latar = Image.new("RGB", img.size, (255, 255, 255))
+            latar.paste(img.convert("RGBA"), mask=img.convert("RGBA").getchannel("A"))
+            img = latar
+        else:
+            img = img.convert("RGB")
+    img.thumbnail((_FOTO_MAX_DIM, _FOTO_MAX_DIM))   # tak pernah memperbesar
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=_FOTO_QUALITY, optimize=True)
+    keluar = buf.getvalue()
+    # Jaring kecil: jpg mungil yang sudah teroptimasi bisa MEMBESAR saat
+    # di-encode ulang — simpan yang asli saja (formatnya sudah jpeg).
+    if len(keluar) >= len(data) and ext_asal in ("jpg", "jpeg"):
+        return data, "jpg"
+    return keluar, "jpg"
 
 
 def require_internal(user: dict = Depends(get_current_user)) -> dict:
@@ -138,6 +186,10 @@ async def unggah_foto(pn: str, gudang: str, file: UploadFile = File(...),
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File kosong.")
     if len(data) > _MAX_FOTO_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Ukuran file maksimal 10 MB.")
+    try:
+        data, ext = _kompres_kartu(data, ext)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
 
     pk = rak.pn_key(pn) or "PN"
     g_aman = "".join(ch for ch in g if ch.isalnum() or ch in "-_") or "gudang"

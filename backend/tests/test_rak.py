@@ -363,6 +363,96 @@ def test_unggah_foto_bukan_gambar_ditolak(db, monkeypatch, label_dikenal):
     assert r.status_code == 400
 
 
+# ── Kompresi foto kartu (server-side, titik penegakan semua klien) ──────────
+def _gambar_besar(fmt="JPEG", w=3000, h=2000, quality=95) -> bytes:
+    """Tiruan foto HP: besar, bergradien halus (JPEG q95 ala kamera).
+    ⚠️ Jangan pakai pola piksel teratur utk klaim UKURAN — PNG menyusutkannya
+    ekstrem sementara JPEG membencinya, kebalikan dari foto sungguhan."""
+    from PIL import Image
+    img = Image.new("RGB", (w, h))
+    px = img.load()
+    for x in range(w):
+        for y in range(0, h, 4):
+            v = (x * 255 // w, ((x + y) // 12) % 255, y * 255 // h)
+            px[x, y] = v
+            if y + 1 < h:
+                px[x, y + 1] = v
+    buf = io.BytesIO()
+    img.save(buf, format=fmt, **({"quality": quality} if fmt == "JPEG" else {}))
+    return buf.getvalue()
+
+
+def _siap_unggah(db, monkeypatch):
+    """Baris rak PN1 siap + tangkap objek yang diunggah ke Storage."""
+    from app.routers import rak as rak_router
+    _pasang_kelola(monkeypatch, {"beni": [JKT]})
+    monkeypatch.setattr(accurate, "snapshot", lambda: {})
+    rak.upsert("PN1", JKT, "A-1", username="beni")
+    tangkapan = {}
+
+    def fake_upload(path, data, content_type, bucket=None):
+        tangkapan.update({"path": path, "data": data, "ct": content_type})
+        return True, "ok"
+
+    monkeypatch.setattr(rak_router.sb, "upload_storage_object", fake_upload)
+    monkeypatch.setattr(rak_router.sb, "photo_public_url", lambda p: f"http://x/{p}")
+    return tangkapan
+
+
+def test_unggah_foto_hp_dikompres(db, monkeypatch, label_dikenal):
+    """Foto HP (JPEG besar) tak boleh mendarat mentah di bucket: sisi terpanjang
+    dipangkas ke 1600 px, hasilnya jauh lebih kecil dari aslinya."""
+    from PIL import Image
+    tangkapan = _siap_unggah(db, monkeypatch)
+    raw = _gambar_besar("JPEG")
+    r = _klien(STAF).post(f"/api/rak/part/PN1/{JKT}/foto",
+                          files={"file": ("kartu.jpg", raw)})
+    assert r.status_code == 200
+    assert tangkapan["ct"] == "image/jpeg"
+    assert len(tangkapan["data"]) < len(raw)
+    img = Image.open(io.BytesIO(tangkapan["data"]))
+    assert max(img.size) <= 1600
+    assert r.json()["foto_url"].endswith(".jpg")
+
+
+def test_unggah_png_dikonversi_jpeg(db, monkeypatch, label_dikenal):
+    """PNG masuk → JPEG keluar (format seragam; EXIF/alpha ikut hilang). Ukuran
+    TIDAK di-assert di sini: PNG sintetis menyusut tak realistis."""
+    from PIL import Image
+    tangkapan = _siap_unggah(db, monkeypatch)
+    r = _klien(STAF).post(f"/api/rak/part/PN1/{JKT}/foto",
+                          files={"file": ("kartu.png", _gambar_besar("PNG"))})
+    assert r.status_code == 200
+    assert tangkapan["path"].endswith(".jpg")
+    img = Image.open(io.BytesIO(tangkapan["data"]))
+    assert img.format == "JPEG" and max(img.size) <= 1600
+
+
+def test_unggah_bytes_palsu_berjudul_jpg_ditolak(db, monkeypatch, label_dikenal):
+    """Dulu bytes apa pun berekstensi .jpg lolos ke bucket; decode Pillow kini
+    sekaligus VALIDASI isi — bukan-gambar ditolak 400, bukan tersimpan rusak."""
+    tangkapan = _siap_unggah(db, monkeypatch)
+    r = _klien(STAF).post(f"/api/rak/part/PN1/{JKT}/foto",
+                          files={"file": ("kartu.jpg", b"bukan gambar sama sekali")})
+    assert r.status_code == 400
+    assert "gambar" in r.json()["detail"].lower()
+    assert not tangkapan                               # tak ada yang terunggah
+
+
+def test_jpg_mungil_tak_dipaksa_membesar(db, monkeypatch, label_dikenal):
+    """JPEG kecil yang sudah teroptimasi bisa MEMBESAR bila di-encode ulang —
+    jaring di _kompres_kartu menyimpan bytes asli untuk kasus itu."""
+    from PIL import Image
+    tangkapan = _siap_unggah(db, monkeypatch)
+    buf = io.BytesIO()
+    Image.new("RGB", (60, 40), (200, 30, 30)).save(buf, format="JPEG", quality=30)
+    raw = buf.getvalue()
+    r = _klien(STAF).post(f"/api/rak/part/PN1/{JKT}/foto",
+                          files={"file": ("kartu.jpg", raw)})
+    assert r.status_code == 200
+    assert len(tangkapan["data"]) <= len(raw)
+
+
 def test_alias_pn_bergaris_miring(db, monkeypatch):
     """Uvicorn men-decode %2F jadi '/' sebelum route dicocokkan, jadi PN ber-
     suffix varian butuh alias dengan PN di posisi terakhir."""
