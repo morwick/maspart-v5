@@ -1424,6 +1424,12 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     kamus = _kamus_subset_block(history)
     if kamus:
         ctx = (ctx + "\n" if ctx else "") + kamus
+    # Rute maksud (frasa khas pemilik → TOOL) — sesudah kamus dengan sengaja:
+    # kamus mengurus KATA yang dicari, rute mengurus TOOL yang dipakai, dan yang
+    # terakhir dibaca model harus yang menentukan langkah berikutnya.
+    rute = _maksud_subset_block(history)
+    if rute:
+        ctx = (ctx + "\n" if ctx else "") + rute
     # Identitas user (username + gudang cabang) SELALU ikut di sini — sengaja BUKAN
     # di system prompt utama, agar prompt utama identik antar-user & kena prompt-cache.
     ctx = _user_context_line(user) + (("\n" + ctx) if ctx else "")

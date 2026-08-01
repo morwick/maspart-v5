@@ -1223,6 +1223,49 @@ def _ajar_istilah(args: dict) -> tuple[dict | None, str]:
     return {"triggers": trig, "keywords": kw}, ""
 
 
+def _ajar_maksud(args: dict, user: dict) -> tuple[dict | None, str]:
+    """Deteksi & validasi RUTE MAKSUD ("kalau user minta gambar teknis, itu
+    maksudnya exploded view").
+
+    Beda tipis tapi penting dari _ajar_istilah: pemetaan ISTILAH menjawab "kata
+    apa yang dicari di katalog" (→ Kamus Sinonim, mempengaruhi expand_query),
+    RUTE MAKSUD menjawab "TOOL mana yang dipakai" (→ maksud.json, disuntik ke
+    prompt tiap giliran). Sebelum store ini ada, ajaran jenis kedua tak punya
+    rumah: jadi catatan = tak pernah terbaca (model tak memanggil
+    cari_pengetahuan untuk permintaan gambar), jadi sinonim = salah tujuan &
+    mengotori pencarian part.
+
+    Return (rute|None, catatan_utk_pengantar). Rute yang TIDAK lolos validasi
+    mengembalikan None + catatan jujur — alurnya tetap jalan sebagai catatan
+    biasa, bukan buntu."""
+    frasa = maksud._norm_frasa(args.get("maksud_frasa") or args.get("frasa"))[:maksud.MAKS_FRASA]
+    tool = " ".join(str(args.get("maksud_tool") or args.get("tool") or "").split())
+    if not frasa or not tool:
+        return None, ""
+    # Nama tool WAJIB nyata. Model kerap menyebut tool dengan nama karangan yang
+    # masuk akal ('tampilkan_gambar'); tanpa cek ini rutenya tersimpan rapi lalu
+    # tak pernah bisa dipatuhi — gagal senyap.
+    if tool not in _allowed_tool_names(user):
+        return None, (f"ℹ️ Rute tidak dibuat: tool **{tool}** tidak ada. Sebut nama "
+                      "tool yang benar-benar kamu punya (lihat daftar alatmu) bila "
+                      "user memang ingin mengarahkan sebuah istilah ke alat tertentu.")
+    try:
+        maksud._validasi_frasa(frasa)
+    except ValueError as err:
+        return None, f"ℹ️ Rute tidak dibuat: {err}"
+    try:
+        lama = next(filter(None, (maksud.cari_frasa(f) for f in frasa)), None)
+    except Exception:  # pragma: no cover — store rusak jangan mematikan pengajaran
+        logger.exception("cek rute maksud lama gagal (dilewati)")
+        lama = None
+    if lama:
+        return None, (f"ℹ️ Frasa **{frasa[0]}** SUDAH punya rute ke "
+                      f"**{lama.get('tool')}** — tidak ditawarkan ulang; ubah lewat "
+                      "menu Rute Maksud bila pemetaannya keliru.")
+    return {"frasa": frasa, "tool": tool,
+            "catatan": " ".join(str(args.get("maksud_catatan") or "").split())}, ""
+
+
 def _ajar_teks_draf(draf: dict) -> str:
     """Bubble jawaban yang DILIHAT user. Wajib berdiri sendiri & lengkap: inilah
     satu-satunya kesempatan user memeriksa isi sebelum masuk store (jalur kartu
@@ -1231,8 +1274,17 @@ def _ajar_teks_draf(draf: dict) -> str:
              f"**Judul:** {draf['judul']}", "", draf["isi"]]
     if draf.get("kata_kunci"):
         baris += ["", "**Kata kunci:** " + ", ".join(draf["kata_kunci"])]
+    rute = draf.get("maksud")
+    if rute:
+        frasa = ", ".join(f"*{f}*" for f in rute["frasa"])
+        baris += ["",
+                  "🎯 Ini **rute maksud** — dua pilihan tempat simpan:",
+                  f"- **Rute Maksud**: mulai sekarang, kalau user menyebut {frasa} "
+                  f"asisten langsung memakai alat **{rute['tool']}**. (Disarankan)",
+                  "- **Catatan biasa**: asisten hanya bisa MENJELASKAN artinya bila "
+                  "kebetulan membuka pengetahuan; pilihan alatnya tidak berubah."]
     ist = draf.get("istilah")
-    if ist:
+    if ist and not rute:
         baris += ["",
                   "🔀 Ini **pemetaan istilah** — dua pilihan tempat simpan:",
                   f"- **Kamus Sinonim**: pencarian part ikut mengerti — "
@@ -1244,15 +1296,21 @@ def _ajar_teks_draf(draf: dict) -> str:
     if mirip:
         baris += ["", f"⚠️ Mirip dengan entri lama **{mirip['judul']}** — pilih "
                       "memperbarui entri itu atau menyimpan ini sebagai entri baru."]
-    if draf.get("catatan_istilah"):
-        baris += ["", draf["catatan_istilah"]]
+    for k in ("catatan_maksud", "catatan_istilah"):
+        if draf.get(k):
+            baris += ["", draf[k]]
     return "\n".join(baris)
 
 
 def _ajar_kartu(draf: dict) -> list[dict]:
+    # Rute maksud paling dulu: ajaran "kalau user minta X pakai alat Y" salah
+    # tempat di mana pun kecuali store rute — jadi kalau terdeteksi, itulah
+    # tawaran utamanya (istilah & kembar-catatan tak relevan lagi).
+    if draf.get("maksud"):
+        opsi = ["Simpan ke Rute Maksud", "Jadi catatan saja", "Batal"]
     # Pemetaan istilah menang atas deteksi kembar-catatan: istilah memang
     # seharusnya TIDAK jadi catatan, jadi opsi perbarui-catatan tak relevan.
-    if draf.get("istilah"):
+    elif draf.get("istilah"):
         opsi = ["Simpan ke Kamus Sinonim", "Jadi catatan saja", "Batal"]
     elif draf.get("mirip"):
         opsi = ["Perbarui entri lama", "Simpan sebagai entri baru", "Batal"]
@@ -1298,7 +1356,10 @@ def _t_ajarkan_pengetahuan(args: dict, user: dict) -> dict:
             "baru": "simpan_baru", "new": "simpan_baru", "update": "perbarui",
             "cancel": "batal", "draft": "draf", "buat": "draf",
             "kamus": "simpan_kamus", "simpan_ke_kamus": "simpan_kamus",
-            "simpan_sinonim": "simpan_kamus"}.get(aksi, aksi)
+            "simpan_sinonim": "simpan_kamus",
+            "maksud": "simpan_maksud", "rute": "simpan_maksud",
+            "simpan_rute": "simpan_maksud", "simpan_ke_rute": "simpan_maksud",
+            "simpan_ke_maksud": "simpan_maksud"}.get(aksi, aksi)
     kunci = _ajar_kunci(user, args)
     username = (user or {}).get("username") or ""
 
@@ -1312,6 +1373,41 @@ def _t_ajarkan_pengetahuan(args: dict, user: dict) -> dict:
                             if ada else
                             "Tidak ada draf tertunda — tak ada yang perlu dibatalkan. "
                             "Sampaikan singkat & lanjutkan percakapan biasa.")}
+
+    # ── simpan_maksud: rute frasa → TOOL, bukan catatan ──────────────
+    # Satu-satunya jalur yang mengubah PEMILIHAN TOOL tanpa deploy. Rute masuk
+    # blok prompt dinamis (_maksud_subset_block) pada giliran berikutnya yang
+    # menyebut frasa itu — jadi efeknya langsung, tanpa restart & tanpa indexing.
+    if aksi == "simpan_maksud":
+        draf = _ajar_get_draf(kunci)
+        if not draf:
+            return {"found": False,
+                    "catatan": ("Tidak ada draf tertunda (kedaluwarsa >30 menit?). "
+                                "⛔ JANGAN mengaku sudah menyimpan. Minta user "
+                                "mengulang ajarannya.")}
+        rute = draf.get("maksud")
+        if not rute:
+            return {"found": False,
+                    "catatan": ("Draf ini BUKAN rute maksud (tidak ada pasangan "
+                                "frasa→tool), jadi tak bisa masuk Rute Maksud. "
+                                "Tawarkan menyimpannya sebagai catatan (aksi='simpan').")}
+        try:
+            e = maksud.add(rute["frasa"], rute["tool"], catatan=rute.get("catatan") or "",
+                           oleh=username, tools_sah=_allowed_tool_names(user))
+        except ValueError as err:
+            _ajar_hapus_draf(kunci)
+            return {"found": False,
+                    "catatan": (f"Rute ditolak: {err} Sampaikan apa adanya ke user.")}
+        _ajar_hapus_draf(kunci)
+        logger.info("rute maksud via chat oleh=%s %r -> %s",
+                    username, e["frasa"], e["tool"])
+        return {"found": True, "tersimpan_maksud": True,
+                "frasa": e["frasa"], "tool": e["tool"],
+                "catatan": ("Rute TERSIMPAN & langsung aktif — mulai giliran "
+                            "berikutnya, permintaan yang menyebut frasa itu "
+                            "diarahkan ke tool tersebut (berlaku untuk SEMUA staf). "
+                            "Konfirmasi singkat ke user; rute bisa diubah/dihapus "
+                            "di menu Rute Maksud.")}
 
     # ── simpan_kamus: pemetaan istilah → KAMUS SINONIM, bukan catatan ─
     # Jalur tulisnya jalur lama yang teruji (sinonim.add — dipakai menu admin &
@@ -1451,12 +1547,14 @@ def _t_ajarkan_pengetahuan(args: dict, user: dict) -> dict:
                           "secara eksplisit, lalu panggil tool ini lagi.")}
 
     istilah, catatan_istilah = _ajar_istilah(args)
+    rute, catatan_maksud = _ajar_maksud(args, user)
     draf = {"judul": judul, "isi": isi, "kata_kunci": kata_kunci,
             "mirip": _ajar_cari_kembar(judul, isi),
-            "istilah": istilah, "catatan_istilah": catatan_istilah}
+            "istilah": istilah, "catatan_istilah": catatan_istilah,
+            "maksud": rute, "catatan_maksud": catatan_maksud}
     _ajar_set_draf(kunci, draf)
-    logger.info("draf pengetahuan disusun oleh=%s judul=%r kembar=%s istilah=%s",
-                username, judul, bool(draf["mirip"]), bool(istilah))
+    logger.info("draf pengetahuan disusun oleh=%s judul=%r kembar=%s istilah=%s rute=%s",
+                username, judul, bool(draf["mirip"]), bool(istilah), bool(rute))
     return {
         "found": True,
         # Sentinel internal (prefiks `_`) yang dibaca chat loop: kartu konfirmasi,

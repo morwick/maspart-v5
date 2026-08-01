@@ -110,6 +110,7 @@ const NAV_ADMIN: NavItem[] = [
   { href: "/admin/chat-log", label: "Observabilitas AI", icon: I.pulse },
   { href: "/admin/search-misses", label: "Pencarian Nihil", icon: I.search },
   { href: "/admin/sinonim", label: "Kamus Sinonim", icon: I.book },
+  { href: "/admin/maksud", label: "Rute Maksud", icon: I.book },
   { href: "/admin/pengetahuan", label: "Pengetahuan AI", icon: I.ai },
   { href: "/admin/menu", label: "Menu Control", icon: I.shield },
   { href: "/admin/monitoring", label: "Monitoring User", icon: I.pulse },

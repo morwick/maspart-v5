@@ -2119,4 +2119,55 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       ⚠️ Operasional: harness AI membunuh proses latar panjang makin agresif —
       pytest pun kena; jalur yang TERBUKTI kebal = jalankan perintah panjang DI
       DALAM tool Monitor (pytest paruh-2 & push.sh sukses lewat situ).
+
+  2026-08-01 (2) — RUTE MAKSUD: mengajari asisten ALAT mana yang dipakai
+
+      Celah yang ketahuan saat pemilik bertanya "kalau saya bilang gambar
+      teknis itu maksudnya exploded view, bisa?": TIDAK ADA satu pun kanal yang
+      bisa diisi pemilik DAN mempengaruhi PEMILIHAN TOOL. Kamus Sinonim otomatis
+      sampai ke model tiap giliran tapi cuma mengubah KATA yang dicari
+      (expand_query); catatan pengetahuan bisa diajarkan lewat chat tapi hanya
+      terbaca bila model kebetulan memanggil cari_pengetahuan — untuk permintaan
+      GAMBAR itu tak pernah terjadi, jadi ajarannya mati di rak. Satu-satunya
+      pengendali routing adalah ai_domain.md = file kode = butuh deploy.
+
+  (A) TAMBALAN LANGSUNG. "gambar teknis" didaftarkan sbg frasa pemicu
+      `gambar_exploded` (`p2_tool_specs.py`) + aturan di `ai_domain.md`
+      (📌 ISTILAH LAPANGAN), lengkap dgn PENGECUALIAN: "gambar teknis/skema"
+      KABEL/PIN/KONEKTOR tetap ke `diagram_wiring` (tool itu memang mengklaim
+      frasa "skema kabel" — tanpa pagar ini pertanyaan kelistrikan terbajak),
+      dan pengingat bahwa `gambar_exploded` WAJIB rangka → minta VIN dulu.
+
+  (B) STORE BARU `maksud.py` — data/maksud/maksud.json, entri
+      {frasa[], tool, catatan, oleh}. Disuntik sbg blok prompt DINAMIS
+      `[RUTE MAKSUD GILIRAN INI]` (`_maksud_subset_block` di p1_dasar, dipasang
+      di p9 SESUDAH blok kamus: kamus mengurus kata, rute mengurus alat, yang
+      terakhir dibaca model harus yang menentukan langkah) — hanya entri yang
+      frasanya benar-benar muncul di ≤6 pesan user terakhir, jadi store boleh
+      tumbuh tanpa membebani tiap percakapan & prompt-cache statik tak bergeser.
+      ⚠️ SENGAJA saran kuat, BUKAN paksaan seperti `_paksa_istilah_kamus`
+      (yang menimpa ARGUMEN): memaksa nama tool dari frasa berbahaya — "gambar
+      teknis kabel EGR" harus ke diagram_wiring. Blok berbunyi "ikuti KECUALI
+      kalimat user jelas berkata lain"; rute paling spesifik diurut di atas.
+
+  (C) PAGAR (pelajaran kamus 07-29 versi lebih keras). Frasa GENERIK ditolak —
+      di kamus trigger generik cuma mengotori hasil, di sini ia MEMBAJAK
+      pilihan tool untuk hampir semua kalimat ("gambar" ada di ratusan
+      pertanyaan tak terkait). Ditolak juga: frasa >4 kata, satu-kata <6 huruf,
+      frasa yang sudah dipakai rute lain, dan — paling penting — TOOL KARANGAN:
+      nama tool divalidasi ke `_allowed_tool_names`, karena rute ke tool hantu
+      tersimpan rapi lalu tak pernah bisa dipatuhi = gagal SENYAP. Plafon 60
+      entri. Store rusak tak pernah menjatuhkan chat (fail-open ke blok kosong).
+
+  (D) DUA PINTU ISI. Menu admin **Rute Maksud** (web `/admin/maksud` + mobile
+      `MaksudScreen`; dropdown alat diisi server, bukan diketik) DAN langsung
+      dari chat: `ajarkan_pengetahuan` dapat `maksud_frasa`/`maksud_tool`/
+      `maksud_catatan` + aksi `simpan_maksud`; kartu jadi [Simpan ke Rute
+      Maksud][Jadi catatan saja][Batal] dan menang atas tawaran istilah/kembar
+      (ajaran "kalau minta X pakai alat Y" salah tempat di mana pun selain
+      rute). Rute batal → alur TIDAK buntu: draf tetap tersaji sbg catatan
+      biasa + catatan jujur kenapa (tool tak ada / frasa terlalu umum / sudah
+      punya rute). 28 test baru → **1.893**. tsc + next build + flutter analyze
+      bersih. Pegangan tim sekarang bertiga: istilah → Kamus Sinonim (kata yang
+      DICARI), rute → Rute Maksud (alat yang DIPAKAI), fakta/prosedur → catatan.
 ```

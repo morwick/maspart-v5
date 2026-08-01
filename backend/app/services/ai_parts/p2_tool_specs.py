@@ -1143,8 +1143,11 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "description": (
                     "TAMPILKAN GAMBAR EXPLODED VIEW untuk SATU Part Number (gambar muncul INLINE di "
                     "jawaban chat, bukan file unduh) — panggil saat user minta 'tampilkan/lihat "
-                    "gambar exploded view part ini', 'gambar/skema part <PN>', 'part ini nomor balon "
-                    "berapa di gambar'. Menemukan FIGURE resmi EPC (Parts Atlas per-VIN) yang memuat "
+                    "gambar exploded view part ini', 'gambar/skema part <PN>', 'GAMBAR TEKNIS "
+                    "part ini' (istilah lapangan: 'gambar teknis' = exploded view), 'part ini nomor balon "
+                    "berapa di gambar'. ⚠️ Kecuali yang diminta gambar KABEL/PIN/KONEKTOR/rangkaian "
+                    "listrik — itu diagram_wiring, bukan tool ini. "
+                    "Menemukan FIGURE resmi EPC (Parts Atlas per-VIN) yang memuat "
                     "PN itu + NOMOR BALON-nya, lalu menyajikan gambarnya + daftar balon→part figure "
                     "itu. Gambar hanya muncul saat DIMINTA lewat tool ini (tidak auto-nempel di tiap "
                     "cek part). Butuh "
@@ -1426,10 +1429,22 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "dan menampilkan kartu konfirmasi; (2) user membalas kartu itu "
                     "sebagai teks biasa → panggil lagi: balasan 'Simpan' atau "
                     "'Simpan sebagai entri baru' → aksi='simpan'/'simpan_baru'; "
-                    "'Simpan ke Kamus Sinonim' → aksi='simpan_kamus'; 'Jadi catatan "
+                    "'Simpan ke Kamus Sinonim' → aksi='simpan_kamus'; 'Simpan ke Rute "
+                    "Maksud' → aksi='simpan_maksud'; 'Jadi catatan "
                     "saja' → aksi='simpan'; 'Perbarui entri lama' → aksi='perbarui'; "
                     "'Perbaiki dulu' + koreksinya → aksi='draf' lagi dengan draf "
                     "REVISI; 'Batal' → aksi='batal'.\n"
+                    "RUTE MAKSUD (frasa → ALAT): bila yang diajarkan adalah ISTILAH "
+                    "yang menentukan ALAT MANA yang harus kamu pakai — 'kalau user "
+                    "minta <istilah>, itu maksudnya <hal yang dikerjakan tool X>', "
+                    "'istilah <A> di sini artinya <B>' di mana B adalah pekerjaan "
+                    "salah satu toolmu — ISI JUGA maksud_frasa + maksud_tool pada "
+                    "aksi='draf'. maksud_tool WAJIB nama tool yang BENAR-BENAR ada di "
+                    "daftar alatmu (⛔ jangan mengarang nama tool). Kartu akan "
+                    "menawarkan menyimpannya sebagai RUTE, dan sejak itu permintaan "
+                    "yang memuat frasa tsb otomatis diarahkan ke tool itu untuk SEMUA "
+                    "staf. Bedakan dari pemetaan istilah biasa: rute mengubah ALAT "
+                    "yang dipakai, kamus sinonim hanya mengubah KATA yang dicari.\n"
                     "PEMETAAN ISTILAH: bila yang diajarkan MURNI penerjemahan istilah "
                     "('simpang empat itu universal joint', 'kalau user bilang X "
                     "maksudnya Y'), ISI JUGA istilah_trigger (istilah lapangan, 1-3 "
@@ -1453,7 +1468,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "properties": {
                         "aksi": {
                             "type": "string",
-                            "enum": ["draf", "simpan", "simpan_baru", "simpan_kamus", "perbarui", "batal"],
+                            "enum": ["draf", "simpan", "simpan_baru", "simpan_kamus", "simpan_maksud", "perbarui", "batal"],
                             "description": "Langkah alur. Default 'draf'. Aksi selain 'draf' memakai draf yang DITAHAN server — judul/isi tak perlu dikirim ulang.",
                         },
                         "judul": {"type": "string", "description": "aksi='draf': judul singkat & mudah dicari (mis. 'Istilah lapangan: cucuk per')."},
@@ -1469,6 +1484,18 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "istilah_keywords": {
                             "type": "array", "items": {"type": "string"},
                             "description": "Pasangan istilah_trigger: kata kunci KATALOG (Inggris) tujuannya (mis. ['universal joint']).",
+                        },
+                        "maksud_frasa": {
+                            "type": "array", "items": {"type": "string"},
+                            "description": "HANYA bila ajarannya menentukan ALAT: frasa yang dipakai user (1-4 kata per item). ⛔ Jangan kata generik sendirian ('gambar', 'part', 'cek') — akan ditolak karena membajak percakapan lain.",
+                        },
+                        "maksud_tool": {
+                            "type": "string",
+                            "description": "Pasangan maksud_frasa: nama tool yang harus dipakai saat frasa itu muncul. WAJIB nama tool yang ADA di daftar alatmu — nama karangan ditolak.",
+                        },
+                        "maksud_catatan": {
+                            "type": "string",
+                            "description": "Opsional, maks 160 char: satu kalimat pembeda yang ikut ditampilkan ke dirimu nanti (mis. 'maksudnya exploded view, bukan foto part'). Sebut juga pengecualiannya bila ada.",
                         },
                     },
                 },

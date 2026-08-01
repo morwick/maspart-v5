@@ -33,7 +33,7 @@ from . import (abs_scr_codes, accurate, ai_belajar, ai_chat_log, ai_export, ai_k
                ai_session, ai_sheet,
                catalog_bom, dtc_codes,
                dtc_diagnosa, eol_dtc, epc, epc_bom, epc_weichai, fault_codes, fault_pdf, filter_ref,
-               gudang, gudang_config, harga, knowledge_links, maintenance_ref, manual_media,
+               gudang, gudang_config, harga, knowledge_links, maintenance_ref, maksud, manual_media,
                manual_teks, orders, part_index, part_taxonomy, pengetahuan,
                pengetahuan_index, pin_ecu, populasi,
                rak, repairkit, reservations, search_log, sims, sims_eol, sims_warranty, sinonim,
@@ -358,6 +358,37 @@ def _kamus_subset_block(messages: list[dict]) -> str:
         return ""
     return ("[KAMUS ISTILAH GILIRAN INI] (Indonesia → kata kunci katalog "
             "Inggris; tool cari sudah otomatis memakainya):\n" + "\n".join(lines))
+
+
+def _load_maksud_entries() -> list:
+    """Entri data/maksud/maksud.json (cache per-mtime). Wrapper tipis — pola
+    `_load_sinonim_entries`: test/monkeypatch cukup menambal `ai.<attr>` ini."""
+    return maksud.entries()
+
+
+def _maksud_subset_block(messages: list[dict]) -> str:
+    """[RUTE MAKSUD GILIRAN INI] — SUBSET Kamus Maksud (frasa user → TOOL) yang
+    frasanya muncul di ≤6 pesan user terakhir.
+
+    Saudara kembar _kamus_subset_block, tapi menjawab pertanyaan yang BERBEDA:
+    kamus sinonim mengurus "kata apa yang dicari", store ini mengurus "tool mana
+    yang dipakai". Dulu satu-satunya tempat untuk aturan semacam itu adalah
+    ai_domain.md (file kode → butuh deploy); sejak 2026-08-01 pemilik bisa
+    menambahnya lewat menu Rute Maksud atau langsung dari chat.
+
+    Sama seperti kamus: disuntik sbg pesan system DINAMIS di ekor (zona bebas
+    prompt-cache) dan hanya entri yang RELEVAN giliran ini — store boleh tumbuh
+    tanpa membebani setiap percakapan."""
+    teks = " ".join(
+        str((m or {}).get("content") or "") for m in (messages or [])[-6:]
+        if (m or {}).get("role") == "user")
+    if not teks:
+        return ""
+    try:
+        return maksud.block(teks, _load_maksud_entries)
+    except Exception:  # pragma: no cover — store rusak tak boleh mematikan chat
+        logger.exception("blok rute maksud gagal disusun (dilewati)")
+        return ""
 
 
 def _norm_gudang(nama: str) -> str:

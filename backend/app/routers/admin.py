@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import accurate, ai_chat_log, ai_sinonim_learn, app_config, catalog_bom, customer_map, gudang, gudang_config, harga, image_search, login_history, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, rak, reservations, search_log, session_policy, sinonim
+from ..services import accurate, ai_chat_log, ai_sinonim_learn, app_config, catalog_bom, customer_map, gudang, gudang_config, harga, image_search, login_history, maksud, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, rak, reservations, search_log, session_policy, sinonim
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -758,6 +758,64 @@ def sinonim_update(index: int, body: SinonimEntryRequest, _admin: dict = Depends
 def sinonim_delete(index: int, _admin: dict = Depends(require_admin)):
     try:
         entry = sinonim.delete(index)
+    except IndexError as err:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(err))
+    return {"ok": True, "entry": entry}
+
+
+# ── Rute Maksud (frasa user → TOOL yang dipakai asisten) ─────────────────────
+# Saudara Kamus Sinonim, tapi mengendalikan PEMILIHAN TOOL, bukan kata kunci
+# pencarian. Menulis data/maksud/maksud.json; asisten memuat ulang per-mtime,
+# jadi rute baru langsung dipatuhi tanpa restart & tanpa deploy.
+class MaksudEntryRequest(BaseModel):
+    frasa: list[str]
+    tool: str
+    catatan: str = ""
+
+
+def _tools_sah_admin(admin: dict) -> set[str]:
+    """Nama tool yang benar-benar ada — sumber kebenaran sama dengan yang
+    ditawarkan ke model, supaya rute tak pernah menunjuk tool hantu."""
+    from ..services import ai_assistant
+    return ai_assistant._allowed_tool_names(admin)
+
+
+@router.get("/maksud")
+def maksud_list(admin: dict = Depends(require_admin)):
+    entries = maksud.load()
+    return {"jumlah": len(entries), "entries": entries,
+            "tools": sorted(_tools_sah_admin(admin)), "maks": maksud.MAKS_ENTRI}
+
+
+@router.post("/maksud")
+def maksud_add(body: MaksudEntryRequest, admin: dict = Depends(require_admin)):
+    try:
+        entry = maksud.add(body.frasa, body.tool, body.catatan,
+                           oleh=admin.get("username") or "",
+                           tools_sah=_tools_sah_admin(admin))
+    except ValueError as err:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(err))
+    return {"ok": True, "entry": entry}
+
+
+@router.put("/maksud/{index}")
+def maksud_update(index: int, body: MaksudEntryRequest,
+                  admin: dict = Depends(require_admin)):
+    try:
+        entry = maksud.update(index, body.frasa, body.tool, body.catatan,
+                              oleh=admin.get("username") or "",
+                              tools_sah=_tools_sah_admin(admin))
+    except ValueError as err:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(err))
+    except IndexError as err:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(err))
+    return {"ok": True, "entry": entry}
+
+
+@router.delete("/maksud/{index}")
+def maksud_delete(index: int, _admin: dict = Depends(require_admin)):
+    try:
+        entry = maksud.delete(index)
     except IndexError as err:
         raise HTTPException(status.HTTP_409_CONFLICT, str(err))
     return {"ok": True, "entry": entry}

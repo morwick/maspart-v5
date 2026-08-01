@@ -1493,6 +1493,55 @@ export async function deleteSinonim(token: string, index: number): Promise<{ ok:
   return res.json();
 }
 
+// ── Rute Maksud (frasa user → TOOL yang dipakai asisten) ──
+// Beda dari Kamus Sinonim: kamus mengubah KATA yang dicari, rute mengubah ALAT
+// yang dipakai. Langsung aktif (reload per-mtime, tanpa restart/deploy).
+export type MaksudEntry = {
+  frasa: string[];
+  tool: string;
+  catatan: string;
+  oleh?: string;
+};
+export async function getMaksud(
+  token: string,
+): Promise<{ jumlah: number; entries: MaksudEntry[]; tools: string[]; maks: number }> {
+  const res = await fetch(`${API_BASE}/api/admin/maksud`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+export async function addMaksud(token: string, entry: MaksudEntry): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/api/admin/maksud`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(entry),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+export async function updateMaksud(
+  token: string,
+  index: number,
+  entry: MaksudEntry,
+): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/api/admin/maksud/${index}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(entry),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+export async function deleteMaksud(token: string, index: number): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/api/admin/maksud/${index}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 export type CatalogUploadResult = {
   ok: boolean;
   saved: { path: string; size: number }[];
