@@ -2337,6 +2337,16 @@ export async function aiChat(
  * Versi STREAMING /chat: `onProgress(label)` dipanggil tiap event STATUS langkah
  * ("Mencari di EPC…", "Menyusun jawaban…"); resolve dgn hasil AKHIR (sudah tersaring
  * guard). Fallback ke aiChat bila stream tak didukung/gagal di tengah.
+ *
+ * `onDelta` (opsional) = STREAMING TOKEN. Memberikannya berarti opt-in: klien
+ * mengirim `stream_tokens: true` dan server mulai memancarkan potongan jawaban
+ * MENTAH (belum lewat guard):
+ *   - `onDelta("potongan")` → tambahkan ke draf yang sedang tampil;
+ *   - `onDelta(null)`       → server MEMBUANG draf (guard sedang merapikan /
+ *                             mencoba ulang) → kosongkan draf, kembali menunggu.
+ * Frame `done` SELALU datang dan tetap otoritatif: `result.reply` menggantikan
+ * SELURUH draf. Tanpa `onDelta` perilaku lama tak berubah sama sekali (server
+ * tidak mengirim delta bila tak diminta).
  */
 export async function aiChatStream(
   token: string,
@@ -2347,6 +2357,7 @@ export async function aiChatStream(
   // Pembatalan dari sisi klien. Satu giliran bisa berjalan sampai 4 menit; tanpa
   // ini satu-satunya jalan keluar user adalah me-refresh halaman.
   signal?: AbortSignal,
+  onDelta?: (text: string | null) => void,
 ): Promise<AIChatResult> {
   const res = await fetch(`${API_BASE}/api/ai/chat-stream`, {
     method: "POST",
@@ -2355,6 +2366,8 @@ export async function aiChatStream(
       messages,
       sheet_id: sheetId || "",
       conversation_id: conversationId || "",
+      // Opt-in — klien lama (& APK lama) tetap menerima progress+done saja.
+      ...(onDelta ? { stream_tokens: true } : {}),
     }),
     signal,
   });
@@ -2375,7 +2388,13 @@ export async function aiChatStream(
     for (const part of parts) {
       const line = part.split("\n").find((l) => l.startsWith("data:"));
       if (!line) continue;
-      let ev: { type: string; label?: string; result?: AIChatResult; message?: string };
+      let ev: {
+        type: string;
+        label?: string;
+        result?: AIChatResult;
+        message?: string;
+        text?: string;
+      };
       try {
         ev = JSON.parse(line.slice(5).trim());
       } catch {
@@ -2384,6 +2403,10 @@ export async function aiChatStream(
       if (ev.type === "progress" && ev.label) onProgress(ev.label);
       else if (ev.type === "done" && ev.result) result = ev.result;
       else if (ev.type === "error") errMsg = ev.message || "Asisten AI gagal merespons.";
+      else if (ev.type === "delta") {
+        if (onDelta && typeof ev.text === "string" && ev.text) onDelta(ev.text);
+      } else if (ev.type === "reset") onDelta?.(null);
+      // Frame lain (mis. tipe baru dari server yang lebih baru) sengaja diabaikan.
     }
   }
   if (errMsg) throw new Error(errMsg);

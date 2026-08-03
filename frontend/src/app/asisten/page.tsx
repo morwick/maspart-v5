@@ -36,9 +36,18 @@ type Msg = AIChatTurn & {
   excelExports?: AIExcelExport[];
   explodedImages?: AIExplodedImage[]; // gambar exploded view inline (besar)
   streamStatus?: string[]; // status langkah live saat streaming (sebelum jawaban)
+  // DRAF token: isi masih mengalir dari model dan BELUM lewat guard. Ditandai
+  // visual (redup + titik mengetik) dan tak pernah bertahan — frame `done`
+  // mengganti seluruh isinya dengan jawaban final.
+  draft?: boolean;
   at?: number; // epoch ms — jam pesan
   rating?: "up" | "down"; // umpan balik user atas jawaban ini
 };
+
+// Status yang ditampilkan saat server MEMBUANG draf yang sudah mengalir (frame
+// `reset`: guard menyala / model diulang). Draf hilang dari layar, spinner
+// kembali — lalu jawaban final datang lewat frame `done`.
+const LABEL_RAPI = "Memeriksa & merapikan jawaban…";
 
 const SUGGESTIONS = [
   "Cek stok part WG9925520270",
@@ -340,6 +349,9 @@ export default function AsistenPage() {
       firstSave.current = false;
       return;
     }
+    // Draf token berubah puluhan kali per detik — jangan serialisasi 60 pesan
+    // tiap potongan. Isi finalnya tersimpan begitu frame `done` menggantinya.
+    if (msgs[msgs.length - 1]?.draft) return;
     try {
       if (msgs.length) sessionStorage.setItem(CHAT_KEY, JSON.stringify(msgs.slice(-60)));
       else sessionStorage.removeItem(CHAT_KEY);
@@ -398,6 +410,31 @@ export default function AsistenPage() {
         return copy;
       });
 
+    // Draf token (opt-in `stream_tokens`). Potongan teks di-APPEND ke placeholder
+    // yang sedang menampilkan status; `null` = server membuang draf → kosongkan
+    // isi & kembali ke tampilan status/spinner. Penjaga `streamStatus` memastikan
+    // delta yang telat tak mengotori jawaban final (applyResult membuang penanda
+    // placeholder-nya, jadi pesan yang sudah final tak bisa diubah lagi).
+    const onDelta = (chunk: string | null) =>
+      setMsgs((m) => {
+        const last = m[m.length - 1];
+        if (!last || last.role !== "assistant" || !last.streamStatus) return m;
+        const copy = [...m];
+        if (chunk === null) {
+          const steps = last.streamStatus;
+          copy[copy.length - 1] = {
+            ...last,
+            content: "",
+            draft: false,
+            streamStatus:
+              steps[steps.length - 1] === LABEL_RAPI ? steps : [...steps, LABEL_RAPI],
+          };
+          return copy;
+        }
+        copy[copy.length - 1] = { ...last, content: last.content + chunk, draft: true };
+        return copy;
+      });
+
     const ac = new AbortController();
     abortRef.current = ac;
     try {
@@ -423,6 +460,7 @@ export default function AsistenPage() {
             }),
           convId,
           ac.signal,
+          onDelta,
         );
       } catch (streamErr) {
         // Pembatalan BUKAN kegagalan streaming — tanpa penjagaan ini, tombol Stop
@@ -430,6 +468,8 @@ export default function AsistenPage() {
         if (isAbort(streamErr)) throw streamErr;
         // Streaming gagal (mis. proxy buffering / SSE tak didukung) → fallback ke /chat.
         if (streamErr instanceof ApiError && streamErr.status === 401) throw streamErr;
+        // Draf separuh jalan tak boleh menggantung selama fallback berjalan.
+        onDelta(null);
         res = await aiChat(token, payload, sheetId, convId);
       }
       applyResult(res);
@@ -1671,12 +1711,12 @@ function RepairKitDownloads({ models }: { models: string[] }) {
 
 /** Penghitung waktu berjalan di gelembung "sedang memproses".
  *
- * Jawaban asisten butuh 14 detik (separuh kasus) sampai 254 detik (terburuk) dan
- * SENGAJA tidak di-stream token demi token — guard harus menyaring jawaban utuh
- * dulu. Akibatnya user menatap layar tanpa satu huruf pun muncul. Angka yang
- * berjalan tidak mempercepat apa pun, tapi mengubah "aplikasinya hang?" menjadi
- * "masih jalan, sudah 20 detik". Muncul setelah 3 detik supaya jawaban cepat
- * tidak ikut berkedip. */
+ * Jawaban asisten butuh 14 detik (separuh kasus) sampai 254 detik (terburuk).
+ * Draf token kini mengalir (`stream_tokens`), tapi bagian MENUNGGU tetap ada:
+ * sebelum huruf pertama (tool berjalan) dan tiap kali guard membuang draf.
+ * Angka yang berjalan tidak mempercepat apa pun, tapi mengubah "aplikasinya
+ * hang?" menjadi "masih jalan, sudah 20 detik". Muncul setelah 3 detik supaya
+ * jawaban cepat tidak ikut berkedip. */
 function Elapsed({ since, inline }: { since?: number; inline?: boolean }) {
   const [detik, setDetik] = useState(0);
   useEffect(() => {
@@ -1909,6 +1949,39 @@ function Bubble({
             >
               {steps.length === 0 ? "Memproses pertanyaan…" : steps[steps.length - 1]}
             </span>
+            <Elapsed since={m.at} inline />
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // DRAF token: jawaban mentah yang masih mengalir (belum lewat guard). Dirender
+  // dgn renderer markdown yang SAMA — tabel separuh jadi memang berkedip sesaat —
+  // tapi diredupkan + titik mengetik agar jelas ini belum final. Tanpa footer
+  // (sumber/salin/👍👎): itu hak jawaban final. aria-live sengaja TIDAK dipasang
+  // supaya pembaca layar tidak mengeja tiap potongan; status di atas sudah polite.
+  if (m.draft) {
+    return (
+      <div className="chat-bubble-in chat-row-ai">
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="chat-bubble-ai" aria-busy="true" style={{ opacity: 0.8 }}>
+            <Markdown content={m.content} />
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginTop: 5,
+              paddingLeft: 2,
+            }}
+          >
+            <span className="typing-dots" style={{ flexShrink: 0 }}>
+              <span />
+              <span />
+              <span />
+            </span>
+            <span style={{ fontSize: 10.5, color: "var(--ink-400)" }}>Menulis jawaban…</span>
             <Elapsed since={m.at} inline />
           </div>
         </div>
