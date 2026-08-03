@@ -53,7 +53,9 @@ from app.services import ai_chat_log              # noqa: E402
 
 # Eval ≠ trafik user: JANGAN menulis ke tabel observabilitas ai_chat_log produksi
 # (pernah mengotori halaman Observabilitas AI dgn pertanyaan golden berulang).
+# chat() memanggil log_turn_async (streaming token draf 2026-08-03); no-op keduanya.
 ai_chat_log.log_turn = lambda **kw: True
+ai_chat_log.log_turn_async = lambda **kw: None
 
 GOLDEN = _EVALS_DIR / "golden.json"
 LAST_RUN = _EVALS_DIR / "last_run.json"

@@ -4,9 +4,11 @@
 > mana pun) yang membuka repo ini bisa langsung paham **apa project-nya, stack-nya,
 > cara deploy, dan cara akses server**.
 >
-> Terakhir diverifikasi: **2026-08-01** (lingkaran belajar MENUTUP: tawaran ajar dari
-> topik yang gagal + rute istilah ke Kamus Sinonim — blok **2026-08-01** di ujung
-> changelog). Sebelumnya: **2026-07-31** (hari terpadat sepanjang proyek — fitur RAK &
+> Terakhir diverifikasi: **2026-08-03** (STREAMING TOKEN DRAF di `/api/ai/chat-stream`
+> — spec protokol `stream_tokens`/`delta`/`reset` di blok **2026-08-03**, entri terakhir
+> changelog). Sebelumnya: **2026-08-01** (lingkaran belajar MENUTUP: tawaran ajar dari
+> topik yang gagal + rute istilah ke Kamus Sinonim — blok **2026-08-01**).
+> Sebelumnya: **2026-07-31** (hari terpadat sepanjang proyek — fitur RAK &
 > KARTU STOK + kewenangan `users.gudang_kelola`, fitur AJARKAN LEWAT CHAT, salvage
 > jawaban kosong, telemetri sebab guard, pengganti_part jujur, kompresi foto server,
 > saringan durasi WO garansi, polish UI menyeluruh, APK **2.2.0**; migrasi 026-028
@@ -2170,4 +2172,55 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       punya rute). 28 test baru → **1.893**. tsc + next build + flutter analyze
       bersih. Pegangan tim sekarang bertiga: istilah → Kamus Sinonim (kata yang
       DICARI), rute → Rute Maksud (alat yang DIPAKAI), fakta/prosedur → catatan.
+
+  2026-08-03 — STREAMING TOKEN DRAF di /api/ai/chat-stream (SPEC PROTOKOL)
+
+      Data yang memicu: ai_chat_log 942 giliran/30 hari → p50 15 dtk, p90 46
+      dtk, dan SELURUH durasi itu dirasakan user sebagai layar kosong — sejak
+      2026-07-15 /chat-stream hanya mengalirkan LABEL langkah + satu frame
+      `done` di akhir. Padahal teksnya sudah selesai ditulis model jauh sebelum
+      itu (DeepSeek ±68 tok/dtk; giliran output ≥2000 token = ±29 dtk murni
+      generate).
+
+  (A) PEMBALIKAN KEPUTUSAN — SADAR & DIPAGARI. Blok 2026-07-15 (malam) menulis
+      "⛔ AMAN: tak ada token mentah/PN tak-terverifikasi di-stream". Keputusan
+      itu kini DIBALIK, atas persetujuan pemilik lewat approve plan. Mitigasi:
+      (1) yang mengalir adalah DRAF — blok [PIKIR] sudah disaring server
+      (stripper inkremental, tahan ekor antar-chunk) dan markup tool-call yang
+      bocor ditahan; (2) tiap kali guard menyala / model diulang / salvage jalan
+      (±19% giliran) server mengirim frame `reset` dan klien WAJIB MEMBUANG
+      SELURUH draf; (3) frame `done` tetap SATU-SATUNYA kebenaran — isinya sudah
+      lewat semua guard dan MENGGANTI draf, tak pernah menambahnya. Risiko sisa
+      yang diterima: PN/angka belum terverifikasi terlihat beberapa detik
+      sebelum reset.
+
+  (B) PROTOKOL (SSE, frame dipisah baris kosong, muatan di baris `data:`).
+      Request `POST /api/ai/chat-stream` + field baru **`stream_tokens: bool`**
+      (default false). Hanya bila true server menambah dua frame:
+        {"type":"delta","text":"potongan jawaban"} → APPEND ke draf; teks kosong
+            diabaikan; klien tak perlu menyaring [PIKIR] (server sudah).
+        {"type":"reset"}                            → BUANG SELURUH draf, kembali
+            ke tampilan menunggu berlabel "Memeriksa & merapikan jawaban…".
+            Bisa terjadi BERKALI-KALI dalam satu giliran; delta berikutnya
+            selalu mulai dari kosong.
+      Frame lama TIDAK berubah: `progress` (label langkah), `done`
+      (SELALU datang; `result.reply` mengganti seluruh draf + mengisi kartu/
+      tools), `error`. Delta yang tiba SESUDAH `done` diabaikan klien.
+      Pembatalan (Stop) = draf dibuang, perilaku abort lama apa adanya. Stream
+      gagal di tengah giliran (BUKAN abort, BUKAN 401) → buang draf lalu
+      fallback ke `/api/ai/chat` non-stream seperti sebelumnya. Draf tak pernah
+      masuk penyimpanan lokal (sessionStorage web / SharedPreferences mobile) —
+      hanya jawaban final yang bertahan.
+
+  (C) KLIEN LAMA AMAN — sepenuhnya additive & opt-in. Web lama, dan APK
+      **≤2.2.0**, tak pernah mengirim `stream_tokens` → server tak pernah
+      memancarkan `delta`/`reset` → protokol yang mereka lihat identik dengan
+      sebelum hari ini. Klien BARU tetap wajib mengabaikan frame bertipe tak
+      dikenal (aturan lama, biar server boleh tumbuh lebih dulu).
+
+  (D) PARITAS. Web: `aiChatStream(..., onDelta)` di `lib/api.ts` + gelembung
+      draf di `app/asisten/page.tsx` (markdown yang SAMA dengan jawaban final,
+      diredupkan + titik mengetik; tabel separuh jadi memang berkedip sesaat —
+      diterima). Mobile Flutter: `ApiService.aiChatStream(..., onDelta)` +
+      gelembung draf di `AsistenScreen` dengan idiom yang sama.
 ```

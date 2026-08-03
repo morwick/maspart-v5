@@ -2,3 +2,7 @@
 {"waktu": "2026-07-29T19:33:07", "model": "deepseek-v4-flash", "pass": 1, "fail": 0, "total": 1, "net": false, "filter": "konteks-rangka", "gagal_id": []}
 {"waktu": "2026-07-29T19:49:30", "model": "deepseek-v4-flash", "pass": 1, "fail": 1, "total": 2, "net": false, "filter": "gejala-", "gagal_id": ["gejala-plus-stok"]}
 {"waktu": "2026-07-29T19:50:45", "model": "deepseek-v4-flash", "pass": 0, "fail": 1, "total": 1, "net": false, "filter": "gejala-plus-stok", "gagal_id": ["gejala-plus-stok"]}
+{"waktu": "2026-08-03T20:07:31", "model": "deepseek-v4-flash", "pass": 35, "fail": 5, "total": 40, "net": false, "filter": "", "gagal_id": ["banding-kategori-rem-berbeda", "smartpn-multi-pn", "olah-total-qty", "gejala-plus-stok", "konteks-rangka-user-only"]}
+{"waktu": "2026-08-03T20:18:11", "model": "deepseek-v4-flash", "pass": 0, "fail": 1, "total": 1, "net": false, "filter": "konteks-rangka", "gagal_id": ["konteks-rangka-user-only"]}
+{"waktu": "2026-08-03T20:19:26", "model": "deepseek-v4-flash", "pass": 1, "fail": 0, "total": 1, "net": false, "filter": "konteks-rangka", "gagal_id": []}
+{"waktu": "2026-08-03T20:19:57", "model": "deepseek-v4-flash", "pass": 1, "fail": 0, "total": 1, "net": false, "filter": "konteks-rangka", "gagal_id": []}
