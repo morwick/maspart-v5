@@ -32,7 +32,7 @@ def tercatat(monkeypatch):
         box.update(kw)
         return True
 
-    monkeypatch.setattr(ai.ai_chat_log, "log_turn", fake)
+    monkeypatch.setattr(ai.ai_chat_log, "log_turn_async", fake)
     return box
 
 

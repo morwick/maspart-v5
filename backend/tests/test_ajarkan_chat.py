@@ -375,7 +375,7 @@ def test_key_terdaftar_di_menu_control():
 def test_guard_klaim_ajar_memaksa_koreksi(monkeypatch):
     """Model mengaku mencatat TANPA tool → satu kali koreksi paksa + telemetri."""
     dicatat = {}
-    monkeypatch.setattr(ai.ai_chat_log, "log_turn", lambda **kw: dicatat.update(kw))
+    monkeypatch.setattr(ai.ai_chat_log, "log_turn_async", lambda **kw: dicatat.update(kw))
     balasan = ["Siap, sudah saya catat pengetahuan itu ya.",
                "Maaf, saya belum menyimpannya."]
     n = {"i": 0}

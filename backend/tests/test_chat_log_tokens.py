@@ -31,7 +31,7 @@ def test_token_diakumulasi_dari_semua_panggilan_giliran(monkeypatch):
     monkeypatch.setattr(A, "_run_tool", lambda n, a, u, s="": {"found": True, "hasil": []})
     monkeypatch.setattr(A, "_prefetch_epc_rangka", lambda h: None)
     logged: dict = {}
-    monkeypatch.setattr(A.ai_chat_log, "log_turn",
+    monkeypatch.setattr(A.ai_chat_log, "log_turn_async",
                         lambda **kw: logged.update(kw) or True)
 
     A.chat(ADMIN, [{"role": "user", "content": "cek stok kampas rem"}])
@@ -47,7 +47,7 @@ def test_respons_tanpa_usage_tidak_meledak(monkeypatch):
         "choices": [{"message": {"content": "Halo."}, "finish_reason": "stop"}]})
     monkeypatch.setattr(A, "_prefetch_epc_rangka", lambda h: None)
     logged: dict = {}
-    monkeypatch.setattr(A.ai_chat_log, "log_turn",
+    monkeypatch.setattr(A.ai_chat_log, "log_turn_async",
                         lambda **kw: logged.update(kw) or True)
 
     A.chat(ADMIN, [{"role": "user", "content": "halo"}])

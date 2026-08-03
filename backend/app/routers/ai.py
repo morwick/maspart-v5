@@ -61,6 +61,10 @@ class AIChatRequest(BaseModel):
     # memori sesi server (services/ai_session.py). Opsional: klien lama yang tak
     # mengirimnya tetap berjalan, hanya tanpa ingatan lintas-giliran.
     conversation_id: str = ""
+    # OPT-IN streaming token di /chat-stream: klien yang tahu cara menangani frame
+    # `delta`/`reset` mengirim true. Default false = protokol lama persis (hanya
+    # progress + done), jadi klien web lama & APK 2.2.0 tak terpengaruh.
+    stream_tokens: bool = False
 
 
 class FeedbackRequest(BaseModel):
@@ -125,9 +129,21 @@ def ai_chat(body: AIChatRequest, user: dict = Depends(require_ai)):
 def ai_chat_stream(body: AIChatRequest, user: dict = Depends(require_ai)):
     """Versi STREAMING dari /chat: kirim event STATUS langkah (SSE) selagi asisten
     bekerja ('Mencari di EPC…', 'Mengambil stok…', 'Menyusun jawaban…'), lalu satu
-    event 'done' berisi hasil AKHIR (jawaban sudah disaring guard — tak ada token
-    mentah/PN tak-terverifikasi yang di-stream). chat() dijalankan di thread; label
-    progress dialirkan lewat queue. /chat lama tetap ada (foto/sheet/klien non-stream)."""
+    event 'done' berisi hasil AKHIR. chat() dijalankan di thread; label progress
+    dialirkan lewat queue. /chat lama tetap ada (foto/sheet/klien non-stream).
+
+    Frame: {type:'progress'|'delta'|'reset'|'done'|'error'}.
+
+    ⚠️ `stream_tokens:true` (OPT-IN) MEMBALIKKAN keputusan lama "tak ada token
+    mentah di-stream". Alasannya diukur, bukan selera: giliran p50 15 dtk / p90 46
+    dtk dilewatkan user dengan layar kosong, padahal teksnya sudah ditulis model
+    sejak detik ke-3. Pembalikan ini disetujui pemilik dengan pagar:
+      - yang dialirkan adalah DRAF ('delta'), blok [PIKIR] sudah disaring;
+      - begitu guard menyala (±19% giliran: PN tak ter-ground, klaim Excel, DTC/
+        EPC-first) server mengirim 'reset' → klien WAJIB mengosongkan draf;
+      - frame 'done' tetap SATU-SATUNYA kebenaran dan selalu berisi teks yang
+        sudah lewat semua guard — ia MENGGANTI seluruh draf, bukan menambahnya.
+    Tanpa `stream_tokens` protokolnya identik dengan sebelumnya (progress+done)."""
     _tolak_bila_perbaikan(user)
     history = [{"role": m.role, "content": m.content} for m in body.messages]
     if not any(m["role"] == "user" and m["content"].strip() for m in history):
@@ -139,10 +155,15 @@ def ai_chat_stream(body: AIChatRequest, user: dict = Depends(require_ai)):
 
     def _run():
         try:
+            # Kwarg on_delta KONDISIONAL: tanpa opt-in, chat() dipanggil dengan
+            # tanda tangan yang persis sama seperti sebelum fitur ini.
+            kw: dict = {}
+            if body.stream_tokens:
+                kw["on_delta"] = lambda potongan: q.put(("delta", potongan))
             box["result"] = ai_assistant.chat(
                 user, history, sheet_id=(body.sheet_id or "").strip(),
                 on_progress=lambda label: q.put(("progress", label)),
-                conversation_id=(body.conversation_id or "").strip())
+                conversation_id=(body.conversation_id or "").strip(), **kw)
         except ai_assistant.AINotConfigured:
             box["error"] = "Asisten AI belum dikonfigurasi (DEEPSEEK_API_KEY kosong)."
         except Exception as e:  # pragma: no cover - dijaga generator
@@ -160,6 +181,11 @@ def ai_chat_stream(body: AIChatRequest, user: dict = Depends(require_ai)):
             kind, payload = q.get()
             if kind is _SENTINEL:
                 break
+            if kind == "delta":
+                # payload None = draf dibatalkan (guard/retry) → klien kosongkan.
+                yield _frame({"type": "reset"} if payload is None
+                             else {"type": "delta", "text": payload})
+                continue
             yield _frame({"type": "progress", "label": payload})
         if "error" in box:
             yield _frame({"type": "error", "message": box["error"]})

@@ -52,27 +52,30 @@ def test_session_id_ikut_tercatat(kirim):
 
 def test_kolom_session_belum_ada_tetap_tercatat(kirim):
     """Migrasi 025 belum dijalankan → turun tingkat sampai lolos, log TIDAK hilang.
-    Sejak migrations/026 (guard_kinds) tangganya bertambah satu anak, jadi dua
-    tingkat teratas sama-sama membawa session_id dan sama-sama ditolak."""
+    Sejak migrations/026 (guard_kinds) & 029 (fase ms) tangganya bertambah dua
+    anak, jadi tiga tingkat teratas sama-sama membawa session_id dan sama-sama
+    ditolak."""
     rekam, state = kirim
     state["tolak"] = {"session_id"}
     assert _log(session_id="conv-123-abc") is True
-    assert len(rekam) == 3
-    assert "session_id" in rekam[0] and "guard_kinds" in rekam[0]
-    assert "session_id" in rekam[1] and "guard_kinds" not in rekam[1]
-    assert "session_id" not in rekam[2]          # tingkat yang akhirnya lolos
-    assert rekam[2]["tools_failed"] is None or "tools_failed" in rekam[2]
+    assert len(rekam) == 4
+    assert "session_id" in rekam[0] and "model_ms" in rekam[0]
+    assert "session_id" in rekam[1] and "model_ms" not in rekam[1]
+    assert "session_id" in rekam[2] and "guard_kinds" not in rekam[2]
+    assert "session_id" not in rekam[3]          # tingkat yang akhirnya lolos
+    assert rekam[3]["tools_failed"] is None or "tools_failed" in rekam[3]
 
 
 def test_kolom_guard_kinds_belum_ada_tetap_tercatat(kirim):
-    """Migrasi 026 belum dijalankan → turun SATU tingkat; session_id tetap ikut."""
+    """Migrasi 026 belum dijalankan → turun DUA tingkat (029 di atasnya ikut
+    membawa guard_kinds); session_id tetap ikut."""
     rekam, state = kirim
     state["tolak"] = {"guard_kinds"}
     assert _log(session_id="c-1", guard_kinds=["dtc"]) is True
-    assert len(rekam) == 2
+    assert len(rekam) == 3
     assert rekam[0]["guard_kinds"] == "dtc"
-    assert "guard_kinds" not in rekam[1]
-    assert rekam[1]["session_id"] == "c-1"       # kolom lain TIDAK ikut hilang
+    assert "guard_kinds" not in rekam[2]
+    assert rekam[2]["session_id"] == "c-1"       # kolom lain TIDAK ikut hilang
 
 
 def test_guard_kinds_tercatat_sebagai_daftar_koma(kirim):

@@ -13,7 +13,7 @@ def _hermetik(monkeypatch):
     monkeypatch.setattr(ai, "_tool_specs", lambda user, sheet_id="": [])
     monkeypatch.setattr(ai, "_unit_name_tokens", lambda: set())
     monkeypatch.setattr(ai, "_prefetch_epc_rangka", lambda h: None)
-    monkeypatch.setattr(ai.ai_chat_log, "log_turn", lambda **kw: True)
+    monkeypatch.setattr(ai.ai_chat_log, "log_turn_async", lambda **kw: True)
 
 
 def _seq(monkeypatch, seq):

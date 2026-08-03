@@ -155,7 +155,7 @@ def test_batas_tak_mencemari_telemetri_err(monkeypatch):
     ]
     _stub_model(monkeypatch, seq)
     logged = {}
-    monkeypatch.setattr(ai.ai_chat_log, "log_turn",
+    monkeypatch.setattr(ai.ai_chat_log, "log_turn_async",
                         lambda **kw: logged.update(kw) or True)
     ai.chat(USER, [{"role": "user", "content": "cari"}])
     assert "cari_part:err" not in (logged.get("tools_failed") or [])

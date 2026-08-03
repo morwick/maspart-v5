@@ -100,7 +100,7 @@ def test_chat_mencatat_tools_failed_bersuffix(monkeypatch):
 
     monkeypatch.setattr(ai, "_post_chat", fake)
     captured = {}
-    monkeypatch.setattr(ai.ai_chat_log, "log_turn",
+    monkeypatch.setattr(ai.ai_chat_log, "log_turn_async",
                         lambda **kw: captured.update(kw) or True)
     ai.chat(USER, [{"role": "user", "content": "ada part zzz?"}])
     assert captured["tools_failed"] == ["cari_part:nf"]

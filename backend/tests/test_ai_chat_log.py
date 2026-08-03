@@ -137,7 +137,10 @@ def test_summary_kosong(monkeypatch):
     assert ai_chat_log.summary() == {"total": 0}
 
 
-# ── hook di chat() memanggil log_turn dgn metadata benar ────────────────────
+# ── hook di chat() memanggil log_turn_async dgn metadata benar ──────────────
+# chat() mencatat lewat log_turn_async (thread daemon) agar jalur jawaban tak
+# menunggu Supabase; stub di bawah memanggilnya SINKRON supaya tak ada balapan
+# antara assertion dan thread.
 
 def _hermetik(monkeypatch):
     monkeypatch.setattr(ai, "_system_prompt", lambda user: "sys")
@@ -151,7 +154,7 @@ def test_chat_mencatat_giliran(monkeypatch):
                         lambda messages, tools, max_tokens=6000: {"choices": [{"message": {"content": "Halo, siap membantu."},
                                                               "finish_reason": "stop"}]})
     captured = {}
-    monkeypatch.setattr(ai.ai_chat_log, "log_turn",
+    monkeypatch.setattr(ai.ai_chat_log, "log_turn_async",
                         lambda **kw: captured.update(kw) or True)
     out = ai.chat(USER, [{"role": "user", "content": "halo asisten"}])
     assert out["reply"].startswith("Halo")
@@ -170,7 +173,7 @@ def test_chat_catat_outcome_not_found_saat_karangan(monkeypatch):
                         lambda messages, tools, max_tokens=6000: {"choices": [{"message": {"content": "PN AZ9998887776 stok 5."},
                                                               "finish_reason": "stop"}]})
     captured = {}
-    monkeypatch.setattr(ai.ai_chat_log, "log_turn",
+    monkeypatch.setattr(ai.ai_chat_log, "log_turn_async",
                         lambda **kw: captured.update(kw) or True)
     out = ai.chat(USER, [{"role": "user", "content": "cari part"}])
     assert "AZ9998887776" not in out["reply"]

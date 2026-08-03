@@ -15,13 +15,128 @@ class _AIGagalSementara(RuntimeError):
 _FALLBACK_COOLDOWN_S = 600   # primary baru tumbang → 10 mnt langsung ke fallback
 _fallback_until = 0.0        # deadline monotonic; > now = jalur fallback aktif
 
+# Timeout jalur STREAM: (connect, read-ANTAR-CHUNK). Read 30 dtk itu bukan plafon
+# durasi jawaban — selama token terus mengalir, jam-nya di-reset tiap chunk. Yang
+# dibunuh justru kelas outlier "provider diam total" (terlihat di ai_chat_log:
+# giliran 254 dtk) yang di jalur non-stream harus menunggu _TIMEOUT penuh.
+_STREAM_TIMEOUT = (5, 30)
+
+
+def _kirim_delta(cb, potongan) -> None:
+    """Kirim satu potongan draf ke callback streaming (best-effort, tak melempar).
+    `None` = SINYAL RESET: buang draf yang sudah tampil di layar user."""
+    if cb is None:
+        return
+    try:
+        cb(potongan)
+    except Exception:
+        pass
+
+
+def _merge_tool_calls(acc: dict, deltas: list[dict]) -> None:
+    """Gabungkan potongan `delta.tool_calls` SSE ke akumulator per-index.
+    Provider mengirim satu tool_call terpecah beberapa chunk: index tetap, tapi
+    `arguments` datang sepotong-sepotong (dan kadang `id`/`name` juga). Kunci
+    `endswith` dipakai agar dua kelakuan provider sama-sama benar: potongan
+    (dirangkai) maupun pengulangan nilai penuh tiap chunk (tak digandakan)."""
+    for i, d in enumerate(deltas or []):
+        idx = d.get("index")
+        if idx is None:
+            idx = i
+        cur = acc.setdefault(idx, {"id": "", "type": "function",
+                                   "function": {"name": "", "arguments": ""}})
+        _id = d.get("id") or ""
+        if _id and not cur["id"].endswith(_id):
+            cur["id"] += _id
+        if d.get("type"):
+            cur["type"] = d["type"]
+        fn = d.get("function") or {}
+        _nm = fn.get("name") or ""
+        if _nm and not cur["function"]["name"].endswith(_nm):
+            cur["function"]["name"] += _nm
+        # arguments SELALU dirangkai apa adanya — potongan JSON kerap berulang
+        # ('", "' dst) sehingga endswith akan salah membuangnya.
+        cur["function"]["arguments"] += fn.get("arguments") or ""
+
+
+def _baca_stream(r, on_delta, label: str = "DeepSeek") -> dict:
+    """Konsumsi SSE chat-completions → dict berbentuk PERSIS respons NON-stream
+    ({"choices": [{"message": {...}, "finish_reason": ...}], "usage": {...}}).
+
+    Bentuk itu wajib: seluruh pemanggil di bawah (`_add_usage`, `choices[0]
+    .message`, `_finish_reason`) tak boleh tahu jawabannya datang mengalir.
+
+    Aturan draf: begitu `delta.tool_calls` muncul, giliran ini ternyata RONDE
+    TOOL — berhenti meneruskan teks, dan bila teks sempat tampil kirim reset.
+    `delta.reasoning_content` (deepseek-v4-flash) BUKAN bagian jawaban → dibuang.
+    Putus di tengah aliran → reset + _AIGagalSementara (ladder retry/fallback yang
+    sudah ada akan mengulang dari nol)."""
+    potongan: list[str] = []
+    tool_acc: dict = {}
+    finish_reason = None
+    usage: dict = {}
+    sudah_alir = False      # teks pernah benar-benar diteruskan ke klien
+    stop_alir = False       # tool_calls muncul → jangan alirkan teks lagi
+    try:
+        for baris in r.iter_lines(decode_unicode=True):
+            if not baris:
+                continue
+            if isinstance(baris, bytes):        # decode_unicode tak dihormati stub/proxy
+                baris = baris.decode("utf-8", "replace")
+            baris = baris.strip()
+            if not baris.startswith("data:"):
+                continue
+            isi = baris[5:].strip()
+            if isi == "[DONE]":
+                break
+            try:
+                chunk = json.loads(isi)
+            except (ValueError, TypeError):
+                continue
+            if chunk.get("usage"):              # chunk terakhir (include_usage)
+                usage = chunk["usage"]
+            for ch in (chunk.get("choices") or []):
+                if ch.get("finish_reason"):
+                    finish_reason = ch["finish_reason"]
+                d = ch.get("delta") or {}
+                if d.get("tool_calls"):
+                    if not stop_alir:
+                        stop_alir = True
+                        if sudah_alir:
+                            _kirim_delta(on_delta, None)
+                    _merge_tool_calls(tool_acc, d["tool_calls"])
+                teks = d.get("content") or ""
+                if teks:
+                    potongan.append(teks)
+                    if not stop_alir:
+                        _kirim_delta(on_delta, teks)
+                        sudah_alir = True
+    except Exception as e:
+        _kirim_delta(on_delta, None)            # draf separuh jalan → buang
+        raise _AIGagalSementara(
+            f"Aliran jawaban {label} terputus di tengah: {e}") from e
+    finally:
+        try:
+            r.close()
+        except Exception:
+            pass
+    msg: dict = {"role": "assistant", "content": "".join(potongan)}
+    if tool_acc:
+        msg["tool_calls"] = [tool_acc[k] for k in sorted(tool_acc)]
+    return {"choices": [{"index": 0, "message": msg, "finish_reason": finish_reason}],
+            "usage": usage}
+
 
 def _post_provider(base_url: str, api_key: str, model: str, messages: list[dict],
-                   tools: list[dict], max_tokens: int, label: str = "DeepSeek") -> dict:
+                   tools: list[dict], max_tokens: int, label: str = "DeepSeek",
+                   on_delta=None) -> dict:
     """Satu panggilan chat-completions OpenAI-compatible ke SATU provider.
     402 → _AIGagalSementara LANGSUNG (saldo tak pulih dalam 2 detik, jangan
     buang waktu retry); 429/5xx/jaringan setelah 1x retry → _AIGagalSementara;
-    4xx lain (400/401/404) = permanen → RuntimeError polos."""
+    4xx lain (400/401/404) = permanen → RuntimeError polos.
+
+    `on_delta` diberikan → mode STREAM (`stream:true`): potongan jawaban diteruskan
+    ke callback selagi model menulis, hasil akhirnya tetap dict bentuk non-stream."""
     url = f"{base_url.rstrip('/')}/chat/completions"
     payload = {
         "model": model,
@@ -36,6 +151,11 @@ def _post_provider(base_url: str, api_key: str, model: str, messages: list[dict]
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
+    if on_delta is not None:
+        payload["stream"] = True
+        # Tanpa ini chunk usage tak dikirim → tokens_in/out giliran jadi 0 dan
+        # seluruh observabilitas biaya buta di jalur streaming.
+        payload["stream_options"] = {"include_usage": True}
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -44,13 +164,22 @@ def _post_provider(base_url: str, api_key: str, model: str, messages: list[dict]
     # 5xx) — supaya user tak langsung dapat error karena gangguan sesaat.
     for attempt in (1, 2):
         try:
-            r = requests.post(url, headers=headers, json=payload, timeout=_TIMEOUT)
+            if on_delta is not None:
+                r = requests.post(url, headers=headers, json=payload, stream=True,
+                                  timeout=_STREAM_TIMEOUT)
+            else:
+                r = requests.post(url, headers=headers, json=payload, timeout=_TIMEOUT)
         except requests.RequestException as e:
             if attempt == 1:
                 time.sleep(1.5)
                 continue
             raise _AIGagalSementara(f"Gagal menghubungi {label} (jaringan): {e}") from e
         if r.status_code in (429, 500, 502, 503, 504) and attempt == 1:
+            if on_delta is not None:
+                try:      # koneksi stream yang tak jadi dipakai wajib dilepas
+                    r.close()
+                except Exception:
+                    pass
             time.sleep(2)
             continue
         if r.status_code >= 400:
@@ -63,10 +192,13 @@ def _post_provider(base_url: str, api_key: str, model: str, messages: list[dict]
             if r.status_code in (402, 429, 500, 502, 503, 504):
                 raise _AIGagalSementara(msg)
             raise RuntimeError(msg)
+        if on_delta is not None:
+            return _baca_stream(r, on_delta, label)
         return r.json()
 
 
-def _post_chat(messages: list[dict], tools: list[dict], max_tokens: int = 6000) -> dict:
+def _post_chat(messages: list[dict], tools: list[dict], max_tokens: int = 6000,
+               on_delta=None) -> dict:
     """Router provider: DeepSeek utama; gagal-SEMENTARA (402/429/5xx/jaringan)
     → provider cadangan (env AI_FALLBACK_*, payload sama, model di-swap) dengan
     cooldown 10 menit (selama itu langsung fallback, lalu re-probe primary).
@@ -81,12 +213,13 @@ def _post_chat(messages: list[dict], tools: list[dict], max_tokens: int = 6000) 
         try:   # cooldown aktif: primary baru saja tumbang → langsung fallback
             return _post_provider(s.ai_fallback_base_url, s.ai_fallback_api_key,
                                   s.ai_fallback_model, messages, tools, max_tokens,
-                                  label="fallback")
+                                  label="fallback", on_delta=on_delta)
         except Exception:
             _fallback_until = 0.0   # fallback ikut tumbang → probe primary lagi
     try:
         return _post_provider(s.deepseek_base_url, s.deepseek_api_key,
-                              s.deepseek_model, messages, tools, max_tokens)
+                              s.deepseek_model, messages, tools, max_tokens,
+                              on_delta=on_delta)
     except _AIGagalSementara as e:
         if not fb:
             raise                    # perilaku lama persis (subclass RuntimeError)
@@ -95,10 +228,40 @@ def _post_chat(messages: list[dict], tools: list[dict], max_tokens: int = 6000) 
         try:
             return _post_provider(s.ai_fallback_base_url, s.ai_fallback_api_key,
                                   s.ai_fallback_model, messages, tools, max_tokens,
-                                  label="fallback")
+                                  label="fallback", on_delta=on_delta)
         except Exception as e2:
             _fallback_until = 0.0    # dua-duanya mati → jangan kunci ke fallback
             raise e from e2          # error PRIMARY yang muncul ke user
+
+
+def _post_chat_timed(tok: dict, messages: list[dict], tools: list[dict],
+                     max_tokens: int = 6000, on_delta=None) -> dict:
+    """_post_chat + stopwatch → tok["model_ms"] (migrations/029).
+
+    Dipakai di SEMUA titik panggilan model dalam satu giliran, jadi angkanya =
+    total waktu giliran itu MENUNGGU model. Dipasangkan dengan tools_ms, latensi
+    akhirnya bisa dibaca: lambat karena model menulis panjang, atau karena tool
+    eksternal (EPC/SIMS/Accurate) lelet. Sengaja fungsi terpisah, bukan timer
+    di dalam _post_chat: _post_chat di-monkeypatch banyak test.
+
+    ⚠️ `on_delta` diteruskan HANYA bila terisi: puluhan test me-monkeypatch
+    _post_chat dengan `lambda messages, tools, max_tokens=6000` — kwarg tanpa
+    syarat akan memecah semuanya sekaligus."""
+    _t = time.monotonic()
+    try:
+        kw: dict = {"max_tokens": max_tokens}
+        if on_delta is not None:
+            kw["on_delta"] = on_delta
+        return _post_chat(messages, tools, **kw)
+    finally:
+        tok["model_ms"] = int(tok.get("model_ms") or 0) + int((time.monotonic() - _t) * 1000)
+
+
+def _add_tools_ms(tok: dict, t_mulai: float) -> None:
+    """Akumulasi WALL-CLOCK satu blok eksekusi tool ke tok["tools_ms"].
+    Per BLOK, bukan per tool: batch dijalankan paralel, jadi menjumlah durasi
+    tiap tool akan melaporkan waktu yang tak pernah benar-benar dilewati user."""
+    tok["tools_ms"] = int(tok.get("tools_ms") or 0) + int((time.monotonic() - t_mulai) * 1000)
 
 
 def _add_usage(tot: dict, data: dict) -> None:
@@ -749,28 +912,39 @@ def _render_hasil_tool(pool: list[dict]) -> str:
 
 
 def _salvage_or_fallback(pertanyaan: str, pool: list[dict],
-                         tok: dict) -> tuple[str, str]:
+                         tok: dict, on_delta=None) -> tuple[str, str]:
     """SATU pintu menyerah — dipakai kedua titik yang dulu langsung memakai
     _EMPTY_FINAL_MSG. Mengembalikan (reply, outcome).
 
     Urutan: (1) tanpa hasil tool sama sekali → jujur menyerah seperti dulu;
     (2) panggilan model konteks BERSIH; (3) render deterministik (gratis);
     (4) baru menyerah. Sekali pool berisi, user tak akan pernah lagi menerima
-    permintaan maaf kosong."""
+    permintaan maaf kosong.
+
+    `on_delta`: salvage adalah panggilan yang MENULIS jawaban, jadi ia ikut
+    di-stream. Bila salvage gagal/kosong dan jalur turun ke render deterministik,
+    draf yang sempat mengalir dibuang lebih dulu (reset)."""
     if not pool:
         return _EMPTY_FINAL_MSG, "empty"
+    ds = _DeltaStream(on_delta, tok) if on_delta else None
     try:
-        data = _post_chat(_salvage_messages(pertanyaan, pool), [],
-                          max_tokens=_MAX_TOKENS_ANSWER)
+        kw: dict = {"max_tokens": _MAX_TOKENS_ANSWER}
+        if ds is not None:
+            kw["on_delta"] = ds.cb
+        data = _post_chat_timed(tok, _salvage_messages(pertanyaan, pool), [], **kw)
         _add_usage(tok, data)
         teks = _strip_reasoning(
             ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+        if ds is not None:
+            ds.selesai()
         if teks:
             return teks, "salvage_llm"
     except Exception:
         # Salvage adalah jaring pengaman — kegagalannya TIDAK boleh menjatuhkan
         # giliran. Masih ada lantai deterministik di bawah.
         logger.exception("salvage konteks-bersih gagal (lanjut ke render)")
+    if ds is not None:
+        ds.batal()      # apa pun yang sempat tampil bukan jawaban akhir
     render = _render_hasil_tool(pool)
     if render:
         return render, "salvage_render"
@@ -800,6 +974,141 @@ def _strip_reasoning(text: str) -> str:
         return ""
     # Jaring pengaman: buang markup pemanggilan tool yang bocor sebagai teks.
     return _strip_tool_markup(s)
+
+
+# Ekor yang SELALU ditahan sebelum dialirkan: tag "[/PIKIR]" (8 karakter) bisa
+# terbelah antar chunk SSE — tanpa tahanan ini separuh tag bocor ke layar user.
+_GATE_EKOR = 8
+# Jendela teks yang sudah dialirkan, dipakai mendeteksi markup tool yang tag-nya
+# baru lengkap beberapa chunk kemudian ('<invoke name="…' lalu '>' menyusul).
+_GATE_WINDOW = 400
+_PIKIR_TAG = "[pikir]"
+
+
+class _DeltaGate:
+    """Penyaring [PIKIR] versi INKREMENTAL untuk streaming token.
+
+    `_strip_reasoning` bekerja atas teks UTUH; saat token mengalir kita belum
+    punya teks utuh, jadi keputusannya harus diambil dari potongan awal:
+      - awal aliran (setelah lstrip) terbukti BUKAN "[PIKIR" → gerbang dibuka,
+        seluruh tampungan langsung dialirkan;
+      - awalnya "[PIKIR" → tahan SEMUANYA sampai "[/PIKIR]" lengkap lewat
+        (case-insensitive), baru sisanya dialirkan;
+      - masih ambigu (mis. baru "[PI") → tunggu chunk berikutnya.
+    Markup pemanggilan tool yang bocor sebagai teks → gerbang MATI + sinyal
+    supress, agar layar user tak menampilkan `<invoke name="…">`.
+
+    Murni & tanpa efek samping: `feed(potongan) -> str | None` (None = supress)
+    dan `close() -> str` (mengeluarkan ekor tertahan)."""
+
+    def __init__(self) -> None:
+        self._buf = ""        # tampungan yang belum diputuskan/dialirkan
+        self._ekor = ""       # ekor tertahan (jaga-jaga tag terbelah)
+        self._window = ""     # ekor teks yang SUDAH dialirkan (deteksi markup)
+        self._open = False    # True = sudah pasti di wilayah jawaban
+        self._mati = False    # markup tool bocor → berhenti total
+
+    def feed(self, potongan: str) -> "str | None":
+        if self._mati:
+            return ""
+        self._buf += potongan or ""
+        if not self._open:
+            s = self._buf.lstrip()
+            if not s:
+                return ""                     # baru spasi/kosong — tunggu
+            low = s.lower()
+            if low.startswith(_PIKIR_TAG):
+                m = _REASON_CLOSE_RE.search(self._buf)
+                if not m:
+                    return ""                 # masih di dalam nalar — tahan
+                self._buf = self._buf[m.end():]
+                self._open = True
+            elif _PIKIR_TAG.startswith(low[:len(_PIKIR_TAG)]):
+                return ""                     # awalan MASIH mungkin "[PIKIR]"
+            else:
+                self._open = True             # terbukti jawaban — alirkan
+        return self._keluarkan()
+
+    def close(self) -> str:
+        """Akhir aliran: keluarkan ekor yang sengaja ditahan. Gerbang yang tak
+        pernah terbuka = isinya nalar/ambigu → tak ada yang boleh keluar."""
+        if self._mati or not self._open:
+            return ""
+        s = self._ekor + self._buf
+        self._buf = self._ekor = ""
+        if _TOOL_MARKUP_TAG_RE.search(self._window + s):
+            self._mati = True
+            return ""
+        self._window = ""
+        return s
+
+    def _keluarkan(self) -> "str | None":
+        gab = self._window + self._ekor + self._buf
+        if _TOOL_MARKUP_TAG_RE.search(gab):
+            self._mati = True
+            self._buf = self._ekor = self._window = ""
+            return None                       # sinyal supress → pemanggil reset
+        s = self._ekor + self._buf
+        self._buf = ""
+        if len(s) <= _GATE_EKOR:
+            self._ekor = s
+            return ""
+        self._ekor = s[-_GATE_EKOR:]
+        keluar = s[:-_GATE_EKOR]
+        self._window = (self._window + keluar)[-_GATE_WINDOW:]
+        return keluar
+
+
+class _DeltaStream:
+    """Perekat antara _post_provider dan callback `on_delta` milik pemanggil,
+    untuk SATU panggilan model. Tugasnya tiga: menyaring [PIKIR] lewat
+    _DeltaGate, mencatat ttft_ms sekali per giliran, dan memastikan setiap
+    pembatalan draf sampai ke klien sebagai reset.
+
+    Gate diganti BARU setiap kali reset datang dari luar (retry ladder / provider
+    cadangan mengulang jawaban dari nol). Reset karena markup tool bocor justru
+    TIDAK mengganti gate — gerbang sengaja dibiarkan mati agar sisa markup tak
+    menyusul ke layar."""
+
+    def __init__(self, on_delta, tok: dict, t0: float | None = None) -> None:
+        self._on = on_delta
+        self._tok = tok if tok is not None else {}
+        self._t0 = t0 if t0 is not None else time.monotonic()
+        self._gate = _DeltaGate()
+
+    def cb(self, potongan) -> None:
+        if potongan is None:                  # reset dari provider/ladder
+            self._gate = _DeltaGate()
+            _kirim_delta(self._on, None)
+            return
+        keluar = self._gate.feed(potongan)
+        if keluar is None:                    # markup tool bocor → buang draf
+            _kirim_delta(self._on, None)
+            return
+        if keluar:
+            self._catat_ttft()
+            _kirim_delta(self._on, keluar)
+
+    def selesai(self) -> None:
+        """Panggilan model selesai normal → keluarkan ekor tertahan."""
+        try:
+            ekor = self._gate.close()
+        except Exception:                     # pragma: no cover — jaring pengaman
+            ekor = ""
+        if ekor:
+            self._catat_ttft()
+            _kirim_delta(self._on, ekor)
+
+    def batal(self) -> None:
+        """Draf giliran ini dibuang (guard/retry/salvage) → klien kosongkan."""
+        self._gate = _DeltaGate()
+        _kirim_delta(self._on, None)
+
+    def _catat_ttft(self) -> None:
+        """Waktu sampai potongan jawaban PERTAMA benar-benar tiba di klien —
+        sekali per giliran (panggilan model berikutnya tak menimpanya)."""
+        if not self._tok.get("ttft_ms"):
+            self._tok["ttft_ms"] = max(1, int((time.monotonic() - self._t0) * 1000))
 
 
 _STUB_REASON_MARK = " …[nalar terpotong — diringkas sistem]"
@@ -1338,8 +1647,11 @@ def _emit(cb, label: str) -> None:
             pass
 
 
+_LBL_RAPI = "Memeriksa & merapikan jawaban…"
+
+
 def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
-         conversation_id: str = "") -> dict:
+         conversation_id: str = "", on_delta=None) -> dict:
     """
     Jalankan satu giliran percakapan.
     `history`: list {role: 'user'|'assistant', content: str} — termasuk pesan
@@ -1349,6 +1661,11 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     `conversation_id`: id percakapan dari klien → memori sesi server (ai_session):
     PN/angka hasil tool + slot rangka/mesin/WO giliran lalu. Kosong (klien lama)
     atau AI_SESSION_MEMORY=0 → asisten berperilaku persis seperti sebelum fitur ini.
+    `on_delta`: callback DRAF streaming (opt-in, dipakai /chat-stream).
+      - `on_delta(str)` = potongan teks jawaban, [PIKIR] sudah tersaring;
+      - `on_delta(None)` = RESET, draf yang sudah tampil dibuang (guard menyala /
+        retry / pindah ke salvage). Jawaban yang SAH tetap `reply` di return —
+        draf hanyalah pratinjau supaya user tak menatap layar kosong 20 detik.
     Return {"reply": str, "tools_used": [nama, ...]}.
     """
     _t0 = time.monotonic()
@@ -1737,7 +2054,10 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             except Exception:  # pragma: no cover
                 logger.exception("gagal menyimpan memori sesi (dilewati)")
         try:
-            ai_chat_log.log_turn(
+            # ASINKRON: menulis observabilitas TIDAK boleh menambah detik ke
+            # latensi yang dirasakan user — user sudah menunggu jawaban ini
+            # belasan detik, POST ke Supabase adalah urusan kita, bukan dia.
+            ai_chat_log.log_turn_async(
                 username=user.get("username"), role=user.get("role"),
                 question=_pertanyaan, tools_used=tools_used,
                 rounds=tool_rounds, latency_ms=int((time.monotonic() - _t0) * 1000),
@@ -1750,7 +2070,11 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 tokens_in=_tok["in"], tokens_out=_tok["out"],
                 tokens_cache_hit=_tok["cache"], api_calls=_tok["calls"],
                 reply=reply or "", tools_failed=tools_failed,
-                session_id=conversation_id)
+                session_id=conversation_id,
+                # Pecahan latensi (migrations/029): tanpa ini `latency_ms` hanya
+                # bilang giliran lambat, bukan lambat DI MANA.
+                model_ms=_tok["model_ms"], tools_ms=_tok["tools_ms"],
+                ttft_ms=_tok["ttft_ms"])
         except Exception:
             pass
         out = {"reply": reply, "tools_used": tools_used,
@@ -1796,9 +2120,34 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     # Indeks pesan HASIL TOOL (+ ronde) untuk memangkas isi ronde lama → hemat token.
     _tool_msg_idx: list[dict] = []
     # Biaya token DeepSeek giliran ini (jumlah SEMUA panggilan API-nya) → ai_chat_log.
-    _tok = {"in": 0, "out": 0, "cache": 0, "calls": 0}
+    # model_ms/tools_ms/ttft_ms = pecahan LATENSI giliran (migrations/029): menunggu
+    # model vs menunggu tool, plus waktu sampai potongan jawaban pertama tiba di
+    # klien (ttft_ms tetap 0 bila giliran ini tak di-stream / drafnya tak pernah
+    # lolos gerbang [PIKIR]).
+    _tok = {"in": 0, "out": 0, "cache": 0, "calls": 0,
+            "model_ms": 0, "tools_ms": 0, "ttft_ms": 0}
     _MAX_ITERS = _MAX_TOOL_ROUNDS + _MAX_EMPTY_RETRIES + _MAX_GUARD_RETRIES + 4
     #            (+1 koreksi klaim-Excel; +1 koreksi EPC-first; +2 pagar lama)
+
+    def _panggil_jawaban(msgs: list[dict], tls: list[dict], max_tokens: int) -> dict:
+        """Panggilan model yang KEMUNGKINAN menulis jawaban → di-stream bila klien
+        memintanya. Gate baru tiap panggilan: retry/koreksi menulis jawaban dari
+        nol, jadi sisa buffer panggilan sebelumnya tak boleh ikut mengalir."""
+        if not on_delta:
+            return _post_chat_timed(_tok, msgs, tls, max_tokens=max_tokens)
+        ds = _DeltaStream(on_delta, _tok, _t0)
+        data = _post_chat_timed(_tok, msgs, tls, max_tokens=max_tokens, on_delta=ds.cb)
+        ds.selesai()
+        return data
+
+    def _buang_draf() -> None:
+        """Draf yang mungkin sudah tampil di layar user DIBATALKAN (guard menyala /
+        retry / pindah ke salvage). Klien mengosongkan gelembung jawaban lalu
+        kembali ke status — frame `done` tetap satu-satunya kebenaran."""
+        if on_delta:
+            _kirim_delta(on_delta, None)
+            _emit(on_progress, _LBL_RAPI)
+
     _emit(on_progress, "Memproses pertanyaan…")
     while _iters < _MAX_ITERS:
         _iters += 1
@@ -1808,16 +2157,20 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         # Ronde tool habis / retry jawaban-langsung → jangan tawarkan tool lagi, paksa
         # jawaban final dgn budget output lebih besar (nalar atas hasil besar bisa panjang).
         if tools_habis or force_direct:
-            data = _post_chat(messages, [], max_tokens=_MAX_TOKENS_ANSWER)
+            data = _panggil_jawaban(messages, [], _MAX_TOKENS_ANSWER)
             force_direct = False
-        else:
+        elif tool_rounds >= 1:
             # Setelah ronde tool pertama, panggilan ini kerap yang MENULIS jawaban
             # final — beri budget output besar agar [PIKIR]+jawaban tak terpotong
             # (truncation-empty memicu salvage ~28k token). max_tokens = PLAFON, bukan
-            # belanja: gratis kecuali token benar-benar dibuat. Ronde-0 (perencanaan
-            # murni, hampir selalu balas tool_calls) cukup budget default.
-            data = _post_chat(messages, tools,
-                              max_tokens=(_MAX_TOKENS_ANSWER if tool_rounds >= 1 else 6000))
+            # belanja: gratis kecuali token benar-benar dibuat. Karena kerap
+            # menulis jawaban, ia juga ikut di-stream (bila balasannya ternyata
+            # tool_calls, _post_provider yang membatalkan drafnya).
+            data = _panggil_jawaban(messages, tools, _MAX_TOKENS_ANSWER)
+        else:
+            # Ronde-0 (perencanaan murni, hampir selalu balas tool_calls) cukup
+            # budget default — dan tak perlu di-stream sama sekali.
+            data = _post_chat_timed(_tok, messages, tools, max_tokens=6000)
         _add_usage(_tok, data)
         choice = (data.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
@@ -1838,6 +2191,10 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                       else [c for c in _leaked_all if c["name"] == "buat_excel"])
             if leaked:
                 tool_rounds += 1  # leaked = tool BENAR dijalankan → ronde produktif
+                # Teks yang bocor itu markup tool, bukan jawaban — apa pun yang
+                # sempat mengalir ke layar dibuang (gate biasanya sudah menahannya,
+                # ini pagar keduanya).
+                _buang_draf()
                 messages.append({"role": "assistant", "content": _strip_tool_markup(content)})
                 _lbl_seen = []
                 for _lc in leaked:
@@ -1854,9 +2211,13 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                         rangka_tool_attempted = True
                     if name in ("cari_kode_kesalahan", "diagnosa"):
                         dtc_tool_attempted = True
+                    # Tool bocor dijalankan BERURUTAN → penjumlahan per panggilan
+                    # di sini memang sama dengan wall-clock blok ini.
+                    _t_tools = time.monotonic()
                     result = _run_tool_turn(name, {**lc_args, "_q_user": q_user_terakhir,
                                                    "_cid": conversation_id},
                                             user, sheet_id)
+                    _add_tools_ms(_tok, _t_tools)
                     tools_used.append(name)
                     _dump = _dump_tool(result, name)
                     _res_pns = _extract_pns(_dump)
@@ -1902,6 +2263,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             if not reply:
                 if empty_retries < _MAX_EMPTY_RETRIES:
                     empty_retries += 1
+                    _buang_draf()   # nalar/potongan tanpa jawaban → jangan disisakan
                     messages.append({"role": "assistant",
                                      "content": _stub_truncated_reasoning(content)})
                     if truncated:
@@ -1917,8 +2279,10 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 # sebuah `continue` akan membuang hasil salvage yang baru saja
                 # dibayar — dan menyuruh model mengoreksi jawaban yang bukan
                 # tulisannya. Rantai kejujuran tetap jalan lewat _sanitize_final.
+                _buang_draf()   # jawaban ditulis ULANG dari konteks bersih
                 _sv_reply, _sv_outcome = _salvage_or_fallback(
-                    q_user_terakhir or _pertanyaan, salvage_pool, _tok)
+                    q_user_terakhir or _pertanyaan, salvage_pool, _tok,
+                    on_delta=on_delta)
                 return _finalize(_sanitize_final(_sv_reply), outcome=_sv_outcome)
             elif truncated:
                 reply += _TRUNCATED_NOTE
@@ -1931,6 +2295,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     and _EXCEL_CLAIM_DONE_RE.search(reply)):
                 excel_claim_retried = True
                 _catat_guard("excel")
+                _buang_draf()
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": _EXCEL_CLAIM_CORRECTION})
                 continue
@@ -1942,6 +2307,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     and _AJAR_CLAIM_OBJ_RE.search(reply)):
                 ajar_claim_retried = True
                 _catat_guard("ajar")
+                _buang_draf()
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": _AJAR_CLAIM_CORRECTION})
                 continue
@@ -1953,6 +2319,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     and any(t in reply.upper() for t in user_dtc_tokens)):
                 dtc_first_retried = True
                 _catat_guard("dtc")
+                _buang_draf()
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": _DTC_FIRST_CORRECTION})
                 continue
@@ -1967,6 +2334,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 if _pn_reply:
                     epc_first_retried = True
                     _catat_guard("epc")
+                    _buang_draf()
                     messages.append({"role": "assistant", "content": content})
                     messages.append({"role": "user", "content": _EPC_FIRST_CORRECTION})
                     continue
@@ -2006,6 +2374,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 _catat_guard("angka")
             if (bad or subst or num_bad) and guard_retries < _MAX_GUARD_RETRIES:
                 guard_retries += 1
+                _buang_draf()   # draf memuat PN/angka yang belum terbukti
                 messages.append({"role": "assistant", "content": content})
                 _corr = []
                 if bad:
@@ -2065,6 +2434,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         # wall-time ronde = tool terlambat, bukan jumlah semuanya. Handler
         # tool read-only & ber-lock sendiri; hasil diproses BERURUTAN di bawah
         # agar urutan pesan/grounding deterministik.
+        _t_tools = time.monotonic()   # wall-clock blok eksekusi tool → _tok["tools_ms"]
         if len(tool_calls) > 1:
             # Panggilan IDENTIK dalam SATU batch di-dedup SEBELUM pool — tanpa
             # ini dua thread paralel lolos cache (race) dan dobel eksekusi.
@@ -2094,6 +2464,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     executed.append((tc, n, a, res))
         else:
             executed = [_exec_call(tool_calls[0])]
+        _add_tools_ms(_tok, _t_tools)
 
         kartu_tanya = None            # sentinel tanya_user giliran ini (maks SATU)
         tanya_pengantar = ""          # teks yang ikut tampil DI ATAS kartu
@@ -2174,17 +2545,18 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         _emit(on_progress, "Menyusun jawaban…")
 
     # Putaran tool habis — minta jawaban final tanpa tool (budget output besar).
-    final = _post_chat(messages, [], max_tokens=_MAX_TOKENS_ANSWER)
+    final = _panggil_jawaban(messages, [], _MAX_TOKENS_ANSWER)
     _add_usage(_tok, final)
     msg = (final.get("choices") or [{}])[0].get("message") or {}
     reply = _strip_reasoning(msg.get("content") or "")
     if not reply:
         # Kosong (kerap nalar [PIKIR] terpotong) → SATU salvage: minta jawaban langsung
         # tanpa [PIKIR] sebelum menyerah ke pesan cadangan.
+        _buang_draf()
         messages.append({"role": "assistant",
                          "content": _stub_truncated_reasoning(msg.get("content") or "")})
         messages.append({"role": "user", "content": _TRUNC_ANSWER_CORRECTION})
-        final = _post_chat(messages, [], max_tokens=_MAX_TOKENS_ANSWER)
+        final = _panggil_jawaban(messages, [], _MAX_TOKENS_ANSWER)
         _add_usage(_tok, final)
         msg = (final.get("choices") or [{}])[0].get("message") or {}
         reply = _strip_reasoning(msg.get("content") or "")
@@ -2192,8 +2564,9 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     if not reply:
         # Dua panggilan konteks-penuh sudah gagal → jangan ulangi konteks yang
         # sama untuk ketiga kalinya; selamatkan dari hasil tool.
+        _buang_draf()
         reply, _sv_outcome = _salvage_or_fallback(
-            q_user_terakhir or _pertanyaan, salvage_pool, _tok)
+            q_user_terakhir or _pertanyaan, salvage_pool, _tok, on_delta=on_delta)
     elif _finish_reason(final) == "length":
         reply += _TRUNCATED_NOTE
     reply = _sanitize_final(reply)

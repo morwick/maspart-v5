@@ -102,7 +102,7 @@ def test_kamus_subset_ikut_pesan_ekor(monkeypatch):
 
     monkeypatch.setattr(A, "_post_chat", _fake_post)
     monkeypatch.setattr(A, "_prefetch_epc_rangka", lambda h: None)
-    monkeypatch.setattr(A.ai_chat_log, "log_turn", lambda **kw: True)
+    monkeypatch.setattr(A.ai_chat_log, "log_turn_async", lambda **kw: True)
     A.chat(ADMIN, [{"role": "user", "content": "ada kampas kopling nx360?"}])
     msgs = sent["messages"]
     # prompt statik hanya MERUJUK nama bloknya; isi kamus (header lengkap +

@@ -14,18 +14,40 @@ import pytest  # noqa: E402
 def _jangan_tulis_observabilitas_prod(request, monkeypatch):
     """Test yang memanggil ai_assistant.chat() TIDAK boleh menulis ke Supabase
     PRODUKSI (kejadian nyata 2026-07-08: 150 baris 'tester' mengotori halaman
-    Observabilitas AI). log_turn di-no-op untuk SEMUA test — kecuali modul
-    test_ai_chat_log* yang memang menguji fungsi itu (mereka mock requests
-    sendiri). Pengecualiannya berbasis PREFIKS: dulu nama persis, sehingga
+    Observabilitas AI). log_turn DAN log_turn_async di-no-op untuk SEMUA test —
+    kecuali modul test_ai_chat_log* yang memang menguji fungsi itu (mereka mock
+    requests sendiri). Pengecualiannya berbasis PREFIKS: dulu nama persis, sehingga
     test_ai_chat_log_session_id ikut di-no-op dan seluruh assertion-nya menguji
-    stub, bukan kode nyata."""
+    stub, bukan kode nyata.
+
+    log_turn_async WAJIB ikut: chat() memakai versi asinkron itu, jadi tanpa
+    no-op-nya thread daemon akan tetap menembak Supabase produksi diam-diam
+    (dan gagalnya pun tak terlihat karena ditelan)."""
     if request.module.__name__.startswith("test_ai_chat_log"):
         return
     try:
         from app.services import ai_chat_log
         monkeypatch.setattr(ai_chat_log, "log_turn", lambda **kw: True)
+        monkeypatch.setattr(ai_chat_log, "log_turn_async", lambda **kw: None)
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_memo_tangga_chat_log():
+    """log_turn mengingat tingkat tangga payload yang terakhir diterima server
+    (variabel modul, umur proses). Antar-test ingatan itu BOCOR: test yang
+    servernya menolak kolom baru meninggalkan memo di tingkat rendah, lalu test
+    berikutnya mendapati payload 'kurang kolom' — dan dengan pytest-randomly,
+    gagalnya berpindah-pindah. Nolkan sebelum & sesudah tiap test."""
+    try:
+        from app.services import ai_chat_log
+        ai_chat_log._tier_memo = 0
+    except Exception:
+        yield
+        return
+    yield
+    ai_chat_log._tier_memo = 0
 
 
 @pytest.fixture(autouse=True)

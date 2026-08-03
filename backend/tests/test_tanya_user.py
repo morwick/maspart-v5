@@ -139,7 +139,7 @@ def test_giliran_berhenti_tanpa_panggilan_model_lagi(monkeypatch):
 def test_giliran_bertanya_dicatat_outcome_tanya(monkeypatch):
     _stub_tool_call(monkeypatch, {"pertanyaan": KARTU})
     dicatat = {}
-    monkeypatch.setattr(ai.ai_chat_log, "log_turn",
+    monkeypatch.setattr(ai.ai_chat_log, "log_turn_async",
                         lambda **kw: dicatat.update(kw))
     ai.chat(USER, [{"role": "user", "content": "kampas rem?"}])
     assert dicatat["outcome"] == "tanya"

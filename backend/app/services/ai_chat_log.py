@@ -19,7 +19,11 @@ import requests
 
 from .supabase_client import _rest_url, _service_headers
 
-_TIMEOUT = 10
+# 10 dtk terlalu longgar: log adalah pekerjaan SAMPINGAN giliran chat — bila
+# Supabase lambat, lebih baik cepat menyerah (log_turn best-effort) daripada
+# menahan thread. Ditulis lewat log_turn_async pun, thread-nya jangan menganggur
+# lama-lama di server 1 vCPU.
+_TIMEOUT = 5
 
 
 def _now() -> str:
@@ -60,7 +64,12 @@ def create_table_sql() -> str:
         "  reply text,\n"                                # migrations/022 (teks jawaban AI)
         "  tools_failed text,\n"                         # migrations/023 (tool yang gagal)
         "  session_id text,\n"                           # migrations/025 (percakapan)
-        "  guard_kinds text\n"                           # migrations/026 (guard mana yg menyala)
+        "  guard_kinds text,\n"                          # migrations/026 (guard mana yg menyala)
+        # migrations/029 — pecahan latensi: waktu menunggu MODEL vs menunggu TOOL,
+        # plus waktu sampai potongan jawaban pertama tiba di klien (0 = tak streaming).
+        "  model_ms int not null default 0,\n"
+        "  tools_ms int not null default 0,\n"
+        "  ttft_ms int not null default 0\n"
         ");\n"
         "create index if not exists ai_chat_log_created_idx on ai_chat_log (created_at desc);\n"
         "create index if not exists ai_chat_log_session_idx on ai_chat_log (session_id);\n"
@@ -73,6 +82,11 @@ _REPLY_CAP = 4000  # teks jawaban di-cap (bisa beberapa KB) — cukup utk monito
 # `text`, jadi menaikkan cap tak menambah biaya skema.
 _QUESTION_CAP = 1000
 
+# Indeks tingkat tangga payload yang TERAKHIR diterima Supabase (lihat log_turn).
+# 0 = coba dari tingkat terkaya. Sengaja variabel modul: umur proses, bukan
+# persisten — restart backend otomatis memprobe skema terbaru sekali lagi.
+_tier_memo = 0
+
 
 def log_turn(*, username: str | None, role: str | None, question: str,
              tools_used: list[str] | None, rounds: int, latency_ms: int,
@@ -81,7 +95,8 @@ def log_turn(*, username: str | None, role: str | None, question: str,
              tokens_cache_hit: int = 0, api_calls: int = 0, reply: str = "",
              tools_failed: list[str] | None = None,
              session_id: str = "",
-             guard_kinds: list[str] | None = None) -> bool:
+             guard_kinds: list[str] | None = None,
+             model_ms: int = 0, tools_ms: int = 0, ttft_ms: int = 0) -> bool:
     """Simpan satu baris observabilitas. Best-effort: False bila gagal/tabel absen,
     TAK melempar (pemanggil membungkus lagi, tapi tetap aman di sini).
 
@@ -96,7 +111,12 @@ def log_turn(*, username: str | None, role: str | None, question: str,
     `guard_kinds` = guard MANA yang menyala (migrations/026). Tanpa ini `guard_hit`
     hanya boolean dan — lebih buruk — dulu hanya dinaikkan guard anti-karangan,
     sehingga guard yang justru paling berharga (DTC-FIRST: terbukti menghentikan
-    14 jawaban kode kesalahan SALAH pada 2026-07-16) sama sekali tak terlihat."""
+    14 jawaban kode kesalahan SALAH pada 2026-07-16) sama sekali tak terlihat.
+
+    `model_ms`/`tools_ms`/`ttft_ms` = PECAHAN latensi (migrations/029): berapa ms
+    giliran ini menunggu model vs menunggu tool, dan kapan potongan jawaban
+    pertama sampai ke klien. Tanpa pecahan itu `latency_ms` cuma memberi tahu
+    bahwa giliran lambat, bukan lambat DI MANA."""
     tools = tools_used or []
     gagal = tools_failed or []
     guards = guard_kinds or []
@@ -123,24 +143,60 @@ def log_turn(*, username: str | None, role: str | None, question: str,
     with_reply = {**base, **tok, "reply": (reply or "")[:_REPLY_CAP] or None}
     with_failed = {**with_reply, "tools_failed": (", ".join(gagal) if gagal else None)}
     with_session = {**with_failed, "session_id": (session_id or None)}
-    full = {**with_session, "guard_kinds": (", ".join(guards) if guards else None)}
-    # 6 tingkat berjenjang: +guard_kinds (026) → +session_id (025) → +tools_failed
-    # (023) → reply (022) → token (021) → base. Kolom absen (migrasi belum jalan)
-    # bikin PostgREST balas 400 → coba tingkat berikutnya (log tetap tercatat,
-    # degradasi bertahap).
-    for payload in (full, with_session, with_failed, with_reply, {**base, **tok}, base):
+    with_guard = {**with_session, "guard_kinds": (", ".join(guards) if guards else None)}
+    full = {**with_guard, "model_ms": int(model_ms or 0),
+            "tools_ms": int(tools_ms or 0), "ttft_ms": int(ttft_ms or 0)}
+    # 7 tingkat berjenjang: +fase ms (029) → +guard_kinds (026) → +session_id
+    # (025) → +tools_failed (023) → reply (022) → token (021) → base. Kolom absen
+    # (migrasi belum jalan) bikin PostgREST balas 400 → coba tingkat berikutnya
+    # (log tetap tercatat, degradasi bertahap).
+    tangga = (full, with_guard, with_session, with_failed, with_reply,
+              {**base, **tok}, base)
+    # MEMO tingkat: bila migrasi tertinggal, tingkat teratas ditolak SETIAP
+    # giliran — itu 1-2 POST sia-sia per giliran chat (masing-masing sampai
+    # _TIMEOUT detik). Karena itu tingkat yang TERAKHIR DITERIMA diingat dan
+    # dipakai sebagai titik MULAI. Ingatan bukan kunci: begitu tingkat itu pun
+    # ditolak, ia dibuang dan tangga lanjut turun sampai baris tercatat.
+    # (Setelah migrasi baru dijalankan, proses ini tetap memakai tingkat lamanya
+    # sampai backend restart — lihat catatan di _tier_memo.)
+    global _tier_memo
+    mulai = _tier_memo if 0 <= _tier_memo < len(tangga) else 0
+    for i in range(mulai, len(tangga)):
         try:
             r = requests.post(
                 _rest_url("ai_chat_log"),
                 headers=_service_headers("return=minimal"),
-                json=payload,
+                json=tangga[i],
                 timeout=_TIMEOUT,
             )
             if r.status_code in (200, 201, 204):
+                _tier_memo = i
                 return True
         except Exception:
+            _tier_memo = 0
             return False
+        _tier_memo = 0          # tingkat ini ditolak → ingatan tak lagi sahih
     return False
+
+
+def log_turn_async(**kw) -> None:
+    """log_turn di thread daemon — API-nya sama, tapi TIDAK menunggu.
+
+    Jalur return giliran chat tak boleh terblokir POST ke Supabase: log adalah
+    pekerjaan sampingan, sedangkan user sudah menunggu jawabannya belasan detik.
+    Sebelum ini, Supabase lambat (atau tangga fallback yang menabrak timeout
+    berkali-kali) langsung menambah detik ke latensi yang DIRASAKAN user.
+    Semua exception ditelan — termasuk kegagalan membuat thread."""
+    def _kerja():
+        try:
+            log_turn(**kw)
+        except Exception:       # pragma: no cover - best-effort
+            pass
+
+    try:
+        threading.Thread(target=_kerja, daemon=True, name="chat-log-turn").start()
+    except Exception:           # pragma: no cover - server kehabisan thread
+        pass
 
 
 _SELECT_BASE = ("id,created_at,username,role,question,tools,tools_count,"
@@ -149,15 +205,16 @@ _SELECT_TOKENS = _SELECT_BASE + ",tokens_in,tokens_out,tokens_cache_hit,api_call
 _SELECT_REPLY = _SELECT_TOKENS + ",reply"
 _SELECT_FAILED = _SELECT_REPLY + ",tools_failed"
 _SELECT_SESSION = _SELECT_FAILED + ",session_id"
-_SELECT_FULL = _SELECT_SESSION + ",guard_kinds"
+_SELECT_GUARD = _SELECT_SESSION + ",guard_kinds"
+_SELECT_FULL = _SELECT_GUARD + ",model_ms,tools_ms,ttft_ms"
 
 
 def list_logs(limit: int = 200) -> list[dict]:
     """Baris observabilitas terbaru dulu (untuk halaman admin). Kolom terkaya dicoba
-    dulu (guard_kinds=026, session_id=025, tools_failed=023, reply=022, token=021);
-    skema lama → fallback ke select yang lebih ramping."""
-    for sel in (_SELECT_FULL, _SELECT_SESSION, _SELECT_FAILED, _SELECT_REPLY,
-                _SELECT_TOKENS, _SELECT_BASE):
+    dulu (fase ms=029, guard_kinds=026, session_id=025, tools_failed=023, reply=022,
+    token=021); skema lama → fallback ke select yang lebih ramping."""
+    for sel in (_SELECT_FULL, _SELECT_GUARD, _SELECT_SESSION, _SELECT_FAILED,
+                _SELECT_REPLY, _SELECT_TOKENS, _SELECT_BASE):
         try:
             r = requests.get(
                 _rest_url("ai_chat_log"),
@@ -314,6 +371,19 @@ def summary() -> dict:
         "cache_hit_persen": round(100 * tok_hit / tok_in, 1) if tok_in else 0.0,
     }
 
+    # Pecahan latensi (migrations/029) — sama seperti token: baris pra-migrasi
+    # semua 0, dan ikut dirata-rata akan membuat "menunggu model" terlihat jauh
+    # lebih ringan daripada kenyataannya. Rata-rata HANYA atas baris terukur.
+    fase_rows = [r for r in rows
+                 if int(r.get("model_ms") or 0) > 0 or int(r.get("tools_ms") or 0) > 0]
+    f_model = sum(int(r.get("model_ms") or 0) for r in fase_rows)
+    f_tools = sum(int(r.get("tools_ms") or 0) for r in fase_rows)
+    fase = {
+        "giliran_terukur": len(fase_rows),
+        "rata2_model_ms": round(f_model / len(fase_rows)) if fase_rows else 0,
+        "rata2_tools_ms": round(f_tools / len(fase_rows)) if fase_rows else 0,
+    }
+
     return {
         "total": n,
         "latensi_ms": {"p50": _pct(50), "p90": _pct(90), "maks": lat[-1]},
@@ -327,4 +397,5 @@ def summary() -> dict:
         "tool_gagal_rincian": gagal_rincian,
         "outcome": outcome_freq,
         "token": token,
+        "fase": fase,
     }

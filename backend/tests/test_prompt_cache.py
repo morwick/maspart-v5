@@ -54,7 +54,7 @@ def _capture_messages(monkeypatch, user):
 
     monkeypatch.setattr(A, "_post_chat", _fake_post)
     monkeypatch.setattr(A, "_prefetch_epc_rangka", lambda h: None)
-    monkeypatch.setattr(A.ai_chat_log, "log_turn", lambda **kw: True)
+    monkeypatch.setattr(A.ai_chat_log, "log_turn_async", lambda **kw: True)
     A.chat(user, [{"role": "user", "content": "halo"}])
     return sent["messages"]
 
