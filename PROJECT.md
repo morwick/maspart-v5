@@ -2223,4 +2223,44 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       diredupkan + titik mengetik; tabel separuh jadi memang berkedip sesaat —
       diterima). Mobile Flutter: `ApiService.aiChatStream(..., onDelta)` +
       gelembung draf di `AsistenScreen` dengan idiom yang sama.
+
+  2026-08-04 — STREAMING + INSTRUMENTASI LIVE PENUH; hasil eval; Fase 5 ditunda
+
+  (A) DEPLOY TUNTAS. push.sh backend+frontend → build image → compose
+      --force-recreate; migrasi 029 (`model_ms`,`tools_ms`,`ttft_ms` di
+      ai_chat_log) dijalankan pemilik di Supabase SQL Editor + restart backend
+      → tiap giliran kini mencatat rincian: berapa ms menunggu model, berapa
+      ms eksekusi tool, kapan draf pertama sampai klien. `log_turn` juga jadi
+      NON-BLOCKING (`log_turn_async`, thread daemon) + memo tingkat tangga +
+      timeout 10→5 dtk — jalur return giliran tak lagi bisa tersandera POST
+      Supabase. Panggilan model streaming memakai read-timeout antar-chunk 30
+      dtk → kelas outlier stall 254 dtk (25 Jul) tertutup.
+
+  (B) TEST PRODUKSI 1 GILIRAN ("cari injector sj346500", token admin di-mint
+      via create_access_token DI DALAM container — JWT_SECRET produksi ≠ .env
+      lokal): 381 frame delta tembus Traefik/Coolify TANPA buffering, [PIKIR]
+      tersaring bersih, draf == reply final, 0 reset. Total 21,9 dtk; draf
+      mulai 18,9 dtk (giliran ini didominasi tool EPC ±15 dtk — bukti sisa
+      latensi terbesar kini di tool, bukan model → bahan Fase 5).
+
+  (C) EVAL SEKALI-PAKAI (izin khusus pemilik, 03 Agu): 35/40 lolos; kelima
+      kegagalan BUKAN regresi streaming — 1 saldo DeepSeek habis (402; sudah
+      di-top-up; kasusnya lolos 2× saat diulang), 1 pra-ada sejak 29 Jul
+      (gejala-plus-stok: "ngebul" diarahkan ke elbow, harusnya injector —
+      kandidat perbaikan gejala_map), 3 golden usang (model kini memakai
+      cek_massal_part / hitung_part / tanya_user yang justru benar).
+      `run_evals.py` kini me-no-op log_turn_async juga (eval tak mengotori
+      observabilitas). ⛔ ATURAN PEMILIK SESUDAHNYA: "Jangan ada eval lagi" —
+      verifikasi selanjutnya = pytest offline saja (1864 hijau; 6 merah + 2
+      error koleksi = baseline pra-ada: docx, httpx2, 2 router tak terdaftar).
+
+  (D) FASE 5 DITUNDA SADAR (3-7 hari, tunggu data model_ms/tools_ms): diet
+      [PIKIR] (≤6 baris; ronde lanjutan ≤3), tabel >±15 baris → kartu
+      buat_excel + preview, nf-nudge (tool sama 2× :nf → catatan sistem
+      berhenti variasi argumen; _MAX_CALLS_PER_TOOL=3 tetap rem keras).
+      Kandidat lain yang dipetakan (belum diputuskan): alarm saldo DeepSeek →
+      Telegram, provider fallback (env AI_FALLBACK_* — mekanisme sudah ada),
+      cache/pre-warm BOM EPC per-VIN utk 257 unit armada, rilis APK 2.2.1
+      (bawa streaming mobile), scrub secrets di branch main, Midtrans
+      production, CI pytest, grafik fase di /admin/chat-log.
 ```
