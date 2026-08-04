@@ -95,6 +95,43 @@ def test_parsial_dan_luar_populasi_tak_dihitung(dunia):
     assert d["n_sampel"] == 1
 
 
+def test_suffix_pn_dilebur_ke_pn_dasar(dunia):
+    """WG.../1 di unit A dan WG.../2 di unit B = part SAMA → satu varian
+    ber-PN dasar dgn n_unit 2 (bukan dua varian palsu)."""
+    _tulis_unit(dunia, "PJ295852", [
+        {"pn": "WG9525195010/1", "nama": "Air filter assembly",
+         "nama_cn": "空气滤清器", "qty": 1, "pengganti": []}])
+    _tulis_unit(dunia, "PJ295853", [
+        {"pn": "WG9525195010/2", "nama": "Air filter assembly",
+         "nama_cn": "空气滤清器", "qty": 1, "pengganti": []}])
+    fast_moving.build()
+    d = fast_moving.data()["model"]["ZZ3257V404JF1"]
+    af = [s for s in d["slot"] if s["slot"] == "air filter"][0]
+    assert len(af["varian"]) == 1
+    v = af["varian"][0]
+    assert v["pn"] == "WG9525195010" and v["n_unit"] == 2
+    assert v["pn_sub"] == ["WG9525195010/1", "WG9525195010/2"]
+
+
+def test_nama_generik_dipecah_per_assembly(dunia):
+    """SATU unit memuat 2 PN 'oil seal' berbeda = dua POSISI (bukan varian) →
+    slot dipecah per assembly induk agar porsi n_unit jujur."""
+    rows = [
+        {"pn": "WG7117329002", "nama": "Oil seal", "nama_cn": "油封", "qty": 1,
+         "pengganti": [], "dari_assembly": {"pn": "A1", "nama": "Gearbox"}},
+        {"pn": "AZ4071410051", "nama": "Oil seal", "nama_cn": "油封", "qty": 4,
+         "pengganti": [], "dari_assembly": {"pn": "A2", "nama": "Wheel hub"}},
+    ]
+    _tulis_unit(dunia, "PJ295852", rows)
+    _tulis_unit(dunia, "PJ295853", rows)
+    fast_moving.build()
+    d = fast_moving.data()["model"]["ZZ3257V404JF1"]
+    nama_slot = sorted(s["slot"] for s in d["slot"])
+    assert nama_slot == ["oil seal — gearbox", "oil seal — wheel hub"]
+    for s in d["slot"]:
+        assert len(s["varian"]) == 1 and s["varian"][0]["n_unit"] == 2
+
+
 def test_kamus_file_menimpa_default(dunia):
     fm = dunia / "fast_moving"
     fm.mkdir()

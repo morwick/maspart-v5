@@ -143,6 +143,11 @@ def _slot_key(nama_en: str, nama_cn: str) -> str:
     return s or " ".join((nama_cn or "").split())
 
 
+# PN suffix varian ('/1', '/2') = part SAMA (aturan bisnis yang juga dipegang
+# accurate.index_key) — dilebur ke PN dasar; suffix aslinya disimpan di pn_sub.
+_SUFFIX_RE = re.compile(r"/\d{1,2}$")
+
+
 def build() -> dict:
     """Bangun data/fast_moving/fast_moving.json.gz dari cache EPC + populasi.
     Return ringkasan {model_n, slot_n, unit_dipakai, unit_tanpa_populasi}."""
@@ -153,7 +158,8 @@ def build() -> dict:
     # populasi per model (SEMUA unit, bukan hanya yang ter-cache)
     pop_model: Counter = Counter(v["model"] for v in peta.values())
 
-    # model → frame sampel → baris terklasifikasi
+    # model → {frame → baris terklasifikasi} (agregasi ditunda: perlu lihat
+    # SEMUA unit dulu untuk membedakan varian vs multi-posisi)
     per_model: dict[str, dict] = {}
     unit_dipakai = unit_tanpa_pop = 0
     for f in sorted(d_items.glob("*.json")) if d_items.exists() else []:
@@ -168,10 +174,10 @@ def build() -> dict:
             continue                 # build parsial = bolong, jangan meracuni porsi
         unit_dipakai += 1
         m = per_model.setdefault(info["model"], {
-            "jenis": Counter(), "unit_sampel": [], "slot": {}})
+            "jenis": Counter(), "unit": {}, "tahun": {}})
         m["jenis"][info["jenis"]] += 1
-        m["unit_sampel"].append(frame)
-        terlihat: set = set()        # (slot, pn) unik per unit — qty>1 ≠ 2 unit
+        m["tahun"][frame] = info["tahun"]
+        baris = m["unit"].setdefault(frame, [])
         for row in rows:
             pn = str(row.get("pn") or "").strip().upper()
             if not pn:
@@ -181,40 +187,76 @@ def build() -> dict:
             kat = _klasifikasi(nama, nama_cn, kamus)
             if not kat:
                 continue
-            sk = (kat, _slot_key(nama, nama_cn))
-            if (sk, pn) in terlihat:
-                continue
-            terlihat.add((sk, pn))
-            slot = m["slot"].setdefault(sk, {})
-            v = slot.setdefault(pn, {
-                "pn": pn, "nama": nama, "nama_cn": nama_cn, "qty": row.get("qty"),
-                "n_unit": 0, "tahun": set(), "pengganti": []})
-            v["n_unit"] += 1
-            if info["tahun"]:
-                v["tahun"].add(info["tahun"])
-            for g in row.get("pengganti") or []:
-                gpn = str((g or {}).get("pn") or "").strip().upper()
-                if gpn and gpn not in v["pengganti"]:
-                    v["pengganti"].append(gpn)
+            baris.append({
+                "kat": kat, "slot": _slot_key(nama, nama_cn),
+                "pn": _SUFFIX_RE.sub("", pn), "pn_asli": pn,
+                "nama": nama, "nama_cn": nama_cn, "qty": row.get("qty"),
+                "assembly": " ".join(str((row.get("dari_assembly") or {})
+                                         .get("nama") or "").split()),
+                "pengganti": [str((g or {}).get("pn") or "").strip().upper()
+                              for g in (row.get("pengganti") or [])
+                              if (g or {}).get("pn")],
+            })
 
     # bentuk final (deterministik: sort model, slot, varian)
     final_model: dict[str, dict] = {}
     slot_n = 0
     for model, m in sorted(per_model.items()):
-        n_sampel = len(m["unit_sampel"])
+        frames = m["unit"]
+        n_sampel = len(frames)
+        # Nama generik ("oil seal") bisa memayungi BEBERAPA POSISI berbeda:
+        # bila SATU unit saja memuat >1 PN dasar utk (kategori, slot) yang sama,
+        # itu multi-posisi (bukan varian antar unit) → pecah per assembly induk
+        # supaya porsi n_unit tiap slot tetap jujur.
+        multi: Counter = Counter()
+        for rows in frames.values():
+            per_slot: dict = {}
+            for r in rows:
+                per_slot.setdefault((r["kat"], r["slot"]), set()).add(r["pn"])
+            for k, pns in per_slot.items():
+                multi[k] = max(multi[k], len(pns))
+
+        def _key(r: dict) -> tuple:
+            if multi[(r["kat"], r["slot"])] > 1 and r["assembly"]:
+                return (r["kat"], f"{r['slot']} — {r['assembly'].lower()}")
+            return (r["kat"], r["slot"])
+
+        agg: dict = {}
+        for frame, rows in frames.items():
+            terlihat: set = set()    # (slot, pn) unik per unit — qty>1 ≠ 2 unit
+            for r in rows:
+                k = _key(r)
+                if (k, r["pn"]) in terlihat:
+                    continue
+                terlihat.add((k, r["pn"]))
+                v = agg.setdefault(k, {}).setdefault(r["pn"], {
+                    "pn": r["pn"], "nama": r["nama"], "nama_cn": r["nama_cn"],
+                    "qty": r["qty"], "n_unit": 0, "tahun": set(),
+                    "pn_sub": set(), "pengganti": []})
+                v["n_unit"] += 1
+                if r["pn_asli"] != r["pn"]:
+                    v["pn_sub"].add(r["pn_asli"])
+                th = m["tahun"].get(frame)
+                if th:
+                    v["tahun"].add(th)
+                for gpn in r["pengganti"]:
+                    if gpn not in v["pengganti"]:
+                        v["pengganti"].append(gpn)
+
         slots = []
-        for (kat, nama_slot), varian in sorted(m["slot"].items()):
+        for (kat, nama_slot), varian in sorted(agg.items()):
             vs = sorted(varian.values(), key=lambda v: (-v["n_unit"], v["pn"]))
             slots.append({
                 "kategori": kat, "slot": nama_slot,
-                "varian": [{**v, "tahun": sorted(v["tahun"])} for v in vs],
+                "varian": [{**v, "tahun": sorted(v["tahun"]),
+                            "pn_sub": sorted(v["pn_sub"])} for v in vs],
             })
             slot_n += 1
         jenis = m["jenis"].most_common(1)[0][0] if m["jenis"] else ""
         final_model[model] = {
             "jenis": jenis, "hp": hp_dari_model(model),
             "unit_populasi": pop_model.get(model, 0),
-            "unit_sampel": sorted(m["unit_sampel"]),
+            "unit_sampel": sorted(frames),
             "n_sampel": n_sampel, "slot": slots,
         }
 
