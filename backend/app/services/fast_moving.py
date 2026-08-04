@@ -221,6 +221,17 @@ def build() -> dict:
                 return (r["kat"], f"{r['slot']} — {r['assembly'].lower()}")
             return (r["kat"], r["slot"])
 
+        # Sisa multi-PN SETELAH dipecah per assembly (mis. sepatu rem kiri+kanan
+        # dalam satu assembly) = KO-EKSIS: keduanya terpasang bersamaan, bukan
+        # varian pilihan → ditandai agar penyaji tidak menyuruh memilih.
+        ko: Counter = Counter()
+        for rows in frames.values():
+            per_k: dict = {}
+            for r in rows:
+                per_k.setdefault(_key(r), set()).add(r["pn"])
+            for k, pns in per_k.items():
+                ko[k] = max(ko[k], len(pns))
+
         agg: dict = {}
         for frame, rows in frames.items():
             terlihat: set = set()    # (slot, pn) unik per unit — qty>1 ≠ 2 unit
@@ -248,6 +259,7 @@ def build() -> dict:
             vs = sorted(varian.values(), key=lambda v: (-v["n_unit"], v["pn"]))
             slots.append({
                 "kategori": kat, "slot": nama_slot,
+                **({"ko_eksis": True} if ko[(kat, nama_slot)] > 1 else {}),
                 "varian": [{**v, "tahun": sorted(v["tahun"]),
                             "pn_sub": sorted(v["pn_sub"])} for v in vs],
             })

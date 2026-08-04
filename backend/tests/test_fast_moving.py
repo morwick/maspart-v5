@@ -130,6 +130,29 @@ def test_nama_generik_dipecah_per_assembly(dunia):
     assert nama_slot == ["oil seal — gearbox", "oil seal — wheel hub"]
     for s in d["slot"]:
         assert len(s["varian"]) == 1 and s["varian"][0]["n_unit"] == 2
+        assert "ko_eksis" not in s
+
+
+def test_ko_eksis_dalam_satu_assembly(dunia):
+    """Dua PN sepatu rem dalam SATU assembly di unit yang sama (kiri+kanan) =
+    ko-eksis: keduanya terpasang, bukan varian pilihan → slot ditandai."""
+    rows = [
+        {"pn": "AZ450045001160", "nama": "Brake shoe", "nama_cn": "制动蹄",
+         "qty": 2, "pengganti": [],
+         "dari_assembly": {"pn": "B1", "nama": "Drum brake"}},
+        {"pn": "AZ450045001161", "nama": "Brake shoe", "nama_cn": "制动蹄",
+         "qty": 2, "pengganti": [],
+         "dari_assembly": {"pn": "B1", "nama": "Drum brake"}},
+    ]
+    _tulis_unit(dunia, "PJ295852", rows)
+    _tulis_unit(dunia, "PJ295853", rows)
+    fast_moving.build()
+    d = fast_moving.data()["model"]["ZZ3257V404JF1"]
+    assert len(d["slot"]) == 1
+    s = d["slot"][0]
+    assert s["slot"] == "brake shoe — drum brake" and s["ko_eksis"] is True
+    assert [(v["pn"], v["n_unit"]) for v in s["varian"]] == [
+        ("AZ450045001160", 2), ("AZ450045001161", 2)]
 
 
 def test_kamus_file_menimpa_default(dunia):
