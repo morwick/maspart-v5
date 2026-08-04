@@ -85,6 +85,19 @@ def test_gap_kelompok_minimal_3(dunia, monkeypatch):
     assert belajar.gaps() == []
 
 
+def test_gap_abaikan_outcome_tanya(dunia, monkeypatch):
+    """'tanya' = kartu interaktif (tanya_user / konfirmasi ajarkan), bukan
+    kegagalan. Regresi loop meta: 'tampilkan topik gagal…' berakhir 'tanya'
+    berulang → dulu ikut tercatat gap → ditawarkan balik utk diajarkan."""
+    rows = [{"created_at": f"2026-08-04T01:0{i}:00Z",
+             "question": "tampilkan topik berulang gagal kamu jawab lalu bantu "
+                         "saya mengajarkannya satu per satu",
+             "tools_failed": "", "outcome": "tanya"} for i in range(4)]
+    _logs(monkeypatch, rows)
+    belajar.mine_chat_logs()
+    assert belajar.gaps() == []
+
+
 def test_edges_dari_disk_tanpa_jaringan(dunia, monkeypatch):
     d = dunia / "epc_unit_items"
     d.mkdir()

@@ -43,6 +43,12 @@ _SCHED_STARTUP_DELAY = 900          # tunggu part_index & warmer lain siap
 _MINE_LOG_LIMIT = 500
 _GAP_MIN_JUMLAH = 3                 # kelompok pertanyaan gagal ≥3 = gap
 _GAP_MAX = 100
+# Outcome yang BUKAN kegagalan utk gap topik: "tanya" = giliran berakhir kartu
+# interaktif (tanya_user / kartu konfirmasi ajarkan) — interaksi normal, user
+# belum selesai. Tanpa pengecualian ini alur ajar memakan dirinya sendiri:
+# "tampilkan topik gagal, bantu ajarkan…" selalu berakhir "tanya" → terhitung
+# gagal berulang → jadi topik gap → ditawarkan balik utk diajarkan (meta).
+_GAP_OUTCOME_BUKAN_GAGAL = ("ok", "tanya")
 
 # Tool ISTILAH: kegagalan nf-nya = kandidat celah kamus sinonim.
 _TOOL_ISTILAH_NF = ("cari_part", "cari_part_di_unit", "stok_gudang",
@@ -206,7 +212,7 @@ def mine_chat_logs(limit: int = _MINE_LOG_LIMIT) -> dict:
         #     lintas-hari di state; publik hanya kelompok ≥ ambang)
         acc: dict = dict(state.get("gap_acc") or {})
         for r in baru:
-            if (r.get("outcome") or "ok") == "ok":
+            if (r.get("outcome") or "ok") in _GAP_OUTCOME_BUKAN_GAGAL:
                 continue
             q = " ".join(str(r.get("question") or "").split())
             key = _gap_key(q)
