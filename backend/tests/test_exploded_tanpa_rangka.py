@@ -46,7 +46,9 @@ _ITEMS = {
 def epc_stub(monkeypatch):
     panggilan = []
 
-    def fake_get_auto(url, params):
+    # **kw: _get_auto kini menerima timeout/retries (jalur GLOBAL pakai yang panjang
+    # — respons t=global bisa belasan MB; lihat test_epc_timeout_global.py).
+    def fake_get_auto(url, params, **kw):
         panggilan.append((url, dict(params)))
         if url == epc_bom._REVERSE_URL:
             return _REVERSE
@@ -82,7 +84,7 @@ def test_figure_global_tanpa_rangka_sama_sekali(epc_stub):
 
 def test_figure_global_cadangan_bila_pn_tak_terdeteksi(monkeypatch):
     """Figure ber-SVG tapi PN tak terlihat di items → tetap dipakai (balon None)."""
-    def fake(url, params):
+    def fake(url, params, **kw):
         if url == epc_bom._REVERSE_URL:
             return {"data": [_REVERSE["data"][0]]}
         return _ITEMS["FIG-TANPA-PN"]
@@ -136,7 +138,7 @@ def test_endpoint_cache_per_pn(epc_stub, monkeypatch):
 
 
 def test_endpoint_gagal_tidak_dicache(monkeypatch):
-    monkeypatch.setattr(epc_bom, "_get_auto", lambda u, p: {"data": []})
+    monkeypatch.setattr(epc_bom, "_get_auto", lambda u, p, **kw: {"data": []})
     out = parts_router.exploded_figure_global(pn=PN, _user=USER)
     assert out["found"] is False and "alasan" in out
     assert parts_router._exploded_cache == {}, "kegagalan EPC sesaat jangan di-cache"

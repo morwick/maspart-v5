@@ -152,9 +152,13 @@ def available() -> bool:
     return bool(_token())
 
 
-def _get(url: str, params: dict) -> dict:
+def _get(url: str, params: dict, timeout: int = 30, retries: int = 3) -> dict:
     """GET ber-token → {'data': ...} atau {'_err': <kode>, 'message': ...}.
-    Kode _err: no_token | network | token_expired | api."""
+    Kode _err: no_token | network | token_expired | api.
+
+    `timeout`/`retries` bisa dinaikkan untuk endpoint yang memang RAKSASA
+    (lihat _TIMEOUT_GLOBAL) — 30 dtk cukup untuk hampir semua panggilan Atlas,
+    tapi jadi vonis 'network' palsu pada respons belasan MB."""
     tok = _token()
     if not tok:
         return {"_err": "no_token"}
@@ -169,13 +173,15 @@ def _get(url: str, params: dict) -> dict:
     # satu blip jangan jatuhkan seluruh hasil. Retry ringan utk error JARINGAN saja
     # (bukan api/token — itu bukan transient).
     j = None
-    for attempt in range(3):
+    n = max(1, int(retries))
+    for attempt in range(n):
         try:
-            r = requests.get(url, params=params, headers=headers, timeout=30, verify=False)
+            r = requests.get(url, params=params, headers=headers,
+                             timeout=timeout, verify=False)
             j = r.json()
             break
         except Exception:
-            if attempt == 2:
+            if attempt == n - 1:
                 return {"_err": "network"}
             time.sleep(1.0 + attempt)
     # EPC/proxy kadang balas JSON non-objek (null/array/string) → jangan crash di .get.
@@ -194,17 +200,28 @@ def _get(url: str, params: dict) -> dict:
     return {"data": j.get("data")}
 
 
-def _get_auto(url: str, params: dict) -> dict:
+def _get_auto(url: str, params: dict, **kw) -> dict:
     """_get + AUTO-REFRESH token via SSO bila kedaluwarsa, lalu coba sekali lagi.
-    Transparan: user tak perlu tahu, admin tak perlu isi token manual."""
-    res = _get(url, params)
+    Transparan: user tak perlu tahu, admin tak perlu isi token manual.
+    `**kw` (timeout/retries) diteruskan apa adanya ke _get."""
+    res = _get(url, params, **kw)
     if res.get("_err") in ("token_expired", "no_token"):
         with _refresh_lock:
             # Mungkin thread lain sudah me-refresh — coba ulang dulu sebelum login lagi.
-            res = _get(url, params)
+            res = _get(url, params, **kw)
             if res.get("_err") in ("token_expired", "no_token") and refresh_token():
-                res = _get(url, params)
+                res = _get(url, params, **kw)
     return res
+
+
+# Reverse GLOBAL (`t=global`) = daftar SEMUA figure pemakai satu PN lintas seluruh
+# model. Untuk PN yang dipakai di mana-mana ini raksasa: WG9000361402 terukur
+# 13,6 MB / 47.525 baris / 48,5 dtk (produksi, 2026-08-04) — di atas timeout 30
+# dtk, sehingga 3 percobaan habis dan hasilnya divonis '_err=network' padahal
+# server EPC baik-baik saja. Retry dikurangi jadi 2: satu percobaan saja sudah
+# ±1 menit, tiga kali menggantung giliran chat tanpa guna.
+_TIMEOUT_GLOBAL = 120
+_RETRIES_GLOBAL = 2
 
 
 # BOM kendaraan penuh Sinotruk biasanya ratusan–ribuan part. Respons di bawah ini
@@ -422,7 +439,8 @@ def reverse_part(pn: str) -> dict:
                              for x in matches[:10]]}
 
     # 2) reverse: daftar kendaraan/model yang memakai PN itu.
-    rv = _get_auto(_REVERSE_URL, {"t": "global", "v": pn, "k": pn})
+    rv = _get_auto(_REVERSE_URL, {"t": "global", "v": pn, "k": pn},
+                   timeout=_TIMEOUT_GLOBAL, retries=_RETRIES_GLOBAL)
     if "_err" in rv:
         return {"found": False, "part_number": pn, "_err": rv["_err"]}
     rows = rv.get("data") or []
@@ -1062,7 +1080,8 @@ def assembly_components_global(pn: str, max_figures: int = 10,
     pnu = (pn or "").strip().upper()
     if not pnu:
         return {"found": False, "_err": "input"}
-    res = _get_auto(_REVERSE_URL, {"t": "global", "k": pnu})
+    res = _get_auto(_REVERSE_URL, {"t": "global", "k": pnu},
+                    timeout=_TIMEOUT_GLOBAL, retries=_RETRIES_GLOBAL)
     if "_err" in res:
         return {"found": False, "_err": res["_err"]}
     rows = [d for d in (res.get("data") or []) if isinstance(d, dict)]
@@ -1155,7 +1174,8 @@ def figure_global(pn: str, max_figures: int = 4) -> dict:
     pnu = (pn or "").strip().upper()
     if not pnu:
         return {"found": False, "_err": "input"}
-    res = _get_auto(_REVERSE_URL, {"t": "global", "k": pnu})
+    res = _get_auto(_REVERSE_URL, {"t": "global", "k": pnu},
+                    timeout=_TIMEOUT_GLOBAL, retries=_RETRIES_GLOBAL)
     if "_err" in res:
         return {"found": False, "_err": res["_err"]}
     rows = [d for d in (res.get("data") or []) if isinstance(d, dict)]

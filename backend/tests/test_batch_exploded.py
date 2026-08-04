@@ -68,7 +68,7 @@ def epc_stub(monkeypatch):
     """Stub EPC + render. Mengembalikan daftar panggilan untuk dihitung test."""
     panggilan: list[tuple] = []
 
-    def fake_get_auto(url, params):
+    def fake_get_auto(url, params, **kw):     # **kw: timeout/retries jalur GLOBAL
         panggilan.append((url, dict(params)))
         if url == epc_bom._REVERSE_URL:
             return _REVERSE
@@ -323,7 +323,7 @@ def test_alias_cache_lama_menunjuk_objek_sama():
 
 
 def test_kegagalan_tidak_dicache(monkeypatch):
-    monkeypatch.setattr(epc_bom, "_get_auto", lambda u, p: {"data": []})
+    monkeypatch.setattr(epc_bom, "_get_auto", lambda u, p, **kw: {"data": []})
     out = parts_router.exploded_figure_global(pn=PN, _user=ADMIN)
     assert out["found"] is False and "alasan" in out
     assert exploded_view.CACHE == {}
