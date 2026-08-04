@@ -142,6 +142,7 @@ _DISPATCH = {
     "banding_rangka": _t_banding_rangka,
     "banding_rangka_massal": _t_banding_rangka_massal,
     "part_aus_dari_rangka": _t_part_aus_dari_rangka,
+    "part_fast_moving": _t_part_fast_moving,
     "repair_kit_transmisi": _t_repair_kit_transmisi,
     "banding_assy": _t_banding_assy,
     "isi_assy": _t_isi_assy,

@@ -1578,6 +1578,7 @@ _TOOL_LABEL = {
     "cari_part_di_unit": "Mencari part di unit (EPC)",
     "detail_part": "Mengambil detail & stok part",
     "part_aus_dari_rangka": "Menelusuri part poros unit (EPC)",
+    "part_fast_moving": "Menyusun daftar part fast moving model",
     "bom_dari_rangka": "Menyusun BOM unit (EPC)",
     "uraikan_mesin": "Menguraikan part mesin (Weichai)",
     "part_dari_mesin": "Mencari part dari nomor mesin (Weichai)",

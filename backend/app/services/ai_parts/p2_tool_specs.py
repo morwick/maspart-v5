@@ -382,6 +382,39 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "part_fast_moving",
+                "description": (
+                    "PART FAST MOVING / part aus rutin per MODEL unit Sinotruk "
+                    "(HOWO/SITRAK/HOMAN) — filter, kampas/sepatu rem, kopling, "
+                    "bearing & seal roda, belt, karet/rubber mount — TURUNAN katalog "
+                    "EPC dari beberapa unit sampel se-model + data populasi, lengkap "
+                    "dengan stok & harga lokal. Pakai untuk: 'part fast moving NX400', "
+                    "'part yang sering diganti SITRAK C7H', 'part apa yang perlu "
+                    "distok untuk armada HOWO 6X4', 'sparepart wajib sedia model X'. "
+                    "Terima label pasaran (NX400 = NX + 400 HP), jenis (HOWO NX 8X4), "
+                    "atau kode model pabrik (ZZ…). Hasil ambigu → tanyakan pilihan ke "
+                    "user. Level MODEL utk perencanaan stok/penawaran; unit SPESIFIK "
+                    "(ada nomor rangka) tetap part_aus_dari_rangka/cari_part_di_unit."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "required": ["model"],
+                    "properties": {
+                        "model": {
+                            "type": "string",
+                            "description": "Model/jenis unit sesuai ucapan user, mis. 'NX400', 'HOWO NX 6X4', 'SITRAK C7H', atau kode model 'ZZ3257V404JF1'.",
+                        },
+                        "kategori": {
+                            "type": "string",
+                            "description": "Opsional, saring satu kategori: filter | rem | kopling | bearing_seal | belt | karet. Kosong = semua.",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "info_part",
                 "description": (
                     "PENGETAHUAN MENDALAM sebuah part / KELUARGA part: fungsi part itu, "

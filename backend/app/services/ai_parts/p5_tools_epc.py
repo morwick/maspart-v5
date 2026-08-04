@@ -3516,3 +3516,128 @@ def _t_sheet_masukkan_fleet(args: dict, user: dict) -> dict:
                         + f". Dilewati: {len(unit_hilang)} unit & {len(fleet_hilang)} fleet tak ditemukan.")}
 
 
+# ═══════════ PART FAST MOVING per model (dataset turunan cache EPC) ═══════════
+# "part fast moving NX400" — label pasaran diterjemahkan ke kode MODEL populasi
+# (NX → JENIS, 400 → HP tersandi di kode model), lalu baca dataset
+# data/fast_moving/fast_moving.json.gz (builder: services/fast_moving.py —
+# slot fungsi + varian ber-porsi n_unit dari unit sampel, hasil diskusi
+# 2026-08-04 soal beda part antar unit se-model).
+
+
+def _fm_norm(s: str) -> str:
+    return " ".join(str(s or "").upper().replace("-", " ").replace("×", "X").split())
+
+
+def _fm_match(q: str, kode: str, m: dict) -> bool:
+    """SEMUA token query harus cocok: teks → substring kode/jenis;
+    3 digit (mis. 400) → HP model; gabungan NX400 dipecah NX + 400."""
+    hay = _fm_norm(f"{kode} {m.get('jenis') or ''}")
+    hay_padat = hay.replace(" ", "")
+    for tok in _fm_norm(q).split():
+        if tok in hay or tok in hay_padat:
+            continue
+        bag = re.findall(r"[A-Z]+|\d+", tok)
+        if not bag:
+            return False
+        for b in bag:
+            if b.isdigit() and len(b) == 3:
+                if m.get("hp") != int(b):
+                    return False
+            elif b not in hay and b not in hay_padat:
+                return False
+    return True
+
+
+def _t_part_fast_moving(args: dict, user: dict) -> dict:
+    from . import fast_moving
+    semua = (fast_moving.data() or {}).get("model") or {}
+    if not semua:
+        return {"error": "Dataset fast moving belum terbangun di server."}
+    q = " ".join(str(args.get("model") or "").split())
+    if not q:
+        return {"error": "Sebutkan model/jenis unitnya, mis. 'NX400', "
+                         "'HOWO NX 6X4', 'SITRAK C7H', atau kode model ZZ…"}
+    kategori = (args.get("kategori") or "").strip().lower()
+
+    cocok = {k: m for k, m in semua.items() if _fm_match(q, k, m)}
+    if not cocok:
+        jenis_hp: dict = {}
+        for k, m in semua.items():
+            j = m.get("jenis") or k
+            if m.get("hp"):
+                jenis_hp.setdefault(j, set()).add(m["hp"])
+        return {"found": False, "model_dicari": q,
+                "tersedia": [{"jenis": j, "hp": sorted(hp)}
+                             for j, hp in sorted(jenis_hp.items())],
+                "catatan": ("Model itu tidak ada di data populasi+EPC kita. "
+                            "Sebutkan pilihan di 'tersedia' ke user (jenis + HP), "
+                            "atau minta nomor rangka satu unitnya untuk diurai "
+                            "langsung dari EPC. ⛔ JANGAN mengarang daftar part.")}
+    if len(cocok) > 1:
+        return {"found": True, "ambigu": True, "model_dicari": q,
+                "kandidat": [{"model": k, "jenis": m.get("jenis"), "hp": m.get("hp"),
+                              "unit_populasi": m.get("unit_populasi"),
+                              "unit_sampel_epc": m.get("n_sampel")}
+                             for k, m in sorted(cocok.items(),
+                                                key=lambda kv: -(kv[1].get("unit_populasi") or 0))][:8],
+                "catatan": ("Lebih dari satu konfigurasi cocok. TANYAKAN user pilih "
+                            "yang mana (sebut jenis, HP, dan jumlah unit populasi "
+                            "masing-masing — boleh lewat tanya_user). Setelah dipilih, "
+                            "panggil lagi tool ini dengan kode 'model' persisnya. "
+                            "JANGAN memilih diam-diam.")}
+
+    kode, m = next(iter(cocok.items()))
+    n = m.get("n_sampel") or 0
+    slot_src = [s for s in m.get("slot") or []
+                if not kategori or s.get("kategori") == kategori]
+    pns = [v["pn"] for s in slot_src for v in s.get("varian") or []]
+    local = part_index.rows_for_pns(pns)
+    boleh_harga = _boleh_harga(user)
+
+    slots = []
+    for s in slot_src:
+        varian = []
+        for v in s.get("varian") or []:
+            lr = local.get(v["pn"], {})
+            item = {"pn": v["pn"], "nama": v["nama"], "qty_per_unit": v.get("qty"),
+                    "dipakai_di_unit": f"{v['n_unit']}/{n}"}
+            if v.get("pn_sub"):
+                item["pn_varian_suffix"] = v["pn_sub"]
+            if len(s.get("varian") or []) > 1 and v.get("tahun"):
+                item["tahun_unit"] = v["tahun"]
+            if v.get("pengganti"):
+                item["pengganti"] = v["pengganti"]
+            if lr:
+                item["stok_total"] = lr.get("stok")
+                if boleh_harga:
+                    item["harga"] = lr.get("harga")
+            else:
+                item["ada_di_inventori"] = False
+            varian.append(item)
+        row = {"kategori": s.get("kategori"), "slot": s.get("slot"),
+               "varian": varian}
+        if s.get("ko_eksis"):
+            row["ko_eksis"] = True
+        slots.append(row)
+
+    return {
+        "found": True, "model": kode, "jenis": m.get("jenis"), "hp": m.get("hp"),
+        "unit_populasi": m.get("unit_populasi"), "unit_sampel_epc": n,
+        "jumlah_slot": len(slots), "kategori_difilter": kategori or None,
+        "slot": slots,
+        "sumber": (f"Dataset fast moving MASPART — turunan katalog EPC per-VIN "
+                   f"dari {n} unit sampel model ini + data populasi."),
+        "catatan": (
+            f"Daftar part fast moving/aus level MODEL (basis {n} unit sampel dari "
+            f"{m.get('unit_populasi')} unit populasi — SEBUTKAN basis ini). Sajikan "
+            "ringkas per kategori. Aturan varian: 'dipakai_di_unit a/b' penuh = "
+            "seragam; slot ber-BEBERAPA varian dgn 'ko_eksis' = PN-PN itu terpasang "
+            "BERSAMAAN di tiap unit (mis. kiri+kanan) — sebut semuanya, JANGAN "
+            "menyuruh memilih; tanpa ko_eksis = varian BERBEDA antar unit — "
+            "tampilkan semua + 'tahun_unit' bila ada, jangan pilih diam-diam. "
+            "Ini untuk PERENCANAAN stok/penawaran: untuk unit spesifik minta nomor "
+            "rangka lalu pakai part_aus_dari_rangka/cari_part_di_unit (per-VIN). "
+            "⛔ JANGAN mengarang PN di luar daftar."),
+    }
+
+

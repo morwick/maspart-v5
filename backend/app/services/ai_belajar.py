@@ -344,6 +344,14 @@ def _tick() -> dict:
         hasil["edges_berubah"] = mine_epc_edges()
     except Exception:
         logger.exception("ai_belajar: mine_epc_edges gagal")
+    # Dataset fast-moving ikut segar harian: cache EPC tumbuh sendiri saat user
+    # menyebut unit (prefetch/stale-refresh) → porsi varian makin akurat.
+    # Penulisan byte-stable (write_json_gz) → tanpa perubahan = no-op.
+    try:
+        from . import fast_moving
+        fast_moving.build()
+    except Exception:
+        logger.exception("ai_belajar: fast_moving.build gagal")
     if hasil["edges_berubah"]:
         try:
             data = knowledge_links.build()
