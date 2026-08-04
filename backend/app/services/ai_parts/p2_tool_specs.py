@@ -1183,8 +1183,13 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "Menemukan FIGURE resmi EPC (Parts Atlas per-VIN) yang memuat "
                     "PN itu + NOMOR BALON-nya, lalu menyajikan gambarnya + daftar balon→part figure "
                     "itu. Gambar hanya muncul saat DIMINTA lewat tool ini (tidak auto-nempel di tiap "
-                    "cek part). Butuh "
-                    "NOMOR RANGKA (per-VIN) + PN + KATEGORI (mempersempit pencarian figure). "
+                    "cek part). Yang WAJIB hanya PN. ADA nomor rangka → jalur per-VIN "
+                    "(paling tepat: figure milik unit itu + daftar balon→part). TANPA "
+                    "rangka → tetap JALAN lewat figure LINTAS-MODEL (figure EPC mana pun "
+                    "yang memuat PN itu) — ⛔ JANGAN menolak & JANGAN mewajibkan user "
+                    "menyebut VIN dulu; cukup sampaikan peringatan lintas-model dari "
+                    "hasil tool, lalu tawarkan cek per-VIN bila unitnya spesifik. "
+                    "'kategori' hanya dipakai di jalur per-VIN (mempersempit figure). "
                     "DUA SISI dalam satu tool (param 'sumber'): 'atlas' (default) = part BODI/"
                     "SASIS/GARDAN/REM/KABIN Sinotruk (Parts Atlas); 'mesin' = part INTERNAL "
                     "MESIN unit bermesin Weichai (piston, liner, klep, injektor, kruk as, "
@@ -1195,13 +1200,13 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "rangka": {"type": "string", "description": "Nomor rangka/VIN unit (gambar diambil per-VIN)."},
+                        "rangka": {"type": "string", "description": "OPSIONAL. Nomor rangka/VIN unit bila diketahui → gambar per-VIN (paling tepat + daftar balon→part). KOSONG = figure lintas-model (tetap jalan; user TAK perlu ditanya VIN lebih dulu)."},
                         "pn": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Part Number untuk MENEMUKAN figure-nya (part yg sedang dibahas). BOLEH ARRAY berisi beberapa PN (maks 4) atau string dipisah ';' — SEMUA diproses dalam SATU panggilan, status per-PN di 'per_pn'; ⛔ JANGAN memanggil tool ini berulang kali per-PN. 'kategori' berlaku utk semua PN; 'balon' hanya utk mode 1 PN."},
                         "kategori": {"type": "string", "description": "Kategori figure untuk mempersempit pencarian: tentukan dari JENIS part (bearing/hub/baut roda → 'gardan depan'/'gardan belakang'; kampas/sepatu rem → 'rem'; piston/liner/klep → 'mesin'; sinkromes/garpu → 'transmisi'; part kabin → 'kabin'; kelistrikan → 'kelistrikan'). Bila belum yakin, KOSONGKAN (tool akan meminta ditentukan). Utk sumber='mesin' boleh kosong = cari di seluruh kelompok mesin."},
                         "balon": {"type": "integer", "description": "OPSIONAL. Bila user minta menyorot NOMOR BALON tertentu di gambar (mis. 'cek baut no 3', 'balon 5 itu apa'), isi nomornya — sistem menyorot balon itu (kuning) di figure yang memuat 'pn' + melaporkan part di balon itu. KOSONG = sorot balon PN-nya sendiri."},
                         "sumber": {"type": "string", "enum": ["atlas", "mesin"], "description": "Sisi EPC: 'atlas' (default, bodi/sasis Sinotruk) atau 'mesin' (EPC Weichai, part internal mesin unit bermesin Weichai). Kosongkan = atlas + auto-fallback mesin."},
                     },
-                    "required": ["rangka", "pn"],
+                    "required": ["pn"],
                 },
             },
         },

@@ -39,6 +39,12 @@ def _t_gambar_exploded(args: dict, user: dict) -> dict:
     else:
         pns = [p.strip().upper() for p in re.split(r"[;,]", str(pn_raw)) if p.strip()]
     pns = list(dict.fromkeys(pns))[:4]
+    # TANPA rangka tiap PN lewat jalur lintas-model yang bisa memakan puluhan detik
+    # saat dingin → batasi 2 PN agar giliran chat tak menggantung. Dipotong secara
+    # TERBUKA (dilaporkan di hasil), bukan diam-diam.
+    dipotong: list[str] = []
+    if not (args.get("rangka") or "").strip() and len(pns) > 2:
+        dipotong, pns = pns[2:], pns[:2]
     if len(pns) <= 1:
         return _t_gambar_exploded_satu({**args, "pn": (pns[0] if pns else "")}, user)
 
@@ -60,10 +66,15 @@ def _t_gambar_exploded(args: dict, user: dict) -> dict:
         per_pn.append(row)
     return {"found": bool(gambar), "pns": pns, "per_pn": per_pn,
             "pn_nihil": nihil, "gambar": gambar[:_MAX_EXPLODED_FIGURES],
+            **({"pn_belum_diproses": dipotong} if dipotong else {}),
             "catatan": ("Gambar exploded SIAP untuk PN ber-found=true (tampil inline "
                         "otomatis). 'pn_nihil' = PN TANPA gambar — sampaikan jujur, "
                         "⛔ jangan mengarang. 'balon' diabaikan pada mode multi-PN — "
-                        "sorot balon hanya via panggilan 1 PN.")}
+                        "sorot balon hanya via panggilan 1 PN."
+                        + (f" ⚠️ Tanpa nomor rangka hanya 2 PN diproses sekaligus; "
+                           f"BELUM diproses: {', '.join(dipotong)} — sampaikan ini & "
+                           "tawarkan memprosesnya di giliran berikutnya."
+                           if dipotong else ""))}
 
 
 def _t_gambar_exploded_mesin(args: dict, user: dict) -> dict:

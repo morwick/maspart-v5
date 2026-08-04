@@ -591,6 +591,60 @@ def _exploded_via_reverse(rangka: str, pn: str, balon_req: int | None) -> dict |
             "sumber": "reverse", "catatan": catatan}
 
 
+def _exploded_tanpa_rangka(pn: str, balon_req: int | None) -> dict:
+    """Exploded view SATU PN TANPA nomor rangka — figure LINTAS-MODEL.
+
+    Memakai `exploded_view` — cache DIBAGI dengan kartu halaman detail part &
+    kolom Batch Download: sekali sebuah PN dibuka di mana pun, panggilan
+    berikutnya instan (figure_untuk_pn sendiri yang mengurus cache).
+
+    ⚠️ Panggilan DINGIN mahal (terukur s/d ±94 dtk di produksi 1 vCPU) — beban
+    chat dibatasi di sisi pemanggil (maks 2 PN per giliran bila tanpa rangka).
+    ⛔ Sengaja TIDAK lewat `bangun_dengan_gerbang`: gerbang itu milik BATCH
+    (satu batch sekaligus); satu PN dari chat yang memegangnya akan membuat user
+    lain yang menekan Batch Download ditolak 'sedang sibuk'. Endpoint satu-PN
+    (/api/parts/exploded-figure) pun tidak mengambil gerbang — samakan.
+
+    ⚠️ Figure-nya bukan milik unit tertentu → peringatan lintas-model WAJIB ikut
+    (satu sumber teks: exploded_view.catatan_lintas_model)."""
+    try:
+        d = exploded_view.figure_untuk_pn(pn)
+    except Exception:
+        return {"found": False,
+                "error": "Gagal mengambil gambar exploded dari EPC. Coba lagi sebentar."}
+    if not d.get("found"):
+        return {"found": False, "part_number": pn,
+                "error": d.get("alasan") or "Figure exploded untuk PN ini tidak ditemukan.",
+                "saran": ("Sebutkan nomor rangka unitnya — jalur per-VIN memakai alamat "
+                          "figure unit itu sendiri dan sering menemukan yang tak terlihat "
+                          "di jalur lintas-model. ⛔ Jangan mengarang gambar/PN.")}
+
+    hl = balon_req if balon_req is not None else d.get("balon")
+    judul = f"Exploded {pn} - {d.get('figure_nama') or 'figure EPC'}"
+    image_id, filename = ai_export.stash_builder(
+        judul, {"kind": "exploded", "svg": d["svg"], "balon": hl}, ext="png")
+    return {
+        "found": True, "tanpa_rangka": True, "part_number": pn,
+        "gambar": [{"image_id": image_id, "filename": filename, "balon": hl,
+                    "nama_figure": d.get("figure_nama"),
+                    "jumlah_item": d.get("jumlah_item")}],
+        "figure_pn": d.get("figure_pn"), "nama_item": d.get("nama_item"),
+        "sumber_model": d.get("sumber_model"),
+        "jumlah_model_pemakai": d.get("jumlah_model_pemakai"),
+        "catatan": (
+            "Gambar exploded view SIAP — tampil OTOMATIS (inline) di bawah jawabanmu; "
+            "⛔ JANGAN buat link/URL/gambar sendiri. "
+            + exploded_view.catatan_lintas_model(d.get("sumber_model"))
+            + " WAJIB sampaikan peringatan lintas-model itu ke user dengan bahasamu "
+            "sendiri, dan tawarkan cek per-VIN bila unitnya spesifik. "
+            + (f"Balon PN ini di figure: {d.get('balon')}. " if d.get("balon") else
+               "Nomor balon PN ini tak terdeteksi di figure — jangan mengarang nomornya. ")
+            + "Daftar balon→part TIDAK tersedia di jalur tanpa-rangka: untuk "
+              "'balon nomor sekian itu part apa', minta nomor rangka lalu panggil "
+              "ulang tool ini dengan rangka."),
+    }
+
+
 def _gambar_exploded_atlas_impl(args: dict, user: dict) -> dict:
     """GAMBAR EXPLODED VIEW EPC untuk SATU PN (per-VIN): temukan figure yang memuat
     PN + NOMOR BALON-nya, siapkan PNG yang tampil INLINE di chat. Reuse Parts Atlas
@@ -598,15 +652,18 @@ def _gambar_exploded_atlas_impl(args: dict, user: dict) -> dict:
     rangka = (args.get("rangka") or "").strip()
     pn = (args.get("pn") or args.get("part_number") or "").strip().upper()
     kategori = (args.get("kategori") or "").strip()
-    if not rangka:
-        return {"error": "Sebutkan nomor rangka/VIN unit — gambar exploded view diambil "
-                         "PER-VIN dari EPC (hanya Sinotruk/HOWO/SITRAK)."}
     if not pn:
         return {"error": "Sebutkan Part Number yang mau ditampilkan gambar exploded view-nya."}
     try:
         balon_req = int(args.get("balon")) if str(args.get("balon") or "").strip() else None
     except (TypeError, ValueError):
         balon_req = None
+    if not rangka:
+        # TANPA nomor rangka (perintah pemilik 2026-08-04): figure LINTAS-MODEL.
+        # Dulu tool ini menolak mentah-mentah dan menyuruh user menyebut VIN,
+        # padahal jalur global sudah ada & dipakai halaman detail part / Batch
+        # Download — user chat saja yang tak kebagian.
+        return _exploded_tanpa_rangka(pn, balon_req)
 
     # JALUR UTAMA: pencarian TERBALIK — PN + rangka langsung ke alamat node-nya,
     # lalu satu panggilan figure. Tak butuh kategori sama sekali. Sebelumnya tool
