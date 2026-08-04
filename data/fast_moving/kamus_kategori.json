@@ -1,0 +1,20 @@
+{
+  "negatif": ["bracket", "clamp", "bolt", "nut", "washer", "screw",
+              "pipe", "hose", "flange", "gasket", "seat wrench"],
+  "kategori": {
+    "filter": ["filter element", "oil filter", "fuel filter", "air filter",
+               "water separator", "filter insert", "cartridge", "滤清器",
+               "滤芯", "干燥筒", "干燥罐"],
+    "rem": ["brake lining", "brake pad", "brake shoe", "brake disc",
+            "brake drum", "摩擦片", "制动蹄", "制动盘", "制动鼓", "刹车片"],
+    "kopling": ["clutch disc", "clutch plate", "clutch driven",
+                "pressure plate", "release bearing", "离合器片",
+                "压盘", "分离轴承", "从动盘"],
+    "bearing_seal": ["hub bearing", "wheel bearing", "oil seal",
+                     "轮毂轴承", "油封"],
+    "belt": ["v-belt", "fan belt", "drive belt", "poly v", "皮带"],
+    "karet": ["rubber mount", "rubber support", "rubber bushing",
+              "rubber bearing", "cab mount", "橡胶支座", "橡胶衬套",
+              "橡胶轴承", "缓冲块"]
+  }
+}
