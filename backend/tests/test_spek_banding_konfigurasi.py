@@ -1,7 +1,11 @@
 """Tool spek_massal_rangka + banding_konfigurasi_rangka (2026-07-23): spesifikasi
 & banding KONFIGURASI banyak unit dari EPC getVehicleConfig (bukan part). Juga
-flag `pasok` (marketability) dari HAR — part discontinued ditandai. Semua
-jaringan di-MOCK."""
+flag `pasok` (marketability) dari HAR — nilainya tetap DISIMPAN di baris item,
+tapi sejak 2026-08-04 TIDAK BOLEH disajikan sebagai klaim "discontinued"
+(tafsirnya terbukti terbalik; lihat _pasok_of di epc_bom.py). Semua jaringan
+di-MOCK."""
+import json
+
 import pytest
 
 from app.services import ai_assistant as ai
@@ -114,7 +118,13 @@ def test_atlas_item_row_pasok():
     assert "pasok" not in row3
 
 
-def test_cari_part_di_unit_tandai_stop(monkeypatch):
+def test_cari_part_di_unit_TIDAK_klaim_discontinued(monkeypatch):
+    """DULU tool ini menandai part ber-marketability 'b' sebagai
+    "STOP — discontinued pabrik". Uji silang 50 PN ke status jual RESMI SIMS
+    (`isSale`) pada 2026-08-04 membuktikan tafsirnya TERBALIK: 25/25 part
+    ber-'b' justru DIJUAL, sementara 16/25 ber-'g' TIDAK dijual. Klaim itu
+    menjauhkan user dari part yang paling bisa dipesan → DIBUANG, dan model
+    dilarang menyimpulkannya sendiri dari hasil EPC."""
     monkeypatch.setattr(ai.epc_bom, "items_index_ready", lambda r: False)
     monkeypatch.setattr(ai.epc_bom, "warm_items_index", lambda r: None)
     monkeypatch.setattr(ai.epc_bom, "search_in_unit", lambda r, k: {
@@ -126,5 +136,7 @@ def test_cari_part_di_unit_tandai_stop(monkeypatch):
                         lambda r, pn: {"found": False, "instances": []})
     monkeypatch.setattr(ai, "_expand_query", lambda q: ([q], []))
     r = ai._t_cari_part_di_unit({"rangka": "SJ346500", "kata_kunci": "part"}, ADMIN)
-    assert r["parts"][0]["status_pasok"].startswith("STOP")
-    assert "status_pasok" in r["catatan"]
+    assert "status_pasok" not in r["parts"][0]
+    assert "discontinued" not in json.dumps(r["parts"], ensure_ascii=False).lower()
+    # pagar aktif: model dilarang menyimpulkan status pasok dari hasil EPC
+    assert "JANGAN menyatakan part discontinued" in r["catatan"]

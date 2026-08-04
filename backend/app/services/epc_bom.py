@@ -536,9 +536,23 @@ def _atlas_children(frame: str, root_id, module: str, part_id,
 
 
 def _pasok_of(p: dict) -> str | None:
-    """Status pasok pabrik dari `marketability` item EPC (temuan HAR 2026-07-23):
-    'g' = masih dipasok, 'b' = TIDAK dipasok lagi (discontinued). None = tak ada
-    datanya (mis. cache lama sebelum field ini diekstrak)."""
+    """Nilai mentah `marketability` item EPC ('g'/'b') — DISIMPAN, TAK DISAJIKAN.
+
+    ⛔⛔ JANGAN memakai ini untuk klaim "discontinued / tidak dipasok lagi".
+    Tafsir HAR 2026-07-23 ('g'=dipasok, 'b'=stop) TERBUKTI SALAH ARAH. Uji silang
+    50 PN ke status jual RESMI portal dealer SIMS (`isSale`), 2026-08-04:
+        'b' (dulu kita sebut "STOP-discontinued") → 25/25 DIJUAL di SIMS
+        'g' (dulu kita anggap aman)              → 16/25 TIDAK DIJUAL di SIMS
+    Jadi label lama justru menjauhkan user dari part yang PALING bisa dipesan.
+    Dugaan makna sebenarnya: 'b' ≈ dijual sebagai suku cadang lepas, 'g' ≈ tidak
+    dijual terpisah — belum dikonfirmasi, karena itu TIDAK dipakai untuk klaim
+    apa pun. Nilai tetap disimpan di cache untuk penelitian lanjutan.
+
+    Status pasok yang SAH hanya dari SIMS (`sims.get_part_info().raw.isSale`,
+    `isPreOffShelves`) — portal tempat kita benar-benar memesan. Sebelum dipakai
+    untuk klaim NEGATIF, arah sebaliknya wajib diuji dulu.
+
+    None = tak ada datanya (mis. cache dibangun sebelum field ini diekstrak)."""
     mk = str(p.get("marketability") or "").strip().lower()
     return {"g": "dipasok", "b": "stop"}.get(mk)
 

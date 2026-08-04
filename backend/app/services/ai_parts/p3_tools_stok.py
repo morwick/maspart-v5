@@ -1202,11 +1202,20 @@ def _t_alternatif_ready(args: dict, user: dict) -> dict:
         seen.add(k)
         kandidat.append({"pn": pn_.strip().upper(), "nama": nama, "sumber": sumber, "arah": arah})
 
+    # STATUS PER SUMBER — pola yang sama dengan pengganti_part (p5, 2026-07-31).
+    # Dulu kedua blok di bawah menelan kegagalan jadi `{}`, lalu pesan akhirnya
+    # tetap mengklaim "dicek SIMS Sinotruk & EPC Weichai" TANPA SYARAT: sesi
+    # Weichai belum aktif pun terbaca user sebagai "tidak ada penggantinya, dan
+    # stok aslinya kosong" — dua vonis negatif dari nol pengecekan.
+    sumber_dicek = {"sims": "ok", "weichai": "ok"}
     try:
         sres = sims.get_part_equivalents(pn)
+        if not sres:
+            sumber_dicek["sims"] = "gagal"
     except Exception:
         logger.exception("alternatif_ready: SIMS equivalents gagal (%s)", pn)
         sres = {}
+        sumber_dicek["sims"] = "gagal"
     for x in (sres.get("digantikan_oleh") or []):
         _add(x.get("pn"), x.get("nama"), "SIMS", "pengganti (part baru)")
     for x in (sres.get("menggantikan") or []):
@@ -1216,6 +1225,15 @@ def _t_alternatif_ready(args: dict, user: dict) -> dict:
     except Exception:
         logger.exception("alternatif_ready: Weichai replace gagal (%s)", pn)
         wres = {}
+        sumber_dicek["weichai"] = "gagal"
+    if not wres:
+        sumber_dicek["weichai"] = "gagal"
+    elif not wres.get("found"):
+        _alasan = (wres.get("reason") or "").strip()
+        if _alasan == "no_session":
+            sumber_dicek["weichai"] = "tanpa_sesi"
+        elif _alasan == "gagal":
+            sumber_dicek["weichai"] = "gagal"
     if wres.get("found"):
         for x in (wres.get("digantikan_oleh") or []):
             _add(x.get("pn"), None, "Weichai", "pengganti (part baru)")
@@ -1257,13 +1275,33 @@ def _t_alternatif_ready(args: dict, user: dict) -> dict:
     }
     if gud:
         out["gudang_dicari"] = gud
+    out["sumber_dicek"] = sumber_dicek
     if not kandidat:
         out["found"] = False
-        out["jawaban_wajib"] = (
-            f"Tidak ada data persamaan/pengganti untuk {pn} (dicek SIMS Sinotruk & EPC Weichai)"
-            + (f", dan stok aslinya sendiri {sum(asli.values())} pcs siap kirim." if asli
-               else ", dan stok aslinya juga kosong.")
-        )
+        _gagal = [k for k, v in sumber_dicek.items() if v != "ok"]
+        _nama = {"sims": "SIMS Sinotruk (sasis)", "weichai": "EPC Weichai (mesin)"}
+        _stok_asli = (f"Stok PN aslinya sendiri {sum(asli.values())} pcs siap kirim."
+                      if asli else "Stok PN aslinya juga kosong.")
+        if _gagal:
+            # Dibaca _tool_fail_kind → 'err', BUKAN 'nf': kita tidak tahu, bukan
+            # tahu-bahwa-tidak-ada. Beda ini menentukan apa yang boleh dikatakan.
+            out["_cek_tak_lengkap"] = True
+            out["sumber_gagal"] = _gagal
+            _belum = ", ".join(_nama[k] for k in _gagal)
+            _sudah = ", ".join(_nama[k] for k in sumber_dicek if k not in _gagal)
+            out["jawaban_wajib"] = (
+                f"BELUM bisa memastikan pengganti {pn}: sumber {_belum} gagal diperiksa"
+                + (f" (yang berhasil dicek: {_sudah}, nihil)" if _sudah else "")
+                + f". {_stok_asli} ⛔ Ini BUKAN pernyataan bahwa penggantinya tidak "
+                  "ada — sampaikan apa adanya bahwa pengecekan belum tuntas & minta "
+                  "coba lagi sebentar. ⛔ JANGAN menyarankan user membatalkan/mencari "
+                  "di luar dari hasil yang belum tuntas ini."
+            )
+        else:
+            out["jawaban_wajib"] = (
+                f"Tidak ada data persamaan/pengganti untuk {pn} "
+                f"(sudah dicek SIMS Sinotruk & EPC Weichai). {_stok_asli}"
+            )
         return out
     out["found"] = True
     if not siap:

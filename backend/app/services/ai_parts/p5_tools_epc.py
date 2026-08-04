@@ -1316,8 +1316,8 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
             "cocok_kata_kunci": h.get("kata_kunci"),
             "ada_di_inventori": bool(lr),
         }
-        if h.get("pasok") == "stop":
-            row["status_pasok"] = "STOP — tidak dipasok pabrik lagi (discontinued)"
+        # ⛔ status_pasok DIBUANG 2026-08-04 — lihat _pasok_of di epc_bom.py:
+        # uji silang 50 PN ke SIMS membuktikan tafsirnya TERBALIK.
         if len(kata_list) > 1:
             row["untuk_istilah"] = _kw2istilah.get((h.get("kata_kunci") or "").lower())
         # Assembly INDUK: hasil mode teliti SUDAH membawanya (dari node pohon yang
@@ -1366,10 +1366,10 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
                     "ringkas (PN + nama + assembly induk bila ada + stok). Bila ada beberapa "
                     "varian (mis. kampas DEPAN vs BELAKANG), SEBUTKAN semuanya & jelaskan "
                     "bedanya lewat 'di_dalam_assembly' — JANGAN pilih satu diam-diam. "
-                    "⛔ JANGAN mengarang PN di luar daftar ini."
-                    + (" ⚠️ Part ber-'status_pasok' STOP = discontinued pabrik — SEBUTKAN "
-                       "itu & sarankan cek pengganti (pengganti_part)."
-                       if any(p.get("status_pasok") for p in parts) else "")),
+                    "⛔ JANGAN mengarang PN di luar daftar ini. ⛔ JANGAN menyatakan "
+                    "part discontinued/tidak dipasok lagi dari hasil ini — EPC tidak "
+                    "memberi status pasok yang bisa dipercaya (dibuktikan 2026-08-04); "
+                    "status pasok hanya boleh dari SIMS."),
     }
     if len(kata_list) > 1:
         # Istilah yang TIDAK menemukan satu part pun disebut eksplisit — model
@@ -1910,8 +1910,8 @@ def _uraikan_assembly_impl(args: dict, user: dict) -> dict:
             "nama_china": " ".join((c.get("nama_cn") or "").split()),
             "qty_di_assembly": c.get("qty"),
         }
-        if c.get("pasok") == "stop":
-            row["status_pasok"] = "STOP — tidak dipasok pabrik lagi (discontinued)"
+        # ⛔ status_pasok DIBUANG 2026-08-04 — lihat _pasok_of di epc_bom.py:
+        # uji silang 50 PN ke SIMS membuktikan tafsirnya TERBALIK.
         if c.get("pengganti"):
             row["part_pengganti"] = c["pengganti"]
         if lr:
@@ -1995,8 +1995,8 @@ def _t_turunan_assembly(args: dict, user: dict) -> dict:
             "balon": c.get("balon"),
             "ada_di_inventori": bool(lr),
         }
-        if c.get("pasok") == "stop":
-            row["status_pasok"] = "STOP — tidak dipasok pabrik lagi (discontinued)"
+        # ⛔ status_pasok DIBUANG 2026-08-04 — lihat _pasok_of di epc_bom.py:
+        # uji silang 50 PN ke SIMS membuktikan tafsirnya TERBALIK.
         if c.get("pengganti"):
             row["part_pengganti"] = c["pengganti"]
         if lr:

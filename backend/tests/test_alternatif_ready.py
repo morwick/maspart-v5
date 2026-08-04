@@ -22,8 +22,13 @@ def _setup(monkeypatch, stok=None, reservasi=None, sims_res=None, shippable_off=
     monkeypatch.setattr(A.gudang, "shippable",
                         lambda bd: {g: q for g, q in bd.items() if g not in shippable_off})
     monkeypatch.setattr(A.reservations, "reserved_map", lambda: dict(reservasi or {}))
-    monkeypatch.setattr(A.sims, "get_part_equivalents", lambda pn: dict(sims_res or {}))
-    monkeypatch.setattr(A.epc_weichai, "replace_part", lambda pn, rangka="": {})
+    monkeypatch.setattr(A.sims, "get_part_equivalents",
+                        lambda pn: dict(sims_res) if sims_res else {"found": False})
+    # Weichai: DICEK & memang nihil. ⚠️ `{}` punya arti LAIN (tak terkonfigurasi /
+    # exception = TIDAK dicek) — memakainya di sini dulu membuat test seolah
+    # membuktikan "tidak ada pengganti" padahal tak satu sumber pun ditanya.
+    monkeypatch.setattr(A.epc_weichai, "replace_part",
+                        lambda pn, rangka="": {"found": False, "part_number": pn})
     monkeypatch.setattr(A.part_index, "search_exact_pns", lambda pns: [])
 
 
@@ -119,6 +124,73 @@ def test_sims_error_tidak_menggagalkan_tool(monkeypatch):
 
     assert out["found"] is False            # tak ada kandidat, tapi tak meledak
     assert out["part_asli_siap_kirim"] == 1
+
+
+# ── Gagal MENGECEK ≠ tahu bahwa TIDAK ADA (audit klaim 2026-08-04) ───────────
+# Temuan risiko tertinggi: sesi Weichai belum aktif / SIMS down dijawab
+# "Tidak ada pengganti … dan stok aslinya juga kosong" — dua vonis negatif dari
+# nol pengecekan, dan admin menolak penjualan yang sebenarnya bisa jalan.
+
+def test_sumber_gagal_bukan_vonis_tidak_ada(monkeypatch):
+    _setup(monkeypatch, stok={HABIS: {}})
+    monkeypatch.setattr(A.sims, "get_part_equivalents",
+                        lambda pn: (_ for _ in ()).throw(RuntimeError("SIMS down")))
+
+    out = A._t_alternatif_ready({"part_number": HABIS}, ADMIN)
+
+    assert out["found"] is False
+    assert out["_cek_tak_lengkap"] is True          # → _tool_fail_kind 'err', bukan 'nf'
+    assert out["sumber_gagal"] == ["sims"]
+    assert out["sumber_dicek"] == {"sims": "gagal", "weichai": "ok"}
+    jw = out["jawaban_wajib"]
+    assert "BELUM bisa memastikan" in jw and "BUKAN pernyataan" in jw
+    assert "Tidak ada data persamaan" not in jw
+
+
+def test_weichai_tanpa_sesi_ditandai_terpisah(monkeypatch):
+    _setup(monkeypatch, stok={HABIS: {}})
+    monkeypatch.setattr(A.epc_weichai, "replace_part",
+                        lambda pn, rangka="": {"found": False, "reason": "no_session"})
+
+    out = A._t_alternatif_ready({"part_number": HABIS}, ADMIN)
+
+    assert out["sumber_dicek"]["weichai"] == "tanpa_sesi"
+    assert out["_cek_tak_lengkap"] is True
+    # sumber yang BERHASIL dicek tetap disebut — jawaban jujur, bukan gelap total
+    assert "SIMS Sinotruk" in out["jawaban_wajib"]
+
+
+def test_weichai_kosong_dianggap_tak_dicek(monkeypatch):
+    """`{}` = tak terkonfigurasi/exception, BUKAN 'dicek & nihil'."""
+    _setup(monkeypatch, stok={HABIS: {}})
+    monkeypatch.setattr(A.epc_weichai, "replace_part", lambda pn, rangka="": {})
+
+    out = A._t_alternatif_ready({"part_number": HABIS}, ADMIN)
+
+    assert out["sumber_dicek"]["weichai"] == "gagal" and out["_cek_tak_lengkap"] is True
+
+
+def test_semua_sumber_ok_baru_boleh_vonis(monkeypatch):
+    """Dua sumber benar-benar dicek & nihil → vonis 'tidak ada' SAH."""
+    _setup(monkeypatch, stok={HABIS: {}})
+
+    out = A._t_alternatif_ready({"part_number": HABIS}, ADMIN)
+
+    assert out["sumber_dicek"] == {"sims": "ok", "weichai": "ok"}
+    assert "_cek_tak_lengkap" not in out
+    assert "Tidak ada data persamaan/pengganti" in out["jawaban_wajib"]
+
+
+def test_kandidat_ketemu_status_sumber_tetap_dilaporkan(monkeypatch):
+    """Meski ada kandidat, status per-sumber tetap ikut: satu sumber gagal berarti
+    daftar alternatifnya BELUM tentu lengkap."""
+    _setup(monkeypatch, stok={HABIS: {}, BARU: {"01.Jakarta": 3}}, sims_res=_SIMS)
+    monkeypatch.setattr(A.epc_weichai, "replace_part", lambda pn, rangka="": {})
+
+    out = A._t_alternatif_ready({"part_number": HABIS}, ADMIN)
+
+    assert out["found"] is True
+    assert out["sumber_dicek"]["weichai"] == "gagal"
 
 
 # ── Peran: ADMIN-ONLY ────────────────────────────────────────────────────────
