@@ -77,11 +77,12 @@ def test_build_konsensus_varian(dunia):
     of = slots[("filter", "oil filter")]
     assert [(v["pn"], v["n_unit"]) for v in of["varian"]] == [
         ("VG61000070005", 1), ("VG61000070005A", 1)]
-    # rubber support: 1 PN di 2 unit, tahun terkumpul, pasok stop & pengganti terbawa
+    # rubber support: 1 PN di 2 unit, tahun terkumpul, pengganti terbawa;
+    # flag pasok TIDAK dibawa (marketability tak bisa dipercaya — lihat modul)
     rs = slots[("karet", "rubber support")]
     v = rs["varian"][0]
     assert v["n_unit"] == 2 and v["tahun"] == ["2023", "2024"]
-    assert v["pasok"] == "stop" and v["pengganti"] == ["WG9725520683"]
+    assert v["pengganti"] == ["WG9725520683"] and "pasok" not in v
 
 
 def test_parsial_dan_luar_populasi_tak_dihitung(dunia):

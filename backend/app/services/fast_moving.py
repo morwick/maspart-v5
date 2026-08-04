@@ -17,7 +17,11 @@ Keputusan desain (hasil diskusi pemilik 2026-08-04):
     memilih satu PN diam-diam.
   - TAHUN unit pembawa tiap varian ikut disimpan → varian bisa dibelah per
     batch produksi ("PN A di unit 2021-2022, PN B di 2023+").
-  - pasok (discontinued) & pengganti (partAlternates Atlas) terbawa per varian.
+  - pengganti (partAlternates Atlas) terbawa per varian. Flag `pasok`
+    (marketability) SENGAJA TIDAK dibawa: audit 2026-08-04 menemukan 78% baris
+    bertanda 'b' termasuk filter servis standar yang jelas masih dipasok, dan
+    PN yang sama bisa 'b' di satu unit tapi 'g' di unit lain — bukan penanda
+    discontinued yang bisa dipercaya.
   - unit_sampel disimpan agar penyaji bisa jujur "berdasarkan N unit sampel";
     daftar per-model = perencanaan stok; unit spesifik tetap wajib per-VIN.
 """
@@ -184,12 +188,10 @@ def build() -> dict:
             slot = m["slot"].setdefault(sk, {})
             v = slot.setdefault(pn, {
                 "pn": pn, "nama": nama, "nama_cn": nama_cn, "qty": row.get("qty"),
-                "n_unit": 0, "tahun": set(), "pasok": None, "pengganti": []})
+                "n_unit": 0, "tahun": set(), "pengganti": []})
             v["n_unit"] += 1
             if info["tahun"]:
                 v["tahun"].add(info["tahun"])
-            if row.get("pasok") == "stop":
-                v["pasok"] = "stop"
             for g in row.get("pengganti") or []:
                 gpn = str((g or {}).get("pn") or "").strip().upper()
                 if gpn and gpn not in v["pengganti"]:
