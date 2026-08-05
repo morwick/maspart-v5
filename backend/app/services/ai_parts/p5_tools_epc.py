@@ -1119,6 +1119,11 @@ _AUS_KEYWORDS = {
     "turbo": ["turbocharger", "supercharger", "增压器"],
 }
 
+# Penanda query BERTEMA FILTER — SATU sumber untuk dua pemakai (peta modul Atlas
+# di bawah & pemaksaan mode teliti di _t_cari_part_di_unit), supaya keduanya tak
+# pernah bergeser sendiri-sendiri.
+_FILTER_TRIGGERS = ("filter", "saringan", "penyaring", "滤")
+
 # Pemetaan DOMAIN query → modul Atlas yang di-walk + apakah posisi (depan/belakang)
 # relevan. Internal MESIN ada di modul Powertrain (FDJ/FDJFJ), kopling di LHQ,
 # gearbox di BSX, sisanya poros/rem (CDQ/QDQ, posisi relevan).
@@ -1158,7 +1163,7 @@ _ATLAS_MODULE_MAP = [
     # SEMUA. Tanpa entri ini, 'filter' polos jatuh ke default POROS saja dan filter
     # mesin cuma nyangkut dari tambalan Loading List (tanpa element di dlm assembly).
     # Pemisahan depan/belakang tak relevan untuk penyajian filter → is_axle False.
-    (["filter", "saringan", "penyaring", "滤"],
+    (list(_FILTER_TRIGGERS),
      ("FDJ", "FDJFJ", "CDQ", "QDQ"), False),
 ]
 
@@ -1238,8 +1243,17 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
     # Indeks item unit SUDAH siap (RAM/disk) → langsung jalur lengkap: instan,
     # cakupan penuh, SATU ronde tool, tanpa panggilan reverse per-PN. Indeks cepat
     # EPC (match) hanya dipakai selagi indeks lengkap belum terbangun.
+    # Tema FILTER dipaksa TELITI. Bukti RJ326978 (2026-08-05): indeks cepat
+    # match/part TIDAK memuat element figure mesin sama sekali — jawaban 'daftar
+    # filter' dari mode cepat isinya assembly/housing/cover semua, sementara
+    # element-nya nyata ada di pohon. Multi-istilah campuran ('filter oli' +
+    # 'kampas rem') ikut teliti seluruhnya: hasil teliti superset hasil cepat,
+    # jadi aman — hanya panggilan pertama per unit yang lambat (±1 mnt), dan itu
+    # sudah dimitigasi prefetch warm_items_index saat rangka muncul di chat.
+    tema_filter = any(t in ist for ist in (k.lower() for k in kata_list) for t in _FILTER_TRIGGERS) \
+        or any(t in k.lower() for k in kws for t in _FILTER_TRIGGERS)
     index_ready = epc_bom.items_index_ready(rangka)
-    mode_teliti = bool(args.get("teliti")) or index_ready
+    mode_teliti = bool(args.get("teliti")) or index_ready or tema_filter
     auto_teliti = False
     hasil: list[dict] = []
     if not mode_teliti:
@@ -1357,7 +1371,9 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
         "jumlah_part": len(hasil), "parts": parts,
         "mode": ("teliti (sisir SEMUA baris part list pohon unit"
                  + (", otomatis karena pencarian cepat nihil)" if auto_teliti
-                    else ", indeks unit sudah siap — instan)" if index_ready else ")"))
+                    else ", indeks unit sudah siap — instan)" if index_ready
+                    else ", otomatis tema FILTER — indeks cepat terbukti tak memuat "
+                         "element)" if tema_filter else ")"))
                 if mode_teliti else "cepat (indeks pencarian EPC match/part)",
         "sumber": ("EPC per-unit — " + ("sisiran SELURUH baris katalog unit (pohon Atlas)."
                    if mode_teliti else
@@ -1397,6 +1413,334 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
     if mode_teliti and d.get("incomplete"):
         out["peringatan"] = ("Sebagian node pohon gagal dibuka — hasil mungkin belum lengkap; "
                              "part yang tak ketemu belum tentu tidak ada.")
+    return out
+
+
+# Urutan penyajian jenis filter: yang paling sering diganti/ditanya montir dulu,
+# 'lainnya' selalu terakhir. Dipakai untuk mengurutkan filter_per_jenis DAN untuk
+# menyusun kalimat urutan di 'catatan' — satu sumber, tak bisa berbeda.
+_JENIS_FILTER_URUT = ("oli_mesin", "solar_halus", "solar_kasar", "udara",
+                      "power_steering", "ac_kabin", "urea", "gardan",
+                      "transmisi", "lainnya")
+_JENIS_FILTER_LABEL = {
+    "oli_mesin": "filter oli mesin",
+    "solar_halus": "filter solar halus",
+    "solar_kasar": "filter solar kasar / water separator",
+    "udara": "filter udara (main + safety)",
+    "power_steering": "filter oli power steering",
+    "ac_kabin": "filter AC kabin",
+    "urea": "filter urea/SCR",
+    "gardan": "filter oli gardan",
+    "transmisi": "filter transmisi",
+    "lainnya": "lainnya",
+}
+
+# 'SCR' harus KATA UTUH: sebagai substring ia ikut kena 'screw'/'description' yang
+# bertebaran di nama part, dan element filter apa pun bisa salah masuk urea.
+_SCR_RX = re.compile(r"\bscr\b")
+# Element gardan: EPC menamainya 'Oil filter' polos (tanpa penanda element) —
+# dicocokkan dari AWAL nama supaya 'Partition ring oil filter assembly' tak ikut.
+_OIL_FILTER_RX = re.compile(r"oil filter\b")
+
+
+def _pn_base(pn: str) -> str:
+    """PN tanpa suffix varian/halaman EPC ('WG9525195201/2' → 'WG9525195201')."""
+    return (pn or "").split("/")[0]
+
+
+def _jenis_filter(nama: str, nama_cn: str, parent: str) -> str:
+    """Jenis filter dari nama EN + nama CN + nama ASSEMBLY INDUK (first-match-wins).
+
+    Induk ikut dibaca karena banyak element bernama generik — 'Filter element'
+    (WG9925550966/1) tak menyebut fungsinya sama sekali, hanya induknya yang
+    menyebut ('… fuel coarse filter …'). Urutan aturan TIDAK boleh diacak: beberapa
+    sengaja saling mendahului (alasannya di komentar masing-masing)."""
+    hay = f"{nama} {nama_cn} {parent}".lower()
+    # GARDAN wajib PERTAMA: element gardan bernama 'Oil filter', jadi kalau aturan
+    # oli mesin dicek lebih dulu ia tercap filter oli MESIN (salah kamar total).
+    if "axle" in hay or "桥" in hay:
+        return "gardan"
+    # AC kabin: element-nya di EPC bernama 'Filter cartridge' — kata 'cartridge' di
+    # nama ITEM (bukan induk) praktis khusus kabin (divalidasi 6 unit cache).
+    if any(k in hay for k in ("air conditioner", "evaporator", "cab air", "空调")) \
+            or "cartridge" in (nama or "").lower():
+        return "ac_kabin"
+    if "urea" in hay or "尿素" in hay or _SCR_RX.search(hay):
+        return "urea"
+    if any(k in hay for k in ("air filter", "air cleaner", "空滤", "空气滤")):
+        return "udara"
+    # KASAR sebelum HALUS: nama saringan kasar hampir selalu memuat 'fuel' juga
+    # ('Fuel coarse filter'), jadi urutan terbalik membuang semua element kasar ke
+    # solar halus.
+    if any(k in hay for k in ("coarse", "water separator", "pre-filter", "prefilter",
+                              "粗滤", "油水分离")):
+        return "solar_kasar"
+    if any(k in hay for k in ("fuel", "柴油", "燃油")):
+        return "solar_halus"
+    if "steering" in hay or "转向" in hay:
+        return "power_steering"
+    if any(k in hay for k in ("gearbox", "transmission", "变速")):
+        return "transmisi"
+    if any(k in hay for k in ("engine oil", "oil filter", "oil module", "机油")):
+        return "oli_mesin"
+    # Fallback JUJUR — mis. element ber-induk 'Filter assembly' polos (sub box).
+    return "lainnya"
+
+
+def _weichai_filter_fallback(rangka: str) -> dict:
+    """Element filter OLI & SOLAR MESIN dari EPC Weichai — dipakai HANYA saat pohon
+    Sinotruk tak punya keduanya.
+
+    Terbukti pada RT108966 (WP10) & RJ345233 (WP12): pohon EPC Sinotruk berhenti di
+    'engine assembly', jadi element oli/solar mesin memang TIDAK ada di sana. EPC
+    Weichai punya, dan find_parts otomatis mengurai turunan part yang cocok
+    (Oil Filter → Filter Element).
+
+    Baris dikembalikan POLOS (tanpa stok/harga): penyilangan inventori & gerbang
+    harga dikerjakan di SATU tempat (_t_filter_unit), supaya tak ada jalur kedua
+    yang bisa lupa memasang gerbangnya.
+    {groups:{jenis:[baris]}, konteks:[...], mesin:{...}} atau {catatan_mesin:"..."}."""
+    res = epc_weichai.find_parts(rangka, ["filter", "滤芯"])
+    if not res.get("found"):
+        if res.get("reason") in ("no_link", "no_engine", "no_order"):
+            # Bukan unit bermesin Weichai (atau tak terhubung) — bukan kegagalan
+            # teknis, jadi jangan disamarkan jadi 'coba lagi nanti'.
+            return {"catatan_mesin": (
+                "Element filter oli & solar MESIN tidak ditemukan di pohon EPC Sinotruk "
+                "unit ini, dan unit ini tidak terhubung ke EPC Weichai. ⛔ JANGAN "
+                "mengarang PN filter mesin — sampaikan apa adanya.")}
+        return {"catatan_mesin": (
+            "Element filter mesin tak ada di pohon Sinotruk dan pengambilan dari EPC "
+            f"Weichai GAGAL ({res.get('message') or 'sebab tak diketahui'}). Sampaikan "
+            "bahwa ini BELUM pasti — coba lagi nanti. ⛔ JANGAN mengarang PN.")}
+
+    eng = res.get("engine") or {}
+    groups: dict[str, list] = {}
+    konteks: list[dict] = []
+    for h in res.get("hasil") or []:
+        nama = " ".join((h.get("nama") or "").split())
+        hay = f'{nama} {h.get("group") or ""}'.lower()
+        if epc_bom.is_elemen_filter(nama):
+            # Jenis dari nama + nama GROUP mesin ('Fuel Coarse Filter' dst). 'pre'
+            # sengaja dicocokkan sbg frasa penuh — sbg substring ia kena 'pressure'.
+            if ("coarse" in hay or "pre-filter" in hay or "prefilter" in hay
+                    or "pre filter" in hay):
+                jenis = "solar_kasar"
+            elif "fuel" in hay:
+                jenis = "solar_halus"
+            elif "oil" in hay or "机油" in hay:
+                jenis = "oli_mesin"
+            else:
+                jenis = "lainnya"
+            groups.setdefault(jenis, []).append(
+                {"part_number": h.get("pn"), "nama": nama,
+                 "group_mesin": h.get("group"), "sumber": "EPC Weichai"})
+        elif "filter" in hay and len(konteks) < 8:
+            # Rumah/assembly filter mesin: BUKAN barang servis, tapi berguna sebagai
+            # konteks pemasangan bila user bertanya balik.
+            konteks.append({"part_number": h.get("pn"), "nama": nama,
+                            "group": h.get("group")})
+    return {"groups": groups, "konteks": konteks,
+            "mesin": {"model": eng.get("nama") or eng.get("model"),
+                      "nomor_mesin": eng.get("nomor_mesin")}}
+
+
+def _t_filter_unit(args: dict, user: dict) -> dict:
+    """DAFTAR ELEMENT FILTER satu unit dari NOMOR RANGKA — yang benar-benar DIGANTI
+    saat servis, terkelompok per jenis (oli mesin, solar halus/kasar, udara, power
+    steering, AC kabin, urea, gardan, transmisi).
+
+    Kenapa tool sendiri (kasus nyata RJ326978, 2026-08-05): pertanyaan 'cek filter
+    <rangka>' lewat cari_part_di_unit menghasilkan ASSEMBLY/HOUSING — 'Air filter
+    assembly', 'Engine oil module', cover — padahal element-nya ADA di pohon unit.
+    Dua sebab: indeks cepat EPC tak memuat element figure mesin, dan di sisiran
+    lengkap pun element kalah skor melawan frasa kanonik ('air filter assembly').
+    Di sini seleksinya dibalik: sisir SELURUH baris katalog unit lalu ambil HANYA
+    baris ber-penanda element ('element'/'cartridge'/'滤芯' — divalidasi 6/6 target
+    pemilik di 6 unit cache), klasifikasikan per jenis lewat nama + assembly induk.
+
+    Unit bermesin Weichai: element oli & solar mesin memang tidak ada di pohon
+    Sinotruk (pohon berhenti di engine assembly) → diambil otomatis dari EPC
+    Weichai, dan sumbernya ditandai per baris."""
+    rangka = (args.get("rangka") or "").strip()
+    if not rangka:
+        return {"error": "Sebutkan nomor rangka (VIN atau frame number)."}
+
+    d = epc_bom.unit_items(rangka)
+    err = d.get("_err")
+    if err in ("token_expired", "no_token"):
+        return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
+    if err == "network":
+        return {"found": False, "error": "Gagal menghubungi server EPC (jaringan). Coba lagi."}
+    if err in ("not_found", "input"):
+        return {"found": False, "error": "Nomor rangka tak ditemukan di EPC "
+                                         "(cek VIN; hanya Sinotruk/HOWO/SITRAK)."}
+    if not d.get("found"):
+        return {"found": False, "error": "Gagal mengambil katalog unit dari EPC. Coba lagi."}
+    frame = d.get("frame_number") or rangka
+
+    # SELEKSI + DEDUP sekaligus. Kunci (PN penuh, BASE assembly induk): satu element
+    # kerap muncul di BEBERAPA varian induk ('Engine oil module' E265 & E381) —
+    # barangnya SATU, cukup tampil sekali (induk pertama dipakai sbg konteks, qty
+    # per pemasangan tetap apa adanya).
+    terpilih: dict[tuple, dict] = {}
+    for row in d.get("rows") or []:
+        nama = row.get("nama") or ""
+        nama_cn = row.get("nama_cn") or ""
+        asm = row.get("dari_assembly") or {}
+        parent_nama = asm.get("nama") or ""
+        parent_pn = asm.get("pn") or ""
+        hay_item = f"{nama} {nama_cn}".lower()
+        if ("filter" in hay_item or "滤" in hay_item) \
+                and epc_bom.is_elemen_filter(nama, nama_cn):
+            jenis = _jenis_filter(nama, nama_cn, parent_nama)
+        elif _OIL_FILTER_RX.match(nama.lower()) and "axle" in parent_nama.lower():
+            # 'Oil filter' polos di rumah gardan: tanpa penanda element, tapi di EPC
+            # memang BARIS ITU yang dijual & diganti (housing-nya tak dijual satuan).
+            jenis = "gardan"
+        else:
+            continue
+        key = (row.get("pn"), _pn_base(parent_pn))
+        if key in terpilih:
+            continue
+        terpilih[key] = {"pn": row.get("pn"), "nama": nama, "qty": row.get("qty"),
+                         "parent_nama": parent_nama, "parent_pn": parent_pn,
+                         "jenis": jenis}
+
+    # BUANG RUMAH yang menyamar element. Beberapa ASSEMBLY menyebut kata 'element'
+    # di keterangan namanya — 'Fuel filter (Hand oil pump cancelled, Upgraded filter
+    # element)' 082V12501-7293 (nyata di PJ306941) — sehingga lolos penanda. Cirinya
+    # tegas dari DATA: ia justru INDUK dari element yang sudah terpilih. Perbandingan
+    # dilakukan atas PN DASAR, dan baris yang induknya PN dasarnya sendiri
+    # (pola varian 'X/1' di bawah 'X') tak dihitung — kalau tidak, element ber-varian
+    # akan membuang dirinya sendiri.
+    induk_elemen = {_pn_base(it["parent_pn"]) for it in terpilih.values()
+                    if it["parent_pn"] and _pn_base(it["parent_pn"]) != _pn_base(it["pn"])}
+    for key in [k for k, it in terpilih.items() if _pn_base(it["pn"]) in induk_elemen]:
+        del terpilih[key]
+
+    # VARIAN PEMASOK: PN dasar sama & induk dasar sama tapi PN PENUH beda
+    # ('WG9525195201/1' Mann-Hummel vs '/2' Shandong Taiquan) = dua pemasok untuk
+    # SLOT yang sama. Hanya satu yang terpasang di unit, tapi keduanya wajib disebut.
+    kelompok: dict[tuple, list] = {}
+    for it in terpilih.values():
+        kelompok.setdefault((_pn_base(it["pn"]), _pn_base(it["parent_pn"])), []).append(it)
+    ada_varian = False
+    for anggota in kelompok.values():
+        if len(anggota) > 1 and len({a["pn"] for a in anggota}) > 1:
+            ada_varian = True
+            for a in anggota:
+                a["varian_pemasok"] = True
+
+    # Silang inventori SEKALI untuk semua PN Sinotruk — rows_for_pns pemaaf suffix
+    # varian EPC ('WG…/2' ↔ 'WG…'), tanpa itu part tampil 'stok —' padahal ada.
+    local = part_index.rows_for_pns([it["pn"] for it in terpilih.values()])
+    boleh_harga = _boleh_harga(user)
+
+    per_jenis: dict[str, list] = {}
+    for it in terpilih.values():
+        lr = local.get(it["pn"], {})
+        row = {
+            "part_number": it["pn"],
+            "nama": " ".join((lr.get("part_name") or it["nama"] or "").split()),
+            "qty": it["qty"],
+            "di_dalam_assembly": it["parent_nama"] or None,
+            "assembly_pn": it["parent_pn"] or None,
+        }
+        if it.get("varian_pemasok"):
+            row["varian_pemasok"] = True
+        row["ada_di_inventori"] = bool(lr)
+        if lr:
+            row["stok_total"] = lr.get("stok")
+            row["stok_per_gudang"] = lr.get("gudang") or {}
+            if boleh_harga:
+                row["harga_lokal"] = lr.get("harga")
+        per_jenis.setdefault(it["jenis"], []).append(row)
+
+    # FALLBACK MESIN: dua jenis inilah yang hilang saat mesinnya Weichai. Kalau salah
+    # satu saja ketemu di pohon Sinotruk, pohonnya memang lengkap → jangan buang
+    # waktu ke bridge SSO Weichai (panggilan pertamanya lambat).
+    mesin = konteks_mesin = catatan_mesin = None
+    if not per_jenis.get("oli_mesin") and not per_jenis.get("solar_halus"):
+        fb = _weichai_filter_fallback(rangka)
+        catatan_mesin = fb.get("catatan_mesin")
+        w_groups = fb.get("groups") or {}
+        w_rows = [r for rs in w_groups.values() for r in rs]
+        if w_rows:
+            # PN Weichai TIDAK ber-suffix varian → cocok PERSIS (preseden
+            # _format_mesin_bom); gerbang harga/stok sama dgn baris Sinotruk di atas.
+            wlocal: dict[str, dict] = {}
+            for r in part_index.search_exact_pns([w["part_number"] for w in w_rows]):
+                p = (r.get("part_number") or "").upper()
+                if p and p not in wlocal:
+                    wlocal[p] = r
+            for jenis, rs in w_groups.items():
+                for r in rs:
+                    lr = wlocal.get((r.get("part_number") or "").upper(), {})
+                    r["ada_di_inventori"] = bool(lr)
+                    if lr:
+                        # Nama katalog LOKAL diutamakan (sama spt jalur Sinotruk di
+                        # atas & _format_mesin_bom) — nama Weichai kerap generik
+                        # 'Filter Element' tanpa keterangan apa pun.
+                        r["nama"] = " ".join((lr.get("part_name") or r["nama"] or "").split())
+                        r["stok_total"] = lr.get("stok")
+                        r["stok_per_gudang"] = lr.get("gudang") or {}
+                        if boleh_harga:
+                            r["harga_lokal"] = lr.get("harga")
+                    per_jenis.setdefault(jenis, []).append(r)
+            mesin = fb.get("mesin")
+            konteks_mesin = fb.get("konteks") or None
+
+    if _is_pembeli(user):
+        for rs in per_jenis.values():
+            for row in rs:
+                row.pop("stok_per_gudang", None)
+
+    peringatan = ("Sebagian node pohon gagal dibuka — hasil mungkin belum lengkap; "
+                  "part yang tak ketemu belum tentu tidak ada.") if d.get("incomplete") else None
+
+    if not per_jenis:
+        out = {"found": False, "frame_number": frame}
+        if peringatan:
+            out["peringatan"] = peringatan
+        out["jawaban_wajib"] = ("Tidak ada element filter yang bisa dipastikan dari EPC "
+                                "untuk unit ini. Sampaikan JUJUR. ⛔ JANGAN mengarang PN.")
+        return out
+
+    urut = [j for j in _JENIS_FILTER_URUT if per_jenis.get(j)]
+    out = {
+        "found": True, "frame_number": frame,
+        "jumlah_element": sum(len(per_jenis[j]) for j in urut),
+        "filter_per_jenis": {j: per_jenis[j] for j in urut},
+    }
+    if mesin:
+        out["mesin"] = mesin
+    if konteks_mesin:
+        out["konteks_mesin_weichai"] = konteks_mesin
+    out["sumber"] = ("EPC per-unit — element filter disaring dari SELURUH baris katalog "
+                     "unit (penanda element/滤芯)"
+                     + (" + BOM mesin EPC Weichai." if mesin else "."))
+    if peringatan:
+        out["peringatan"] = peringatan
+    if ada_varian:
+        out["catatan_varian"] = ("PN ber-varian ('…/1' vs '…/2') = PEMASOK berbeda untuk "
+                                 "slot yang SAMA — hanya SATU yang terpasang di unit; "
+                                 "sebutkan semuanya, ⛔ JANGAN memilih diam-diam.")
+    if catatan_mesin:
+        out["catatan_mesin"] = catatan_mesin
+    # 'catatan' WAJIB kunci TERAKHIR — _cap_tool_content memotong bagian TENGAH hasil
+    # tool, kepala & ekor yang dipertahankan.
+    out["catatan"] = (
+        "Sajikan per jenis dalam urutan: "
+        + ", ".join(_JENIS_FILTER_LABEL.get(j, j) for j in urut)
+        + ". PN di daftar PERSIS untuk unit ini (dari EPC). Jenis yang TIDAK muncul = "
+        "tidak terdata di EPC unit ini"
+        + (" — jangan vonis pasti tidak ada, sebagian node pohon gagal dibuka"
+           if peringatan else "")
+        + ". Element ber-'sumber' EPC Weichai sebutkan sumbernya. ⛔ JANGAN mengarang PN "
+        "di luar daftar ini. ⛔ JANGAN menyatakan part discontinued/tidak dipasok lagi "
+        "dari hasil ini — EPC tak memberi status pasok yang bisa dipercaya; status pasok "
+        "hanya boleh dari SIMS.")
     return out
 
 

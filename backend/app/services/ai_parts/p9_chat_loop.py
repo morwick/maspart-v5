@@ -1421,7 +1421,7 @@ _NOT_FOUND_REPLY = (
 # BUKAN dari cari_part (katalog lokal per-model, bisa beda per-VIN). Lihat guard
 # substitusi di bawah (kasus nyata WG9114520140 lokal vs WG9525520641 EPC).
 _EPC_VIN_PART_TOOLS = frozenset({
-    "cari_part_di_unit",
+    "cari_part_di_unit", "filter_unit",
     "part_aus_dari_rangka", "bom_dari_rangka", "uraikan_mesin", "uraikan_assembly",
     "kategori_unit", "assembly_utama_unit", "banding_rangka", "banding_rangka_massal",
 })
@@ -1576,6 +1576,7 @@ def _sanitize_ungrounded(reply: str, bad: list[str]) -> str:
 _TOOL_LABEL = {
     "cari_part": "Mencari part di katalog",
     "cari_part_di_unit": "Mencari part di unit (EPC)",
+    "filter_unit": "Menyusun daftar filter unit (EPC)",
     "detail_part": "Mengambil detail & stok part",
     "part_aus_dari_rangka": "Menelusuri part poros unit (EPC)",
     "part_fast_moving": "Menyusun daftar part fast moving model",

@@ -334,3 +334,109 @@ def test_error_token_di_mode_teliti_tersampaikan(monkeypatch):
     out = A._t_cari_part_di_unit({"rangka": FRAME, "kata_kunci": "ecu"}, ADMIN)
 
     assert out.get("_token_issue") is True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  TEMA FILTER — element vs assembly (kasus RJ326978, 2026-08-05)
+#  Dua kelas kegagalan berbeda yang menghasilkan jawaban salah yang SAMA:
+#  (1) di sisiran teliti, ELEMENT kalah skor melawan frasa kanonik
+#      ('air filter assembly') sampai terpangkas [:40];
+#  (2) pertanyaan filter tak pernah SAMPAI ke sisiran teliti karena indeks
+#      cepat match/part mengembalikan hasil (yang isinya housing semua).
+# ═══════════════════════════════════════════════════════════════════════
+ELEMEN_ROW = {"pn": "WG9525195201/1", "nama": "Main filter element", "nama_cn": "",
+              "qty": 1, "kata_kunci": "filter",
+              "dari_assembly": {"pn": "WG9525195010/1", "nama": "Air filter assembly"}}
+
+
+def test_skor_item_boost_elemen_kalahkan_frasa_kanonik():
+    """Tanpa boost, ELEMENT (skor 3) kalah telak dari nama ASSEMBLY yang menyerap
+    seluruh keyword bertema filter — persis kenapa jawaban RJ326978 isinya housing.
+    Panggilan 2-arg lama tetap sah (perilaku default tak berubah)."""
+    kws = ["filter", "air filter", "air filter assembly"]
+    elemen = "main filter element - flame retardant (mann- hummel)"
+    assembly = "air filter assembly"
+
+    assert E._skor_item(elemen, kws)[0] < E._skor_item(assembly, kws)[0]
+    assert E._skor_item(elemen, kws, boost_elemen=True)[0] > \
+        E._skor_item(assembly, kws, boost_elemen=True)[0]
+    # baris lain TIDAK dipenalti — bonusnya hanya menaikkan element
+    assert E._skor_item(assembly, kws)[0] == E._skor_item(assembly, kws, boost_elemen=True)[0]
+
+
+def test_search_items_autoboost_saat_keyword_bertema_filter(monkeypatch):
+    rows = [
+        {"pn": "WG9525195010/1", "nama": "Air filter assembly", "nama_cn": "", "qty": 1,
+         "dari_assembly": {"pn": "WG9525190000", "nama": "Air intake system"}},
+        {"pn": "WG9525195201/1", "nama": "Main filter element", "nama_cn": "", "qty": 1,
+         "dari_assembly": {"pn": "WG9525195010/1", "nama": "Air filter assembly"}},
+    ]
+    monkeypatch.setattr(E, "_all_items",
+                        lambda r: {"found": True, "frame_number": FRAME,
+                                   "rows": rows, "incomplete": False})
+
+    out = E.search_items_in_unit(FRAME, ["filter", "air filter", "air filter assembly"])
+
+    assert [h["pn"] for h in out["hasil"]] == ["WG9525195201/1", "WG9525195010/1"]
+
+
+def test_tanpa_boost_untuk_tema_selain_filter(monkeypatch):
+    """Boost menyala HANYA untuk keyword bertema filter — query lain (mis. 'ecu')
+    tak boleh tiba-tiba menjunjung 'heating element'."""
+    rows = [
+        {"pn": "P-ECU", "nama": "ECU", "nama_cn": "", "qty": 1, "dari_assembly": {}},
+        {"pn": "P-HEAT", "nama": "ECU heating element", "nama_cn": "", "qty": 1,
+         "dari_assembly": {}},
+    ]
+    monkeypatch.setattr(E, "_all_items",
+                        lambda r: {"found": True, "frame_number": FRAME,
+                                   "rows": rows, "incomplete": False})
+
+    out = E.search_items_in_unit(FRAME, ["ecu"])
+
+    assert [h["pn"] for h in out["hasil"]] == ["P-ECU", "P-HEAT"]
+
+
+def _patch_tema_deps(monkeypatch, cepat):
+    monkeypatch.setattr(A.part_index, "rows_for_pns", lambda pns: {})
+    monkeypatch.setattr(A.epc_bom, "reverse_find_in_unit", lambda r, p: {"instances": []})
+    monkeypatch.setattr(A, "_expand_query", lambda q: ([q], []))
+    monkeypatch.setattr(A, "_umbrella_keywords", lambda q: [])
+    monkeypatch.setattr(A.search_log, "record_miss", lambda *a, **k: None)
+    monkeypatch.setattr(A.epc_bom, "search_in_unit", cepat)
+    monkeypatch.setattr(A.epc_bom, "search_items_in_unit",
+                        lambda r, k: {"found": True, "frame_number": FRAME,
+                                      "hasil": [ELEMEN_ROW], "incomplete": False})
+
+
+@pytest.mark.parametrize("kata", ["filter", "saringan solar"])
+def test_tema_filter_dipaksa_mode_teliti(monkeypatch, kata):
+    """Indeks cepat match/part TIDAK memuat element figure mesin — kalau ia sempat
+    menjawab, jawabannya housing semua. Tema filter karena itu MELEWATI jalur cepat."""
+    def _terlarang(r, k):
+        raise AssertionError("jalur cepat dilarang utk tema filter")
+
+    _patch_tema_deps(monkeypatch, _terlarang)
+
+    out = A._t_cari_part_di_unit({"rangka": FRAME, "kata_kunci": kata}, ADMIN)
+
+    assert out["found"] is True
+    assert "teliti" in out["mode"] and "FILTER" in out["mode"]
+    assert out["parts"][0]["part_number"] == "WG9525195201/1"
+
+
+def test_tema_lain_tetap_lewat_jalur_cepat(monkeypatch):
+    dipakai = {"cepat": False}
+
+    def _cepat(r, k):
+        dipakai["cepat"] = True
+        return {"found": True, "frame_number": FRAME,
+                "hasil": [{"pn": "082V11640-0287/1", "nama": "ECU bracket",
+                           "kata_kunci": "ecu"}]}
+
+    _patch_tema_deps(monkeypatch, _cepat)
+
+    out = A._t_cari_part_di_unit({"rangka": FRAME, "kata_kunci": "ecu"}, ADMIN)
+
+    assert dipakai["cepat"] is True
+    assert out["mode"].startswith("cepat")

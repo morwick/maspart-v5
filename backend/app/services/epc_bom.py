@@ -1876,12 +1876,39 @@ def warm_items_index(rangka: str) -> None:
                      name=f"epc-items-warm-{_frame(rangka) or 'x'}"[:40]).start()
 
 
-def _skor_item(hay: str, kws: list[str]) -> tuple[int, str | None]:
+def unit_items(rangka: str) -> dict:
+    """Wrapper PUBLIK indeks item unit (_all_items) — dipakai tool filter_unit.
+    Bentuk: {found, frame_number, rows, incomplete} / {found: False, _err}."""
+    return _all_items(rangka)
+
+
+# ELEMENT filter = bagian yang BENAR-BENAR diganti saat servis; sisanya (rumah,
+# assembly, cover, bracket, seat) tidak. Penanda divalidasi 2026-08-05 pada 6 unit
+# cache: 6/6 element versi pemilik kena, dan 22-61 baris ber-'filter' per unit
+# tersaring jadi 8-16 element saja.
+_ELEMEN_RX = re.compile(r"\b(element|cartridge)\b")
+# Besar bonus skor element saat keyword bertema filter — alasan angkanya di _skor_item.
+_BOOST_ELEMEN = 30
+
+
+def is_elemen_filter(nama: str, nama_cn: str = "") -> bool:
+    """True bila baris ini ELEMENT/cartridge filter (yang diganti saat servis),
+    bukan rumah/assembly/bracket-nya. Penanda: EN 'element'/'cartridge' sbg KATA
+    UTUH, atau CN '滤芯' (harfiah 'inti saringan') di nama EN maupun nama CN."""
+    if _ELEMEN_RX.search((nama or "").lower()):
+        return True
+    return "滤芯" in (nama or "") or "滤芯" in (nama_cn or "")
+
+
+def _skor_item(hay: str, kws: list[str], boost_elemen: bool = False) -> tuple[int, str | None]:
     """Skor relevansi 1 baris terhadap keyword: match KATA-UTUH (+3) > substring
     (+1); keyword frasa/CJK (+2); cakupan multi-keyword (+2 bila ≥2 keyword kena).
     Kembalikan (skor, keyword pertama yang kena) — 0 berarti tak relevan. Tujuannya:
     keyword generik ('pipe') yang cuma nyerempet tak menggusur match spesifik
-    ('air pipe'/'气管') saat hasil dipangkas [:40]."""
+    ('air pipe'/'气管') saat hasil dipangkas [:40].
+
+    `boost_elemen` (khusus keyword bertema filter) menaikkan baris ELEMENT — lihat
+    alasannya di badan fungsi."""
     total = 0
     hits = 0
     first_hit: str | None = None
@@ -1901,6 +1928,14 @@ def _skor_item(hay: str, kws: list[str]) -> tuple[int, str | None]:
             total += 2
     if hits >= 2:
         total += 2
+    if boost_elemen and hits and is_elemen_filter(hay):
+        # Keyword tema filter mengembang ke frasa kanonik ('air filter assembly',
+        # 'fuel filter', …) sehingga nama ASSEMBLY meraup skor 15-25, sementara
+        # ELEMENT-nya — yang justru dicari orang saat servis — cuma 3 dan ikut
+        # terpangkas [:40] di pemanggil (terukur RJ326978 2026-08-05: element ada
+        # di peringkat 46/47/52 dari 56 hasil). Bonus 30 > selisih maksimum 22,
+        # jadi element pasti naik; baris lain TIDAK dipenalti (bedah minimal).
+        total += _BOOST_ELEMEN
     return total, first_hit
 
 
@@ -1918,11 +1953,15 @@ def search_items_in_unit(rangka: str, keywords: list[str]) -> dict:
     if not base.get("found"):
         return {"found": False, "frame_number": base.get("frame_number"),
                 "_err": base.get("_err")}
+    # Tema FILTER = satu-satunya tema yang TERBUKTI tertukar assembly-vs-element
+    # (kasus RJ326978, 2026-08-05) → element-nya dinaikkan. Tema lain tak tersentuh
+    # agar tak ada efek samping (mis. 'heating element' pada query kelistrikan).
+    boost = any(("filter" in k) or ("saringan" in k) or ("滤" in k) for k in kws)
     skored: list[tuple] = []
     seen: set = set()
     for row in base["rows"]:
         hay = f'{row["nama"]} {row["nama_cn"]} {row["pn"]}'.lower()
-        skor, kw_hit = _skor_item(hay, kws)
+        skor, kw_hit = _skor_item(hay, kws, boost_elemen=boost)
         if not kw_hit:
             continue
         key = (row["pn"], (row.get("dari_assembly") or {}).get("pn"))

@@ -774,6 +774,34 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "filter_unit",
+                "description": (
+                    "⭐ DAFTAR FILTER LENGKAP satu unit dari NOMOR RANGKA — "
+                    "ELEMENT/cartridge yang benar-benar diganti saat servis (BUKAN "
+                    "housing/assembly), terkelompok per jenis (oli mesin, solar "
+                    "halus/kasar, udara, power steering, AC kabin, urea, gardan, "
+                    "transmisi) + varian pemasok + stok/harga. Unit bermesin Weichai "
+                    "(WP): element oli & solar mesin otomatis diambil dari EPC "
+                    "Weichai. Pakai untuk: 'cek filter <rangka>', 'filter apa saja di "
+                    "unit ini', 'daftar filter servis unit'. ⛔ Pertanyaan filter "
+                    "MENYELURUH jangan cari_part_di_unit (indeks cepatnya terbukti "
+                    "memberi housing/assembly, bukan element); cari_part_di_unit tetap "
+                    "utk part non-filter & SATU istilah spesifik. ⚠️ Bukan "
+                    "part_fast_moving (itu level MODEL). Panggilan pertama per unit "
+                    "±1 mnt (indeks dibangun), berikutnya instan."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Nomor rangka/VIN unit."},
+                    },
+                    "required": ["rangka"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "bom_dari_rangka",
                 "description": (
                     "Daftar PART (BOM pabrik/Loading List) SATU unit dari NOMOR RANGKA/VIN "
