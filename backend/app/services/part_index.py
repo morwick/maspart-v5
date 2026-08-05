@@ -468,7 +468,55 @@ def gudang_breakdown(pn: str) -> dict:
     return out
 
 
-def _acc_stok_harga(snap: dict, pn_key: str) -> tuple[str, str, int | None, int | None]:
+def _ribuan(n) -> str:
+    """12345 → '12.345' (pemisah ribuan titik, gaya Indonesia)."""
+    return f"{int(n):,}".replace(",", ".")
+
+
+# Sentinel "keluarga belum dihitung": `None` sudah punya arti sendiri di jalur ini
+# (= part TIDAK punya kartu saudara), jadi ia tak bisa merangkap penanda.
+_FAM_BELUM: object = object()
+
+
+def keluarga_acc(pn_key: str):
+    """accurate.family_summary yang TAK PERNAH menjatuhkan baris pencarian.
+    None = part ini sendirian (atau indeks belum siap) → jalur lama apa adanya.
+    Publik: router web memakainya bersama `label_keluarga`."""
+    from . import accurate
+    try:
+        return accurate.family_summary(pn_key)
+    except Exception:
+        return None
+
+
+def label_keluarga(fam: dict) -> tuple[str, str, int, int | None]:
+    """(stok_str, harga_str, stok_num, harga_num) untuk part ber-KELUARGA VARIAN
+    PEMASOK — satu part fisik dipecah jadi beberapa KARTU barang Accurate per
+    pemasok (kasus nyata 2026-08-05, PN 1000442956: base 482 pc @Rp 300rb, '/SN'
+    1.069 pc @Rp 285rb, '/SH' 2 pc @Rp 455rb).
+
+    Dipakai BERSAMA oleh baris hasil pencarian (`_acc_stok_harga`) dan overlay
+    router web (`routers/parts._overlay_accurate`) supaya angka di dua tempat itu
+    tak pernah berbeda.
+
+    STOK = total sekeluarga (sebelumnya baris memakai satu kartu saja — kerap
+    kartu mati 2 pc — atau '—' karena `index_key` sengaja menolak menebak saat
+    ambigu). HARGA = rentang bila kartunya berbeda harga; ⛔ aturan pemilik:
+    harga TIDAK dirata-rata/digabung, rentang ini LABEL TAMPILAN saja — karena
+    itu `harga_num` sengaja None (sel Excel tak boleh berisi angka yang seolah
+    harga resmi satu barang; `_compact_result` juga membuang None)."""
+    total = int(fam["stok_total"])
+    hmin, hmax = fam.get("harga_min"), fam.get("harga_max")
+    s = _ribuan(total)
+    if hmin and hmax and hmin != hmax:
+        return s, f"Rp {_ribuan(hmin)} – {_ribuan(hmax)}", total, None
+    if hmin:
+        return s, "Rp " + _ribuan(hmin), total, int(hmin)
+    return s, "—", total, None
+
+
+def _acc_stok_harga(snap: dict, pn_key: str,
+                    fam: object = _FAM_BELUM) -> tuple[str, str, int | None, int | None]:
     """(stok_str, harga_str, stok_int, harga_int) dari snapshot indeks Accurate.
 
     Dua bentuk sekaligus, sengaja: string untuk TAMPILAN chat ('Rp 1.500.000'),
@@ -477,8 +525,17 @@ def _acc_stok_harga(snap: dict, pn_key: str) -> tuple[str, str, int | None, int 
     murni lapisan presentasi. Int `None` bila PN tak ada di Accurate.
     '—' bila PN tak ada di Accurate (perusahaan tak menstok/menjualnya).
     ⛔ Dulu diisi dari stok.xlsx & harga.xlsx — dua-duanya kini dilarang pemilik.
+
+    `fam` = hasil family_summary bila pemanggil sudah menghitungnya (dipakai
+    _acc_fields agar tak dihitung dua kali per baris).
     """
     from . import accurate
+    if fam is _FAM_BELUM:
+        fam = keluarga_acc(pn_key)
+    if fam:
+        # KELUARGA VARIAN PEMASOK — dijawab SEBELUM lookup snap, justru karena
+        # kasus ambigu tak punya entri snap yang sah (index_key balas '').
+        return label_keluarga(fam)      # type: ignore[arg-type]
     # PN katalog/EPC kerap ber-suffix varian ('WG9525160004/2') sementara Accurate
     # menyimpan PN dasarnya → index_key mencocokkan keduanya (kalau tidak, part yang
     # ADA dilaporkan stok '—').
@@ -489,8 +546,8 @@ def _acc_stok_harga(snap: dict, pn_key: str) -> tuple[str, str, int | None, int 
     hg = e.get("harga")
     s_num = int(stok) if stok is not None else None
     h_num = int(hg) if hg else None
-    s = f"{s_num:,}".replace(",", ".") if s_num is not None else "—"
-    h = "Rp " + f"{h_num:,}".replace(",", ".") if h_num else "—"
+    s = _ribuan(s_num) if s_num is not None else "—"
+    h = "Rp " + _ribuan(h_num) if h_num else "—"
     return s, h, s_num, h_num
 
 
@@ -501,9 +558,17 @@ def _acc_fields(snap: dict, pn_key: str) -> dict:
     puluhan pemanggil meneruskannya apa adanya ke dump model).
     `stok_num`/`harga_num` = int mentah untuk SEL EXCEL. `None` saat PN tak ada
     di Accurate; `_compact_result` membuang None sehingga tak memakan token.
+
+    `varian_pemasok` (jumlah kartu) HANYA menempel bila part ini punya >1 kartu
+    pemasok di Accurate — baris part biasa tetap berisi persis 4 field seperti
+    dulu (ratusan test & pemanggil bergantung pada bentuk itu).
     """
-    s, h, s_num, h_num = _acc_stok_harga(snap, pn_key)
-    return {"stok": s, "harga": h, "stok_num": s_num, "harga_num": h_num}
+    fam = keluarga_acc(pn_key)
+    s, h, s_num, h_num = _acc_stok_harga(snap, pn_key, fam)
+    out = {"stok": s, "harga": h, "stok_num": s_num, "harga_num": h_num}
+    if fam:
+        out["varian_pemasok"] = fam["n"]
+    return out
 
 
 def harga_map() -> dict[str, str]:

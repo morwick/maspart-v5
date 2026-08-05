@@ -85,6 +85,28 @@ def _paginate(term: str, results: list, page: int, page_size: int,
     )
 
 
+def _scope_bd(bd: dict, pn: str, user: dict, names: list[str],
+              own: str | None, resv: dict) -> dict:
+    """Aturan WILAYAH untuk SATU breakdown {gudang: qty} — badan lama loop
+    `_scope_gudang`, dipisah agar endpoint /varian memakai aturan yang PERSIS
+    SAMA (mengarang aturan wilayah kedua = pembeli bisa melihat gudang yang
+    salah, atau melihat stok yang sudah direservasi orang lain)."""
+    uname, role = user.get("username", ""), user.get("role", "user")
+    if role == "pembeli":
+        bd = gudang.shippable(bd)       # gudang non-kirim tak dijual ke pembeli
+        if resv:
+            bd = {g: q - resv.get((pn, g), 0) for g, q in bd.items()}
+            bd = {g: q for g, q in bd.items() if q > 0}  # buang yang habis (tersisa ≤ 0)
+    scoped = gudang.scope_breakdown(bd, uname, role, names, own=own)
+    if role == "pembeli":
+        # Sembunyikan label gudang BERNOMOR (mis. '01.Jakarta','06.B80 H1')
+        # — pembeli hanya boleh lihat nama kota, konsisten dgn etalase.
+        # scope_breakdown mengembalikan SATU gudang pemenuh utk pembeli →
+        # tak ada tabrakan kunci saat di-relabel.
+        scoped = {gudang.gudang_label(g): q for g, q in scoped.items()}
+    return scoped
+
+
 def _scope_gudang(results: list[dict], user: dict) -> list[dict]:
     """Filter breakdown gudang tiap hasil sesuai cabang user (stok total tetap).
 
@@ -93,26 +115,15 @@ def _scope_gudang(results: list[dict], user: dict) -> list[dict]:
     etalase (buyer_catalog._scoped_stock) — kalau tidak, katalog bisa READY tapi
     detail 'habis' (bug urutan reserve-vs-scope)."""
     names = part_index.gudang_names()
-    uname, role = user.get("username", ""), user.get("role", "user")
+    role = user.get("role", "user")
     # Pembeli: scope ke gudang yang DIPILIH (bukan mapping per-username).
-    own = gudang.buyer_label(get_user_gudang(uname)) if role == "pembeli" else None
+    own = (gudang.buyer_label(get_user_gudang(user.get("username", "")))
+           if role == "pembeli" else None)
     resv = reservations.reserved_map() if role == "pembeli" else {}
     for r in results:
-        bd = dict(r.get("gudang") or {})
-        if role == "pembeli":
-            bd = gudang.shippable(bd)   # gudang non-kirim tak dijual ke pembeli
-        if role == "pembeli" and resv:
-            pn = str(r.get("part_number", "")).upper()
-            bd = {g: q - resv.get((pn, g), 0) for g, q in bd.items()}
-            bd = {g: q for g, q in bd.items() if q > 0}  # buang yang habis (tersisa ≤ 0)
-        scoped = gudang.scope_breakdown(bd, uname, role, names, own=own)
-        if role == "pembeli":
-            # Sembunyikan label gudang BERNOMOR (mis. '01.Jakarta','06.B80 H1')
-            # — pembeli hanya boleh lihat nama kota, konsisten dgn etalase.
-            # scope_breakdown mengembalikan SATU gudang pemenuh utk pembeli →
-            # tak ada tabrakan kunci saat di-relabel.
-            scoped = {gudang.gudang_label(g): q for g, q in scoped.items()}
-        r["gudang"] = scoped
+        r["gudang"] = _scope_bd(dict(r.get("gudang") or {}),
+                                str(r.get("part_number", "")).upper(),
+                                user, names, own, resv)
     return results
 
 
@@ -134,8 +145,19 @@ def _overlay_accurate(results: list[dict]) -> list[dict]:
         snap = {}
     for r in results:
         r["harga"] = "—"        # buang harga bawaan harga.xlsx
+        pn = r.get("part_number") or ""
+        # KELUARGA VARIAN PEMASOK (2026-08-05): part yang di Accurate dipecah jadi
+        # beberapa KARTU per pemasok ('…/SN','…/SH') → stok TOTAL sekeluarga +
+        # harga RENTANG, lewat helper yang sama dengan baris chat/Excel
+        # (part_index._acc_stok_harga) agar web & asisten tak pernah beda angka.
+        fam = part_index.keluarga_acc(pn)
+        if fam:
+            # (stok_str, harga_str, …) — dua angka mentah di ekor tuple hanya
+            # dipakai jalur Excel/chat, baris web memang cuma butuh stringnya.
+            r["stok"], r["harga"] = part_index.label_keluarga(fam)[:2]
+            continue
         # index_key: pemaaf suffix varian ("WG…/2" → PN dasar di Accurate).
-        e = snap.get(accurate.index_key(r.get("part_number") or ""))
+        e = snap.get(accurate.index_key(pn))
         if not e:
             continue
         if e.get("stok") is not None:
@@ -258,16 +280,102 @@ def accurate_stock(
             "per_gudang": hit.get("per_gudang") or [],
         },
     }
+    # KELUARGA VARIAN PEMASOK (2026-08-05): kartu SAUDARA part ini (harga & stok
+    # beda per pemasok). Diteruskan ke SEMUA peran — isinya stok/harga varian,
+    # BUKAN sebaran antar-gudang, jadi tak melanggar "gudang disembunyikan dari
+    # pembeli". Field di-rename ke 'kode/stok/harga' supaya penjaga strip terpusat
+    # (yang mengenali nama key) ikut menjangkaunya.
+    if hit.get("varian_lain"):
+        resp["stock"]["varian_lain"] = [
+            {"kode": v.get("pn"), "no": v.get("no"),
+             "stok": v.get("available_to_sell"), "harga": int(v.get("price") or 0)}
+            for v in hit["varian_lain"]
+        ]
+        resp["stock"]["stok_semua_varian"] = hit.get("stok_semua_varian")
     # Menu Control server-side: dict bebas → STRIP key (pola gerbang asisten).
     if not permissions.boleh_harga(user):
         permissions.strip_harga(resp)
     if not permissions.boleh_stok(user):
-        permissions.strip_stok(resp, extra=permissions.ROUTER_STOK_EXTRA)
+        # 'stok_semua_varian' bukan key standar STOK_KEYS → sebut eksplisit, kalau
+        # tidak total stok bocor lewat pintu belakang ke staf tanpa centang stok.
+        permissions.strip_stok(resp, extra=permissions.ROUTER_STOK_EXTRA
+                               + ("stok_semua_varian",))
     # Pembeli boleh_stok=True (perlu tahu ketersediaan) TAPI rincian antar-gudang
     # (per_gudang: distribusi stok semua cabang, termasuk gudang internal) TIDAK
     # boleh bocor — aturan pemilik "gudang disembunyikan dari pembeli".
     if (user.get("role") or "").lower() == "pembeli":
         resp.get("stock", {}).pop("per_gudang", None)
+    return resp
+
+
+@router.get("/varian")
+def parts_varian(
+    pn: str = Query(..., min_length=1, description="Part Number — semua kartu varian pemasoknya"),
+    user: dict = Depends(get_current_user),
+):
+    """SEMUA kartu barang Accurate untuk satu part fisik (KELUARGA VARIAN PEMASOK).
+
+    LATAR LIVE 2026-08-05: satu part dipecah per PEMASOK di Accurate dengan suffix
+    huruf — PN 1000442956 punya base 482 pc @Rp 300rb, '/SN' 1.069 pc @Rp 285rb,
+    '/SH' 2 pc @Rp 455rb. `/accurate-stock` hanya bisa menunjuk SATU kartu, jadi
+    halaman part memperlihatkan stok/harga kartu yang kebetulan terpilih (kerap
+    kartu mati 2 pc). Di sini semuanya disajikan apa adanya.
+
+    ⛔ Aturan pemilik: harga TIDAK dirata-rata/digabung — `harga_min`/`harga_max`
+    murni LABEL rentang; penjualan/penawaran selalu menunjuk `kode` varian yang
+    dipilih user secara eksplisit.
+
+    Baca INDEKS saja (nol panggilan Accurate live) → aman dipanggil tiap buka part.
+    """
+    if not accurate.available():
+        return {"configured": False, "reason": "no_session"}
+    try:
+        fam = accurate.stock_family(pn)
+    except accurate.AccurateSessionExpired:
+        return {"configured": True, "session_expired": True}
+    except accurate.AccurateError:
+        return {"configured": True, "error": True}
+    if not fam.get("found"):
+        return {"configured": True, "found": False}
+    varian = [{
+        # 'kode' = PN kartu APA ADANYA, suffix ikut ('1000442956/SN') — itulah
+        # yang harus disebut saat memesan/menawar, jangan dinormalisasi.
+        "kode": v.get("pn") or "",
+        "no": v.get("no") or "",
+        "nama": v.get("name") or "",
+        "stok": v.get("available_to_sell"),
+        "harga": int(v.get("price") or 0),
+        "unit": v.get("unit") or "",
+        "per_gudang": v.get("per_gudang") or [],
+    } for v in fam["varian"]]
+    resp: dict = {
+        "configured": True,
+        "found": True,
+        "base": fam["base"],
+        "total_available": fam["total_available"],
+        "harga_min": fam["harga_min"],
+        "harga_max": fam["harga_max"],
+        "varian": varian,
+    }
+    # Pembeli: sebaran antar-gudang TIDAK boleh bocor (aturan pemilik) → diganti
+    # SATU angka wilayahnya sendiri, lewat aturan scoping yang sama persis dengan
+    # hasil pencarian (_scope_bd: gudang non-kirim dibuang → reservasi dikurangkan
+    # → gudang sendiri, kalau kosong fallback gudang terdekat).
+    if (user.get("role") or "").lower() == "pembeli":
+        names = part_index.gudang_names()
+        own = gudang.buyer_label(get_user_gudang(user.get("username", "")))
+        resv = reservations.reserved_map()
+        for v in varian:
+            bd = {g["gudang"]: g["qty"] for g in (v.pop("per_gudang", None) or [])}
+            v["stok_wilayah"] = sum(
+                _scope_bd(bd, str(v["kode"]).upper(), user, names, own, resv).values())
+    # Menu Control server-side (pola sama dgn accurate_stock): key harga/stok yang
+    # bukan nama standar disebut eksplisit di `extra`.
+    if not permissions.boleh_harga(user):
+        permissions.strip_harga(resp, extra=("harga_min", "harga_max"))
+    if not permissions.boleh_stok(user):
+        permissions.strip_stok(resp, extra=permissions.ROUTER_STOK_EXTRA
+                               + ("total_available", "stok_wilayah"))
     return resp
 
 

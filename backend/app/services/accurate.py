@@ -557,24 +557,203 @@ def stock_full(part_number: str) -> dict[str, Any] | None:
         [{"gudang": g, "qty": q} for g, q in sorted(gmap.items(), key=lambda kv: kv[1], reverse=True)]
         if gmap else []
     )
+    # KELUARGA VARIAN PEMASOK (2026-08-05). Bentuk lama dipertahankan APA ADANYA;
+    # dua field ini HANYA ditambahkan bila part ini memang punya kartu saudara —
+    # jadi part biasa tak berubah sedikit pun. Tanpa ini, halaman part hanya
+    # memperlihatkan stok satu kartu (mis. 2 pc dari kartu '/SH' yang mati)
+    # padahal saudaranya menumpuk 1.069 pc.
+    fam = [k for k in ((_index_cache.get("by_base") or {}).get(
+        _pn_base_key(entry.get("pn") or want)) or []) if k in (_index_cache.get("by_pn") or {})]
+    if len(fam) > 1:
+        by = _index_cache["by_pn"]
+        base["varian_lain"] = [
+            {"pn": by[k].get("pn"), "no": by[k].get("no"),
+             "available_to_sell": _num(by[k].get("available_to_sell")),
+             "price": _num(by[k].get("price"))}
+            for k in fam if k != want
+        ]
+        base["stok_semua_varian"] = sum(_num(by[k].get("available_to_sell")) for k in fam)
     return base
 
 
+def stock_family(part_number: str) -> dict[str, Any]:
+    """SEMUA kartu barang Accurate untuk satu part fisik (keluarga varian pemasok).
+
+    LATAR LIVE 2026-08-05: PN 1000442956 punya TIGA kartu — base 482 pc @300rb,
+    '/SN' 1.069 pc @285rb, '/SH' 2 pc @455rb. Selama ini lookup hanya bisa
+    memilih SATU (dan sering kartu yang salah), sehingga stok terlihat 2 pc dan
+    harga terlihat termahal. Fungsi ini menyajikan semuanya apa adanya —
+    keputusan kartu mana yang dipakai ada di manusia/pemanggil, bukan ditebak.
+
+    Baca INDEKS saja (⛔ aturan keras pemilik: tak pernah login/live per-PN).
+    Return: {found, base, varian[…+per_gudang], total_available, harga_min, harga_max}.
+    """
+    kosong: dict[str, Any] = {"found": False, "base": "", "varian": [],
+                              "total_available": 0.0, "harga_min": None, "harga_max": None}
+    by = _index_cache.get("by_pn") or {}
+    by_base = _index_cache.get("by_base") or {}
+    if not by:
+        return kosong                     # indeks belum siap → pemanggil fallback
+    kb = _pn_base_key(part_number)
+    keys = [k for k in (by_base.get(kb) or []) if k in by]
+    if not keys:
+        # Query berupa KUNCI PERSIS yang sudah ternormalisasi ('1000442956SN' —
+        # tanpa '/'), jadi _pn_base_key tak bisa memotongnya. Ambil keluarga dari
+        # entri itu sendiri (field pn-nya masih memuat '/').
+        k = _norm_pn(part_number)
+        ent = by.get(k)
+        if ent:
+            kb = _pn_base_key(ent.get("pn") or k)
+            keys = [x for x in (by_base.get(kb) or []) if x in by] or [k]
+    if not keys:
+        return kosong
+    by_g = _index_cache.get("by_gudang") or {}
+    varian: list[dict[str, Any]] = []
+    for k in keys:                        # by_base sudah terurut stok desc
+        v = dict(by[k])
+        gmap = by_g.get(k) or {}
+        v["per_gudang"] = [{"gudang": g, "qty": q}
+                           for g, q in sorted(gmap.items(), key=lambda kv: kv[1], reverse=True)]
+        varian.append(v)
+    harga = [int(_num(v.get("price"))) for v in varian if _num(v.get("price")) > 0]
+    return {
+        "found": True,
+        "base": kb,
+        "varian": varian,
+        "total_available": sum(_num(v.get("available_to_sell")) for v in varian),
+        "harga_min": min(harga) if harga else None,
+        "harga_max": max(harga) if harga else None,
+    }
+
+
+def family_summary(part_number: str) -> dict[str, Any] | None:
+    """RINGKASAN MURAH keluarga varian pemasok — ``None`` bila part ini sendirian.
+
+    Kembaran ringan `stock_family`: baca `by_base` + view `snap` saja, TANPA
+    menyusun rincian per-gudang. Alasannya ada di jalur pemakainya — TIAP BARIS
+    hasil pencarian (ratusan per request; ditambah tiap PN di cek massal) perlu
+    tahu "punya kartu saudara atau tidak". Memanggil stock_family di sana berarti
+    membangun daftar per-gudang ratusan kali untuk data yang langsung dibuang.
+
+    ``None`` (bukan dict kosong) = keluarga ≤1 anggota → pemanggil memakai jalur
+    lamanya APA ADANYA, jadi part biasa tak berubah perilakunya sedikit pun.
+    Return: {n, stok_total, harga_min, harga_max, kunci[…]}.
+    """
+    by_base = _index_cache.get("by_base") or {}
+    if not by_base:
+        return None                       # indeks belum siap → jangan mengarang
+    by = _index_cache.get("by_pn") or {}
+    keys = [k for k in (by_base.get(_pn_base_key(part_number)) or []) if k in by]
+    if not keys:
+        # Query berupa KUNCI ternormalisasi ('1000442956SN', tanpa '/') → _pn_base_key
+        # tak bisa memotongnya; ambil basis dari entri itu sendiri (sama spt stock_family).
+        ent = by.get(_norm_pn(part_number))
+        if ent:
+            keys = [k for k in (by_base.get(_pn_base_key(ent.get("pn") or "")) or [])
+                    if k in by]
+    if len(keys) < 2:
+        return None
+    snap = _index_cache.get("snap") or {}
+    total = 0.0
+    harga: list[int] = []
+    for k in keys:
+        s = snap.get(k)
+        if s is None:
+            # snap = VIEW turunan by_pn (dibangun di refresh). Bila timpang — mis.
+            # entri hasil rekonsiliasi yang masuk sebelum snap disentuh — jatuh ke
+            # by_pn, jangan melaporkan stok 0 palsu untuk kartu yang jelas ada.
+            e = by.get(k) or {}
+            q, p = _num(e.get("available_to_sell")), _num(e.get("price"))
+        else:
+            q, p = _num(s.get("stok")), _num(s.get("harga"))
+        total += q
+        if p > 0:
+            harga.append(int(p))
+    return {"n": len(keys), "stok_total": total,
+            "harga_min": min(harga) if harga else None,
+            "harga_max": max(harga) if harga else None,
+            "kunci": list(keys)}
+
+
+# Berapa kali katalog disapu ulang bila sapuan sebelumnya masih kurang dari
+# rowCount. 3 = cukup untuk menambal geseran offset tanpa memperpanjang window
+# login (tiap sapuan ~27 panggilan, hitungan detik).
+_MAX_SWEEPS = 3
+
+
+def _item_key(it: dict[str, Any]) -> Any:
+    """Kunci dedup lintas halaman: id internal Accurate; fallback kode barang
+    (`no`) bila id kosong — supaya barang yang terbaca 2× (efek geser offset)
+    tidak dihitung dua kali dan tidak menutupi barang lain."""
+    i = it.get("id")
+    return i if i is not None else ("no", str(it.get("no") or ""))
+
+
 def fetch_all_items() -> list[dict[str, Any]]:
-    """Tarik SELURUH barang (paging otomatis sampai rowCount habis). Untuk sync massal.
-    Auto-login saat sesi habis (per halaman)."""
-    first = _search_retry(start=0, limit=_PAGE_SIZE)
-    row_count = int(first.get("sp", {}).get("rowCount") or 0)
-    items: list[dict[str, Any]] = list(first.get("d") or [])
-    start = _PAGE_SIZE
-    while start < row_count:
-        page = _search_retry(start=start, limit=_PAGE_SIZE)
-        batch = page.get("d") or []
-        if not batch:
+    """Tarik SELURUH barang (sapuan berulang + dedup). Untuk sync massal.
+    Auto-login saat sesi habis (per halaman).
+
+    ⚠️ BUKTI PRODUKSI 2026-08-05 — INDEKS BOCOR: server melaporkan
+    ``rowCount=5229`` tetapi sapuan offset polos hanya memungut **5200** (persis
+    26×200). 29 barang hilang dari indeks TIAP siklus, dan yang hilang justru
+    yang PALING LAKU (PN 1000442956 'Fuel Filter' 482 pc, dan kartu varian
+    pemasok '/SN' 1.069 pc), sementara kartu mati ('/SH', 2 pc) tertangkap.
+    Akibatnya halaman part & asisten menjawab "stok —" untuk part yang paling
+    laku. Dua sebabnya:
+
+      1. ``search-item.do`` di-page dengan OFFSET tanpa urutan stabil. Barang
+         yang BERTRANSAKSI selama sapuan berpindah posisi: yang bergeser MAJU
+         melewati offset yang sudah dilewati → tak pernah terbaca; yang mundur
+         terbaca dua kali (karena itu jumlahnya pas kelipatan halaman).
+      2. ``if not batch: break`` — SATU halaman yang kebetulan balas kosong
+         (glitch sesaat) MEMOTONG SELURUH EKOR katalog.
+
+    Penawarnya di sini: halaman kosong di TENGAH tidak menghentikan sapuan
+    (retry sekali lalu lanjut ke offset berikutnya), hasil di-DEDUP by id, dan
+    bila jumlah unik masih kurang dari rowCount → sapuan penuh diulang (maks
+    ``_MAX_SWEEPS``) sampai genap atau tak ada tambahan lagi. rowCount dibaca
+    ULANG tiap sapuan karena katalog memang bisa bertambah/berkurang.
+    """
+    found: dict[Any, dict[str, Any]] = {}
+    row_count = 0
+    for sweep in range(1, _MAX_SWEEPS + 1):
+        before = len(found)
+        first = _search_retry(start=0, limit=_PAGE_SIZE)
+        row_count = int((first.get("sp") or {}).get("rowCount") or 0)
+        for it in (first.get("d") or []):
+            found[_item_key(it)] = it
+        # Guard loop: server aneh (rowCount melonjak / offset tak pernah habis)
+        # tak boleh membuat sapuan berputar tanpa batas.
+        max_pages = row_count // _PAGE_SIZE + 3
+        start, pages = _PAGE_SIZE, 1
+        while start < row_count and pages < max_pages:
+            batch = _search_retry(start=start, limit=_PAGE_SIZE).get("d") or []
+            if not batch:
+                # Kosong DI TENGAH (start < rowCount) = bukan akhir data. Coba
+                # sekali lagi; masih kosong → LEWATI offset ini dan teruskan.
+                # ⛔ JANGAN break: itu yang dulu memotong ekor katalog.
+                batch = _search_retry(start=start, limit=_PAGE_SIZE).get("d") or []
+                if not batch:
+                    logger.warning(
+                        "[accurate] halaman kosong di offset %d (rowCount %d) — "
+                        "dilewati, sapuan diteruskan (ekor katalog tak dipotong)",
+                        start, row_count)
+            for it in batch:
+                found[_item_key(it)] = it
+            start += _PAGE_SIZE
+            pages += 1
+        if not row_count or len(found) >= row_count:
             break
-        items.extend(batch)
-        start += _PAGE_SIZE
-    return items
+        if len(found) == before:
+            break                      # sapuan ulang tak menambah apa pun → sudahi
+        logger.info("[accurate] sapuan %d baru %d dari rowCount %d — sapu ulang",
+                    sweep, len(found), row_count)
+    if row_count and len(found) < row_count:
+        logger.warning(
+            "[accurate] sapuan katalog KURANG: %d unik dari rowCount %d — sebagian "
+            "barang tak masuk indeks siklus ini (bukti 2026-08-05: 5200 vs 5229, "
+            "yang hilang justru barang paling laku)", len(found), row_count)
+    return list(found.values())
 
 
 # ── Parsing PN ─────────────────────────────────────────────────────────────
@@ -608,6 +787,41 @@ def norm_pn(pn: str) -> str:
     return _norm_pn(pn)
 
 
+def _pn_base_key(pn: str) -> str:
+    """Kunci KELUARGA VARIAN dari sebuah PN: potong di '/' atau '+' PERTAMA lalu
+    normalisasi. '1000442956/SN' → '1000442956'; 'WG9525160004' → dirinya.
+
+    Dipakai atas field ``pn`` (hasil parse_pn), BUKAN ``no`` — ``no`` masih
+    berprefix nomor urut Accurate ('000951.…') yang bukan bagian PN."""
+    base = re.split(r"[/+]", (pn or "").strip())[0]
+    return _norm_pn(base)
+
+
+def _build_by_base(by_pn: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
+    """Peta KELUARGA: kunci PN dasar → daftar kunci by_pn anggotanya (stok desc).
+
+    FAKTA LIVE 2026-08-05: satu part fisik bisa dipecah jadi BEBERAPA kartu
+    barang Accurate per PEMASOK, dibedakan suffix huruf. Contoh PN 1000442956
+    (Fuel Filter): '000969.1000442956' 482 pc @Rp 300rb, '000951.1000442956/SN'
+    1.069 pc @Rp 285rb, '000993.1000442956/SH' 2 pc @Rp 455rb — part SAMA
+    (kata pemilik), pemasok & harga beda.
+
+    Semua entri masuk peta, termasuk keluarga beranggota satu, supaya pemanggil
+    tak perlu membedakan 'punya keluarga' vs 'tidak'. Peta ini TURUNAN dari
+    by_pn (jangan dipersist — selalu dibangun ulang)."""
+    out: dict[str, list[str]] = {}
+    for key, entry in (by_pn or {}).items():
+        kb = _pn_base_key((entry or {}).get("pn") or key)
+        if not kb:
+            continue
+        out.setdefault(kb, []).append(key)
+    for kb, keys in out.items():
+        # Stok terbanyak dulu = kartu pemasok yang paling mungkin dipakai;
+        # kunci sbg pemecah seri agar urutan DETERMINISTIK antar-restart.
+        keys.sort(key=lambda k: (-_num(((by_pn.get(k) or {}).get("available_to_sell"))), k))
+    return out
+
+
 def index_key(pn: str) -> str:
     """Kunci indeks Accurate untuk sebuah PN — PEMAAF terhadap SUFFIX VARIAN.
 
@@ -615,8 +829,8 @@ def index_key(pn: str) -> str:
     'YG9525230005/1'), sementara Accurate menyimpan PN DASAR ('WG9525160004').
     Normalisasi biasa membuang '/' → 'WG95251600042' ≠ 'WG9525160004', jadi stok &
     harga part yang ADA dilaporkan '—' (kasus nyata: kampas kopling, 11 pc).
-    Urutan: kunci apa adanya → kunci PN dasar (potong di '/' atau '+').
-    '' bila dua-duanya tak ada di indeks."""
+    Urutan: kunci apa adanya → kunci PN dasar (potong di '/' atau '+') → satu-satunya
+    kartu varian dari keluarga PN dasar itu. '' bila semuanya tak ada di indeks."""
     by = _index_cache.get("by_pn") or {}
     k = _norm_pn(pn)
     if not by:
@@ -625,7 +839,20 @@ def index_key(pn: str) -> str:
         return k
     base = re.split(r"[/+]", (pn or "").strip().upper())[0]
     kb = _norm_pn(base)
-    return kb if kb and kb in by else ""
+    if kb and kb in by:
+        return kb
+    # Langkah-3 (2026-08-05) — arah SEBALIKNYA. Sampai hari ini pemaafan hanya
+    # SATU ARAH (query ber-suffix → PN dasar), jadi query PN dasar '1000442956'
+    # MELESET dari kunci '1000442956SN'/'1000442956SH' yang ada di indeks. Efek
+    # nyata di halaman part: total stok '—' padahal tabel per-gudang terisi
+    # (by_gudang dari report memuat ketiga kartu, by_pn cuma satu).
+    # Bila keluarga PN dasar itu hanya punya SATU kartu → itu jawabannya
+    # (aturan pemilik: "PN suffix varian = part SAMA").
+    # ⛔ ≥2 kartu (kasus nyata 1000442956 punya 3) = AMBIGU harga/stok → JANGAN
+    # menebak salah satu; kembalikan '' dan biarkan stock_family menyajikan
+    # semuanya apa adanya.
+    cands = [c for c in ((_index_cache.get("by_base") or {}).get(kb) or []) if c in by]
+    return cands[0] if len(cands) == 1 else ""
 
 
 def _num(v: Any) -> float:
@@ -658,7 +885,11 @@ _index_lock = threading.Lock()
 # by_gudang: {norm_pn: {warehouseName: qty}} — rincian per-gudang, diisi enrichment
 # latar (enrich_warehouses) sekali per siklus 5-jam & DIBAGI ke semua fitur (stock_full,
 # stok_gudang) tanpa panggilan live per-PN. gudang_ts = kapan enrichment terakhir tuntas.
-_index_cache: dict[str, Any] = {"ts": 0.0, "items": [], "by_pn": {}, "by_gudang": {}, "gudang_ts": 0.0}
+# by_base: {pn_dasar: [kunci by_pn…]} — peta KELUARGA VARIAN PEMASOK (satu part
+# dipecah jadi beberapa kartu barang bersuffix '/SN', '/SH'…). TURUNAN dari by_pn,
+# dibangun ulang tiap refresh/_load_index/rekonsiliasi — TIDAK dipersist ke disk.
+_index_cache: dict[str, Any] = {"ts": 0.0, "items": [], "by_pn": {}, "by_gudang": {},
+                                "by_base": {}, "gudang_ts": 0.0}
 
 
 def _build_by_pn(items: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -698,6 +929,7 @@ def refresh(force: bool = False) -> dict[str, Any]:
             return _index_cache
         _index_cache["items"] = [normalize_item(x) for x in items]
         _index_cache["by_pn"] = _build_by_pn(items)
+        _index_cache["by_base"] = _build_by_base(_index_cache["by_pn"])
         # View ringkas utk overlay hasil pencarian (dipakai snapshot()) — dibangun
         # sekali di sini agar tiap request pencarian tinggal baca dict jadi.
         _index_cache["snap"] = {
@@ -750,6 +982,92 @@ def gudang_enriched_count() -> int:
     return len(_index_cache.get("by_gudang") or {})
 
 
+# Batas tambalan per siklus. Rekonsiliasi = 1 panggilan search per kunci; 80 sudah
+# jauh di atas kebocoran nyata (29 barang, 2026-08-05) dan menjaga window login
+# tetap pendek. Lebih dari itu = ada yang salah di sapuan → dicatat, bukan diborong.
+_RECONCILE_MAX = 80
+
+# Kunci indeks = PN TANPA tanda pisah ('1000442956/SN' → '1000442956SN'), padahal
+# kode barang di Accurate MASIH memakai '/'. Pola ini memisahkan ekor huruf agar
+# kita punya kata kunci cadangan yang pasti cocok di sisi server.
+_EKOR_HURUF_RE = re.compile(r"^(.{5,}?)([A-Z]{1,3})$")
+
+
+def _keyword_kandidat(key: str) -> list[str]:
+    """Kata kunci pencarian untuk satu KUNCI indeks, urut dari paling tepat.
+
+    Mencari '1000442956SN' apa adanya bisa 0 hasil karena kode aslinya
+    '000951.1000442956/SN'; kata kunci cadangan '1000442956' pasti mengembalikan
+    SELURUH kartu keluarga. Hasilnya tetap disaring kecocokan PERSIS, jadi kata
+    kunci yang lebih longgar tak berisiko salah-cocok."""
+    out = [key]
+    m = _EKOR_HURUF_RE.match(key)
+    if m and m.group(1) not in out:
+        out.append(m.group(1))
+    return out
+
+
+def _reconcile_report_keys(by_g: dict[str, Any]) -> int:
+    """Tambal barang yang LOLOS dari sapuan katalog, pakai Report per-gudang
+    sebagai daftar pembanding.
+
+    Report 'Kuantitas Barang per Gudang' adalah satu query server-side (bukan
+    paging offset), jadi ia TIDAK ikut bocor seperti fetch_all_items. Kunci yang
+    ada di report tapi TIDAK ada di by_pn = bukti hitam-putih barang itu hilang
+    dari indeks siklus ini (bukti 2026-08-05: PN 1000442956 & varian '/SN' —
+    justru yang paling laku). Untuk tiap kunci begitu kita tarik SATU barang via
+    ``search_by_keyword`` (server-side, bukan paging) lalu sisipkan ke indeks.
+
+    ⛔ ATURAN KERAS PEMILIK: HANYA dipanggil dari jalur enrichment/refresh
+    TERJADWAL — TIDAK PERNAH dari jalur request (request selalu baca cache saja).
+    Best-effort: kegagalan jaringan dilewati, tak pernah menjatuhkan enrichment.
+    Return jumlah barang yang berhasil ditambal."""
+    by_pn = _index_cache.get("by_pn") or {}
+    if not by_g or not by_pn:
+        # by_pn kosong = indeks memang belum dibangun; menambal satu-satu di sini
+        # bukan obatnya (dan bisa ribuan panggilan). Diamkan.
+        return 0
+    kurang = sorted(k for k in by_g if k not in by_pn)
+    if not kurang:
+        return 0
+    if len(kurang) > _RECONCILE_MAX:
+        logger.warning("[accurate] %d kunci report tak ada di indeks — hanya %d "
+                       "pertama yang ditambal siklus ini", len(kurang), _RECONCILE_MAX)
+        kurang = kurang[:_RECONCILE_MAX]
+    items = _index_cache.setdefault("items", [])
+    snap = _index_cache.setdefault("snap", {})
+    tertambal = 0
+    gagal_beruntun = 0
+    for key in kurang:
+        cocok: list[dict[str, Any]] = []
+        try:
+            for kw in _keyword_kandidat(key):
+                cocok = [h for h in search_by_keyword(kw, limit=20)
+                         if _norm_pn(h.get("pn") or "") == key]
+                if cocok:
+                    break
+            gagal_beruntun = 0
+        except AccurateError as e:
+            gagal_beruntun += 1
+            logger.warning("[accurate] rekonsiliasi '%s' gagal: %s", key, e)
+            if gagal_beruntun >= 3:
+                logger.warning("[accurate] rekonsiliasi dihentikan (3 kegagalan beruntun)")
+                break
+            continue
+        if not cocok:
+            continue                     # kunci report tak terpetakan ke barang → lewati
+        n = max(cocok, key=lambda h: _num(h.get("available_to_sell")))
+        by_pn[key] = n
+        items.append(n)
+        snap[key] = {"stok": n["available_to_sell"], "harga": n["price"], "unit": n["unit"]}
+        tertambal += 1
+    if tertambal:
+        _index_cache["by_base"] = _build_by_base(by_pn)   # keluarga ikut berubah
+        logger.info("[accurate] rekonsiliasi report→indeks menambal %d barang yang "
+                    "lolos dari sapuan katalog", tertambal)
+    return tertambal
+
+
 def enrich_warehouses() -> int:
     """Isi indeks per-gudang: tarik rincian gudang utk SEMUA barang berstok>0 (serial,
     santun ke Accurate) → simpan ke _index_cache['by_gudang'] = {norm_pn:{gudang:qty}}.
@@ -781,6 +1099,10 @@ def enrich_warehouses() -> int:
                 return prev
         _index_cache["by_gudang"] = built
         _index_cache["gudang_ts"] = time.time()
+        try:                            # tambal barang yang lolos sapuan katalog
+            _reconcile_report_keys(built)
+        except Exception as e:  # pragma: no cover - jaring pengaman
+            logger.warning("[accurate] rekonsiliasi report→indeks gagal: %s", e)
         return len(built)
     finally:
         with _gudang_enrich_lock:
@@ -916,6 +1238,13 @@ def enrich_warehouses_via_report() -> int:
         return enrich_warehouses()
     _index_cache["by_gudang"] = by_g
     _index_cache["gudang_ts"] = time.time()
+    # Report tak ikut bocor spt paging offset → pakai sbg pembanding untuk
+    # menambal barang yang lolos dari sapuan katalog. Best-effort: gagal di sini
+    # tak boleh membatalkan enrichment yang sudah berhasil.
+    try:
+        _reconcile_report_keys(by_g)
+    except Exception as e:  # pragma: no cover - jaring pengaman
+        logger.warning("[accurate] rekonsiliasi report→indeks gagal: %s", e)
     logger.info("[accurate] enrichment per-gudang via REPORT OK (%d PN, ~detik)", len(by_g))
     return len(by_g)
 
@@ -991,6 +1320,9 @@ def _load_index() -> bool:
         for k in ("items", "by_pn", "by_gudang", "snap", "ts", "gudang_ts"):
             if k in raw:
                 _index_cache[k] = raw[k]
+        # by_base TURUNAN — dibangun ulang di sini, sengaja TIDAK ikut dipersist
+        # (kalau ikut, file lama tanpa kunci itu akan menyisakan peta basi).
+        _index_cache["by_base"] = _build_by_base(_index_cache.get("by_pn") or {})
     logger.info("[accurate] indeks dimuat dari DISK (%d barang) — tanpa login Accurate",
                 len(raw["items"]))
     return True

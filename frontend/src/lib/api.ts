@@ -833,6 +833,49 @@ export async function getAccurateStock(pn: string, token: string): Promise<Accur
   return res.json();
 }
 
+// ── Keluarga varian pemasok (kartu Accurate ganda utk 1 part fisik) ──
+// Satu part fisik bisa dipecah per PEMASOK di Accurate dengan suffix huruf
+// (mis. PN dasar + '/SN' + '/SH') — stok DAN harga beda tiap kartu.
+// ⛔ Aturan pemilik: harga TIDAK dirata-rata — `harga_min`/`harga_max` murni
+// LABEL rentang; keranjang & penawaran selalu menunjuk `kode` varian yang
+// dipilih user secara eksplisit.
+export type PartVarianItem = {
+  kode: string; // PN kartu APA ADANYA, suffix ikut — inilah yang dipesan
+  no: string; // nomor kartu barang Accurate ("000951.<pn>")
+  nama: string;
+  unit?: string;
+  // Angka stok/harga bisa HILANG (bukan 0) bila gerbang kolom server
+  // mencabutnya untuk staf tanpa centang col_stok/col_harga → jangan
+  // dirender sebagai `?? 0`, itu memalsukan data jadi "habis"/"gratis".
+  stok?: number;
+  harga?: number;
+  per_gudang?: { gudang: string; qty: number }[]; // staf/admin saja
+  stok_wilayah?: number; // pembeli: pengganti per_gudang (tanpa sebaran gudang)
+};
+
+export type PartVarian = {
+  configured: boolean;
+  found?: boolean;
+  session_expired?: boolean;
+  error?: boolean;
+  reason?: string;
+  base?: string;
+  total_available?: number;
+  harga_min?: number | null;
+  harga_max?: number | null;
+  varian?: PartVarianItem[];
+};
+
+// ⚠️ WAJIB query param `?pn=` — kode varian mengandung '/' ("…/SN"), dan PN
+// ber-'/' di PATH segment kena jebakan %2F (proxy menormalkan → 404).
+export async function getPartVarian(pn: string, token: string): Promise<PartVarian> {
+  const res = await fetch(`${API_BASE}/api/parts/varian?pn=${encodeURIComponent(pn)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 // ── Permissions (menu + kolom + sub-tab harga) ──────────────────────
 export type MyPermissions = {
   menus: string[];

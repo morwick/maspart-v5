@@ -1,17 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import ImageLightbox from "@/components/ImageLightbox";
-import { ApiError, cekPartDiUnit, deleteRakFoto, getAccurateStock, getPartExploded, getPartExplodedFigure, getPartPhotos, getPartSpec, getBuyerLocations, getRakForPart, partImageUrl, saveRak, searchParts, uploadRakFoto, type AccurateStock, type BuyerLocation, type CekUnitResult, type PartExplodedFigure, type PartResult, type PartSpec, type RakInfo } from "@/lib/api";
+import { ApiError, cekPartDiUnit, deleteRakFoto, getAccurateStock, getPartExploded, getPartExplodedFigure, getPartPhotos, getPartSpec, getPartVarian, getBuyerLocations, getRakForPart, partImageUrl, saveRak, searchParts, uploadRakFoto, type AccurateStock, type BuyerLocation, type CekUnitResult, type PartExplodedFigure, type PartResult, type PartSpec, type PartVarian, type PartVarianItem, type RakInfo } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { ensurePerms } from "@/lib/perms";
 import { addToCart, hasPrice, hasWeight } from "@/lib/cart";
 
 // Buang prefix nomor gudang untuk tampilan pembeli ("01.Jakarta" → "Jakarta").
 const locName = (s: string) => s.replace(/^\s*\d+\s*\.\s*/, "").trim() || s;
+
+const angka = (n: number) => Number(n).toLocaleString("id-ID");
+const rupiah = (n: number) => "Rp " + angka(n);
+
+// Sel baris TOTAL tabel gudang. Ditulis inline karena `.tbl tbody td` tidak
+// menjangkau <tfoot> — tanpa ini barisnya kehilangan tinggi & padding.
+const SEL_TOTAL: CSSProperties = {
+  background: "var(--ink-50)",
+  fontWeight: 600,
+  height: "var(--row-h)",
+  padding: "0 var(--row-px)",
+  borderTop: "1px solid var(--ink-200)",
+};
 
 export default function PartDetailPage() {
   const router = useRouter();
@@ -33,6 +46,11 @@ export default function PartDetailPage() {
   const [isBuyer, setIsBuyer] = useState(false);
   const [buyerLocs, setBuyerLocs] = useState<BuyerLocation[]>([]);
   const [accStock, setAccStock] = useState<AccurateStock | null>(null);
+  // KELUARGA VARIAN PEMASOK: satu part fisik bisa punya beberapa kartu barang
+  // Accurate (base + '/SN' + '/SH'), masing-masing beda stok & HARGA.
+  // `tabVarian` = kode varian yang sedang dilihat; "" = tab "Semua varian".
+  const [varianData, setVarianData] = useState<PartVarian | null>(null);
+  const [tabVarian, setTabVarian] = useState("");
   // Exploded view TANPA nomor rangka. SENGAJA tidak dimuat saat halaman dibuka:
   // panggilan pertama bisa 10-60 dtk (PN umum dipakai belasan ribu model), dan
   // gambar hanya ditampilkan bila user memang meminta.
@@ -77,6 +95,16 @@ export default function PartDetailPage() {
     if (!pn || !t) return;
     setAccStock(null);
     getAccurateStock(pn, t).then(setAccStock).catch(() => setAccStock(null));
+  }, [pn]);
+
+  // Keluarga varian pemasok — non-fatal (pola getAccurateStock): kalau gagal,
+  // `varianData` tetap null dan SELURUH tampilan lama dipakai apa adanya.
+  useEffect(() => {
+    const t = getToken();
+    if (!pn || !t) return;
+    setVarianData(null);
+    setTabVarian("");
+    getPartVarian(pn, t).then(setVarianData).catch(() => setVarianData(null));
   }, [pn]);
 
   // Rak & kartu stok — hanya staf internal (backend 403 untuk pembeli) dan
@@ -191,6 +219,75 @@ export default function PartDetailPage() {
     return byLabel ?? getUser()?.gudang ?? null;
   }, [isBuyer, buyerLocs, buyerStock]);
 
+  // ── Varian pemasok ─────────────────────────────────────────────────────────
+  // UI varian hanya hidup bila keluarga memang > 1 kartu. Satu anggota (atau
+  // endpoint gagal/tak dikonfigurasi) → `varian` null → tampilan lama utuh.
+  const varian: PartVarianItem[] | null =
+    varianData?.found && (varianData.varian?.length ?? 0) > 1 ? varianData.varian! : null;
+  const varianAktif = varian?.find((v) => v.kode === tabVarian) ?? null;
+  // Label pendek untuk chip/kolom tabel: "…/SN" → "/SN", kartu dasar → "base".
+  const labelVarian = useCallback(
+    (kode: string) => {
+      const b = (varianData?.base || "").toUpperCase();
+      const k = kode.toUpperCase();
+      if (!b) return kode;
+      if (k === b) return "base";
+      return k.startsWith(b) ? kode.slice(b.length) : kode;
+    },
+    [varianData?.base],
+  );
+  // Tabel GABUNGAN: satu baris per gudang, satu kolom per varian + Total.
+  // Gudang ber-rak tapi tanpa stok tetap ikut (alasan sama dgn `barisGudang`).
+  const barisVarianSemua = useMemo(() => {
+    if (!varian) return [];
+    const m = new Map<string, number[]>();
+    varian.forEach((v, i) => {
+      for (const g of v.per_gudang ?? []) {
+        const row = m.get(g.gudang) ?? Array<number>(varian.length).fill(0);
+        row[i] += Number(g.qty) || 0;
+        m.set(g.gudang, row);
+      }
+    });
+    for (const label of Object.keys(rakMap)) {
+      if (!m.has(label)) m.set(label, Array<number>(varian.length).fill(0));
+    }
+    return [...m.entries()]
+      .map(([nama, kolom]) => ({ nama, kolom, total: kolom.reduce((a, b) => a + b, 0) }))
+      .sort((a, b) => b.total - a.total || a.nama.localeCompare(b.nama));
+  }, [varian, rakMap]);
+  // Tabel SATU varian terpilih.
+  const barisVarianAktif = useMemo<[string, number][]>(() => {
+    if (!varianAktif) return [];
+    const m = new Map<string, number>();
+    for (const g of varianAktif.per_gudang ?? []) {
+      m.set(g.gudang, (m.get(g.gudang) ?? 0) + (Number(g.qty) || 0));
+    }
+    for (const label of Object.keys(rakMap)) if (!m.has(label)) m.set(label, 0);
+    return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [varianAktif, rakMap]);
+  // Total kolom = jumlah baris yang BENAR-BENAR ditampilkan (bukan
+  // `total_available`), supaya footer tabel selalu konsisten dengan isinya.
+  const totalKolomVarian = useMemo(() => {
+    if (!varian) return [];
+    return varian.map((_, i) => barisVarianSemua.reduce((n, r) => n + r.kolom[i], 0));
+  }, [varian, barisVarianSemua]);
+  // Baris tabel gudang yang BENAR-BENAR dirender — satu jalur untuk ketiga mode
+  // (tanpa varian / tab "Semua" / tab satu varian) supaya integrasi RAK per baris
+  // tetap satu tempat. `kolom` hanya terisi di mode gabungan.
+  const barisTampil = useMemo<{ nama: string; qty: number; kolom?: number[] }[]>(() => {
+    if (!varian) return barisGudang.map(([nama, qty]) => ({ nama, qty }));
+    if (varianAktif) return barisVarianAktif.map(([nama, qty]) => ({ nama, qty }));
+    return barisVarianSemua.map((r) => ({ nama: r.nama, qty: r.total, kolom: r.kolom }));
+  }, [varian, varianAktif, barisGudang, barisVarianAktif, barisVarianSemua]);
+  const totalTampil = useMemo(() => barisTampil.reduce((n, r) => n + r.qty, 0), [barisTampil]);
+  // Label rentang harga — LABEL saja, tak pernah dirata-rata (aturan pemilik).
+  const rentangHarga = useMemo(() => {
+    const lo = varianData?.harga_min;
+    const hi = varianData?.harga_max;
+    if (!lo || !hi) return null;
+    return lo === hi ? rupiah(lo) : `${rupiah(lo)} – ${angka(hi)}`;
+  }, [varianData?.harga_min, varianData?.harga_max]);
+
   async function loadExploded() {
     if (explodedBusy || exploded) return;
     const token = getToken();
@@ -218,7 +315,13 @@ export default function PartDetailPage() {
       actions={
         <>
           {main && isBuyer && (
-            (!buyerStock || buyerStock.qty <= 0) ? (
+            // Keluarga varian: harga BEDA per pemasok → tak ada tombol beli
+            // "gabungan" di header (keranjang wajib menunjuk kode spesifik).
+            varian ? (
+              <span className="pill pill-warn" title="Part ini punya beberapa varian pemasok — harga berbeda, pilih salah satu">
+                {varian.length} varian — pilih di bawah
+              </span>
+            ) : (!buyerStock || buyerStock.qty <= 0) ? (
               <span className="pill pill-danger" title="Stok habis di lokasimu">Stok habis</span>
             ) : !hasPrice(hargaStr) ? (
               <span className="pill pill-warn" title="Harga belum tersedia — belum bisa dibeli">Tanpa harga</span>
@@ -263,7 +366,14 @@ export default function PartDetailPage() {
           <>
             {/* Heading */}
             <div className="mb-4">
-              <div className="mono" style={{ fontSize: 24, fontWeight: 600 }}>{main.part_number}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="mono" style={{ fontSize: 24, fontWeight: 600 }}>{main.part_number}</div>
+                {varian && (
+                  <span className="pill pill-warn" title="Part yang sama dipecah jadi beberapa kartu barang Accurate — beda pemasok, beda harga">
+                    {varian.length} varian pemasok
+                  </span>
+                )}
+              </div>
               <div style={{ color: "var(--ink-600)", marginTop: 2 }}>{main.part_name}</div>
             </div>
 
@@ -302,6 +412,57 @@ export default function PartDetailPage() {
               <section className="flex flex-col gap-4">
                 {/* Pembeli: stok hanya untuk daerah terpilih (tanpa total) */}
                 {isBuyer ? (
+                  varian ? (
+                    // Keluarga varian pemasok: SATU BARIS per kartu — harga & stok
+                    // wilayah PASTI milik varian itu, dan tombol keranjang menunjuk
+                    // `kode` spesifik (tak ada penjualan atas nama "gabungan").
+                    // Tetap TANPA sebaran antar-gudang (aturan pemilik).
+                    <div className="surface" style={{ overflow: "hidden" }}>
+                      <div className="px-4 py-2.5 flex flex-wrap items-center gap-2" style={{ fontSize: 13, fontWeight: 600, borderBottom: "1px solid var(--ink-150)" }}>
+                        Pilih varian pemasok
+                        <span className="pill pill-warn">{varian.length} pilihan</span>
+                      </div>
+                      {varian.map((v) => {
+                        const hargaV = v.harga ? rupiah(v.harga) : "—";
+                        const stokV = v.stok_wilayah ?? 0;
+                        const beratV = main.berat || specBeratGram;
+                        return (
+                          <div
+                            key={v.kode}
+                            className="flex items-center gap-3 px-4 py-2.5"
+                            style={{ borderBottom: "1px solid var(--ink-100)" }}
+                          >
+                            <div style={{ minWidth: 0 }}>
+                              <div className="mono" style={{ fontSize: 13, fontWeight: 550 }}>{v.kode}</div>
+                              <div style={{ fontSize: 11.5, color: "var(--ink-500)" }}>{v.nama || main.part_name}</div>
+                            </div>
+                            <div className="ml-auto" style={{ textAlign: "right" }}>
+                              <div className="mono" style={{ fontSize: 13.5, fontWeight: 600, color: "var(--brand-700)" }}>{hargaV}</div>
+                              <div style={{ fontSize: 11.5, color: "var(--ink-500)" }}>stok wilayahmu: {angka(stokV)}</div>
+                            </div>
+                            {stokV <= 0 ? (
+                              <span className="pill pill-danger" title="Stok habis di wilayahmu">Stok habis</span>
+                            ) : !hasPrice(hargaV) ? (
+                              <span className="pill pill-warn" title="Harga belum tersedia — belum bisa dibeli">Tanpa harga</span>
+                            ) : !hasWeight(beratV) ? (
+                              <span className="pill pill-warn" title="Berat belum ditetapkan admin — belum bisa dibeli">Tanpa berat</span>
+                            ) : (
+                              <button
+                                className="btn btn-primary btn-sm"
+                                title={`Masukkan ${v.kode} ke keranjang`}
+                                onClick={() => addToCart({ part_number: v.kode, name: v.nama || main.part_name, harga: hargaV, berat: beratV })}
+                              >
+                                + 🛒
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <div className="px-4 py-2" style={{ fontSize: 11.5, color: "var(--ink-400)" }}>
+                        Part fisik sama, pemasok berbeda — harga mengikuti varian yang dipilih.
+                      </div>
+                    </div>
+                  ) : (
                   <div className="grid grid-cols-2 gap-3">
                     <div className="surface surface-pad">
                       <div className="stat-label">Stok tersedia</div>
@@ -316,9 +477,110 @@ export default function PartDetailPage() {
                       <div className="stat-value mono" style={{ color: "var(--brand-700)", fontSize: 18 }}>{hargaStr}</div>
                     </div>
                   </div>
+                  )
                 ) : (
                   <>
+                    {/* Tab varian pemasok — default "Semua varian" (gabungan).
+                        Hanya muncul bila keluarga memang > 1 kartu Accurate. */}
+                    {varian && (showStok || showHarga) && (
+                      <div className="tabs" role="tablist" aria-label="Varian pemasok" style={{ overflowX: "auto" }}>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={!varianAktif}
+                          className={"tab" + (!varianAktif ? " active" : "")}
+                          style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}
+                          onClick={() => setTabVarian("")}
+                        >
+                          Semua varian
+                          {showStok && varianData?.total_available != null && (
+                            <span style={{ color: "var(--ink-400)", fontWeight: 450 }}>· {angka(varianData.total_available)}</span>
+                          )}
+                        </button>
+                        {varian.map((v) => {
+                          const aktif = varianAktif?.kode === v.kode;
+                          const sub = [
+                            showStok && v.stok != null ? angka(v.stok) : "",
+                            showHarga && v.harga ? rupiah(v.harga) : "",
+                          ].filter(Boolean).join(" · ");
+                          return (
+                            <button
+                              key={v.kode}
+                              type="button"
+                              role="tab"
+                              aria-selected={aktif}
+                              className={"tab" + (aktif ? " active" : "")}
+                              style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}
+                              onClick={() => setTabVarian(v.kode)}
+                              title={v.nama}
+                            >
+                              <span className="mono">{v.kode}</span>
+                              {sub && <span style={{ color: "var(--ink-400)", fontWeight: 450 }}>· {sub}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
                     {(showStok || showHarga) && (
+                      varian ? (
+                        // Kartu versi VARIAN — menggantikan kartu stok/harga lama
+                        // (jangan dirender dobel): tab "Semua" = total keluarga +
+                        // rentang harga; tab varian = angka pasti kartu itu.
+                        <div className="grid grid-cols-2 gap-3">
+                          {showStok && (
+                            <div className="surface surface-pad">
+                              <div className="stat-label">
+                                {varianAktif ? "Stok varian ini" : "Stok total"} <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate</span>
+                              </div>
+                              <div className="stat-value">
+                                {varianAktif
+                                  ? (varianAktif.stok != null ? `${angka(varianAktif.stok)}${varianAktif.unit ? ` ${varianAktif.unit}` : ""}` : "—")
+                                  : (varianData?.total_available != null
+                                      ? `${angka(varianData.total_available)}${varian[0]?.unit ? ` ${varian[0].unit}` : ""}`
+                                      : "—")}
+                              </div>
+                              {varianAktif ? (
+                                <div style={{ fontSize: 12, color: "var(--ink-500)", marginTop: 4 }}>{varianAktif.nama}</div>
+                              ) : (
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {varian.map((v) => (
+                                    <span key={v.kode} className="pill mono" style={{ fontSize: 11 }} title={v.nama}>
+                                      {labelVarian(v.kode)} <b>{v.stok != null ? angka(v.stok) : "—"}</b>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {showHarga && (
+                            <div className="surface surface-pad">
+                              <div className="stat-label">Harga <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate</span></div>
+                              <div className="stat-value mono" style={{ color: "var(--brand-700)", fontSize: 18 }}>
+                                {varianAktif
+                                  ? (varianAktif.harga ? rupiah(varianAktif.harga) : "—")
+                                  : (rentangHarga ?? "—")}
+                              </div>
+                              <div style={{ fontSize: 12, color: "var(--ink-500)", marginTop: 4 }}>
+                                {varianAktif
+                                  ? "harga pasti varian ini — dipakai keranjang & penawaran"
+                                  : "beda per pemasok — pilih varian untuk harga pasti"}
+                              </div>
+                            </div>
+                          )}
+                          <div className="surface surface-pad" style={{ gridColumn: "1 / -1" }}>
+                            <div className="stat-label">Kode Accurate</div>
+                            <div className="stat-value mono" style={{ fontSize: 14 }}>
+                              {varianAktif ? varianAktif.kode : `${varian.length} kartu barang`}
+                            </div>
+                            <div className="mono" style={{ fontSize: 12, color: "var(--ink-500)", marginTop: 4 }}>
+                              {varianAktif
+                                ? `Kode Accurate: ${varianAktif.no || "—"}`
+                                : varian.map((v) => (v.no || "").split(".")[0]).filter(Boolean).join(" · ")}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
                       <div className="grid grid-cols-2 gap-3">
                         {showStok && (
                           <div className="surface surface-pad">
@@ -335,26 +597,49 @@ export default function PartDetailPage() {
                           </div>
                         )}
                       </div>
+                      )
                     )}
 
                     {showStok && (
                       <div className="surface" style={{ overflow: "hidden" }}>
                         <div className="px-4 py-2.5" style={{ fontSize: 13, fontWeight: 600, borderBottom: "1px solid var(--ink-150)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                          <span>Stok per Gudang {stokLive && <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate</span>}</span>
-                          {!stokLive && !isBuyer && (accStock?.session_expired || accStock?.error) && (
+                          <span>
+                            Stok per Gudang {(stokLive || varian) && <span className="pill pill-success" style={{ marginLeft: 6 }}>Accurate</span>}
+                            {varian && (
+                              <span className="pill mono" style={{ marginLeft: 6, fontSize: 11 }}>
+                                {varianAktif ? varianAktif.kode : "gabungan varian"}
+                              </span>
+                            )}
+                          </span>
+                          {!stokLive && !varian && !isBuyer && (accStock?.session_expired || accStock?.error) && (
                             <span style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-400)" }} title="Fetch Accurate gagal — memakai data Excel (export Accurate)">fallback Excel</span>
                           )}
                         </div>
-                        {barisGudang.length > 0 ? (
+                        {barisTampil.length > 0 ? (
                           <>
+                            {/* Mode gabungan bisa punya banyak kolom varian → biar
+                                menggeser sendiri, jangan memaksa halaman melebar. */}
+                            <div style={{ overflowX: "auto" }}>
                             <table className="tbl">
+                              {varian && !varianAktif && (
+                                <thead>
+                                  <tr>
+                                    <th>Gudang</th>
+                                    {varian.map((v) => (
+                                      <th key={v.kode} className="num mono" title={v.kode}>{labelVarian(v.kode)}</th>
+                                    ))}
+                                    <th className="num">Total</th>
+                                  </tr>
+                                </thead>
+                              )}
                               <tbody>
-                                {barisGudang.map(([nama, qty]) => (
+                                {barisTampil.map(({ nama, qty, kolom }) => (
                                   <GudangRakRow
                                     key={nama}
                                     pn={main.part_number}
                                     gudang={nama}
                                     qty={qty}
+                                    kolom={kolom}
                                     info={rakMap[nama]}
                                     boleh={isAdmin || kelola.includes(nama)}
                                     open={rakOpen === nama}
@@ -364,9 +649,22 @@ export default function PartDetailPage() {
                                   />
                                 ))}
                               </tbody>
+                              {varian && (
+                                <tfoot>
+                                  <tr>
+                                    <td style={SEL_TOTAL}>Total</td>
+                                    {!varianAktif && totalKolomVarian.map((t, i) => (
+                                      <td key={i} className="num" style={SEL_TOTAL}>{angka(t)}</td>
+                                    ))}
+                                    <td className="num" style={SEL_TOTAL}>{angka(totalTampil)}</td>
+                                  </tr>
+                                </tfoot>
+                              )}
                             </table>
+                            </div>
                             <div className="px-4 py-2" style={{ fontSize: 11.5, color: "var(--ink-400)", borderTop: "1px solid var(--ink-150)" }}>
                               Klik baris gudang untuk melihat lokasi rak & kartu stok.
+                              {varian && " Rak dicatat per gudang untuk part ini (berlaku semua varian)."}
                             </div>
                           </>
                         ) : (
@@ -552,6 +850,7 @@ function GudangRakRow({
   pn,
   gudang,
   qty,
+  kolom,
   info,
   boleh,
   open,
@@ -562,6 +861,10 @@ function GudangRakRow({
   pn: string;
   gudang: string;
   qty: number;
+  // Mode KELUARGA VARIAN (tab "Semua"): qty per varian, urutannya sejajar
+  // dengan header kolom. `qty` di atas = totalnya. Undefined = tabel 2 kolom
+  // seperti sedia kala.
+  kolom?: number[];
   info?: RakInfo;
   boleh: boolean;
   open: boolean;
@@ -653,11 +956,18 @@ function GudangRakRow({
             </span>
           )}
         </td>
+        {kolom?.map((q, i) => (
+          // Sel 0 ditulis "—" redup, bukan angka 0 — gudang yang memang tak
+          // pernah memegang varian itu tak perlu ikut ramai.
+          <td key={i} className="num" style={q ? undefined : { color: "var(--ink-300)" }}>
+            {q ? Number(q).toLocaleString("id-ID") : "—"}
+          </td>
+        ))}
         <td className="num" style={{ fontWeight: 550 }}>{Number(qty).toLocaleString("id-ID")}</td>
       </tr>
       {open && (
         <tr>
-          <td colSpan={2} style={{ background: "var(--ink-50)", padding: "10px 14px" }}>
+          <td colSpan={2 + (kolom?.length ?? 0)} style={{ background: "var(--ink-50)", padding: "10px 14px" }}>
             {err && <div className="alert alert-error" style={{ marginBottom: 8 }}>{err}</div>}
 
             {!edit ? (

@@ -617,6 +617,77 @@ def _detail_lookup_pemaaf(pn: str) -> tuple[list[dict], str | None, list[dict]]:
     return [], None, saran[:6]
 
 
+# Kalimat pengarah untuk model saat sebuah PN punya BEBERAPA kartu pemasok.
+# Ditaruh sebagai konstanta karena dipakai detail_part & cek_massal_part — dua
+# jawaban yang berbeda tak boleh memberi aturan berbeda soal harga.
+_CATATAN_VARIAN_PEMASOK = (
+    "Part ini punya {n} kartu varian PEMASOK di Accurate — satu part fisik yang "
+    "dipecah per pemasok (dibedakan suffix pada kodenya), stok & harganya "
+    "MASING-MASING. ⚠️ 'stok_total'/'harga_lokal' di luar blok ini hanya "
+    "mewakili SATU kartu; stok seluruh keluarga ada di 'varian_pemasok.total'. "
+    "Tampilkan SEMUA varian apa adanya beserta angkanya. ⛔ JANGAN merata-rata "
+    "/ menjumlahkan harga jadi satu angka. Bila user mau membeli atau minta "
+    "penawaran, TANYAKAN dulu varian mana (sebut kodenya persis) — penawaran "
+    "selalu menunjuk SATU kode varian."
+)
+
+
+def _varian_pemasok(pn: str, user: dict, *, dengan_gudang: bool = True,
+                    dengan_stok: bool = True) -> dict | None:
+    """Kartu VARIAN PEMASOK Accurate untuk 1 PN — None bila part ini sendirian.
+
+    LATAR LIVE 2026-08-05 (PN 1000442956): satu part fisik bisa punya beberapa
+    kartu barang per pemasok — base 482 pc @Rp 300rb, '/SN' 1.069 pc @Rp 285rb,
+    '/SH' 2 pc @Rp 455rb. Tanpa ini asisten menyebut stok/harga SATU kartu (kerap
+    kartu yang mati) seolah itu seluruh stok, lalu penawaran dibuat atas kartu
+    yang salah harganya.
+
+    Murah dulu (`family_summary` = beberapa lookup dict), baru `stock_family`
+    yang menyusun per-gudang — supaya jalur massal tak membayar untuk part biasa.
+    Gerbang: harga ikut `_boleh_harga`, stok ikut `_boleh_stok` + `dengan_stok`
+    (jalur yang memang tak memberi angka stok, mis. pembeli di cek massal);
+    sebaran per-gudang tak pernah untuk pembeli & dilewati di jalur massal
+    (payload token)."""
+    boleh_h = _boleh_harga(user)
+    boleh_s = dengan_stok and _boleh_stok(user)
+    if not (boleh_h or boleh_s):
+        return None                     # tak ada yang boleh ditampilkan
+    try:
+        if not accurate.family_summary(pn):
+            return None                 # sendirian / indeks belum siap → jalur lama
+        fam = accurate.stock_family(pn)
+    except Exception:
+        return None
+    daftar: list[dict] = []
+    for v in (fam.get("varian") or []):
+        it: dict = {"kode": v.get("pn") or ""}
+        if boleh_s:
+            it["stok"] = v.get("available_to_sell")
+        if boleh_h and v.get("price"):
+            it["harga"] = int(v["price"])
+        if dengan_gudang and not _is_pembeli(user) and v.get("per_gudang"):
+            it["per_gudang"] = {g["gudang"]: g["qty"] for g in v["per_gudang"]}
+        daftar.append(it)
+    if len(daftar) < 2:
+        return None
+    out: dict = {"jumlah_varian": len(daftar), "varian": daftar}
+    if boleh_s:
+        out["total"] = fam.get("total_available")
+    if boleh_h and fam.get("harga_min"):
+        out["harga_min"], out["harga_max"] = fam["harga_min"], fam["harga_max"]
+    return out
+
+
+def _sisip_varian_pemasok(out: dict, pn: str, user: dict, **kw) -> dict:
+    """Tempelkan `varian_pemasok` + `catatan_varian` ke hasil tool bila perlu.
+    Mutasi di tempat + kembalikan `out` agar enak dirangkai."""
+    vp = _varian_pemasok(pn, user, **kw)
+    if vp:
+        out["varian_pemasok"] = vp
+        out["catatan_varian"] = _CATATAN_VARIAN_PEMASOK.format(n=vp["jumlah_varian"])
+    return out
+
+
 def _t_detail_part(args: dict, user: dict) -> dict:
     pn = (args.get("part_number") or "").strip()
     if not pn:
@@ -652,6 +723,8 @@ def _t_detail_part(args: dict, user: dict) -> dict:
             _rg = _rak_untuk(pn, user)
             if _rg:
                 out["rak_gudang"] = _rg
+            # Barang non-katalog pun bisa punya kartu saudara per pemasok.
+            _sisip_varian_pemasok(out, pn, user, dengan_stok=not _is_pembeli(user))
             return _hide_gudang_for_buyer(out, user)
         try:
             search_log.record_miss(pn, "pn", "detail_part")
@@ -729,6 +802,10 @@ def _t_detail_part(args: dict, user: dict) -> dict:
                 result["sumber_harga"] = "Accurate (sinkron berkala)"
         elif user.get("role") != "pembeli":
             result["sumber_stok"] = "Excel stok.xlsx (fallback — Accurate tak tersedia/PN tak ada)"
+        # KELUARGA VARIAN PEMASOK: stok_total/harga_lokal di atas hanya mewakili
+        # SATU kartu — sesudahnya wajib disodorkan kartu saudaranya, kalau tidak
+        # model menjawab "stok 2 pc" untuk part yang sebenarnya menumpuk 1.553 pc.
+        _sisip_varian_pemasok(result, pn, user, dengan_stok=user.get("role") != "pembeli")
     # Spesifikasi fisik resmi dari SIMS: berat (untuk ongkir) + dimensi + satuan +
     # merek. Non-fatal: bila SIMS tak punya data / down, detail tetap tampil.
     try:
@@ -948,6 +1025,14 @@ def _t_cek_massal_part(args: dict, user: dict) -> dict:
             item["berat_kg"] = round(g / 1000, 2)
         if peta_dim.get(pn):
             item["dimensi_cm"] = peta_dim[pn]
+        # Kartu VARIAN PEMASOK (2026-08-05). TANPA per-gudang di jalur massal:
+        # payload sudah mepet plafon token (_rampingkan_payload malah membuang
+        # rincian gudang saat sesak) — yang wajib sampai ke model = kode + harga
+        # tiap kartu supaya ia tak memilih varian diam-diam.
+        vp = _varian_pemasok(pn, user, dengan_gudang=False, dengan_stok=boleh_stok)
+        if vp:
+            item["varian_pemasok"] = vp
+            ada = True
         if not ada:
             tak_ada.append(pn)
             item["catatan_pn"] = "tidak ditemukan di indeks (cek ejaan / mungkin non-katalog)"
@@ -987,6 +1072,18 @@ def _t_cek_massal_part(args: dict, user: dict) -> dict:
 
     # Rampingkan SEBELUM menulis catatan — catatan wajib jadi key TERAKHIR.
     dirampingkan = _rampingkan_payload(out, part)
+
+    # Aturan varian ditulis SEKALI di sini (bukan per-PN) agar tak mengulang
+    # kalimat panjang ×100. Ditaruh sebelum 'catatan' supaya 'catatan' tetap key
+    # terakhir — model membaca ujung payload paling kuat.
+    n_varian = sum(1 for it in part if it.get("varian_pemasok"))
+    if n_varian:
+        out["catatan_varian"] = (
+            f"{n_varian} PN di daftar ini punya BEBERAPA kartu varian PEMASOK di "
+            "Accurate (lihat 'varian_pemasok' tiap baris: kode + stok + harga per "
+            "pemasok). Harga baris utama hanya mewakili SATU kartu. ⛔ JANGAN "
+            "merata-rata harga; bila user mau memesan/menawar, tanyakan dulu "
+            "varian mana — penawaran selalu menunjuk SATU kode varian.")
 
     catatan = (f"Cek massal {len(pns)} PN dalam SATU panggilan (⛔ JANGAN detail_part "
                f"berulang). {ketemu} ketemu, {len(tak_ada)} tidak ada — sebut jujur yang "
@@ -1609,6 +1706,32 @@ def _t_foto_resmi_part(args: dict, user: dict) -> dict:
     }
 
 
+def _varian_ambigu(pn: str) -> list[dict] | None:
+    """Daftar kartu varian pemasok bila PN ini TAK bisa di-resolve ke SATU kartu
+    Accurate. None = tidak ambigu → jalur penawaran lama jalan apa adanya.
+
+    `index_key` sengaja mengembalikan '' saat PN dasar punya ≥2 kartu bersuffix
+    ('…/SN','…/SH') — ia menolak menebak. Sebelum ini penolakan itu berakhir
+    sebagai 'part tidak ditemukan' yang menyesatkan; dan bila salah satu kartu
+    kebetulan terpilih, dokumen resmi memuat harga pemasok yang salah.
+
+    Bila kode yang diketik user COCOK PERSIS ke satu kartu, itu sudah pilihan
+    eksplisit — tidak ambigu, jangan diganggu."""
+    try:
+        if accurate.index_key(pn):
+            return None
+        fam = accurate.family_summary(pn)
+        if not fam:
+            return None       # bukan soal varian (PN memang tak ada di Accurate)
+            # → biar pesan 'part_tidak_ditemukan' yang bicara.
+        full = accurate.stock_family(pn)
+    except Exception:
+        return None           # gagal baca indeks ≠ vonis; alur lama yang menilai
+    return [{"kode": v.get("pn"), "stok": v.get("available_to_sell"),
+             "harga": int(v.get("price") or 0)}
+            for v in (full.get("varian") or [])] or None
+
+
 def _penawaran_core(nama_pel: str, barang: list, tanggal: str = "",
                     catatan: str = "") -> dict:
     """INTI pembuatan Penawaran Accurate + PDF resmi (dipakai buat_penawaran &
@@ -1657,11 +1780,18 @@ def _penawaran_core(nama_pel: str, barang: list, tanggal: str = "",
 
         # 2) barang — resolve tiap PN. HARGA = harga jual Accurate apa adanya
         #    (aturan pemilik: hanya kuantitas yang boleh diatur, tak menawar harga).
-        lines, tak_ada, tanpa_harga = [], [], []
+        lines, tak_ada, tanpa_harga, ambigu = [], [], [], []
         for b in barang:
             pn = str(b.get("part_number") or "").strip()
             qty = float(b.get("qty") or 0)
             if not pn or qty <= 0:
+                continue
+            # VARIAN PEMASOK AMBIGU (2026-08-05): PN ini di Accurate hanya ada
+            # sebagai BEBERAPA kartu pemasok berbeda harga → memilih salah satu
+            # diam-diam = harga pemasok yang salah di dokumen resmi. BATAL total.
+            kv = _varian_ambigu(pn)
+            if kv:
+                ambigu.append({"pn_diminta": pn, "varian": kv})
                 continue
             it = accurate.item_for_quotation(pn)
             if not it:
@@ -1673,6 +1803,16 @@ def _penawaran_core(nama_pel: str, barang: list, tanggal: str = "",
                 continue
             lines.append({"item_id": it["id"], "name": it["name"], "qty": qty,
                           "unit_price": unit_price, "unit_id": it["unit_id"], "pn": it["pn"]})
+        if ambigu:
+            return {"found": False, "perlu_pilih_varian": True,
+                    "part_ambigu": ambigu,
+                    "error": ("Sebagian Part Number punya BEBERAPA kartu varian PEMASOK "
+                              "di Accurate (harga & stok berbeda per pemasok) — penawaran "
+                              "DIBATALKAN, tidak ada yang dibuat. Tampilkan daftar di "
+                              "'part_ambigu' (kode + stok + harga) ke user dan minta ia "
+                              "memilih SATU kode varian, lalu panggil buat_penawaran lagi "
+                              "dengan kode itu PERSIS (suffix ikut). ⛔ JANGAN memilihkan "
+                              "sendiri, JANGAN merata-rata harga.")}
         if tak_ada:
             return {"found": False, "error": "Sebagian Part Number tak ada di Accurate — "
                     "batalkan & sampaikan ke user, jangan buat penawaran sebagian.",
