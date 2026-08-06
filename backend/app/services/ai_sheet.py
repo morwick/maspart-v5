@@ -870,6 +870,170 @@ def _rangka_di_file(headers: list[str], body: list[list]) -> dict | None:
     return {"kolom": headers[i], "nilai": nilai[:5]} if nilai else None
 
 
+# ── Bagian GAMBAR yang dipakai BERSAMA `fill_gambar` (gambar saja) dan
+#    `fill_columns` (kolom data + gambar dalam SATU file). Satu sumber supaya
+#    perilaku & teks penyetir model tak pernah menyimpang antar jalur. ──
+
+def _gambar_tanya_vin(jenis: list[str], headers: list[str], body: list[list],
+                      n_part: int, nama_kolom_pn: str) -> dict:
+    """Payload perintah BERTANYA soal nomor rangka (khusus jenis 'exploded').
+
+    ⛔ SENGAJA tanpa key 'found': bertanya BUKAN lookup gagal. found=False membuat
+    _tool_fail_kind menandainya 'nf' → giliran tercatat tool_failed dan model
+    disuntik nota "lookup gagal, jangan mengarang" — padahal tak ada yang gagal,
+    tool memang sedang meminta keterangan."""
+    out = {
+        "perlu_jawaban_user": True,
+        "jenis_diminta": jenis,
+        "jumlah_part": n_part,
+        "kolom_part_number": nama_kolom_pn,
+        "pilihan": [
+            "ADA nomor rangka (VIN) — gambar diambil dari figure unit itu sendiri (paling tepat)",
+            "TIDAK ada nomor rangka — cari gambar LINTAS MODEL (figure EPC mana pun yang memuat PN itu)",
+        ],
+        "jawaban_wajib": (
+            "JANGAN memanggil tool ini lagi sebelum user menjawab. TANYAKAN dulu: "
+            "apakah user PUNYA nomor rangka/VIN unitnya? "
+            "(a) Bila ADA → minta VIN-nya, lalu panggil lagi tool ini dengan 'rangka' "
+            "terisi — gambar diambil dari figure unit itu sendiri, jadi pasti gambar "
+            "unitnya. (b) Bila TIDAK ADA → panggil lagi dengan lintas_model=true — "
+            "gambar dicari lintas model (figure EPC mana pun yang memuat PN itu) dan "
+            "peringatan lintas-model WAJIB disampaikan ke user. "
+            "⛔ JANGAN menebak nomor rangka & JANGAN memilih sendiri salah satu jalur. "
+            "Saat memanggil ulang, ULANGI SELURUH permintaan giliran ini dalam SATU "
+            "panggilan (semua 'jenis_diminta' + kolom data yang tadi diminta) supaya "
+            "hasilnya tetap SATU file."
+        ),
+    }
+    rf = _rangka_di_file(headers, body)
+    if rf:
+        out["rangka_di_file"] = rf
+        out["jawaban_wajib"] += (
+            f" Catatan: file ini punya kolom '{rf['kolom']}' berisi nomor rangka "
+            f"{rf['nilai']} — TAWARKAN nomor itu saat bertanya (mis. 'pakai VIN "
+            "ini?'), tapi tetap tunggu user mengiyakan.")
+    return out
+
+
+def _gambar_batas_error(jenis: list[str], rangka: str, n_part: int) -> dict | None:
+    """Plafon PN: yang PALING SEMPIT di antara jenis yang diminta menang — kalau
+    tidak, 300 PN foto akan menyeret 300 PN exploded (berjam-jam, server 1 vCPU)."""
+    batas, alasan = _MAX_FOTO_PN, "pencarian foto SIMS"
+    if JENIS_EXPLODED in jenis:
+        b_expl = _MAX_EXPLODED_PN_VIN if rangka else _MAX_EXPLODED_PN_GLOBAL
+        if JENIS_FOTO not in jenis or b_expl < batas:
+            batas = b_expl
+            alasan = ("gambar exploded per-VIN" if rangka
+                      else "gambar exploded LINTAS MODEL")
+    if n_part <= batas:
+        return None
+    saran = "Minta user memecah filenya atau menyaring baris yang benar-benar perlu bergambar."
+    if JENIS_EXPLODED in jenis and not rangka:
+        saran += (f" Bila user punya nomor rangka/VIN, jalur per-VIN muat sampai "
+                  f"{_MAX_EXPLODED_PN_VIN} PN — tawarkan itu.")
+    return {"found": False,
+            "error": (f"Terlalu banyak Part Number ({n_part}) untuk {alasan}. Maksimum "
+                      f"{batas} per permintaan — tiap gambar diambil satu per satu dari "
+                      f"server. {saran}")}
+
+
+def _gambar_tambah_kolom(headers: list[str], body: list[list], pns: list[str],
+                         unik: list[str], jenis: list[str], n_foto: int,
+                         rangka: str) -> dict:
+    """Tambahkan kolom gambar di ujung kanan + ambil URL foto (murah, ter-cache).
+
+    Urutan kolom: Info Gambar Teknis → Foto 1..n → Gambar Teknis — sama dengan
+    urutan kolom Batch Download (catalog._COLUMN_ORDER) supaya user tak bingung
+    berpindah fitur. Return potongan payload builder + statistik foto."""
+    perlu_foto, perlu_expl = JENIS_FOTO in jenis, JENIS_EXPLODED in jenis
+    kol_info = kol_gambar = None
+    kol_foto: list[int] = []
+    if perlu_expl:
+        kol_info = len(headers)
+        headers.append(_KOL_EXPLODED_INFO)
+    if perlu_foto:
+        kol_foto = [len(headers) + i for i in range(n_foto)]
+        for i in range(n_foto):
+            headers.append(f"Foto {i + 1}" if n_foto > 1 else "Foto")
+    if perlu_expl:
+        kol_gambar = len(headers)
+        headers.append(_KOL_EXPLODED_GAMBAR)
+
+    # FOTO: URL-nya murah & ter-cache di SIMS → diambil SEKARANG supaya asisten
+    # bisa jujur "20 dari 33 baris dapat foto" tanpa menunggu unduhan.
+    peta_foto: dict[str, list[str]] = {}
+    if perlu_foto:
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            for pn, urls in zip(unik, ex.map(sims.get_images, unik)):
+                peta_foto[pn] = list(urls or [])[:n_foto]
+
+    foto_baris: list[list[str]] = []
+    berfoto = 0
+    for r, p in zip(body, pns):
+        if perlu_expl:
+            r.append("")      # kolom info DIISI builder (hasil EPC baru diketahui di sana)
+        if perlu_foto:
+            urls = (peta_foto.get(p) or []) if p else []
+            foto_baris.append(urls)
+            for j in range(n_foto):
+                # Sel yang akan diisi gambar dibiarkan KOSONG; yang memang tak ada
+                # fotonya ditandai '—' supaya tak tampak "sedang diproses".
+                r.append("" if j < len(urls) else _TANPA_FOTO)
+            if urls:
+                berfoto += 1
+        if perlu_expl:
+            r.append("")      # sel gambar teknis (diisi gambar saat diunduh)
+
+    payload: dict = {}
+    if perlu_foto:
+        payload.update({"foto": foto_baris, "kol_foto": kol_foto})
+    if perlu_expl:
+        payload.update({"pns": pns, "rangka": rangka,
+                        "kol_info": kol_info, "kol_gambar": kol_gambar})
+    return {"payload": payload, "baris_berfoto": berfoto}
+
+
+def _gambar_laporan(jenis: list[str], rangka: str, n_part: int, n_baris: int,
+                    n_foto: int, berfoto: int) -> tuple[dict, str]:
+    """(field laporan, potongan catatan) untuk bagian gambar — dipakai kedua jalur."""
+    out: dict = {"jenis": jenis, "satu_file": True, "jumlah_part": n_part}
+    catatan = ""
+    if JENIS_FOTO in jenis:
+        out.update({"foto_per_part": n_foto, "baris_berfoto": berfoto,
+                    "baris_tanpa_foto": n_baris - berfoto,
+                    "sumber_foto": "foto resmi SIMS (dicari per Part Number)"})
+        catatan += (f"FOTO: {berfoto} dari {n_baris} baris dapat foto; sisanya PN-nya memang "
+                    f"TIDAK punya foto di SIMS dan ditandai '{_TANPA_FOTO}' — ⛔ jangan "
+                    "menjanjikan foto untuk baris itu & jangan menyarankan mencocokkan foto "
+                    "lewat NAMA part (pencarian nama di SIMS mengembalikan part lain). ")
+    if JENIS_EXPLODED in jenis:
+        # Perkiraan waktu unduhan PERTAMA (EPC dingin, 3 pekerja paralel): per-VIN
+        # ±2-6 dtk/PN, lintas-model 30-90 dtk/PN (94 dtk terukur di produksi). Angka
+        # ini dipakai asisten memberi tahu user supaya ia tak mengira unduhan macet.
+        per_pn = (2, 6) if rangka else (30, 90)
+        lo = max(1, round(n_part * per_pn[0] / 3 / 60))
+        hi = max(lo + 1, round(n_part * per_pn[1] / 3 / 60))
+        durasi = f"±{lo}-{hi} menit"
+        out.update({"sumber_gambar_teknis": ("per-VIN" if rangka else "lintas-model"),
+                    "estimasi_durasi_unduhan": durasi})
+        if rangka:
+            out["rangka"] = rangka
+        catatan += (f"GAMBAR TEKNIS: {n_part} part dicarikan exploded view & UNDUHAN PERTAMA "
+                    f"butuh {durasi} (tiap gambar diambil & dirender satu per satu dari server "
+                    "EPC) — sampaikan durasi ini ke user. "
+                    + (f"Gambar diambil PER-VIN dari figure unit {rangka} — gambar unit itu "
+                       "sendiri. " if rangka else
+                       "⚠️ Gambar diambil LINTAS MODEL: figure EPC mana pun yang memuat PN itu, "
+                       "BUKAN milik unit tertentu. WAJIB sampaikan peringatan ini ke user dengan "
+                       "bahasamu sendiri, dan tawarkan ulang per-VIN bila nanti nomor rangkanya "
+                       "ketemu. ")
+                    + "Part yang memang tak punya figure di EPC dibiarkan TANPA gambar dan "
+                      "alasannya ditulis apa adanya di kolom 'Info Gambar Teknis' — ⛔ jangan "
+                      "menjanjikan gambar untuk part itu & jangan mengarang nomor balon/nama "
+                      "figure. ")
+    return out, catatan
+
+
 def fill_gambar(sheet_id: str, user: dict, jenis, rangka: str = "",
                 lintas_model: bool = False, jumlah_foto: int = 2,
                 kolom_pn: str = "") -> dict:
@@ -899,204 +1063,18 @@ def fill_gambar(sheet_id: str, user: dict, jenis, rangka: str = "",
     Di sini HANYA daftar kerjanya yang disusun (URL foto + daftar PN); unduh,
     render & tempel gambar dikerjakan SAAT KARTU DIUNDUH (ai_export builder
     'sheet_gambar') — foto SIMS bisa >10 MB dan satu PN exploded dingin bisa
-    makan puluhan detik."""
-    jenis = jenis_norm(jenis)
-    if not jenis:
+    makan puluhan detik.
+
+    Jalur pengisiannya SATU-SATUNYA = `fill_columns` (dengan daftar kolom data
+    kosong), supaya "gambar saja" dan "kolom data + gambar" mustahil menyimpang."""
+    if not jenis_norm(jenis):
         return {"found": False,
                 "error": ("Sebutkan 'jenis' gambar yang mau diisi: 'foto' (foto fisik part "
                           "dari SIMS), 'exploded' (gambar teknis/exploded view EPC), atau "
                           "keduanya sekaligus — keduanya masuk SATU file.")}
-    perlu_foto = JENIS_FOTO in jenis
-    perlu_expl = JENIS_EXPLODED in jenis
-
-    parsed = get_sheet(sheet_id, user.get("username", ""))
-    if not parsed:
-        return {"found": False, "error": "Belum ada file Excel yang diunggah di percakapan ini "
-                                         "(atau sudah kedaluwarsa). Minta user unggah ulang."}
-    if perlu_foto and not sims.available():
-        return {"found": False, "error": "Layanan SIMS (sumber foto) sedang tidak tersedia."}
-    try:
-        n_foto = int(jumlah_foto or 2)
-    except (TypeError, ValueError):
-        n_foto = 2
-    n_foto = max(1, min(_MAX_FOTO_PER_PART, n_foto))
-
-    headers = list(parsed["headers"])
-    body = [list(r) for r in parsed["_body"]]
-
-    pn_i = _cari_kolom(headers, kolom_pn) if kolom_pn else None
-    if pn_i is None:
-        pn_i = parsed["roles"].index("part_number") if "part_number" in parsed["roles"] else None
-    if pn_i is None:
-        return {"found": False,
-                "error": "Kolom Part Number tidak terdeteksi. Foto & gambar exploded dicari "
-                         "PER PART NUMBER (pencarian lewat nama part memberi gambar part yang "
-                         "SALAH). Minta user menyebut kolom mana yang berisi Part Number."}
-
-    pns = [(r[pn_i] or "").strip().upper() if pn_i < len(r) else "" for r in body]
-    unik = [p for p in dict.fromkeys(pns) if p]
-    if not unik:
-        return {"found": False, "error": f"Kolom '{headers[pn_i]}' tidak berisi Part Number."}
-
-    rangka = (rangka or "").strip()
-    # ── GERBANG TANYA (khusus exploded): tanpa rangka & tanpa keputusan
-    #    lintas-model → BERTANYA. Permintaan foto saja tak boleh kena. ──
-    if perlu_expl and not rangka and not lintas_model:
-        # ⛔ SENGAJA tanpa key 'found': bertanya BUKAN lookup gagal. found=False
-        # membuat _tool_fail_kind menandainya 'nf' → giliran tercatat tool_failed
-        # dan model disuntik nota "lookup gagal, jangan mengarang" — padahal tak
-        # ada yang gagal, tool memang sedang meminta keterangan.
-        out = {
-            "perlu_jawaban_user": True,
-            "jenis_diminta": jenis,
-            "jumlah_part": len(unik),
-            "kolom_part_number": headers[pn_i],
-            "pilihan": [
-                "ADA nomor rangka (VIN) — gambar diambil dari figure unit itu sendiri (paling tepat)",
-                "TIDAK ada nomor rangka — cari gambar LINTAS MODEL (figure EPC mana pun yang memuat PN itu)",
-            ],
-            "jawaban_wajib": (
-                "JANGAN memanggil tool ini lagi sebelum user menjawab. TANYAKAN dulu: "
-                "apakah user PUNYA nomor rangka/VIN unitnya? "
-                "(a) Bila ADA → minta VIN-nya, lalu panggil lagi tool ini dengan 'rangka' "
-                "terisi — gambar diambil dari figure unit itu sendiri, jadi pasti gambar "
-                "unitnya. (b) Bila TIDAK ADA → panggil lagi dengan lintas_model=true — "
-                "gambar dicari lintas model (figure EPC mana pun yang memuat PN itu) dan "
-                "peringatan lintas-model WAJIB disampaikan ke user. "
-                "⛔ JANGAN menebak nomor rangka & JANGAN memilih sendiri salah satu jalur. "
-                "Saat memanggil ulang, IKUTKAN LAGI semua 'jenis_diminta' dalam SATU "
-                "panggilan supaya hasilnya tetap SATU file."
-            ),
-        }
-        rf = _rangka_di_file(headers, body)
-        if rf:
-            out["rangka_di_file"] = rf
-            out["jawaban_wajib"] += (
-                f" Catatan: file ini punya kolom '{rf['kolom']}' berisi nomor rangka "
-                f"{rf['nilai']} — TAWARKAN nomor itu saat bertanya (mis. 'pakai VIN "
-                "ini?'), tapi tetap tunggu user mengiyakan.")
-        return out
-
-    # Plafon: yang PALING SEMPIT di antara jenis yang diminta menang — kalau tidak,
-    # 300 PN foto akan menyeret 300 PN exploded (berjam-jam di server 1 vCPU).
-    batas, alasan_batas = _MAX_FOTO_PN, "pencarian foto SIMS"
-    if perlu_expl:
-        b_expl = _MAX_EXPLODED_PN_VIN if rangka else _MAX_EXPLODED_PN_GLOBAL
-        if not perlu_foto or b_expl < batas:
-            batas = b_expl
-            alasan_batas = ("gambar exploded per-VIN" if rangka
-                            else "gambar exploded LINTAS MODEL")
-    if len(unik) > batas:
-        saran = ("Minta user memecah filenya atau menyaring baris yang benar-benar perlu "
-                 "bergambar.")
-        if perlu_expl and not rangka:
-            saran += (f" Bila user punya nomor rangka/VIN, jalur per-VIN muat sampai "
-                      f"{_MAX_EXPLODED_PN_VIN} PN — tawarkan itu.")
-        return {"found": False,
-                "error": (f"Terlalu banyak Part Number ({len(unik)}) untuk {alasan_batas}. "
-                          f"Maksimum {batas} per permintaan — tiap gambar diambil satu per "
-                          f"satu dari server. {saran}")}
-
-    # ── Kolom baru di ujung kanan. Urutan: TEKS (info figure) → FOTO → GAMBAR
-    #    teknis; sama dengan urutan kolom Batch Download (catalog._COLUMN_ORDER). ──
-    kol_info = kol_gambar = None
-    kol_foto: list[int] = []
-    if perlu_expl:
-        kol_info = len(headers)
-        headers.append(_KOL_EXPLODED_INFO)
-    if perlu_foto:
-        kol_foto = [len(headers) + i for i in range(n_foto)]
-        for i in range(n_foto):
-            headers.append(f"Foto {i + 1}" if n_foto > 1 else "Foto")
-    if perlu_expl:
-        kol_gambar = len(headers)
-        headers.append(_KOL_EXPLODED_GAMBAR)
-
-    # FOTO: URL-nya murah & ter-cache di SIMS → diambil SEKARANG supaya asisten
-    # bisa jujur "20 dari 33 baris dapat foto" tanpa menunggu unduhan.
-    peta_foto: dict[str, list[str]] = {}
-    if perlu_foto:
-        with ThreadPoolExecutor(max_workers=6) as ex:
-            for pn, urls in zip(unik, ex.map(sims.get_images, unik)):
-                peta_foto[pn] = list(urls or [])[:n_foto]
-
-    foto_baris: list[list[str]] = []
-    ada_foto_baris = 0
-    for r, p in zip(body, pns):
-        if perlu_expl:
-            r.append("")          # kolom info DIISI builder (hasil EPC baru diketahui di sana)
-        if perlu_foto:
-            urls = (peta_foto.get(p) or []) if p else []
-            foto_baris.append(urls)
-            for j in range(n_foto):
-                # Sel yang akan diisi gambar dibiarkan KOSONG; yang memang tak ada
-                # fotonya ditandai '—' supaya tak tampak "sedang diproses".
-                r.append("" if j < len(urls) else _TANPA_FOTO)
-            if urls:
-                ada_foto_baris += 1
-        if perlu_expl:
-            r.append("")          # sel gambar teknis (diisi gambar saat diunduh)
-
-    label = (" + Foto & Gambar Teknis" if perlu_foto and perlu_expl
-             else " + Foto" if perlu_foto else " + Gambar Teknis")
-    judul = parsed["filename"].rsplit(".", 1)[0] + label
-    payload = {"kind": "sheet_gambar", "judul": judul, "kolom": headers, "baris": body}
-    if perlu_foto:
-        payload.update({"foto": foto_baris, "kol_foto": kol_foto})
-    if perlu_expl:
-        payload.update({"pns": pns, "rangka": rangka,
-                        "kol_info": kol_info, "kol_gambar": kol_gambar})
-    export_id, filename = ai_export.stash_builder(judul, payload)
-
-    out = {
-        "found": True,
-        "export_id": export_id,
-        "filename": filename,
-        "judul": judul,
-        "jenis": jenis,
-        "satu_file": True,
-        "jumlah_baris": len(body),
-        "jumlah_part": len(unik),
-        "kolom_part_number": headers[pn_i],
-    }
-    catatan = ("📎 SATU kartu unduh Excel muncul otomatis di bawah jawaban — SEMUA gambar yang "
-               "diminta ada di file yang SAMA. ⛔ JANGAN membuat file kedua (jangan panggil "
-               "tool ini lagi) kecuali user memang minta filenya dipisah. ")
-    if perlu_foto:
-        out.update({"foto_per_part": n_foto, "baris_berfoto": ada_foto_baris,
-                    "baris_tanpa_foto": len(body) - ada_foto_baris,
-                    "sumber_foto": "foto resmi SIMS (dicari per Part Number)"})
-        catatan += (f"FOTO: {ada_foto_baris} dari {len(body)} baris dapat foto; sisanya PN-nya "
-                    f"memang TIDAK punya foto di SIMS dan ditandai '{_TANPA_FOTO}' — ⛔ jangan "
-                    "menjanjikan foto untuk baris itu & jangan menyarankan mencocokkan foto "
-                    "lewat NAMA part (pencarian nama di SIMS mengembalikan part lain). ")
-    if perlu_expl:
-        # Perkiraan waktu unduhan PERTAMA (EPC dingin, 3 pekerja paralel): per-VIN
-        # ±2-6 dtk/PN, lintas-model 30-90 dtk/PN (94 dtk terukur di produksi). Angka
-        # ini dipakai asisten memberi tahu user supaya ia tak mengira unduhan macet.
-        per_pn = (2, 6) if rangka else (30, 90)
-        lo = max(1, round(len(unik) * per_pn[0] / 3 / 60))
-        hi = max(lo + 1, round(len(unik) * per_pn[1] / 3 / 60))
-        durasi = f"±{lo}-{hi} menit"
-        out.update({"sumber_gambar_teknis": ("per-VIN" if rangka else "lintas-model"),
-                    "estimasi_durasi_unduhan": durasi})
-        if rangka:
-            out["rangka"] = rangka
-        catatan += (f"GAMBAR TEKNIS: {len(unik)} part dicarikan exploded view & UNDUHAN PERTAMA "
-                    f"butuh {durasi} (tiap gambar diambil & dirender satu per satu dari server "
-                    "EPC) — sampaikan durasi ini ke user. "
-                    + (f"Gambar diambil PER-VIN dari figure unit {rangka} — gambar unit itu "
-                       "sendiri. " if rangka else
-                       "⚠️ Gambar diambil LINTAS MODEL: figure EPC mana pun yang memuat PN itu, "
-                       "BUKAN milik unit tertentu. WAJIB sampaikan peringatan ini ke user dengan "
-                       "bahasamu sendiri, dan tawarkan ulang per-VIN bila nanti nomor rangkanya "
-                       "ketemu. ")
-                    + "Part yang memang tak punya figure di EPC dibiarkan TANPA gambar dan "
-                      "alasannya ditulis apa adanya di kolom 'Info Gambar Teknis' — ⛔ jangan "
-                      "menjanjikan gambar untuk part itu & jangan mengarang nomor balon/nama "
-                      "figure. ")
-    out["catatan"] = catatan + "⛔ JANGAN membuat link/gambar/URL sendiri."
-    return out
+    return fill_columns(sheet_id, user, [], kolom_pn=kolom_pn, gambar=jenis,
+                        rangka=rangka, lintas_model=lintas_model,
+                        jumlah_foto=jumlah_foto)
 
 
 def fill_exploded(sheet_id: str, user: dict, rangka: str = "",
@@ -1255,6 +1233,10 @@ def fill_columns(
     boleh_harga: bool = True,
     boleh_stok: bool = True,
     konversi_idr: bool = False,
+    gambar=None,
+    rangka: str = "",
+    lintas_model: bool = False,
+    jumlah_foto: int = 2,
 ) -> dict:
     """Isi BEBERAPA kolom sekaligus ke SATU file (satu kartu unduh). `permintaan` =
     daftar spesifikasi kolom, tiap elemen menghasilkan SATU kolom:
@@ -1266,8 +1248,14 @@ def fill_columns(
       tandai_status → tambah kolom Status+Keterangan & WARNA baris (hijau ready /
         merah kosong-kurang / kuning tak-ketemu-atau-ada-pengganti);
       rekap → blok RINGKASAN (jumlah, qty, subtotal+PPN [gate harga], berat, ongkir);
-      qty_kolom → kolom Qty untuk 'kurang'/pemenuhan/total; kode_pos_tujuan → estimasi ongkir.
+      qty_kolom → kolom Qty untuk 'kurang'/pemenuhan/total; kode_pos_tujuan → estimasi ongkir;
+      gambar → ['foto'] &/atau ['exploded'] (+ rangka/lintas_model/jumlah_foto):
+        kolom GAMBAR ikut ke file yang SAMA. Ini yang membuat "isikan stok Jakarta &
+        Pekanbaru, foto part, dan exploded view" menghasilkan SATU Excel, bukan
+        beberapa (aturan pemilik 2026-08-06). Bagian gambarnya memakai penolong
+        yang sama dengan fill_gambar — termasuk gerbang WAJIB-TANYA nomor rangka.
     Data di-lookup SEKALI lalu dipakai semua kolom (deterministik; nol Accurate live)."""
+    gambar = jenis_norm(gambar)
     # Gerbang STOK (Menu Control 'Kolom Stok') — ditegakkan di FILE, bukan cuma di
     # hasil model, dan DULUAN sebelum apa pun: izin tak bergantung ada/tidaknya
     # lampiran. Selain kolom stok, 'rencana_pemenuhan' (gudang mana bisa penuhi
@@ -1286,6 +1274,12 @@ def fill_columns(
     if not parsed:
         return {"found": False, "error": "Belum ada file Excel yang diunggah di percakapan ini "
                                          "(atau sudah kedaluwarsa). Minta user unggah ulang."}
+    if JENIS_FOTO in gambar and not sims.available():
+        return {"found": False, "error": "Layanan SIMS (sumber foto) sedang tidak tersedia."}
+    try:
+        n_foto = max(1, min(_MAX_FOTO_PER_PART, int(jumlah_foto or 2)))
+    except (TypeError, ValueError):
+        n_foto = 2
 
     # Normalkan & validasi spesifikasi.
     specs: list[dict] = []
@@ -1298,8 +1292,8 @@ def fill_columns(
         specs.append({"isi": isi,
                       "gudang": (s.get("gudang") or "").strip(),
                       "kolom_tujuan": (s.get("kolom_tujuan") or "").strip()})
-    if not specs and not (tandai_status or rekap):
-        return {"found": False, "error": "Tidak ada kolom yang diminta untuk diisi."}
+    if not specs and not (tandai_status or rekap or gambar):
+        return {"found": False, "error": "Tidak ada kolom/gambar yang diminta untuk diisi."}
     for s in specs:
         if s["isi"] not in ISI_PILIHAN:
             return {"error": f"isi '{s['isi']}' tak dikenal; pilih dari {list(ISI_PILIHAN)}"}
@@ -1316,11 +1310,29 @@ def fill_columns(
         pn_i = parsed["roles"].index("part_number") if "part_number" in parsed["roles"] else None
     if pn_i is None:
         return {"found": False,
-                "error": "Kolom Part Number tidak terdeteksi. Minta user menyebut kolom mana "
-                         "yang berisi Part Number."}
+                "error": ("Kolom Part Number tidak terdeteksi. "
+                          + ("Foto & gambar exploded dicari PER PART NUMBER; pencarian lewat "
+                             "NAMA part memberi gambar part yang SALAH (nama di SIMS cocok "
+                             "'mengandung kata'). ⛔ Jangan menebak lewat nama. " if gambar else "")
+                          + "Minta user menyebut kolom mana yang berisi Part Number.")}
 
     pns = [(r[pn_i] or "").strip().upper() for r in body]
     unik = [p for p in dict.fromkeys(pns) if p]
+
+    # ── Bagian GAMBAR: gerbang & plafon DULUAN, sebelum kerja apa pun. Gerbang
+    #    WAJIB-TANYA nomor rangka (khusus 'exploded') identik dengan fill_gambar —
+    #    satu penolong, jadi tak mungkin menyimpang antar jalur. ──
+    rangka = (rangka or "").strip()
+    if gambar:
+        if not unik:
+            return {"found": False,
+                    "error": f"Kolom '{headers[pn_i]}' tidak berisi Part Number — foto & "
+                             "gambar exploded hanya bisa dicari per Part Number."}
+        if JENIS_EXPLODED in gambar and not rangka and not lintas_model:
+            return _gambar_tanya_vin(gambar, headers, body, len(unik), headers[pn_i])
+        err = _gambar_batas_error(gambar, rangka, len(unik))
+        if err:
+            return err
 
     isis = {s["isi"] for s in specs}
     # Kolom Qty (untuk 'kurang'/pemenuhan/total): user-sebut atau peran terdeteksi.
@@ -1465,8 +1477,12 @@ def fill_columns(
     # DAFTARKAN (bukan cuma dihitung) agar miss SISTEMATIS (mis. semua varian '/2',
     # atau seluruh file salah kolom) terlihat oleh model & user. Cap 20 → hormati
     # budget token (_compact_result/_cap_tool_content).
+    # ⛔ HANYA bila lookup memang dijalankan: permintaan GAMBAR saja tak menyentuh
+    # indeks part, jadi tanpa penjaga ini SELURUH PN akan dilaporkan "tak ketemu"
+    # dan asisten memberi peringatan palsu.
     _ketemu = set(peta_lokal) | set(peta_sims)
-    pn_tidak_ditemukan = [p for p in unik if p not in _ketemu]
+    pn_tidak_ditemukan = ([p for p in unik if p not in _ketemu]
+                          if (_perlu_lokal or peta_sims) else [])
 
     hasil: list[dict] = []
     gudang_tak_dikenal: list[str] = []
@@ -1514,7 +1530,7 @@ def fill_columns(
         hasil.append({"kolom": headers[tgt], "isi": isi,
                       "gudang": gud_canon, "baris_terisi": terisi})
 
-    if not hasil and not (tandai_status or rekap):
+    if not hasil and not (tandai_status or rekap or gambar):
         return {"found": False,
                 "error": (f"Tak ada kolom yang bisa diisi. Gudang tak dikenal: {gudang_tak_dikenal}. "
                           f"Pilihan gudang: {tersedia_gudang}.")}
@@ -1610,11 +1626,32 @@ def fill_columns(
                 except Exception:  # pragma: no cover
                     pass
 
-    judul = f"{parsed['filename'].rsplit('.', 1)[0]} + Data"
-    export_id, filename = _stash_sheet_out(
-        judul, headers, body,
-        status=row_status if tandai_status else None,
-        ringkasan=ringkasan or None)
+    # ── Kolom GAMBAR (paling kanan, setelah Status/Keterangan) — file yang SAMA ──
+    g = (_gambar_tambah_kolom(headers, body, pns, unik, gambar, n_foto, rangka)
+         if gambar else {"payload": {}, "baris_berfoto": 0})
+    lap_gambar, catatan_gambar = (
+        _gambar_laporan(gambar, rangka, len(unik), len(body), n_foto, g["baris_berfoto"])
+        if gambar else ({}, ""))
+
+    bagian = ([] if not (specs or tandai_status or rekap) else ["Data"])
+    if JENIS_FOTO in gambar:
+        bagian.append("Foto")
+    if JENIS_EXPLODED in gambar:
+        bagian.append("Gambar Teknis")
+    judul = f"{parsed['filename'].rsplit('.', 1)[0]} + " + " & ".join(bagian or ["Data"])
+    if gambar:
+        # Ada gambar → WAJIB lewat builder (gambar diunduh & ditempel saat kartu
+        # diklik). Warna status & blok rekap ikut di payload yang sama.
+        export_id, filename = ai_export.stash_builder(judul, {
+            "kind": "sheet_gambar", "judul": judul, "kolom": headers, "baris": body,
+            **({"status": row_status} if tandai_status else {}),
+            **({"ringkasan": ringkasan} if ringkasan else {}),
+            **g["payload"]})
+    else:
+        export_id, filename = _stash_sheet_out(
+            judul, headers, body,
+            status=row_status if tandai_status else None,
+            ringkasan=ringkasan or None)
     out = {
         "found": True,
         "export_id": export_id,
@@ -1628,13 +1665,18 @@ def fill_columns(
         "pn_tidak_ditemukan_total": len(pn_tidak_ditemukan),
         # Jujur soal sumber: stok & harga JUAL rupiah = indeks Accurate; nama/
         # pengganti/berat = katalog & SIMS — BUKAN stok.xlsx/harga.xlsx lagi.
-        "sumber": ("indeks Accurate (stok & harga jual Rp) + katalog MASPART"
-                   + (f" + {sumber_sims}" if sumber_sims else "")),
+        # (Permintaan gambar saja tak memakai sumber ini → jangan diklaim.)
+        **({"sumber": ("indeks Accurate (stok & harga jual Rp) + katalog MASPART"
+                       + (f" + {sumber_sims}" if sumber_sims else ""))}
+           if _perlu_lokal or sumber_sims else {}),
+        **lap_gambar,
         "catatan": (
-            "📎 SATU kartu unduh Excel muncul otomatis di bawah — SEMUA kolom yang diminta ada "
-            "di file yang SAMA (jangan pernah membuat banyak file kecuali user eksplisit "
-            "memintanya). Untuk stok per-gudang, '0' = terlacak tapi kosong di gudang itu, sel "
+            "📎 SATU kartu unduh Excel muncul otomatis di bawah — SEMUA yang diminta (kolom "
+            "data, foto, gambar teknis) ada di file yang SAMA. ⛔ JANGAN membuat file kedua / "
+            "memanggil tool ini lagi giliran ini, kecuali user eksplisit minta filenya dipisah. "
+            "Untuk stok per-gudang, '0' = terlacak tapi kosong di gudang itu, sel "
             "KOSONG = PN tak ada di sumber. "
+            + catatan_gambar
             + (f"⚠️ Gudang tak dikenal: {gudang_tak_dikenal}. " if gudang_tak_dikenal else "")
             + (f"⚠️ {len(pn_tidak_ditemukan)} PN tak ketemu di sumber (lihat "
                "'pn_tidak_ditemukan'). " if pn_tidak_ditemukan else "")

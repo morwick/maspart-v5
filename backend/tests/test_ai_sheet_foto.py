@@ -139,19 +139,19 @@ def test_builder_menempel_gambar_dan_menciutkannya(monkeypatch):
 
 
 # ── Terdaftar di asisten (kalau lupa, kartu unduh tak muncul) ────────────────
-def test_tool_gambar_hanya_muncul_saat_ada_lampiran():
-    """Sejak dua tool gambar dilebur (2026-08-06), yang DITAWARKAN cuma
-    sheet_isi_gambar — nama lama tinggal shim supaya panggilan bocor tak gagal."""
+def test_tool_pengisi_hanya_muncul_saat_ada_lampiran():
+    """Sejak semua alat pengisi dilebur (2026-08-06), yang DITAWARKAN cuma
+    sheet_isi_kolom — nama lama tinggal shim supaya panggilan bocor tak gagal."""
     assert "sheet_isi_foto" in A._DISPATCH
     tanpa = {f["function"]["name"] for f in A._tool_specs(USER, "")}
     dengan = {f["function"]["name"] for f in A._tool_specs(USER, "sid-123")}
-    assert "sheet_isi_gambar" not in tanpa     # tanpa lampiran: model tak melihatnya
-    assert "sheet_isi_gambar" in dengan
-    assert "sheet_isi_foto" not in dengan      # tak lagi ditawarkan (cegah 2 file)
+    assert "sheet_isi_kolom" not in tanpa      # tanpa lampiran: model tak melihatnya
+    assert "sheet_isi_kolom" in dengan
+    assert "sheet_isi_foto" not in dengan      # tak lagi ditawarkan (cegah file terpisah)
 
 
 def test_pembeli_boleh_pakai(sheet):
     """Foto bukan data sensitif (beda dari harga/stok gudang) → pembeli boleh.
     Nama lama tetap SAH dieksekusi lewat alias legacy."""
-    assert "sheet_isi_gambar" in A._allowed_tool_names(USER, sheet)
+    assert "sheet_isi_kolom" in A._allowed_tool_names(USER, sheet)
     assert "sheet_isi_foto" in A._allowed_tool_names(USER, sheet)

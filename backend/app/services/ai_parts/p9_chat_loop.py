@@ -1625,7 +1625,7 @@ _TOOL_LABEL = {
     "buat_excel": "Menyiapkan file Excel",
     "excel_bom_rangka": "Menyiapkan Excel BOM unit",
     "excel_stok_gudang": "Menyiapkan Excel stok",
-    "sheet_isi_kolom": "Mengisi kolom Excel",
+    "sheet_isi_kolom": "Mengisi Excel lampiran",
     "sheet_isi_part_number": "Mencari Part Number",
     "sheet_cek_qty": "Memvalidasi jumlah (qty)",
     "sheet_isi_gambar": "Menempel foto & gambar teknis",
@@ -1723,17 +1723,18 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         # agar kena prompt-cache DeepSeek).
         ctx = ((ctx + "\n") if ctx else "") + (
             "[LAMPIRAN] User melampirkan file Excel di percakapan ini. Alat sheet: "
-            "sheet_ringkasan (baca isi & struktur file), sheet_isi_kolom (isi SATU/BANYAK kolom "
-            "dari Part Number: stok total/per-gudang, nama part, harga — SEMUA ke SATU file), "
-            "sheet_isi_part_number (KEBALIKAN: isi Part Number dari kolom NAMA part, butuh "
-            "nomor rangka/VIN), sheet_cek_qty (isi/validasi Qty dari BOM unit, butuh rangka), dan "
-            "sheet_isi_gambar (tempel GAMBAR: jenis 'foto' = foto FISIK part resmi SIMS, jenis "
-            "'exploded' = GAMBAR TEKNIS/exploded view EPC ber-nomor balon — diminta dua-duanya "
-            "masukkan KEDUA jenis dalam SATU panggilan → SATU file; ⛔ dicocokkan lewat PART "
-            "NUMBER, TIDAK PERNAH lewat nama part: nama di SIMS cocok 'mengandung kata' & memberi "
-            "gambar part LAIN; ⛔ untuk jenis 'exploded' TANYA DULU apakah user punya nomor "
-            "rangka/VIN: ADA → panggil dengan 'rangka' (figure unit itu sendiri), TIDAK ADA → "
-            "lintas_model=true & sampaikan peringatan lintas-model). "
+            "sheet_ringkasan (baca isi & struktur file), sheet_isi_kolom (SATU-SATUNYA alat "
+            "PENGISI: kolom data dari Part Number — stok total/per-gudang, nama part, harga — "
+            "DAN gambar lewat param 'gambar': 'foto' = foto FISIK part resmi SIMS, 'exploded' = "
+            "GAMBAR TEKNIS/exploded view EPC ber-nomor balon; ⛔ SEMUA yang diminta user masuk "
+            "SATU panggilan → SATU file, jangan pernah memecah jadi beberapa file kecuali user "
+            "eksplisit minta dipisah; ⛔ gambar dicocokkan lewat PART NUMBER, TIDAK PERNAH lewat "
+            "nama part: nama di SIMS cocok 'mengandung kata' & memberi gambar part LAIN; ⛔ untuk "
+            "gambar 'exploded' TANYA DULU apakah user punya nomor rangka/VIN: ADA → isi 'rangka' "
+            "(figure unit itu sendiri), TIDAK ADA → lintas_model=true & sampaikan peringatan "
+            "lintas-model), sheet_isi_part_number (KEBALIKAN: isi Part Number dari kolom NAMA "
+            "part, butuh nomor rangka/VIN), sheet_cek_qty (isi/validasi Qty dari BOM unit, butuh "
+            "rangka). "
             "BERSIKAP PROAKTIF: bila user hanya melampirkan file tanpa instruksi jelas (atau minta "
             "'tolong lengkapi/rapikan'), panggil sheet_ringkasan DULU lalu RINGKAS singkat isinya "
             "(berapa baris, kolom apa, berapa baris tanpa Part Number, apakah dikelompokkan per "

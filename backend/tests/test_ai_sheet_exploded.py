@@ -250,8 +250,8 @@ def test_tool_terdaftar_dan_hanya_muncul_saat_ada_lampiran(sheet):
     assert A._DISPATCH["sheet_isi_exploded"] is A._t_sheet_isi_exploded
     tanpa = {f["function"]["name"] for f in A._tool_specs(USER, "")}
     dengan = {f["function"]["name"] for f in A._tool_specs(USER, sheet)}
-    assert "sheet_isi_gambar" not in tanpa
-    assert "sheet_isi_gambar" in dengan
+    assert "sheet_isi_kolom" not in tanpa
+    assert "sheet_isi_kolom" in dengan
     # Nama lama: tak ditawarkan lagi, tapi tetap SAH dieksekusi (alias legacy).
     assert "sheet_isi_exploded" not in dengan
     assert "sheet_isi_exploded" in A._allowed_tool_names(USER, sheet)
@@ -261,4 +261,4 @@ def test_kartu_unduh_ditangkap_chat_loop():
     """Tanpa nama ini di daftar _capture_meta, file jadi tapi kartunya tak muncul."""
     import inspect
     src = inspect.getsource(A.chat)
-    assert '"sheet_isi_gambar"' in src
+    assert '"sheet_isi_kolom"' in src

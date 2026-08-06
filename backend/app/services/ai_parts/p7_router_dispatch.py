@@ -403,10 +403,11 @@ _LEGACY_TOOL_ALIAS = {
     "katalog_mesin": "katalog_kategori",
     "uraikan_mesin": "uraikan_assembly",
     "repair_kit_mesin": "repair_kit_transmisi",
-    # Dua tool gambar Excel dilebur jadi sheet_isi_gambar (2026-08-06) supaya
-    # "foto + exploded" tak lagi menghasilkan DUA file.
-    "sheet_isi_foto": "sheet_isi_gambar",
-    "sheet_isi_exploded": "sheet_isi_gambar",
+    # Semua tool pengisi Excel lampiran dilebur ke sheet_isi_kolom (2026-08-06):
+    # "stok + foto + exploded" wajib jadi SATU file, jadi alat pengisinya pun satu.
+    "sheet_isi_gambar": "sheet_isi_kolom",
+    "sheet_isi_foto": "sheet_isi_kolom",
+    "sheet_isi_exploded": "sheet_isi_kolom",
 }
 
 

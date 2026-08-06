@@ -2164,18 +2164,33 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "sheet_isi_kolom",
                 "description": (
-                    "Isi SATU ATAU BEBERAPA kolom pada Excel unggahan user memakai data MASPART, "
-                    "lalu hasilkan SATU file Excel yang bisa diunduh. Dipakai saat user minta "
-                    "'tambahkan stok', 'isikan nama & harga', 'stok gudang Jakarta dan Pekanbaru', "
-                    "'lengkapi PN pengganti', 'tambah cross reference filter', 'isi berat/dimensi', "
-                    "'gudang mana bisa penuhi'. ⛔ PENTING: bila user minta beberapa data/gudang "
-                    "sekaligus, masukkan SEMUANYA sebagai elemen 'kolom' dalam SATU panggilan → "
-                    "hasilnya SATU file dengan kolom-kolom bersebelahan. JANGAN memanggil tool ini "
-                    "berkali-kali. Baris yang Part Number-nya tak ditemukan dibiarkan KOSONG. "
+                    "SATU-SATUNYA alat untuk MENGISI Excel unggahan user: kolom data MASPART "
+                    "(stok/harga/nama/pengganti/…), penanda status & rekap, DAN gambar (foto "
+                    "part + gambar teknis/exploded) — semuanya ke SATU file Excel yang bisa "
+                    "diunduh. Dipakai saat user minta 'tambahkan stok', 'isikan nama & harga', "
+                    "'stok gudang Jakarta dan Pekanbaru', 'lengkapi PN pengganti', 'tambah cross "
+                    "reference filter', 'isi berat/dimensi', 'gudang mana bisa penuhi', 'isikan "
+                    "fotonya', 'isikan gambar exploded view/gambar teknisnya'. "
+                    "⛔ PENTING: apa pun yang user minta dalam satu permintaan — beberapa data, "
+                    "beberapa gudang, foto, gambar teknis — masukkan SEMUANYA dalam SATU "
+                    "panggilan ('kolom' untuk data + 'gambar' untuk foto/exploded) → hasilnya "
+                    "SATU file berisi semua kolom bersebelahan. JANGAN memanggil tool ini "
+                    "berkali-kali dalam satu giliran; panggil lebih dari sekali HANYA bila user "
+                    "eksplisit minta filenya DIPISAH. "
+                    "Baris yang Part Number-nya tak ditemukan dibiarkan KOSONG. "
                     "Set 'tandai_status'=true untuk kolom Status + WARNA baris (hijau ready/merah "
                     "kosong-kurang/kuning tak-ketemu-atau-ada-pengganti) + saran 'mungkin maksud'; "
                     "'rekap'=true untuk blok RINGKASAN (jumlah, subtotal, PPN, berat, ongkir). "
-                    "Boleh dipanggil HANYA dengan tandai_status/rekap (tanpa 'kolom')." + ket_sims
+                    "Boleh dipanggil HANYA dengan tandai_status/rekap/gambar (tanpa 'kolom'). "
+                    "⛔ GAMBAR: dicocokkan lewat PART NUMBER, TIDAK PERNAH lewat nama part "
+                    "(pencarian nama di SIMS 'mengandung kata' → gambar part LAIN). Untuk "
+                    "gambar='exploded' WAJIB TANYA DULU apakah user punya nomor rangka/VIN: ADA "
+                    "→ isi 'rangka' (figure unit itu sendiri, paling tepat); TIDAK ADA → "
+                    "lintas_model=true (figure EPC mana pun yang memuat PN itu — peringatan "
+                    "lintas-model WAJIB disampaikan). Tanpa keduanya tool hanya mengembalikan "
+                    "perintah bertanya. ⚠️ 'exploded' LAMBAT: maks 60 PN per-VIN / 25 PN lintas "
+                    "model & unduhan pertama butuh beberapa menit (sampaikan ke user)."
+                    + ket_sims
                 ),
                 "parameters": {
                     "type": "object",
@@ -2235,6 +2250,29 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                                             "eksplisit minta harga SIMS dikonversi ke rupiah. "
                                             "Default false = kolom diisi CNY apa adanya."),
                         },
+                        "gambar": {
+                            "type": "array",
+                            "description": ("Gambar yang ikut ditempel ke file yang SAMA: "
+                                            "'foto' = foto FISIK part resmi SIMS; 'exploded' = "
+                                            "GAMBAR TEKNIS/exploded view EPC ber-nomor balon. "
+                                            "Isi keduanya bila user minta dua-duanya."),
+                            "items": {"type": "string",
+                                      "enum": [ai_sheet.JENIS_FOTO, ai_sheet.JENIS_EXPLODED]},
+                        },
+                        "rangka": {
+                            "type": "string",
+                            "description": ("KHUSUS gambar='exploded': nomor rangka/VIN unit — "
+                                            "isi HANYA bila user menyebutkannya. ⛔ Jangan menebak."),
+                        },
+                        "lintas_model": {
+                            "type": "boolean",
+                            "description": ("KHUSUS gambar='exploded': true HANYA setelah user "
+                                            "menyatakan TIDAK punya nomor rangka."),
+                        },
+                        "jumlah_foto": {
+                            "type": "integer",
+                            "description": "KHUSUS gambar='foto': foto per part (1-3). Kosong = 2.",
+                        },
                     },
                 },
             },
@@ -2276,73 +2314,6 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     },
                 },
             })
-        specs.append({
-            "type": "function",
-            "function": {
-                "name": "sheet_isi_gambar",
-                "description": (
-                    "Tempelkan GAMBAR ke Excel unggahan user lalu hasilkan file Excel yang bisa "
-                    "diunduh. Dua jenis: 'foto' = FOTO FISIK part resmi SIMS (default 2 foto per "
-                    "part); 'exploded' = GAMBAR TEKNIS / EXPLODED VIEW EPC (diagram uraian "
-                    "ber-nomor balon + kolom info figure). Dipakai saat user minta 'isikan "
-                    "fotonya', 'tambahkan gambar part', 'isikan gambar exploded view / gambar "
-                    "teknisnya', 'lengkapi dengan diagram part'. "
-                    "⛔ PENTING: user minta FOTO DAN GAMBAR TEKNIS sekaligus → masukkan KEDUANYA "
-                    "sebagai 'jenis' dalam SATU panggilan → hasilnya SATU file berisi kolom foto "
-                    "DAN kolom gambar teknis. JANGAN memanggil tool ini dua kali; panggil dua "
-                    "kali (satu jenis per panggilan) HANYA bila user eksplisit minta filenya "
-                    "DIPISAH. "
-                    "⛔ WAJIB TANYA DULU bila 'exploded' diminta: tanyakan ke user APAKAH ADA "
-                    "nomor rangka/VIN unitnya. Bila ADA → minta VIN-nya lalu panggil dengan "
-                    "'rangka' (gambar diambil dari figure unit itu sendiri = paling tepat). Bila "
-                    "TIDAK ADA → panggil dengan lintas_model=true (gambar dicari LINTAS MODEL: "
-                    "figure EPC mana pun yang memuat PN itu — peringatan lintas-model WAJIB "
-                    "disampaikan ke user). Dipanggil tanpa keduanya, tool hanya mengembalikan "
-                    "perintah bertanya. (Permintaan FOTO saja tidak perlu VIN.) "
-                    "Semua gambar dicocokkan lewat PART NUMBER. ⛔ TIDAK bisa lewat NAMA part: "
-                    "pencarian nama di SIMS bersifat 'mengandung kata' & mengembalikan part LAIN "
-                    "(nama 'Radiator' memunculkan PIPA radiator) — gambar bisa SALAH. File tanpa "
-                    "kolom Part Number → katakan apa adanya & minta kolom PN, jangan menebak. "
-                    "⚠️ Jenis 'exploded' LAMBAT: tiap PN diambil satu per satu dari EPC — "
-                    "maksimum 60 PN per-VIN / 25 PN lintas model, dan unduhan pertama butuh "
-                    "beberapa menit (sampaikan ke user). Part yang memang tak punya foto/figure "
-                    "ditandai '-' + alasannya ditulis apa adanya, tidak dikarang."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "jenis": {
-                            "type": "array",
-                            "description": ("Jenis gambar yang diisi — SEMUA yang diminta user "
-                                            "masuk di sini sekaligus (satu file). Contoh: "
-                                            "['foto','exploded']."),
-                            "items": {"type": "string",
-                                      "enum": [ai_sheet.JENIS_FOTO, ai_sheet.JENIS_EXPLODED]},
-                        },
-                        "rangka": {
-                            "type": "string",
-                            "description": ("KHUSUS jenis 'exploded': nomor rangka/VIN unit — isi "
-                                            "HANYA bila user menyebutkannya. ⛔ Jangan menebak."),
-                        },
-                        "lintas_model": {
-                            "type": "boolean",
-                            "description": ("KHUSUS jenis 'exploded': true HANYA setelah user "
-                                            "menyatakan TIDAK punya nomor rangka."),
-                        },
-                        "jumlah_foto": {
-                            "type": "integer",
-                            "description": "KHUSUS jenis 'foto': foto per part (1-3). Kosong = 2.",
-                        },
-                        "kolom_pn": {
-                            "type": "string",
-                            "description": ("Kolom sumber Part Number. Kosongkan bila sudah "
-                                            "terdeteksi otomatis (lihat sheet_ringkasan)."),
-                        },
-                    },
-                    "required": ["jenis"],
-                },
-            },
-        })
         specs.append({
             "type": "function",
             "function": {

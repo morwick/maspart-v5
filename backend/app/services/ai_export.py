@@ -579,19 +579,11 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
                 with _stash_lock:
                     d["_path"] = str(p)
             return data, d["filename"]
-        # Satu builder untuk semua Excel unggahan BERGAMBAR. Dua `kind` lama tetap
-        # dilayani: payload yang sudah terlanjur ada di stash tak boleh mati.
-        if b.get("kind") in ("sheet_gambar", "sheet_foto", "sheet_exploded"):
+        # SATU builder untuk semua Excel olahan lampiran (data + warna + rekap +
+        # foto + gambar teknis). `kind` lama tetap dilayani: payload yang sudah
+        # terlanjur ada di stash tak boleh mati.
+        if b.get("kind") in ("sheet_gambar", "sheet_foto", "sheet_exploded", "sheet_status"):
             data, err = sheet_gambar_excel(b)
-            if data is None:
-                return None, err
-            p = _cache_write(export_id, data)
-            if p:
-                with _stash_lock:
-                    d["_path"] = str(p)
-            return data, d["filename"]
-        if b.get("kind") == "sheet_status":
-            data, err = sheet_status_excel(b)
             if data is None:
                 return None, err
             p = _cache_write(export_id, data)
@@ -668,85 +660,12 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
 
 
 def sheet_status_excel(b: dict) -> tuple[bytes | None, str]:
-    """Builder Excel BERWARNA STATUS + blok RINGKASAN (rekap) untuk hasil olah
-    Excel unggahan (sheet_isi_kolom `tandai_status`/`rekap`). Payload:
-      {kind:"sheet_status", judul, sub?, kolom:[...], baris:[[...]],
-       status:[per-baris ""|"hijau"|"merah"|"kuning"],
-       ringkasan:[(label, nilai, warna)]}
-    Warna sel MENYERTAI kolom teks 'Status' (dwi-encode) — warna bukan satu-satunya
-    sinyal. Byte-stable via _save_stable."""
-    kolom: list[str] = b.get("kolom") or []
-    baris: list[list] = b.get("baris") or []
-    status: list[str] = b.get("status") or []
-    ringkasan: list = b.get("ringkasan") or []
-    if not kolom:
+    """Excel olahan lampiran BERWARNA STATUS + blok RINGKASAN, tanpa gambar —
+    pembungkus `sheet_gambar_excel`. Dipertahankan untuk payload lama di stash
+    (kind 'sheet_status') & pemanggil yang memang tak butuh gambar."""
+    if not (b.get("kolom") or []):
         return None, "Payload sheet_status kosong."
-    judul = b.get("judul") or "Data MASPART"
-    sub = b.get("sub") or f"{len(baris)} baris · MASPART Asisten AI"
-    mono_cols = {j for j, h in enumerate(kolom, start=1) if _MONO_HEAD_RE.search(h or "")}
-    widths = []
-    for j, h in enumerate(kolom):
-        w = max([len(h or "")] + [len(str(r[j])) for r in baris if j < len(r)] or [0])
-        widths.append(max(8, min(60, w + 4)))
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Data"
-    ws.sheet_view.showGridLines = False
-    start = _title(ws, _safe(judul), sub, max(2, len(kolom)))
-    for j, (h, w) in enumerate(zip(kolom, widths), start=1):
-        c = ws.cell(row=start, column=j, value=_safe(h))
-        c.fill = _HEAD_FILL
-        c.font = _WHITE
-        c.alignment = _CENTER
-        c.border = _BORDER
-        ws.column_dimensions[get_column_letter(j)].width = w
-    num_cols = kolom_angka(kolom)     # sama seperti generic_excel — lihat ke_angka
-    col_fmts = [num_format(h) for h in kolom]   # format tampilan pintar per-kolom
-    r = start + 1
-    for i, row in enumerate(baris):
-        fill = _STATUS_FILL.get(status[i] if i < len(status) else "")
-        for j in range(1, len(kolom) + 1):
-            val = row[j - 1] if j - 1 < len(row) else ""
-            if j - 1 in num_cols:
-                val = ke_angka(val, num_cols[j - 1])
-            c = ws.cell(row=r, column=j, value=_safe(val))
-            c.border = _BORDER
-            angka = isinstance(c.value, (int, float)) and not isinstance(c.value, bool)
-            if angka:
-                c.alignment = _RIGHT
-                c.number_format = col_fmts[j - 1]
-            else:
-                c.alignment = _CENTER if j == 1 or j in mono_cols else _LEFT
-            c.font = _MONO if j in mono_cols else _INK
-            if fill:
-                c.fill = fill
-            elif i % 2:
-                c.fill = _ZEBRA
-        r += 1
-    ws.freeze_panes = ws.cell(row=start + 1, column=1)
-
-    # Blok RINGKASAN (rekap) di bawah tabel.
-    if ringkasan:
-        r += 1
-        hc = ws.cell(row=r, column=1, value="RINGKASAN")
-        hc.font = Font(bold=True, color=_BRAND_DK, size=12)
-        r += 1
-        for item in ringkasan:
-            label, nilai = item[0], item[1]
-            warna = item[2] if len(item) > 2 else ""
-            lc = ws.cell(row=r, column=1, value=_safe(str(label)))
-            lc.font = _BOLD
-            lc.fill = _STATUS_FILL.get(warna, _SUB1_FILL)
-            lc.border = _BORDER
-            lc.alignment = _LEFT
-            vc = ws.cell(row=r, column=2, value=_safe(nilai))
-            vc.font = _INK
-            vc.border = _BORDER
-            vc.alignment = _LEFT
-            r += 1
-
-    return _save_stable(wb), ""
+    return sheet_gambar_excel(b)
 
 
 # ── Excel UNGGAHAN USER + FOTO part (tool `sheet_isi_foto`) ─────────────────
@@ -823,19 +742,22 @@ def sheet_exploded_excel(b: dict) -> tuple[bytes | None, str]:
 
 
 def sheet_gambar_excel(b: dict) -> tuple[bytes | None, str]:
-    """SATU builder untuk Excel unggahan user + GAMBAR: foto FISIK part (SIMS)
-    dan/atau GAMBAR TEKNIS exploded view (EPC) — boleh keduanya di file yang SAMA.
+    """SATU builder untuk SEMUA Excel olahan lampiran user: kolom data (stok/harga/
+    dst, lengkap dengan WARNA status & blok RINGKASAN) + FOTO fisik part (SIMS) +
+    GAMBAR TEKNIS exploded view (EPC) — semuanya boleh berada di file yang SAMA.
 
-    Dulu keduanya punya builder sendiri, dan itulah sebab keluhan pemilik
-    2026-08-06: minta 'foto + exploded' menghasilkan DUA kartu unduh, karena dua
-    tool masing-masing menstash file sendiri. Satu builder = satu file.
+    Dulu ada tiga builder terpisah, dan itulah sebab keluhan pemilik 2026-08-06:
+    'isikan stok Jakarta & Pekanbaru, foto, dan exploded' menghasilkan beberapa
+    kartu unduh karena tiap jalur menstash filenya sendiri. Satu builder = satu file.
 
     Dipanggil saat kartu unduh diklik (lihat generic_excel), BUKAN saat tool
     dijalankan: satu PN exploded dingin bisa makan puluhan detik & foto SIMS bisa
     >10 MB — menahannya di giliran chat akan membuat asisten tampak menggantung.
 
     Payload (bagian yang tak dipakai boleh absen):
-      {kind:"sheet_gambar", judul, kolom, baris,
+      {kind:"sheet_gambar", judul, sub?, kolom, baris,
+       status:[per-baris ""|"hijau"|"merah"|"kuning"],             ← WARNA baris
+       ringkasan:[(label, nilai, warna)],                          ← blok REKAP
        foto:[per-baris [url,…]], kol_foto:[idx,…],                 ← bagian FOTO
        pns:[per-baris], rangka:""|VIN, kol_info, kol_gambar}       ← bagian EXPLODED
     Return (bytes, pesan_error)."""
@@ -847,6 +769,8 @@ def sheet_gambar_excel(b: dict) -> tuple[bytes | None, str]:
     baris: list[list] = b.get("baris") or []
     if not kolom:
         return None, "Data sheet tidak ditemukan — minta asisten membuat ulang."
+    status: list[str] = b.get("status") or []
+    ringkasan: list = b.get("ringkasan") or []
     foto: list[list[str]] = b.get("foto") or []
     kol_foto: list[int] = b.get("kol_foto") or []
     pns: list[str] = b.get("pns") or []
@@ -855,8 +779,6 @@ def sheet_gambar_excel(b: dict) -> tuple[bytes | None, str]:
     kol_gambar = b.get("kol_gambar")
     ada_foto = bool(kol_foto)
     ada_expl = kol_gambar is not None
-    if not ada_foto and not ada_expl:
-        return None, "Data sheet tidak ditemukan — minta asisten membuat ulang."
 
     # 1) FOTO SIMS: unduh paralel + ciutkan (plafon total dijaga).
     thumb: dict[tuple[int, int], bytes] = {}
@@ -899,10 +821,12 @@ def sheet_gambar_excel(b: dict) -> tuple[bytes | None, str]:
                       else "gambar teknis EPC LINTAS MODEL (bukan milik unit tertentu)")
     judul_default = ("Data + Foto" if ada_foto and not ada_expl else
                      "Data + Gambar Teknis" if ada_expl and not ada_foto else
-                     "Data + Foto & Gambar Teknis")
-    start = _title(ws, _safe(b.get("judul") or judul_default),
-                   f"{len(baris)} baris · " + " · ".join(bagian) + " · MASPART Asisten AI",
-                   max(2, len(kolom)))
+                     "Data + Foto & Gambar Teknis" if ada_foto and ada_expl else
+                     "Data MASPART")
+    sub = b.get("sub") or (f"{len(baris)} baris"
+                           + ("" if not bagian else " · " + " · ".join(bagian))
+                           + " · MASPART Asisten AI")
+    start = _title(ws, _safe(b.get("judul") or judul_default), sub, max(2, len(kolom)))
 
     mono_cols = {j for j, h in enumerate(kolom, start=1) if _MONO_HEAD_RE.search(h or "")}
     foto_cols = {j + 1 for j in kol_foto}      # 1-based
@@ -932,6 +856,9 @@ def sheet_gambar_excel(b: dict) -> tuple[bytes | None, str]:
     for i, row in enumerate(baris):
         pn = pns[i] if i < len(pns) else ""
         d = peta.get(exploded_view.kunci(pn, rangka)) if (ada_expl and pn) else None
+        # WARNA status menang atas zebra (warna MENYERTAI kolom teks 'Status' —
+        # dwi-encode, warna bukan satu-satunya sinyal).
+        fill_status = _STATUS_FILL.get(status[i] if i < len(status) else "")
         row = list(row)
         if ada_expl and kol_info is not None and kol_info < len(row):
             # Baris tanpa PN → '—' (dari _teks_info_exploded(None)), bukan sel kosong
@@ -951,7 +878,9 @@ def sheet_gambar_excel(b: dict) -> tuple[bytes | None, str]:
                 c.alignment = (_CENTER if j == 1 or j in mono_cols or j in foto_cols
                                or (ada_expl and j - 1 == kol_gambar) else _LEFT)
             c.font = _MONO if j in mono_cols else _INK
-            if i % 2:
+            if fill_status:
+                c.fill = fill_status
+            elif i % 2:
                 c.fill = _ZEBRA
         # Tinggi baris = yang TERTINGGI di antara foto & gambar teknis (kalau
         # keduanya ada, memakai tinggi foto akan memotong figure exploded).
@@ -978,6 +907,26 @@ def sheet_gambar_excel(b: dict) -> tuple[bytes | None, str]:
             ws.row_dimensions[r].height = tinggi
         r += 1
     ws.freeze_panes = ws.cell(row=start + 1, column=1)
+
+    # Blok RINGKASAN (rekap) di bawah tabel.
+    if ringkasan:
+        r += 1
+        hc = ws.cell(row=r, column=1, value="RINGKASAN")
+        hc.font = Font(bold=True, color=_BRAND_DK, size=12)
+        r += 1
+        for item in ringkasan:
+            label, nilai = item[0], item[1]
+            warna = item[2] if len(item) > 2 else ""
+            lc = ws.cell(row=r, column=1, value=_safe(str(label)))
+            lc.font = _BOLD
+            lc.fill = _STATUS_FILL.get(warna, _SUB1_FILL)
+            lc.border = _BORDER
+            lc.alignment = _LEFT
+            vc = ws.cell(row=r, column=2, value=_safe(nilai))
+            vc.font = _INK
+            vc.border = _BORDER
+            vc.alignment = _LEFT
+            r += 1
 
     return _save_stable(wb), ""
 

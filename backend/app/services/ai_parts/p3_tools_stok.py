@@ -2022,35 +2022,29 @@ def _t_sheet_isi_kolom(args: dict, user: dict) -> dict:
         # Harga SIMS = harga MODAL ber-CNY; harga JUAL rupiah datang dari Accurate.
         # Konversi HANYA bila user memintanya (aturan pemilik 2026-07-21).
         konversi_idr=bool(args.get("konversi_idr")),
-    )
-
-
-def _t_sheet_isi_gambar(args: dict, user: dict) -> dict:
-    """FOTO fisik dan/atau GAMBAR TEKNIS ke Excel unggahan — SATU panggilan =
-    SATU file. Gerbang 'tanya dulu soal VIN' (khusus jenis exploded) ada di
-    ai_sheet.fill_gambar, bukan cuma di prompt."""
-    return ai_sheet.fill_gambar(
-        sheet_id=args.get("_sheet_id", ""),
-        user=user,
-        # 'jenis' bisa datang sebagai list, string tunggal, atau string majemuk —
-        # jenis_norm mengurus ketiganya (model tak selalu patuh skema).
-        jenis=args.get("jenis"),
+        # Gambar ikut ke file yang SAMA (aturan pemilik 2026-08-06: jangan dipisah).
+        # 'jenis' = nama lama di sheet_isi_gambar (masih dipakai shim/leaked call).
+        gambar=args.get("gambar") or args.get("jenis"),
         rangka=(args.get("rangka") or "").strip(),
         lintas_model=bool(args.get("lintas_model")),
-        # 'jumlah' = nama lama di sheet_isi_foto (masih dipakai shim/leaked call).
         jumlah_foto=args.get("jumlah_foto") or args.get("jumlah") or 2,
-        kolom_pn=(args.get("kolom_pn") or "").strip(),
     )
 
 
 # ── Shim tool LAMA (spec-nya tak lagi ditawarkan; lihat _LEGACY_TOOL_ALIAS) ──
-# Model kadang menulis nama lama dari kebiasaan riwayat; jangan sampai gagal.
+# Semuanya bermuara ke sheet_isi_kolom: SATU alat pengisi Excel lampiran = mustahil
+# menghasilkan file terpisah. Model kadang menulis nama lama dari kebiasaan
+# riwayat; jangan sampai gagal.
+def _t_sheet_isi_gambar(args: dict, user: dict) -> dict:
+    return _t_sheet_isi_kolom({**args, "gambar": args.get("gambar") or args.get("jenis")}, user)
+
+
 def _t_sheet_isi_foto(args: dict, user: dict) -> dict:
-    return _t_sheet_isi_gambar({**args, "jenis": [ai_sheet.JENIS_FOTO]}, user)
+    return _t_sheet_isi_kolom({**args, "gambar": [ai_sheet.JENIS_FOTO]}, user)
 
 
 def _t_sheet_isi_exploded(args: dict, user: dict) -> dict:
-    return _t_sheet_isi_gambar({**args, "jenis": [ai_sheet.JENIS_EXPLODED]}, user)
+    return _t_sheet_isi_kolom({**args, "gambar": [ai_sheet.JENIS_EXPLODED]}, user)
 
 
 # ── Isi Part Number dari NAMA part, dibatasi BOM satu unit (per nomor rangka) ──

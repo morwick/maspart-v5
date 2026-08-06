@@ -189,20 +189,78 @@ def test_plafon_memakai_batas_tersempit(monkeypatch):
 
 # ── Tool lama: tak ditawarkan, tapi tetap jalan ─────────────────────────────
 
-def test_tool_lama_jadi_shim_satu_jenis(sheet):
+def test_satu_alat_pengisi_sisanya_shim(sheet):
+    """SATU alat pengisi Excel lampiran = mustahil menghasilkan file terpisah.
+    Nama lama tetap sah dieksekusi (alias legacy) supaya panggilan bocor tak gagal."""
     dengan = {f["function"]["name"] for f in A._tool_specs(USER, sheet)}
-    assert "sheet_isi_gambar" in dengan
-    assert not {"sheet_isi_foto", "sheet_isi_exploded"} & dengan
+    assert "sheet_isi_kolom" in dengan
+    assert not {"sheet_isi_gambar", "sheet_isi_foto", "sheet_isi_exploded"} & dengan
     izin = A._allowed_tool_names(USER, sheet)
-    assert {"sheet_isi_foto", "sheet_isi_exploded"} <= izin      # alias legacy
+    assert {"sheet_isi_gambar", "sheet_isi_foto", "sheet_isi_exploded"} <= izin
 
     r = A._run_tool("sheet_isi_foto", {}, USER, sheet_id=sheet)
     assert r["found"] is True and r["jenis"] == ["foto"]
     r2 = A._run_tool("sheet_isi_exploded", {"rangka": FRAME}, USER, sheet_id=sheet)
     assert r2["found"] is True and r2["jenis"] == ["exploded"]
+    r3 = A._run_tool("sheet_isi_gambar", {"jenis": ["foto", "exploded"], "rangka": FRAME},
+                     USER, sheet_id=sheet)
+    assert r3["found"] is True and r3["jenis"] == ["foto", "exploded"]
 
 
 def test_dispatch_dan_kartu_unduh_terpasang():
     assert A._DISPATCH["sheet_isi_gambar"] is A._t_sheet_isi_gambar
     import inspect
-    assert '"sheet_isi_gambar"' in inspect.getsource(A.chat)   # kartu unduh ditangkap
+    assert '"sheet_isi_kolom"' in inspect.getsource(A.chat)   # kartu unduh ditangkap
+
+
+# ── Kolom DATA + gambar dalam SATU file (permintaan pemilik 2026-08-06) ─────
+
+def test_stok_dua_gudang_plus_foto_dan_exploded_satu_file(sheet, monkeypatch):
+    """'isikan stok jakarta, pekanbaru, gambar part, gambar exploded' → 1 Excel."""
+    monkeypatch.setattr(ai_sheet.part_index, "rows_for_pns", lambda pns: {
+        PN_ADA: {"part_name": "Wheel hub", "stok": "5", "harga": "1500000",
+                 "gudang": {"01.Jakarta": 3, "02.Pekanbaru": 2}}})
+    monkeypatch.setattr(ai_sheet.part_index, "gudang_names",
+                        lambda: ["01.Jakarta", "02.Pekanbaru"])
+    out = ai_sheet.fill_columns(
+        sheet, USER,
+        [{"isi": "stok", "gudang": "Jakarta"}, {"isi": "stok", "gudang": "Pekanbaru"}],
+        gambar=["foto", "exploded"], rangka=FRAME)
+    assert out["found"] is True and out["satu_file"] is True
+    b = ai_export._stash[out["export_id"]]["builder"]
+    assert b["kind"] == "sheet_gambar"
+    # Kolom data DULU, gambar di ujung kanan — semuanya di file yang sama.
+    assert b["kolom"] == ["Part No.", "Nama", "Qty", "Stok 01.Jakarta", "Stok 02.Pekanbaru",
+                          "Info Gambar Teknis", "Foto 1", "Foto 2",
+                          "Gambar Teknis (Exploded View)"]
+    assert b["rangka"] == FRAME and b["kol_foto"] == [6, 7]
+    assert [k["kolom"] for k in out["kolom"]] == ["Stok 01.Jakarta", "Stok 02.Pekanbaru"]
+    assert out["baris_berfoto"] == 1 and out["jumlah_part"] == 2
+    assert b["baris"][0][3] == 3 and b["baris"][0][4] == 2      # stok per gudang tetap ANGKA
+
+
+def test_status_dan_rekap_tetap_jalan_bersama_gambar(sheet, monkeypatch):
+    monkeypatch.setattr(ai_sheet.part_index, "rows_for_pns", lambda pns: {
+        PN_ADA: {"part_name": "Wheel hub", "stok": "5", "harga": "1500000", "gudang": {}}})
+    monkeypatch.setattr(ai_sheet, "_pengganti_pn", lambda pn: "")
+    out = ai_sheet.fill_columns(sheet, USER, [{"isi": "stok"}], tandai_status=True, rekap=True,
+                                gambar=["foto"])
+    assert out["found"] is True
+    b = ai_export._stash[out["export_id"]]["builder"]
+    assert b["status"] and b["ringkasan"]          # warna & rekap ikut payload gambar
+    assert "Status" in b["kolom"] and "Foto 1" in b["kolom"]
+    data, err = ai_export.sheet_gambar_excel(b)
+    assert err == "" and data
+    ws = openpyxl.load_workbook(io.BytesIO(data))["Data"]
+    teks = [ws.cell(row=r, column=1).value for r in range(1, ws.max_row + 1)]
+    assert "RINGKASAN" in teks                      # blok rekap tetap muncul
+
+
+def test_gambar_saja_tak_mengklaim_pn_hilang(sheet, monkeypatch):
+    """Tanpa kolom data, indeks part TIDAK di-lookup → jangan lapor 'PN tak ketemu'."""
+    monkeypatch.setattr(ai_sheet.part_index, "rows_for_pns",
+                        lambda pns: pytest.fail("indeks part tak boleh dibaca utk gambar saja"))
+    out = ai_sheet.fill_gambar(sheet, USER, ["foto"])
+    assert out["found"] is True
+    assert out["pn_tidak_ditemukan"] == [] and out["pn_tidak_ditemukan_total"] == 0
+    assert "sumber" not in out                      # tak ada sumber data yang dipakai
