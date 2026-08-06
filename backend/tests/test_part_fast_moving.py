@@ -219,14 +219,29 @@ def test_semua_unit_gagal_tak_mengarang(per_vin):
     assert "part_aus_dari_rangka" in r["catatan"]      # tawarkan jalur per-VIN
 
 
-def test_populasi_jadi_jaring_saat_epc_bisu(patched, monkeypatch):
-    monkeypatch.setattr(ai, "_configs_rangka", lambda rgs: {})
+def test_populasi_didahulukan_karena_kunci_dataset(patched, monkeypatch):
+    """Dataset ber-kunci kode model POPULASI. Kode EPC memakai sandi lain yang
+    menyertakan konfigurasi ('ZZ1317V466JE1R/27F7Q46-BZ' — kasus nyata pemilik):
+    kalau EPC didahulukan, unit yang datanya ADA justru dijawab 'belum ada'."""
+    monkeypatch.setattr(ai, "_configs_rangka",
+                        lambda rgs: {r: {"model": "ZZ1317V466JE1R/27F7Q46-BZ"} for r in rgs})
     monkeypatch.setattr(fast_moving, "peta_populasi",
                         lambda: {VIN_A[-8:]: {"model": "ZZ3257V404JF1",
                                               "jenis": "HOWO-NX 6X4", "tahun": "2022"}})
     r = ai._t_part_fast_moving({"rangka": [VIN_A]}, ADMIN)
     assert r["found"] and r["model"] == "ZZ3257V404JF1"
     assert "populasi" in r["unit"][0]["sumber_model"]
+
+
+def test_epc_jadi_jaring_bila_unit_tak_ada_di_populasi(patched, monkeypatch):
+    """Unit di luar populasi (mis. milik pihak lain) masih tertolong EPC bila
+    kode dasarnya kebetulan sama dengan kunci dataset."""
+    monkeypatch.setattr(ai, "_configs_rangka",
+                        lambda rgs: {r: {"model": "ZZ3257V404JF1/27F7Q46-BZ"} for r in rgs})
+    monkeypatch.setattr(fast_moving, "peta_populasi", lambda: {})
+    r = ai._t_part_fast_moving({"rangka": [VIN_A]}, ADMIN)
+    assert r["found"] and r["model"] == "ZZ3257V404JF1"
+    assert "EPC" in r["unit"][0]["sumber_model"]
 
 
 def test_kategori_tetap_menyaring_di_jalur_rangka(per_vin):
@@ -237,3 +252,29 @@ def test_kategori_tetap_menyaring_di_jalur_rangka(per_vin):
 def test_tanpa_model_dan_tanpa_rangka_minta_keduanya(patched):
     r = ai._t_part_fast_moving({}, ADMIN)
     assert "nomor rangka" in r["error"] and "NX400" in r["error"]
+
+
+def test_slot_dipotong_agar_hasil_tak_terpangkas_diam_diam(monkeypatch, patched):
+    """Model terbesar produksi = 31 KB JSON, plafon isi tool 24 KB → tanpa
+    plafon slot, hasilnya dipotong di TENGAH dan slot hilang tanpa jejak."""
+    besar = {"jenis": "HOWO NX 8X4", "hp": 460, "unit_populasi": 77,
+             "unit_sampel": ["SJ1"], "n_sampel": 1,
+             "slot": [{"kategori": "filter", "slot": f"filter {i:03d}", "varian": [
+                 {"pn": f"VG61000{i:06d}", "nama": f"Filter {i}", "qty": 1,
+                  "n_unit": 1, "tahun": [], "pn_sub": [], "pengganti": []}]}
+                 for i in range(ai._FM_MAX_SLOT + 12)]}
+    monkeypatch.setattr(fast_moving, "data", lambda: {"model": {"ZZ1315N4666E1": besar}})
+    r = ai._t_part_fast_moving({"model": "ZZ1315N4666E1"}, ADMIN)
+    assert r["jumlah_slot"] == ai._FM_MAX_SLOT + 12          # total tetap jujur
+    assert len(r["slot"]) == ai._FM_MAX_SLOT
+    assert r["slot_tak_ditampilkan"] == 12
+    assert "TIDAK ditampilkan" in r["catatan"] and "excel=true" in r["catatan"]
+    # Excel memuat SEMUANYA (itulah jalan keluar yang ditawarkan catatan).
+    r2 = ai._t_part_fast_moving({"model": "ZZ1315N4666E1", "excel": True}, ADMIN)
+    assert r2["jumlah_baris"] == ai._FM_MAX_SLOT + 12 and r2["export_id"]
+
+
+def test_urutan_kategori_ikut_frekuensi_servis(patched):
+    """Yang tampil duluan di chat harus yang paling sering diservis."""
+    r = ai._t_part_fast_moving({"model": "ZZ3257V404JF1"}, ADMIN)
+    assert [s["kategori"] for s in r["slot"]] == ["filter", "rem", "karet"]

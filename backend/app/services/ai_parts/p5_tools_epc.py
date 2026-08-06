@@ -3898,7 +3898,12 @@ def _fm_match(q: str, kode: str, m: dict) -> bool:
 # sama. Beberapa unit se-model = satu daftar; unit beda model = daftar GABUNGAN
 # yang menandai slot mana dipakai semua model.
 _FM_MAX_RANGKA = 20          # tiap rangka = 1 panggilan config EPC (ber-cache)
-_FM_MAX_SLOT_GABUNG = 60     # plafon baris di CHAT; selebihnya lewat Excel
+# Plafon baris di CHAT. Bukan hiasan: model terbesar dataset menghasilkan 31 KB
+# JSON (terukur di produksi 2026-08-06) sementara plafon isi tool 24 KB — tanpa
+# plafon ini hasilnya DIPOTONG DI TENGAH oleh _cap_tool_content dan slot yang
+# hilang tak terlihat siapa pun. Daftar LENGKAP lewat excel=true.
+_FM_MAX_SLOT = 60
+_FM_MAX_SLOT_GABUNG = _FM_MAX_SLOT
 # Urutan tampil kategori = urutan frekuensi servis di lapangan.
 _FM_KAT_URUT = ["filter", "rem", "kopling", "bearing_seal", "belt", "karet"]
 
@@ -3907,39 +3912,58 @@ def _fm_kat_rank(kat: str) -> int:
     return _FM_KAT_URUT.index(kat) if kat in _FM_KAT_URUT else len(_FM_KAT_URUT)
 
 
-def _fm_model_dari_rangka(rgs: list[str]) -> dict:
-    """{rangka: {model, sumber}} — EPC getVehicleConfig DULU (otoritatif untuk
-    unit itu sendiri), data populasi sebagai jaring kedua. Kosong bila keduanya
-    tak mengenal unitnya — ⛔ jangan pernah menebak model dari pola VIN."""
+def _fm_model_dari_rangka(rgs: list[str], semua: dict) -> dict:
+    """{rangka: {model, sumber}} — VIN → kode MODEL kunci dataset fast moving.
+
+    ⚠️ DATA POPULASI DIDAHULUKAN, dan itu bukan kelalaian "EPC-first": dataset
+    fast moving BER-KUNCI kode model populasi (mis. ZZ1315N4666E1), sedangkan
+    `modelCode` EPC memakai sandi lain yang menyertakan konfigurasi
+    (LZZPBXSF5NJ248278 → 'ZZ1317V466JE1R/27F7Q46-BZ' — terbukti live 2026-08-06).
+    Mencocokkan kode EPC ke kunci populasi mustahil tanpa menebak. EPC tetap
+    dipakai sebagai JARING untuk unit yang tak ada di populasi (kode dasar sebelum
+    '/' dicoba apa adanya). ⛔ Model TAK PERNAH ditebak dari pola VIN."""
     from . import fast_moving
     try:
-        cfgs = _configs_rangka(rgs)
-    except Exception:                                   # EPC ngadat ≠ unit tak ada
-        cfgs = {}
-    peta = {}
-    if any(not (cfgs.get(r) or {}).get("model") for r in rgs):
-        try:
-            peta = fast_moving.peta_populasi()
-        except Exception:
-            peta = {}
+        peta = fast_moving.peta_populasi()
+    except Exception:
+        peta = {}
     out: dict = {}
     for r in rgs:
-        model = " ".join(str((cfgs.get(r) or {}).get("model") or "").split()).upper()
-        sumber = "EPC (getVehicleConfig)"
-        if not model and peta:
-            kunci = re.sub(r"[^A-Z0-9]", "", r.upper())[-8:]
-            model = (peta.get(kunci) or {}).get("model") or ""
-            sumber = "data populasi MASPART"
-        out[r] = {"model": model, "sumber": sumber if model else ""}
+        kunci = re.sub(r"[^A-Z0-9]", "", r.upper())[-8:]
+        model = " ".join(str((peta.get(kunci) or {}).get("model") or "").split()).upper()
+        out[r] = ({"model": model, "sumber": "data populasi MASPART"} if model
+                  else {"model": "", "sumber": ""})
+
+    # Jaring EPC hanya untuk unit yang populasinya diam ATAU modelnya tak ada di
+    # dataset — hemat panggilan & tak pernah menimpa kecocokan yang sudah sah.
+    perlu = [r for r in rgs if not (out[r]["model"] in semua)]
+    if not perlu:
+        return out
+    try:
+        cfgs = _configs_rangka(perlu)
+    except Exception:                                   # EPC ngadat ≠ unit tak ada
+        cfgs = {}
+    for r in perlu:
+        kode = " ".join(str((cfgs.get(r) or {}).get("model") or "").split()).upper()
+        dasar = kode.split("/")[0].strip()
+        if dasar in semua or (dasar and not out[r]["model"]):
+            out[r] = {"model": dasar, "sumber": "EPC (getVehicleConfig)"}
     return out
 
 
 def _fm_payload_model(kode: str, m: dict, kategori: str, user: dict) -> dict:
     """Isi hasil untuk SATU model (slot + varian + stok/harga) — dipakai jalur
-    'model' maupun jalur rangka bila semua unit ternyata se-model."""
+    'model' maupun jalur rangka bila semua unit ternyata se-model.
+
+    Slot diurutkan menurut frekuensi servis (filter → rem → kopling → …) lalu
+    DIPOTONG di _FM_MAX_SLOT: yang tampil di chat harus yang paling berguna,
+    dan sisanya disebut jujur di 'slot_tak_ditampilkan' (bukan hilang diam-diam
+    kena plafon isi tool)."""
     n = m.get("n_sampel") or 0
-    slot_src = [s for s in m.get("slot") or []
+    slot_all = [s for s in m.get("slot") or []
                 if not kategori or s.get("kategori") == kategori]
+    slot_all.sort(key=lambda s: (_fm_kat_rank(s.get("kategori") or ""), s.get("slot") or ""))
+    slot_src = slot_all[:_FM_MAX_SLOT]
     pns = [v["pn"] for s in slot_src for v in s.get("varian") or []]
     local = part_index.rows_for_pns(pns)
     boleh_harga = _boleh_harga(user)
@@ -3969,10 +3993,14 @@ def _fm_payload_model(kode: str, m: dict, kategori: str, user: dict) -> dict:
         if s.get("ko_eksis"):
             row["ko_eksis"] = True
         slots.append(row)
-    return {"found": True, "model": kode, "jenis": m.get("jenis"), "hp": m.get("hp"),
-            "unit_populasi": m.get("unit_populasi"), "unit_sampel_epc": n,
-            "jumlah_slot": len(slots), "kategori_difilter": kategori or None,
-            "slot": slots}
+    out = {"found": True, "model": kode, "jenis": m.get("jenis"), "hp": m.get("hp"),
+           "unit_populasi": m.get("unit_populasi"), "unit_sampel_epc": n,
+           "jumlah_slot": len(slot_all), "kategori_difilter": kategori or None,
+           "slot": slots}
+    if len(slot_all) > len(slots):
+        out["slot_ditampilkan"] = len(slots)
+        out["slot_tak_ditampilkan"] = len(slot_all) - len(slots)
+    return out
 
 
 def _fm_baris_gabungan(model_unit: dict, semua: dict, kategori: str) -> list[dict]:
@@ -4016,6 +4044,14 @@ def _fm_baris_gabungan(model_unit: dict, semua: dict, kategori: str) -> list[dic
     return baris
 
 
+def _fm_potong_note(sisa: int) -> str:
+    """Kalimat jujur soal slot yang tak muat di chat + jalan keluarnya."""
+    return (f" ⚠️ {sisa} slot lain TIDAK ditampilkan (plafon {_FM_MAX_SLOT} baris "
+            "chat) — sebutkan apa adanya & tawarkan menyaring per kategori "
+            "(filter/rem/kopling/bearing_seal/belt/karet) atau versi Excel "
+            "LENGKAP (panggil lagi dengan excel=true).")
+
+
 def _fm_excel_gabungan(judul: str, baris: list[dict], boleh_harga: bool,
                        local: dict) -> tuple[str, str, int]:
     """Excel LENGKAP (tanpa plafon baris chat) untuk daftar gabungan."""
@@ -4043,7 +4079,7 @@ def _t_fm_rangka(rgs: list[str], semua: dict, args: dict, user: dict) -> dict:
     dipotong_unit = len(rgs) > _FM_MAX_RANGKA
     rgs = rgs[:_FM_MAX_RANGKA]
     kategori = (args.get("kategori") or "").strip().lower()
-    peta_model = _fm_model_dari_rangka(rgs)
+    peta_model = _fm_model_dari_rangka(rgs, semua)
 
     unit_rows: list[dict] = []
     model_unit: dict[str, list[str]] = {}
@@ -4080,6 +4116,13 @@ def _t_fm_rangka(rgs: list[str], semua: dict, args: dict, user: dict) -> dict:
         out = _fm_payload_model(kode, semua[kode], kategori, user)
         out.update(rangka_diminta=rgs, unit=unit_rows,
                    jumlah_rangka=len(rgs), unit_se_model=True)
+        if args.get("excel"):
+            baris_x = _fm_baris_gabungan({kode: model_unit[kode]}, semua, kategori)
+            pns_x = [v["pn"] for r in baris_x for v in r["varian"]]
+            judul = f"Fast moving {semua[kode].get('jenis') or kode} ({len(rgs)} unit)"
+            eid, fn, nb = _fm_excel_gabungan(judul, baris_x, _boleh_harga(user),
+                                             part_index.rows_for_pns(pns_x))
+            out.update(export_id=eid, filename=fn, judul=judul, jumlah_baris=nb)
         n = out["unit_sampel_epc"]
         out["sumber"] = (f"Dataset fast moving MASPART — turunan katalog EPC per-VIN "
                          f"dari {n} unit sampel model ini + data populasi.")
@@ -4094,6 +4137,10 @@ def _t_fm_rangka(rgs: list[str], semua: dict, args: dict, user: dict) -> dict:
             "perencanaan stok), BUKAN bacaan EPC unit-unit ini satu per satu: untuk "
             "PN pasti milik satu unit pakai part_aus_dari_rangka. ⛔ JANGAN mengarang "
             "PN di luar daftar.")
+        if out.get("slot_tak_ditampilkan"):
+            out["catatan"] += _fm_potong_note(out["slot_tak_ditampilkan"])
+        if out.get("export_id"):
+            out["catatan"] += " File Excel LENGKAP siap — kartu unduh muncul OTOMATIS."
         if dipotong_unit:
             out["catatan"] = (f"⚠️ Daftar rangka dipotong ke {_FM_MAX_RANGKA} pertama. "
                               + out["catatan"])
@@ -4146,10 +4193,7 @@ def _t_fm_rangka(rgs: list[str], semua: dict, args: dict, user: dict) -> dict:
         "⚠️ Level MODEL (dasar perencanaan stok), BUKAN bacaan EPC tiap unit: untuk "
         "PN pasti milik satu unit pakai part_aus_dari_rangka. ⛔ JANGAN mengarang PN.")
     if dipotong_slot:
-        catatan += (f" ⚠️ {dipotong_slot} slot lain TIDAK ditampilkan (plafon "
-                    f"{_FM_MAX_SLOT_GABUNG} baris chat) — sebutkan apa adanya & "
-                    "tawarkan menyaring per kategori (filter/rem/kopling/"
-                    "bearing_seal/belt/karet) atau minta versi Excel (excel=true).")
+        catatan += _fm_potong_note(dipotong_slot)
     if out.get("export_id"):
         catatan += " File Excel LENGKAP siap — kartu unduh muncul OTOMATIS."
     if dipotong_unit:
@@ -4208,6 +4252,18 @@ def _t_part_fast_moving(args: dict, user: dict) -> dict:
     kode, m = next(iter(cocok.items()))
     out = _fm_payload_model(kode, m, kategori, user)
     n = out["unit_sampel_epc"]
+    if args.get("excel"):
+        baris_x = _fm_baris_gabungan({kode: []}, semua, kategori)
+        pns_x = [v["pn"] for r in baris_x for v in r["varian"]]
+        judul = f"Fast moving {m.get('jenis') or kode}"
+        eid, fn, nb = _fm_excel_gabungan(judul, baris_x, _boleh_harga(user),
+                                         part_index.rows_for_pns(pns_x))
+        out.update(export_id=eid, filename=fn, judul=judul, jumlah_baris=nb)
+    ekor = ""
+    if out.get("slot_tak_ditampilkan"):
+        ekor += _fm_potong_note(out["slot_tak_ditampilkan"])
+    if out.get("export_id"):
+        ekor += " File Excel LENGKAP siap — kartu unduh muncul OTOMATIS."
     return {
         **out,
         "sumber": (f"Dataset fast moving MASPART — turunan katalog EPC per-VIN "
@@ -4222,7 +4278,7 @@ def _t_part_fast_moving(args: dict, user: dict) -> dict:
             "tampilkan semua + 'tahun_unit' bila ada, jangan pilih diam-diam. "
             "Ini untuk PERENCANAAN stok/penawaran: untuk unit spesifik minta nomor "
             "rangka lalu pakai part_aus_dari_rangka/cari_part_di_unit (per-VIN). "
-            "⛔ JANGAN mengarang PN di luar daftar."),
+            "⛔ JANGAN mengarang PN di luar daftar." + ekor),
     }
 
 
