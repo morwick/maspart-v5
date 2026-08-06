@@ -179,6 +179,23 @@ def _peta_populasi() -> dict[str, dict]:
         return {}
 
 
+def urutan_istilah() -> dict[str, int]:
+    """{nama lapangan → urutan TAMPIL}. Sengaja terpisah dari urutan LIST kamus:
+    list diurut menurut prioritas COCOK (khusus dulu — 'fuel coarse filter'
+    sebelum 'fuel filter'), sedangkan yang dilihat user harus urut kepentingan
+    servis (filter oli → solar → udara → … → air dryer) lewat field 'urut'.
+    Dibaca TOOL saat menyajikan, jadi mengubah kamus langsung terasa TANPA
+    membangun ulang dataset."""
+    out: dict[str, int] = {}
+    for i, a in enumerate(_kamus().get("istilah") or []):
+        if a.get("id"):
+            try:
+                out[a["id"]] = int(a.get("urut", i))
+            except (TypeError, ValueError):
+                out[a["id"]] = i
+    return out
+
+
 def peta_populasi() -> dict[str, dict]:
     """NOMOR RANGKA (8 char akhir) → {model, jenis, tahun} dari populasi.
 

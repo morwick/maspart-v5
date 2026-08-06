@@ -278,3 +278,54 @@ def test_urutan_kategori_ikut_frekuensi_servis(patched):
     """Yang tampil duluan di chat harus yang paling sering diservis."""
     r = ai._t_part_fast_moving({"model": "ZZ3257V404JF1"}, ADMIN)
     assert [s["kategori"] for s in r["slot"]] == ["filter", "rem", "karet"]
+
+
+# ── Nama lapangan: urutan tampil & peleburan slot kembar ────────────────────
+_DATA_ID = {"model": {"ZZ9": {
+    "jenis": "HOWO NX 8X4", "hp": 460, "unit_populasi": 77,
+    "unit_sampel": ["A", "B"], "n_sampel": 2, "slot": [
+        # sengaja diacak & dipecah per assembly seperti keluaran builder asli
+        {"kategori": "filter", "slot": "air drying chamber",
+         "nama_id": "tabung air dryer (pengering angin)", "varian": [
+             {"pn": "WG9000360521+001", "nama": "Air drying chamber", "qty": 1,
+              "n_unit": 2, "tahun": [], "pn_sub": [], "pengganti": []}]},
+        {"kategori": "filter", "slot": "fuel coarse filter — fuel tank",
+         "nama_id": "filter solar kasar (bawah)", "varian": [
+             {"pn": "WG9925550182", "nama": "Fuel coarse filter element", "qty": 1,
+              "n_unit": 2, "tahun": [], "pn_sub": [], "pengganti": []}]},
+        {"kategori": "filter", "slot": "fuel coarse filter — engine",
+         "nama_id": "filter solar kasar (bawah)", "varian": [
+             {"pn": "WG9925550182", "nama": "Fuel coarse filter element", "qty": 1,
+              "n_unit": 2, "tahun": [], "pn_sub": [], "pengganti": []},
+             {"pn": "WG9925550180", "nama": "Fuel coarse filter", "qty": 1,
+              "n_unit": 1, "tahun": [], "pn_sub": [], "pengganti": []}]},
+        {"kategori": "filter", "slot": "oil filter element component",
+         "nama_id": "filter oli mesin", "varian": [
+             {"pn": "080V05504-6096", "nama": "Oil filter element component",
+              "qty": 1, "n_unit": 2, "tahun": [], "pn_sub": [], "pengganti": []}]},
+    ]}}}
+
+
+@pytest.fixture
+def patched_id(monkeypatch):
+    monkeypatch.setattr(fast_moving, "data", lambda: dict(_DATA_ID))
+    monkeypatch.setattr(ai.part_index, "rows_for_pns", lambda pns: {})
+    monkeypatch.setattr(ai, "_boleh_harga", lambda u: True)
+
+
+def test_nama_lapangan_urut_kepentingan_servis(patched_id):
+    """Filter oli & solar HARUS di atas air dryer — itu yang dicari user."""
+    r = ai._t_part_fast_moving({"model": "ZZ9"}, ADMIN)
+    assert [s.get("nama_lapangan") for s in r["slot"]] == [
+        "filter oli mesin", "filter solar kasar (bawah)",
+        "tabung air dryer (pengering angin)"]
+
+
+def test_slot_kembar_dilebur_jadi_satu_baris(patched_id):
+    """Builder memecah slot per assembly induk; di chat itu tampak seperti
+    daftar berulang. Dilebur jadi satu baris + PN unik."""
+    r = ai._t_part_fast_moving({"model": "ZZ9"}, ADMIN)
+    solar = [s for s in r["slot"] if s.get("nama_lapangan") == "filter solar kasar (bawah)"][0]
+    assert [v["pn"] for v in solar["varian"]] == ["WG9925550182", "WG9925550180"]
+    assert len(solar["slot_epc"]) == 2      # jejak slot EPC aslinya tetap ada
+    assert r["jumlah_slot"] == 3            # 4 slot dataset → 3 baris tampil

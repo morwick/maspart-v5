@@ -3912,6 +3912,51 @@ def _fm_kat_rank(kat: str) -> int:
     return _FM_KAT_URUT.index(kat) if kat in _FM_KAT_URUT else len(_FM_KAT_URUT)
 
 
+def _fm_urut_istilah() -> dict:
+    from . import fast_moving
+    try:
+        return fast_moving.urutan_istilah()
+    except Exception:                                   # kamus rusak ≠ tool mati
+        return {}
+
+
+def _fm_gabung_istilah(slot_src: list[dict]) -> list[dict]:
+    """Slot yang berbagi NAMA LAPANGAN sama (dalam satu kategori) dilebur jadi
+    SATU baris tampil.
+
+    Alasannya terlihat di produksi 2026-08-06: satu 'filter solar kasar' muncul
+    6 baris karena builder memecah slot per ASSEMBLY induk (PN yang sama
+    terpasang di beberapa rakitan). Untuk pembaca itu terlihat seperti daftar
+    yang berulang-ulang. Pemecahan per-assembly tetap ada di dataset & Excel;
+    yang dilebur hanya tampilan. Slot tanpa nama lapangan dibiarkan apa adanya."""
+    out: list[dict] = []
+    idx: dict = {}
+    for s in slot_src:
+        nid = s.get("nama_id")
+        if not nid:
+            out.append(s)
+            continue
+        k = (s.get("kategori"), nid)
+        induk = idx.get(k)
+        if induk is None:
+            gabung = dict(s)
+            gabung["slot_epc"] = [s.get("slot")]
+            gabung["varian"] = list(s.get("varian") or [])
+            idx[k] = gabung
+            out.append(gabung)
+            continue
+        if s.get("slot") not in induk["slot_epc"]:
+            induk["slot_epc"].append(s.get("slot"))
+        if s.get("ko_eksis"):
+            induk["ko_eksis"] = True
+        ada = {v.get("pn") for v in induk["varian"]}
+        for v in s.get("varian") or []:
+            if v.get("pn") not in ada:      # PN yang sama di assembly lain: sekali saja
+                induk["varian"].append(v)
+                ada.add(v.get("pn"))
+    return out
+
+
 def _fm_model_dari_rangka(rgs: list[str], semua: dict) -> dict:
     """{rangka: {model, sumber}} — VIN → kode MODEL kunci dataset fast moving.
 
@@ -3962,10 +4007,14 @@ def _fm_payload_model(kode: str, m: dict, kategori: str, user: dict) -> dict:
     n = m.get("n_sampel") or 0
     slot_all = [s for s in m.get("slot") or []
                 if not kategori or s.get("kategori") == kategori]
-    # Slot ber-ISTILAH LAPANGAN naik duluan: itu barang servis yang dicari orang
-    # bengkel (filter oli/solar/udara/water separator). Sisanya menyusul.
+    slot_all = _fm_gabung_istilah(slot_all)
+    # Barang servis rutin (ber-nama lapangan) naik duluan, URUT KEPENTINGAN dari
+    # kamus (filter oli → solar → udara → …), baru sisanya menurut nama EPC.
+    urut_id = _fm_urut_istilah()
     slot_all.sort(key=lambda s: (_fm_kat_rank(s.get("kategori") or ""),
-                                 0 if s.get("nama_id") else 1, s.get("slot") or ""))
+                                 0 if s.get("nama_id") else 1,
+                                 urut_id.get(s.get("nama_id"), 999),
+                                 s.get("slot") or ""))
     slot_src = slot_all[:_FM_MAX_SLOT]
     pns = [v["pn"] for s in slot_src for v in s.get("varian") or []]
     local = part_index.rows_for_pns(pns)
@@ -3995,6 +4044,8 @@ def _fm_payload_model(kode: str, m: dict, kategori: str, user: dict) -> dict:
                "varian": varian}
         if s.get("nama_id"):
             row["nama_lapangan"] = s["nama_id"]
+        if len(s.get("slot_epc") or []) > 1:
+            row["slot_epc"] = s["slot_epc"]
         if s.get("ko_eksis"):
             row["ko_eksis"] = True
         slots.append(row)
@@ -4035,6 +4086,32 @@ def _fm_baris_gabungan(model_unit: dict, semua: dict, kategori: str) -> list[dic
                 vv["dipakai_di_unit"][kode] = f"{v.get('n_unit')}/{n}"
                 if v.get("pengganti") and "pengganti" not in vv:
                     vv["pengganti"] = v["pengganti"]
+    # Lebur slot yang berbagi nama lapangan (pecahan per-assembly builder) —
+    # sama seperti jalur satu model, supaya daftarnya tak tampak berulang.
+    gab: dict = {}
+    for (kat, slot), e in list(agg.items()):
+        nid = e.get("nama_id")
+        if not nid:
+            continue
+        k = (kat, nid)
+        induk = gab.get(k)
+        if induk is None:
+            gab[k] = (kat, slot)
+            continue
+        utama = agg[induk]
+        for kode in e["model"]:
+            if kode not in utama["model"]:
+                utama["model"].append(kode)
+        if e["ko_eksis"]:
+            utama["ko_eksis"] = True
+        for pn, v in e["varian"].items():
+            if pn in utama["varian"]:
+                utama["varian"][pn]["dipakai_di_unit"].update(v["dipakai_di_unit"])
+            else:
+                utama["varian"][pn] = v
+        agg.pop((kat, slot), None)
+
+    urut_id = _fm_urut_istilah()
     n_model = len(model_unit)
     baris = []
     for (kat, slot), e in agg.items():
@@ -4050,7 +4127,8 @@ def _fm_baris_gabungan(model_unit: dict, semua: dict, kategori: str) -> list[dic
             row["ko_eksis"] = True
         baris.append(row)
     baris.sort(key=lambda r: (not r["di_semua_model"], _fm_kat_rank(r["kategori"]),
-                              0 if r.get("nama_lapangan") else 1, r["slot"]))
+                              0 if r.get("nama_lapangan") else 1,
+                              urut_id.get(r.get("nama_lapangan"), 999), r["slot"]))
     return baris
 
 
