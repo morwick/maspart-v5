@@ -1884,10 +1884,16 @@ def _pr_defaults(session: dict[str, str]) -> dict[str, Any]:
 def next_pr_number() -> str:
     """Nomor Permintaan Barang BERIKUTNYA: 'PERMINTAAN-NN'. Dihitung dari dokumen
     Accurate sendiri (tahan restart, tak bentrok) — sama seperti penawaran,
-    penomoran otomatis Accurate TIDAK dipakai."""
+    penomoran otomatis Accurate TIDAK dipakai.
+
+    ⚠️ `keywords` TIDAK menyaring berdasarkan NOMOR di endpoint ini (terbukti live
+    2026-08-06: kirim 'PERMINTAAN' tetap membalas dokumen ber-nomor P.R.U./PRD.),
+    jadi penyaringan dilakukan DI SINI atas 200 dokumen terbaru bertipe PURCHASE
+    — jangan mengandalkan filter server."""
     def _do(sess):
         rows = _call(sess, "vendor/search-purchase-requisition.do",
-                     {"start": 0, "limit": 200, "keywords": "PERMINTAAN",
+                     {"start": 0, "limit": 200, "keywords": "",
+                      "purchaseRequisitionTypeFilter": json.dumps(["PURCHASE"]),
                       "sp.pageSize": 200, "sp.start": 0, "sp.limit": 200}).get("d") or []
         mx = 0
         for r in rows:
