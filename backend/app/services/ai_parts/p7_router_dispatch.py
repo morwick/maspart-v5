@@ -218,8 +218,9 @@ _DISPATCH = {
     "gambar_exploded_mesin": _t_gambar_exploded_mesin,
     "sheet_ringkasan": _t_sheet_ringkasan,
     "sheet_isi_kolom": _t_sheet_isi_kolom,
-    "sheet_isi_foto": _t_sheet_isi_foto,
-    "sheet_isi_exploded": _t_sheet_isi_exploded,
+    "sheet_isi_gambar": _t_sheet_isi_gambar,
+    "sheet_isi_foto": _t_sheet_isi_foto,            # shim (lihat _LEGACY_TOOL_ALIAS)
+    "sheet_isi_exploded": _t_sheet_isi_exploded,    # shim
     "sheet_isi_part_number": _t_sheet_isi_part_number,
     "sheet_cek_qty": _t_sheet_cek_qty,
     "sheet_pilih_sheet": _t_sheet_pilih_sheet,
@@ -402,6 +403,10 @@ _LEGACY_TOOL_ALIAS = {
     "katalog_mesin": "katalog_kategori",
     "uraikan_mesin": "uraikan_assembly",
     "repair_kit_mesin": "repair_kit_transmisi",
+    # Dua tool gambar Excel dilebur jadi sheet_isi_gambar (2026-08-06) supaya
+    # "foto + exploded" tak lagi menghasilkan DUA file.
+    "sheet_isi_foto": "sheet_isi_gambar",
+    "sheet_isi_exploded": "sheet_isi_gambar",
 }
 
 

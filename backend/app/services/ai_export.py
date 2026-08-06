@@ -579,17 +579,10 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
                 with _stash_lock:
                     d["_path"] = str(p)
             return data, d["filename"]
-        if b.get("kind") == "sheet_foto":
-            data, err = sheet_foto_excel(b)
-            if data is None:
-                return None, err
-            p = _cache_write(export_id, data)
-            if p:
-                with _stash_lock:
-                    d["_path"] = str(p)
-            return data, d["filename"]
-        if b.get("kind") == "sheet_exploded":
-            data, err = sheet_exploded_excel(b)
+        # Satu builder untuk semua Excel unggahan BERGAMBAR. Dua `kind` lama tetap
+        # dilayani: payload yang sudah terlanjur ada di stash tak boleh mati.
+        if b.get("kind") in ("sheet_gambar", "sheet_foto", "sheet_exploded"):
+            data, err = sheet_gambar_excel(b)
             if data is None:
                 return None, err
             p = _cache_write(export_id, data)
@@ -791,82 +784,9 @@ def _foto_thumb(url: str) -> bytes | None:
 
 
 def sheet_foto_excel(b: dict) -> tuple[bytes | None, str]:
-    """Bangun Excel unggahan user + FOTO part tertanam. Dipanggil saat kartu unduh
-    diklik (lihat generic_excel). Baris tanpa foto sudah bertanda '-' dari ai_sheet.
-    Return (bytes, pesan_error)."""
-    from openpyxl.drawing.image import Image as XLImage
-
-    kolom: list[str] = b.get("kolom") or []
-    baris: list[list] = b.get("baris") or []
-    foto: list[list[str]] = b.get("foto") or []
-    kol_foto: list[int] = b.get("kol_foto") or []
-    if not kolom:
-        return None, "Data sheet tidak ditemukan — minta asisten membuat ulang."
-
-    # Unduh SEMUA foto paralel (plafon total dijaga), lalu tempel.
-    tugas: list[tuple[int, int, str]] = []   # (baris_i, urutan_foto, url)
-    for i, urls in enumerate(foto):
-        for k, u in enumerate(urls[:len(kol_foto)]):
-            if u and len(tugas) < _FOTO_MAX_TOTAL:
-                tugas.append((i, k, u))
-    gambar: dict[tuple[int, int], bytes] = {}
-    if tugas:
-        with ThreadPoolExecutor(max_workers=8) as ex:
-            for (i, k, _u), png in zip(tugas, ex.map(lambda t: _foto_thumb(t[2]), tugas)):
-                if png:
-                    gambar[(i, k)] = png
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Data"
-    ws.sheet_view.showGridLines = False
-    start = _title(ws, _safe(b.get("judul") or "Data + Foto"),
-                   f"{len(baris)} baris · foto resmi SIMS (dicocokkan per Part Number) · "
-                   "MASPART Asisten AI", max(2, len(kolom)))
-
-    mono_cols = {j for j, h in enumerate(kolom, start=1) if _MONO_HEAD_RE.search(h or "")}
-    foto_cols = {j + 1 for j in kol_foto}      # 1-based
-    for j, h in enumerate(kolom, start=1):
-        c = ws.cell(row=start, column=j, value=_safe(h))
-        c.fill = _HEAD_FILL
-        c.font = _WHITE
-        c.alignment = _CENTER
-        c.border = _BORDER
-        if j in foto_cols:
-            ws.column_dimensions[get_column_letter(j)].width = _FOTO_COL_W
-        else:
-            w = max([len(str(h or ""))] + [len(str(r[j - 1])) for r in baris if j - 1 < len(r)] or [0])
-            ws.column_dimensions[get_column_letter(j)].width = max(8, min(60, w + 4))
-
-    r = start + 1
-    for i, row in enumerate(baris):
-        for j in range(1, len(kolom) + 1):
-            val = row[j - 1] if j - 1 < len(row) else ""
-            c = ws.cell(row=r, column=j, value=_safe(val))
-            c.border = _BORDER
-            c.alignment = _CENTER if j == 1 or j in mono_cols or j in foto_cols else _LEFT
-            c.font = _MONO if j in mono_cols else _INK
-            if i % 2:
-                c.fill = _ZEBRA
-        dipasang = 0
-        for k, col0 in enumerate(kol_foto):
-            png = gambar.get((i, k))
-            if not png:
-                continue
-            img = XLImage(io.BytesIO(png))
-            ratio = img.width / img.height if img.height else 1
-            img.height = _FOTO_H_PX
-            img.width = int(_FOTO_H_PX * ratio)
-            ws.add_image(img, f"{get_column_letter(col0 + 1)}{r}")
-            dipasang += 1
-        if dipasang:
-            ws.row_dimensions[r].height = _FOTO_H_PX * 0.78
-        r += 1
-    ws.freeze_panes = ws.cell(row=start + 1, column=1)
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue(), ""
+    """Excel unggahan user + FOTO part saja — pembungkus `sheet_gambar_excel`.
+    Dipertahankan untuk payload lama yang masih ada di stash (kind 'sheet_foto')."""
+    return sheet_gambar_excel(b)
 
 
 # ── Excel UNGGAHAN USER + GAMBAR TEKNIS exploded view (tool `sheet_isi_exploded`) ──
@@ -897,60 +817,106 @@ def _info_exploded_sel(d: dict, rangka: str) -> str:
 
 
 def sheet_exploded_excel(b: dict) -> tuple[bytes | None, str]:
-    """Bangun Excel unggahan user + GAMBAR TEKNIS (exploded view EPC) tertanam.
+    """Excel unggahan user + GAMBAR TEKNIS saja — pembungkus `sheet_gambar_excel`.
+    Dipertahankan untuk payload lama di stash (kind 'sheet_exploded')."""
+    return sheet_gambar_excel(b)
 
-    Dipanggil saat kartu unduh diklik (lihat generic_excel) — BUKAN saat tool
-    dijalankan: satu PN bisa makan puluhan detik, jadi menahannya di giliran chat
-    akan membuat asisten tampak menggantung. Payload:
-      {kind:"sheet_exploded", judul, kolom, baris, pns:[per-baris],
-       rangka:"" (lintas-model) | VIN (per-VIN), kol_info, kol_gambar}
+
+def sheet_gambar_excel(b: dict) -> tuple[bytes | None, str]:
+    """SATU builder untuk Excel unggahan user + GAMBAR: foto FISIK part (SIMS)
+    dan/atau GAMBAR TEKNIS exploded view (EPC) — boleh keduanya di file yang SAMA.
+
+    Dulu keduanya punya builder sendiri, dan itulah sebab keluhan pemilik
+    2026-08-06: minta 'foto + exploded' menghasilkan DUA kartu unduh, karena dua
+    tool masing-masing menstash file sendiri. Satu builder = satu file.
+
+    Dipanggil saat kartu unduh diklik (lihat generic_excel), BUKAN saat tool
+    dijalankan: satu PN exploded dingin bisa makan puluhan detik & foto SIMS bisa
+    >10 MB — menahannya di giliran chat akan membuat asisten tampak menggantung.
+
+    Payload (bagian yang tak dipakai boleh absen):
+      {kind:"sheet_gambar", judul, kolom, baris,
+       foto:[per-baris [url,…]], kol_foto:[idx,…],                 ← bagian FOTO
+       pns:[per-baris], rangka:""|VIN, kol_info, kol_gambar}       ← bagian EXPLODED
     Return (bytes, pesan_error)."""
     from openpyxl.drawing.image import Image as XLImage
 
-    from . import exploded_view
+    from . import exploded_view      # impor lokal: hindari siklus saat modul dimuat
 
     kolom: list[str] = b.get("kolom") or []
     baris: list[list] = b.get("baris") or []
+    if not kolom:
+        return None, "Data sheet tidak ditemukan — minta asisten membuat ulang."
+    foto: list[list[str]] = b.get("foto") or []
+    kol_foto: list[int] = b.get("kol_foto") or []
     pns: list[str] = b.get("pns") or []
     rangka = (b.get("rangka") or "").strip()
     kol_info = b.get("kol_info")
     kol_gambar = b.get("kol_gambar")
-    if not kolom or kol_gambar is None:
+    ada_foto = bool(kol_foto)
+    ada_expl = kol_gambar is not None
+    if not ada_foto and not ada_expl:
         return None, "Data sheet tidak ditemukan — minta asisten membuat ulang."
 
-    unik = [p for p in dict.fromkeys(pns) if p]
-    # Gerbang: hanya SATU batch exploded boleh jalan di server ini (1 vCPU + EPC
-    # mudah menolak). Sama seperti Batch Download; diambil DI DALAM thread pekerja.
-    try:
-        peta = exploded_view.bangun_dengan_gerbang(
-            exploded_view.png_batch, unik, anggaran=_EXPL_ANGGARAN, rangka=rangka)
-    except exploded_view.SedangSibuk:
-        return None, ("Server sedang menyusun satu batch gambar exploded lain (hanya "
-                      "boleh satu sekaligus — server 1 vCPU dan server EPC mudah "
-                      "menolak). Coba klik unduh lagi beberapa menit lagi.")
-    except Exception:
-        return None, "Gagal mengambil gambar exploded dari EPC. Coba lagi sebentar."
+    # 1) FOTO SIMS: unduh paralel + ciutkan (plafon total dijaga).
+    thumb: dict[tuple[int, int], bytes] = {}
+    if ada_foto:
+        tugas: list[tuple[int, int, str]] = []   # (baris_i, urutan_foto, url)
+        for i, urls in enumerate(foto):
+            for k, u in enumerate(urls[:len(kol_foto)]):
+                if u and len(tugas) < _FOTO_MAX_TOTAL:
+                    tugas.append((i, k, u))
+        if tugas:
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                for (i, k, _u), png in zip(tugas, ex.map(lambda t: _foto_thumb(t[2]), tugas)):
+                    if png:
+                        thumb[(i, k)] = png
+
+    # 2) GAMBAR TEKNIS EPC: gerbang satu-batch (server 1 vCPU + EPC mudah menolak);
+    #    diambil DI DALAM thread pekerja, sama seperti Batch Download.
+    peta: dict[str, dict] = {}
+    if ada_expl:
+        unik = [p for p in dict.fromkeys(pns) if p]
+        try:
+            peta = exploded_view.bangun_dengan_gerbang(
+                exploded_view.png_batch, unik, anggaran=_EXPL_ANGGARAN, rangka=rangka)
+        except exploded_view.SedangSibuk:
+            return None, ("Server sedang menyusun satu batch gambar exploded lain (hanya "
+                          "boleh satu sekaligus — server 1 vCPU dan server EPC mudah "
+                          "menolak). Coba klik unduh lagi beberapa menit lagi.")
+        except Exception:
+            return None, "Gagal mengambil gambar exploded dari EPC. Coba lagi sebentar."
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Data"
     ws.sheet_view.showGridLines = False
-    sub = (f"{len(baris)} baris · gambar teknis EPC per-VIN (unit {rangka})"
-           if rangka else
-           f"{len(baris)} baris · gambar teknis EPC LINTAS MODEL (bukan milik unit tertentu)")
-    start = _title(ws, _safe(b.get("judul") or "Data + Gambar Teknis"),
-                   sub + " · MASPART Asisten AI", max(2, len(kolom)))
+    bagian = []
+    if ada_foto:
+        bagian.append("foto resmi SIMS (dicocokkan per Part Number)")
+    if ada_expl:
+        bagian.append(f"gambar teknis EPC per-VIN (unit {rangka})" if rangka
+                      else "gambar teknis EPC LINTAS MODEL (bukan milik unit tertentu)")
+    judul_default = ("Data + Foto" if ada_foto and not ada_expl else
+                     "Data + Gambar Teknis" if ada_expl and not ada_foto else
+                     "Data + Foto & Gambar Teknis")
+    start = _title(ws, _safe(b.get("judul") or judul_default),
+                   f"{len(baris)} baris · " + " · ".join(bagian) + " · MASPART Asisten AI",
+                   max(2, len(kolom)))
 
     mono_cols = {j for j, h in enumerate(kolom, start=1) if _MONO_HEAD_RE.search(h or "")}
+    foto_cols = {j + 1 for j in kol_foto}      # 1-based
     for j, h in enumerate(kolom, start=1):
         c = ws.cell(row=start, column=j, value=_safe(h))
         c.fill = _HEAD_FILL
         c.font = _WHITE
         c.alignment = _CENTER
         c.border = _BORDER
-        if j - 1 == kol_gambar:
+        if j in foto_cols:
+            ws.column_dimensions[get_column_letter(j)].width = _FOTO_COL_W
+        elif ada_expl and j - 1 == kol_gambar:
             ws.column_dimensions[get_column_letter(j)].width = _EXPL_COL_W
-        elif j - 1 == kol_info:
+        elif ada_expl and j - 1 == kol_info:
             ws.column_dimensions[get_column_letter(j)].width = _EXPL_INFO_COL_W
         else:
             w = max([len(str(h or ""))]
@@ -958,17 +924,19 @@ def sheet_exploded_excel(b: dict) -> tuple[bytes | None, str]:
             ws.column_dimensions[get_column_letter(j)].width = max(8, min(60, w + 4))
 
     # Kolom Harga/Stok/Qty milik FILE USER tetap ditulis sebagai ANGKA (rumus
-    # user harus tetap jalan) — sama seperti generic_excel; kolom info & gambar
+    # user harus tetap jalan) — sama seperti generic_excel; kolom foto/info/gambar
     # tak pernah kena koersi (nama headernya bukan kolom angka).
     num_cols = kolom_angka(kolom)
     col_fmts = [num_format(h) for h in kolom]
     r = start + 1
     for i, row in enumerate(baris):
         pn = pns[i] if i < len(pns) else ""
-        d = peta.get(exploded_view.kunci(pn, rangka)) if pn else None
+        d = peta.get(exploded_view.kunci(pn, rangka)) if (ada_expl and pn) else None
         row = list(row)
-        if kol_info is not None and kol_info < len(row):
-            row[kol_info] = _info_exploded_sel(d, rangka) if pn else ""
+        if ada_expl and kol_info is not None and kol_info < len(row):
+            # Baris tanpa PN → '—' (dari _teks_info_exploded(None)), bukan sel kosong
+            # yang tampak seperti "sedang diproses".
+            row[kol_info] = _info_exploded_sel(d, rangka)
         for j in range(1, len(kolom) + 1):
             val = row[j - 1] if j - 1 < len(row) else ""
             if j - 1 in num_cols:
@@ -980,11 +948,24 @@ def sheet_exploded_excel(b: dict) -> tuple[bytes | None, str]:
                 c.alignment = _RIGHT
                 c.number_format = col_fmts[j - 1]
             else:
-                c.alignment = (_CENTER if j == 1 or j in mono_cols or j - 1 == kol_gambar
-                               else _LEFT)
+                c.alignment = (_CENTER if j == 1 or j in mono_cols or j in foto_cols
+                               or (ada_expl and j - 1 == kol_gambar) else _LEFT)
             c.font = _MONO if j in mono_cols else _INK
             if i % 2:
                 c.fill = _ZEBRA
+        # Tinggi baris = yang TERTINGGI di antara foto & gambar teknis (kalau
+        # keduanya ada, memakai tinggi foto akan memotong figure exploded).
+        tinggi = 0.0
+        for k, col0 in enumerate(kol_foto):
+            png = thumb.get((i, k))
+            if not png:
+                continue
+            img = XLImage(io.BytesIO(png))
+            ratio = img.width / img.height if img.height else 1
+            img.height = _FOTO_H_PX
+            img.width = int(_FOTO_H_PX * ratio)
+            ws.add_image(img, f"{get_column_letter(col0 + 1)}{r}")
+            tinggi = max(tinggi, _FOTO_H_PX * 0.78)
         png = (d or {}).get("png")
         if png:
             img = XLImage(io.BytesIO(png))
@@ -992,7 +973,9 @@ def sheet_exploded_excel(b: dict) -> tuple[bytes | None, str]:
             skala = min(_EXPL_IMG_W / w, _EXPL_IMG_H / h, 1.0)
             img.width, img.height = max(1, int(w * skala)), max(1, int(h * skala))
             ws.add_image(img, f"{get_column_letter(kol_gambar + 1)}{r}")
-            ws.row_dimensions[r].height = min(_EXPL_ROW_PT_MAX, img.height * 0.78 + 8)
+            tinggi = max(tinggi, min(_EXPL_ROW_PT_MAX, img.height * 0.78 + 8))
+        if tinggi:
+            ws.row_dimensions[r].height = tinggi
         r += 1
     ws.freeze_panes = ws.cell(row=start + 1, column=1)
 

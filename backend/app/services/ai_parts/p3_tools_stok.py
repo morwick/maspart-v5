@@ -2025,26 +2025,32 @@ def _t_sheet_isi_kolom(args: dict, user: dict) -> dict:
     )
 
 
-def _t_sheet_isi_foto(args: dict, user: dict) -> dict:
-    return ai_sheet.fill_photos(
+def _t_sheet_isi_gambar(args: dict, user: dict) -> dict:
+    """FOTO fisik dan/atau GAMBAR TEKNIS ke Excel unggahan — SATU panggilan =
+    SATU file. Gerbang 'tanya dulu soal VIN' (khusus jenis exploded) ada di
+    ai_sheet.fill_gambar, bukan cuma di prompt."""
+    return ai_sheet.fill_gambar(
         sheet_id=args.get("_sheet_id", ""),
         user=user,
+        # 'jenis' bisa datang sebagai list, string tunggal, atau string majemuk —
+        # jenis_norm mengurus ketiganya (model tak selalu patuh skema).
+        jenis=args.get("jenis"),
+        rangka=(args.get("rangka") or "").strip(),
+        lintas_model=bool(args.get("lintas_model")),
+        # 'jumlah' = nama lama di sheet_isi_foto (masih dipakai shim/leaked call).
+        jumlah_foto=args.get("jumlah_foto") or args.get("jumlah") or 2,
         kolom_pn=(args.get("kolom_pn") or "").strip(),
-        jumlah=args.get("jumlah") or 2,
     )
+
+
+# ── Shim tool LAMA (spec-nya tak lagi ditawarkan; lihat _LEGACY_TOOL_ALIAS) ──
+# Model kadang menulis nama lama dari kebiasaan riwayat; jangan sampai gagal.
+def _t_sheet_isi_foto(args: dict, user: dict) -> dict:
+    return _t_sheet_isi_gambar({**args, "jenis": [ai_sheet.JENIS_FOTO]}, user)
 
 
 def _t_sheet_isi_exploded(args: dict, user: dict) -> dict:
-    """Gambar TEKNIS (exploded view) ke Excel unggahan. Gerbang 'tanya dulu soal
-    VIN' ada di ai_sheet.fill_exploded — bukan cuma di prompt: tanpa rangka DAN
-    tanpa keputusan lintas-model, tool menolak & menyuruh model bertanya."""
-    return ai_sheet.fill_exploded(
-        sheet_id=args.get("_sheet_id", ""),
-        user=user,
-        rangka=(args.get("rangka") or "").strip(),
-        lintas_model=bool(args.get("lintas_model")),
-        kolom_pn=(args.get("kolom_pn") or "").strip(),
-    )
+    return _t_sheet_isi_gambar({**args, "jenis": [ai_sheet.JENIS_EXPLODED]}, user)
 
 
 # ── Isi Part Number dari NAMA part, dibatasi BOM satu unit (per nomor rangka) ──

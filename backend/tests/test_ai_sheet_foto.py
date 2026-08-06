@@ -51,7 +51,7 @@ def test_isi_foto_2_per_part_dan_tandai_yang_kosong(sheet):
     assert out["export_id"] and out["filename"].endswith(".xlsx")
 
     b = ai_export._stash[out["export_id"]]["builder"]
-    assert b["kind"] == "sheet_foto"
+    assert b["kind"] == "sheet_gambar"        # satu builder utk foto & gambar teknis
     assert b["kolom"][-2:] == ["Foto 1", "Foto 2"]          # 2 kolom foto di ujung
     assert b["foto"][0] == FOTO["FG9804532170"][:2]         # dipotong ke 2, bukan 3
     assert b["foto"][2] == []                               # tak ada foto
@@ -139,14 +139,19 @@ def test_builder_menempel_gambar_dan_menciutkannya(monkeypatch):
 
 
 # ── Terdaftar di asisten (kalau lupa, kartu unduh tak muncul) ────────────────
-def test_tool_terdaftar_dan_hanya_muncul_saat_ada_lampiran():
+def test_tool_gambar_hanya_muncul_saat_ada_lampiran():
+    """Sejak dua tool gambar dilebur (2026-08-06), yang DITAWARKAN cuma
+    sheet_isi_gambar — nama lama tinggal shim supaya panggilan bocor tak gagal."""
     assert "sheet_isi_foto" in A._DISPATCH
     tanpa = {f["function"]["name"] for f in A._tool_specs(USER, "")}
     dengan = {f["function"]["name"] for f in A._tool_specs(USER, "sid-123")}
-    assert "sheet_isi_foto" not in tanpa       # tanpa lampiran: model tak melihatnya
-    assert "sheet_isi_foto" in dengan
+    assert "sheet_isi_gambar" not in tanpa     # tanpa lampiran: model tak melihatnya
+    assert "sheet_isi_gambar" in dengan
+    assert "sheet_isi_foto" not in dengan      # tak lagi ditawarkan (cegah 2 file)
 
 
 def test_pembeli_boleh_pakai(sheet):
-    """Foto bukan data sensitif (beda dari harga/stok gudang) → pembeli boleh."""
+    """Foto bukan data sensitif (beda dari harga/stok gudang) → pembeli boleh.
+    Nama lama tetap SAH dieksekusi lewat alias legacy."""
+    assert "sheet_isi_gambar" in A._allowed_tool_names(USER, sheet)
     assert "sheet_isi_foto" in A._allowed_tool_names(USER, sheet)

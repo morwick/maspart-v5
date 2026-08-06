@@ -1628,6 +1628,7 @@ _TOOL_LABEL = {
     "sheet_isi_kolom": "Mengisi kolom Excel",
     "sheet_isi_part_number": "Mencari Part Number",
     "sheet_cek_qty": "Memvalidasi jumlah (qty)",
+    "sheet_isi_gambar": "Menempel foto & gambar teknis",
     "sheet_isi_foto": "Menempel foto part",
     "sheet_isi_exploded": "Menempel gambar teknis (exploded)",
     "sheet_pilih_sheet": "Membuka sheet lain",
@@ -1726,12 +1727,13 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             "dari Part Number: stok total/per-gudang, nama part, harga — SEMUA ke SATU file), "
             "sheet_isi_part_number (KEBALIKAN: isi Part Number dari kolom NAMA part, butuh "
             "nomor rangka/VIN), sheet_cek_qty (isi/validasi Qty dari BOM unit, butuh rangka), dan "
-            "sheet_isi_foto (tempel FOTO part resmi SIMS, default 2 foto/part — dicocokkan lewat "
-            "PART NUMBER, ⛔ TIDAK PERNAH lewat nama part: nama di SIMS cocok 'mengandung kata' & "
-            "memberi foto part LAIN), serta sheet_isi_exploded (tempel GAMBAR TEKNIS / EXPLODED "
-            "VIEW EPC ber-nomor balon — beda dari foto fisik; ⛔ TANYA DULU apakah user punya "
-            "nomor rangka/VIN: ADA → panggil dengan 'rangka' (figure unit itu sendiri), TIDAK ADA "
-            "→ panggil dengan lintas_model=true & sampaikan peringatan lintas-model). "
+            "sheet_isi_gambar (tempel GAMBAR: jenis 'foto' = foto FISIK part resmi SIMS, jenis "
+            "'exploded' = GAMBAR TEKNIS/exploded view EPC ber-nomor balon — diminta dua-duanya "
+            "masukkan KEDUA jenis dalam SATU panggilan → SATU file; ⛔ dicocokkan lewat PART "
+            "NUMBER, TIDAK PERNAH lewat nama part: nama di SIMS cocok 'mengandung kata' & memberi "
+            "gambar part LAIN; ⛔ untuk jenis 'exploded' TANYA DULU apakah user punya nomor "
+            "rangka/VIN: ADA → panggil dengan 'rangka' (figure unit itu sendiri), TIDAK ADA → "
+            "lintas_model=true & sampaikan peringatan lintas-model). "
             "BERSIKAP PROAKTIF: bila user hanya melampirkan file tanpa instruksi jelas (atau minta "
             "'tolong lengkapi/rapikan'), panggil sheet_ringkasan DULU lalu RINGKAS singkat isinya "
             "(berapa baris, kolom apa, berapa baris tanpa Part Number, apakah dikelompokkan per "
@@ -1789,7 +1791,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         if name in ("buat_excel", "excel_bom_rangka", "excel_stok_gudang",
                     "katalog_kategori", "katalog_mesin", "banding_rangka_massal",
                     "sheet_isi_kolom", "sheet_isi_part_number", "sheet_cek_qty",
-                    "sheet_isi_foto", "sheet_isi_exploded", "buat_penawaran",
+                    "sheet_isi_gambar", "sheet_isi_foto", "sheet_isi_exploded",
+                    "buat_penawaran",
                     "excel_unit_armada", "sheet_garansi_massal",
                     "excel_riwayat_klaim", "cek_massal_part",
                     "cek_massal_part_mesin", "cek_massal_part_rangka",

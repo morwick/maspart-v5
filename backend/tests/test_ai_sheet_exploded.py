@@ -132,10 +132,10 @@ def test_vin_di_file_ditawarkan_tapi_tak_dipakai_diam_diam(epc_stub):
 
 def test_jalur_per_vin_menyiapkan_kartu_dan_kolom(sheet):
     out = ai_sheet.fill_exploded(sheet, USER, rangka=FRAME)
-    assert out["found"] is True and out["sumber_gambar"] == "per-VIN"
+    assert out["found"] is True and out["sumber_gambar_teknis"] == "per-VIN"
     assert out["rangka"] == FRAME and out["jumlah_part"] == 2
     b = ai_export._stash[out["export_id"]]["builder"]
-    assert b["kind"] == "sheet_exploded" and b["rangka"] == FRAME
+    assert b["kind"] == "sheet_gambar" and b["rangka"] == FRAME
     assert b["kolom"][-2:] == [ai_sheet._KOL_EXPLODED_INFO, ai_sheet._KOL_EXPLODED_GAMBAR]
     assert b["pns"] == [PN_ADA, PN_TAK]
     assert b["kol_info"] == 3 and b["kol_gambar"] == 4
@@ -143,7 +143,7 @@ def test_jalur_per_vin_menyiapkan_kartu_dan_kolom(sheet):
 
 def test_jalur_lintas_model_membawa_peringatan(sheet):
     out = ai_sheet.fill_exploded(sheet, USER, lintas_model=True)
-    assert out["found"] is True and out["sumber_gambar"] == "lintas-model"
+    assert out["found"] is True and out["sumber_gambar_teknis"] == "lintas-model"
     assert ai_export._stash[out["export_id"]]["builder"]["rangka"] == ""
     assert "LINTAS MODEL" in out["catatan"]            # model wajib menyampaikannya
     assert "estimasi_durasi_unduhan" in out
@@ -250,8 +250,10 @@ def test_tool_terdaftar_dan_hanya_muncul_saat_ada_lampiran(sheet):
     assert A._DISPATCH["sheet_isi_exploded"] is A._t_sheet_isi_exploded
     tanpa = {f["function"]["name"] for f in A._tool_specs(USER, "")}
     dengan = {f["function"]["name"] for f in A._tool_specs(USER, sheet)}
-    assert "sheet_isi_exploded" not in tanpa
-    assert "sheet_isi_exploded" in dengan
+    assert "sheet_isi_gambar" not in tanpa
+    assert "sheet_isi_gambar" in dengan
+    # Nama lama: tak ditawarkan lagi, tapi tetap SAH dieksekusi (alias legacy).
+    assert "sheet_isi_exploded" not in dengan
     assert "sheet_isi_exploded" in A._allowed_tool_names(USER, sheet)
 
 
@@ -259,4 +261,4 @@ def test_kartu_unduh_ditangkap_chat_loop():
     """Tanpa nama ini di daftar _capture_meta, file jadi tapi kartunya tak muncul."""
     import inspect
     src = inspect.getsource(A.chat)
-    assert '"sheet_isi_exploded"' in src
+    assert '"sheet_isi_gambar"' in src
