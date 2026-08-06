@@ -144,8 +144,28 @@ def _kamus() -> dict:
 
 
 def hp_dari_model(model: str) -> int | None:
+    """⚠️ PERKIRAAN, dan TERBUKTI BISA MELESET: ZZ3317V486JB1R terbaca 480 HP
+    padahal mesin unitnya WP12.400E201 = 400 HP (temuan pemilik 2026-08-06).
+    Dua digit itu ternyata tak selalu tenaga. Pakai HANYA untuk pencocokan label
+    pasaran ('NX400'); untuk MENYEBUT tenaga ke user, pakai `hp_dari_mesin` atas
+    kode mesin EPC unit ybs."""
     m = _HP_RE.match(str(model or "").upper().replace(" ", ""))
     return int(m.group(1)) * 10 if m else None
+
+
+# Kode mesin Weichai/Sinotruk: WP12.400E201 → 400 HP; MC11.42 → 420; MT13.54 →
+# 540. Tiga digit = tenaga apa adanya, dua digit = ×10.
+_HP_MESIN_RE = re.compile(r"\b(?:WP|MC|MT|WD|YC|ISM|SC)\d{1,2}[A-Z]?\.(\d{2,3})")
+
+
+def hp_dari_mesin(kode: str) -> int | None:
+    """Tenaga (HP) dari KODE MESIN EPC — sumber yang SAH untuk menyebut tenaga
+    sebuah unit. None bila kodenya tak dikenali (⛔ jangan diganti tebakan)."""
+    m = _HP_MESIN_RE.search(str(kode or "").upper())
+    if not m:
+        return None
+    n = int(m.group(1))
+    return n if n >= 100 else n * 10
 
 
 def _peta_populasi() -> dict[str, dict]:

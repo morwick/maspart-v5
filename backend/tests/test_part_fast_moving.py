@@ -128,9 +128,10 @@ VIN_C = "LZZ5EXSF9RJ373319"      # ZZ4256V324HF1B → model lain
 VIN_X = "LZZ0000000000000"       # tak dikenal EPC & populasi
 
 _CFG = {
-    VIN_A: {"model": "ZZ3257V404JF1", "jenis": "Cargo"},
-    VIN_B: {"model": "ZZ3257V404JF1", "jenis": "Cargo"},
-    VIN_C: {"model": "ZZ4256V324HF1B", "jenis": "Tractor (kepala)"},
+    VIN_A: {"model": "ZZ3257V404JF1", "jenis": "Cargo", "mesin": "WP12.400E201"},
+    VIN_B: {"model": "ZZ3257V404JF1", "jenis": "Cargo", "mesin": "WP12.400E201"},
+    VIN_C: {"model": "ZZ4256V324HF1B", "jenis": "Tractor (kepala)",
+            "mesin": "MC11.42-50"},
     VIN_X: {},
 }
 
@@ -247,6 +248,43 @@ def test_epc_jadi_jaring_bila_unit_tak_ada_di_populasi(patched, monkeypatch):
 def test_kategori_tetap_menyaring_di_jalur_rangka(per_vin):
     r = ai._t_part_fast_moving({"rangka": [VIN_A], "kategori": "rem"}, ADMIN)
     assert [s["kategori"] for s in r["slot"]] == ["rem"]
+
+
+def test_hp_dari_kode_mesin_bukan_tebakan_kode_model(per_vin):
+    """Pemilik memergoki 'HOWO-NX 8X4, 480 HP' untuk SJ346500 padahal mesinnya
+    WP12.400E201 = 400 HP — digit kode model BUKAN tenaga."""
+    r = ai._t_part_fast_moving({"rangka": [VIN_A, VIN_B]}, ADMIN)
+    assert r["hp"] == 400 and "kode mesin" in r["hp_sumber"]
+    assert r["unit"][0]["mesin"] == "WP12.400E201"
+    assert r["unit"][0]["hp"] == 400
+    # tebakan kode model tetap dibawa, TAPI berlabel & dilarang disebut
+    assert r["hp_perkiraan_kode_model"] == 400          # kebetulan sama di fixture
+    assert "JANGAN sebut" in r["hp_perkiraan_catatan"]
+
+
+def test_hp_beda_antar_unit_disebut_per_unit(per_vin, monkeypatch):
+    monkeypatch.setattr(ai, "_configs_rangka", lambda rgs: {
+        VIN_A: {"model": "ZZ3257V404JF1", "mesin": "WP12.400E201"},
+        VIN_B: {"model": "ZZ3257V404JF1", "mesin": "WP13.480E501"}})
+    r = ai._t_part_fast_moving({"rangka": [VIN_A, VIN_B]}, ADMIN)
+    assert "hp" not in r                                # ⛔ jangan pilih salah satu
+    assert r["hp_per_unit"] == {VIN_A: 400, VIN_B: 480}
+    assert "BEDA antar unit" in r["hp_sumber"]
+
+
+def test_hp_model_tanpa_rangka_ditandai_perkiraan(patched):
+    r = ai._t_part_fast_moving({"model": "ZZ3257V404JF1"}, ADMIN)
+    assert r["hp"] == 400 and "perkiraan" in r["hp_sumber"]
+    assert "PERKIRAAN" in r["catatan"] and "kode mesin" in r["catatan"]
+
+
+def test_hp_dari_mesin_parser():
+    assert fast_moving.hp_dari_mesin("WP12.400E201发动机") == 400
+    assert fast_moving.hp_dari_mesin("WP13.530E501") == 530
+    assert fast_moving.hp_dari_mesin("MC11.42-50") == 420
+    assert fast_moving.hp_dari_mesin("MT13.54") == 540
+    assert fast_moving.hp_dari_mesin("HW19709XST变速箱") is None    # gearbox ≠ mesin
+    assert fast_moving.hp_dari_mesin("") is None
 
 
 def test_tanpa_model_dan_tanpa_rangka_minta_keduanya(patched):

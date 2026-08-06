@@ -3958,7 +3958,8 @@ def _fm_gabung_istilah(slot_src: list[dict]) -> list[dict]:
 
 
 def _fm_model_dari_rangka(rgs: list[str], semua: dict) -> dict:
-    """{rangka: {model, sumber}} — VIN → kode MODEL kunci dataset fast moving.
+    """{rangka: {model, sumber, mesin?, hp?}} — VIN → kode MODEL kunci dataset
+    fast moving, PLUS tenaga sebenarnya dari kode mesin EPC.
 
     ⚠️ DATA POPULASI DIDAHULUKAN, dan itu bukan kelalaian "EPC-first": dataset
     fast moving BER-KUNCI kode model populasi (mis. ZZ1315N4666E1), sedangkan
@@ -3979,20 +3980,25 @@ def _fm_model_dari_rangka(rgs: list[str], semua: dict) -> dict:
         out[r] = ({"model": model, "sumber": "data populasi MASPART"} if model
                   else {"model": "", "sumber": ""})
 
-    # Jaring EPC hanya untuk unit yang populasinya diam ATAU modelnya tak ada di
-    # dataset — hemat panggilan & tak pernah menimpa kecocokan yang sudah sah.
-    perlu = [r for r in rgs if not (out[r]["model"] in semua)]
-    if not perlu:
-        return out
+    # Config EPC diambil untuk SEMUA rangka (ber-cache di epc.get_config): selain
+    # jaring model untuk unit di luar populasi, di sinilah KODE MESIN — satu-
+    # satunya sumber sah tenaga (HP) unit — didapat.
     try:
-        cfgs = _configs_rangka(perlu)
+        cfgs = _configs_rangka(rgs)
     except Exception:                                   # EPC ngadat ≠ unit tak ada
         cfgs = {}
-    for r in perlu:
-        kode = " ".join(str((cfgs.get(r) or {}).get("model") or "").split()).upper()
+    for r in rgs:
+        cfg = cfgs.get(r) or {}
+        kode = " ".join(str(cfg.get("model") or "").split()).upper()
         dasar = kode.split("/")[0].strip()
-        if dasar in semua or (dasar and not out[r]["model"]):
+        if not (out[r]["model"] in semua) and (dasar in semua or (dasar and not out[r]["model"])):
             out[r] = {"model": dasar, "sumber": "EPC (getVehicleConfig)"}
+        mesin = " ".join(str(cfg.get("mesin") or "").split())
+        if mesin:
+            out[r]["mesin"] = mesin
+            hp = fast_moving.hp_dari_mesin(mesin)
+            if hp:
+                out[r]["hp"] = hp
     return out
 
 
@@ -4147,6 +4153,30 @@ _FM_SAJI_NOTE = (
     "(0/kosong = perlu indent) — justru itu yang dicari user.")
 
 
+def _fm_pakai_hp_mesin(out: dict, unit_rows: list[dict]) -> None:
+    """Ganti HP tebakan kode model dengan HP dari KODE MESIN EPC unit-unit ini.
+
+    Pemilik memergoki 'HOWO-NX 8X4, 480 HP' untuk SJ346500 (2026-08-06) padahal
+    mesinnya WP12.400E201 = 400 HP: angka 48 di ZZ3317V486JB1R ternyata bukan
+    tenaga. Sejak itu tenaga HANYA boleh dari kode mesin; tebakan kode model
+    tetap dibawa (untuk transparansi) tapi diberi label perkiraan."""
+    hps = {u["hp"] for u in unit_rows if u.get("hp")}
+    tebakan = out.pop("hp", None)
+    if len(hps) == 1:
+        out["hp"] = next(iter(hps))
+        out["hp_sumber"] = "kode mesin EPC unit ini (sah)"
+    elif hps:
+        out["hp_per_unit"] = {u["rangka"]: u["hp"] for u in unit_rows if u.get("hp")}
+        out["hp_sumber"] = "kode mesin EPC — BEDA antar unit, sebut per unit"
+    if tebakan:
+        out["hp_perkiraan_kode_model"] = tebakan
+        out["hp_perkiraan_catatan"] = (
+            "⛔ JANGAN sebut angka ini sebagai tenaga unit — ia cuma dibaca dari "
+            "digit kode model dan TERBUKTI bisa meleset (ZZ3317V486JB1R terbaca "
+            "480 padahal mesinnya WP12.400 = 400 HP). Pakai 'hp' (kode mesin EPC); "
+            "bila 'hp' tak ada, JANGAN menyebut tenaga sama sekali.")
+
+
 def _fm_potong_note(sisa: int) -> str:
     """Kalimat jujur soal slot yang tak muat di chat + jalan keluarnya."""
     return (f" ⚠️ {sisa} slot lain TIDAK ditampilkan (plafon {_FM_MAX_SLOT} baris "
@@ -4201,9 +4231,14 @@ def _t_fm_rangka(rgs: list[str], semua: dict, args: dict, user: dict) -> dict:
             row["catatan"] = ("model dikenal, tapi BELUM ada di dataset fast moving "
                               "(belum ada unit sampel EPC untuk model ini)")
         else:
-            row.update(jenis=m.get("jenis"), hp=m.get("hp"),
-                       unit_sampel_epc=m.get("n_sampel"))
+            row.update(jenis=m.get("jenis"), unit_sampel_epc=m.get("n_sampel"))
             model_unit.setdefault(kode, []).append(r)
+        # Tenaga & kode mesin unit INI (dari EPC) — ⛔ bukan tebakan kode model.
+        if info.get("mesin"):
+            row["mesin"] = info["mesin"]
+        if info.get("hp"):
+            row["hp"] = info["hp"]
+            row["hp_sumber"] = "kode mesin EPC"
         unit_rows.append(row)
 
     if not model_unit:
@@ -4220,6 +4255,7 @@ def _t_fm_rangka(rgs: list[str], semua: dict, args: dict, user: dict) -> dict:
         out = _fm_payload_model(kode, semua[kode], kategori, user)
         out.update(rangka_diminta=rgs, unit=unit_rows,
                    jumlah_rangka=len(rgs), unit_se_model=True)
+        _fm_pakai_hp_mesin(out, unit_rows)
         if args.get("excel"):
             baris_x = _fm_baris_gabungan({kode: model_unit[kode]}, semua, kategori)
             pns_x = [v["pn"] for r in baris_x for v in r["varian"]]
@@ -4259,8 +4295,9 @@ def _t_fm_rangka(rgs: list[str], semua: dict, args: dict, user: dict) -> dict:
     out: dict = {
         "found": True, "gabungan_beberapa_model": True,
         "jumlah_rangka": len(rgs), "unit": unit_rows,
+        # ⛔ HP model TIDAK disertakan di sini: itu tebakan digit kode model yang
+        # terbukti meleset. Tenaga per unit ada di 'unit' (dari kode mesin EPC).
         "model_terlibat": [{"model": k, "jenis": (semua[k] or {}).get("jenis"),
-                            "hp": (semua[k] or {}).get("hp"),
                             "unit_sampel_epc": (semua[k] or {}).get("n_sampel"),
                             "rangka": v}
                            for k, v in sorted(model_unit.items())],
@@ -4365,6 +4402,14 @@ def _t_part_fast_moving(args: dict, user: dict) -> dict:
                                          part_index.rows_for_pns(pns_x))
         out.update(export_id=eid, filename=fn, judul=judul, jumlah_baris=nb)
     ekor = ""
+    if out.get("hp"):
+        # Tanpa nomor rangka, tenaga hanya bisa DITEBAK dari digit kode model —
+        # dan tebakan itu terbukti meleset (lihat _fm_pakai_hp_mesin).
+        out["hp_sumber"] = "perkiraan dari digit kode model (BUKAN dari kode mesin)"
+        ekor += (" ⚠️ 'hp' di sini PERKIRAAN dari digit kode model & bisa meleset "
+                 "(kasus nyata: kode berdigit 48 padahal mesinnya WP12.400 = 400 HP). "
+                 "Sebut sebagai perkiraan, atau lebih baik minta nomor rangka unitnya "
+                 "supaya tenaganya dibaca dari kode mesin EPC.")
     if out.get("slot_tak_ditampilkan"):
         ekor += _fm_potong_note(out["slot_tak_ditampilkan"])
     if out.get("export_id"):
