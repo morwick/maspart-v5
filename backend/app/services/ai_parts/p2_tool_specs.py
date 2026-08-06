@@ -393,20 +393,40 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "distok untuk armada HOWO 6X4', 'sparepart wajib sedia model X'. "
                     "Terima label pasaran (NX400 = NX + 400 HP), jenis (HOWO NX 8X4), "
                     "atau kode model pabrik (ZZ…). Hasil ambigu → tanyakan pilihan ke "
-                    "user. Level MODEL utk perencanaan stok/penawaran; unit SPESIFIK "
-                    "(ada nomor rangka) tetap part_aus_dari_rangka/cari_part_di_unit."
+                    "user. "
+                    "⭐ BISA PER NOMOR RANGKA, SATU ATAU BANYAK sekaligus: 'part fast "
+                    "moving untuk unit LZZ…, LZZ…' → isi 'rangka' dengan SEMUA VIN yang "
+                    "user sebut (jangan dipecah jadi beberapa panggilan). Model tiap "
+                    "unit dicari sendiri dari EPC; unit se-model digabung jadi SATU "
+                    "daftar, unit beda model jadi daftar gabungan yang menandai slot "
+                    "mana dipakai SEMUA model (prioritas stok). "
+                    "⚠️ Hasilnya tetap level MODEL (basis unit sampel, untuk perencanaan "
+                    "stok/penawaran) — untuk PN pasti milik satu unit tertentu tetap "
+                    "part_aus_dari_rangka/cari_part_di_unit."
                 ),
                 "parameters": {
                     "type": "object",
-                    "required": ["model"],
                     "properties": {
                         "model": {
                             "type": "string",
-                            "description": "Model/jenis unit sesuai ucapan user, mis. 'NX400', 'HOWO NX 6X4', 'SITRAK C7H', atau kode model 'ZZ3257V404JF1'.",
+                            "description": "Model/jenis unit sesuai ucapan user, mis. 'NX400', 'HOWO NX 6X4', 'SITRAK C7H', atau kode model 'ZZ3257V404JF1'. Kosongkan bila memakai 'rangka'.",
+                        },
+                        "rangka": {
+                            "type": "array",
+                            "description": ("Nomor rangka/VIN unit — SEMUA yang disebut user "
+                                            "dalam SATU panggilan (maks 20). Dipakai bila user "
+                                            "menyebut unitnya, bukan nama model."),
+                            "items": {"type": "string"},
                         },
                         "kategori": {
                             "type": "string",
                             "description": "Opsional, saring satu kategori: filter | rem | kopling | bearing_seal | belt | karet. Kosong = semua.",
+                        },
+                        "excel": {
+                            "type": "boolean",
+                            "description": ("true bila user minta file/daftar lengkap (khusus "
+                                            "jalur 'rangka' beda model — daftar chat dipotong "
+                                            "60 slot, Excel memuat semuanya)."),
                         },
                     },
                 },

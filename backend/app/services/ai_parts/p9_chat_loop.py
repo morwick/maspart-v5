@@ -1797,7 +1797,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     "excel_unit_armada", "sheet_garansi_massal",
                     "excel_riwayat_klaim", "cek_massal_part",
                     "cek_massal_part_mesin", "cek_massal_part_rangka",
-                    "spek_massal_rangka", "banding_konfigurasi_rangka") and result.get("found"):
+                    "spek_massal_rangka", "banding_konfigurasi_rangka",
+                    "part_fast_moving") and result.get("found"):
             item = {"id": result.get("export_id"), "filename": result.get("filename"),
                     "judul": result.get("judul"), "jumlah_baris": result.get("jumlah_baris")}
             if item["id"] and item not in excel_exports:

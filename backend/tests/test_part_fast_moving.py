@@ -119,3 +119,121 @@ def test_dataset_kosong(monkeypatch):
     monkeypatch.setattr(fast_moving, "data", lambda: {})
     r = ai._t_part_fast_moving({"model": "NX400"}, ADMIN)
     assert "belum terbangun" in r["error"]
+
+
+# ── Jalur NOMOR RANGKA, 1 unit atau lebih (permintaan pemilik 2026-08-06) ────
+VIN_A = "LZZPBXSF5NJ248278"      # ZZ3257V404JF1 (ada di dataset)
+VIN_B = "LZZPBXSF2PJ264974"      # ZZ3257V404JF1 juga → se-model
+VIN_C = "LZZ5EXSF9RJ373319"      # ZZ4256V324HF1B → model lain
+VIN_X = "LZZ0000000000000"       # tak dikenal EPC & populasi
+
+_CFG = {
+    VIN_A: {"model": "ZZ3257V404JF1", "jenis": "Cargo"},
+    VIN_B: {"model": "ZZ3257V404JF1", "jenis": "Cargo"},
+    VIN_C: {"model": "ZZ4256V324HF1B", "jenis": "Tractor (kepala)"},
+    VIN_X: {},
+}
+
+
+@pytest.fixture
+def per_vin(patched, monkeypatch):
+    """EPC getVehicleConfig & populasi ditiru — tak ada jaringan."""
+    monkeypatch.setattr(ai, "_configs_rangka",
+                        lambda rgs: {r: dict(_CFG.get(r, {})) for r in rgs})
+    monkeypatch.setattr(fast_moving, "peta_populasi", lambda: {})
+
+
+def test_dua_unit_se_model_jadi_satu_daftar(per_vin):
+    r = ai._t_part_fast_moving({"rangka": [VIN_A, VIN_B]}, ADMIN)
+    assert r["found"] and r["unit_se_model"] is True
+    assert r["model"] == "ZZ3257V404JF1" and r["jumlah_rangka"] == 2
+    assert [u["rangka"] for u in r["unit"]] == [VIN_A, VIN_B]
+    assert {u["model"] for u in r["unit"]} == {"ZZ3257V404JF1"}
+    # bentuknya SAMA dengan jalur 'model' → penyaji tak perlu logika baru
+    of = [s for s in r["slot"] if s["slot"] == "oil filter"][0]["varian"][0]
+    assert of["dipakai_di_unit"] == "3/3" and of["stok_total"] == 120
+    assert "SEMUA bermodel" in r["catatan"]
+
+
+def test_vin_koma_dalam_satu_string_juga_diterima(per_vin):
+    """Model kerap meneruskan apa adanya: 'VIN1,VIN2'."""
+    r = ai._t_part_fast_moving({"rangka": f"{VIN_A},{VIN_B}"}, ADMIN)
+    assert r["found"] and r["jumlah_rangka"] == 2 and r["unit_se_model"] is True
+
+
+def test_unit_beda_model_digabung_dan_ditandai(per_vin, monkeypatch):
+    data2 = {"model": dict(_DATA["model"])}
+    data2["model"]["ZZ4256V324HF1B"] = {
+        "jenis": "SITRAK C7H 6X4", "hp": 320, "unit_populasi": 30,
+        "unit_sampel": ["SJ000005", "SJ000006"], "n_sampel": 2,
+        "slot": [
+            {"kategori": "filter", "slot": "oil filter", "varian": [
+                {"pn": "VG61000070005", "nama": "Oil filter", "qty": 1,
+                 "n_unit": 2, "tahun": [], "pn_sub": [], "pengganti": []}]},
+            {"kategori": "belt", "slot": "v-belt", "varian": [
+                {"pn": "VG1246060003", "nama": "V-belt", "qty": 1,
+                 "n_unit": 2, "tahun": [], "pn_sub": [], "pengganti": []}]},
+        ]}
+    monkeypatch.setattr(fast_moving, "data", lambda: data2)
+
+    r = ai._t_part_fast_moving({"rangka": [VIN_A, VIN_C]}, ADMIN)
+    assert r["found"] and r["gabungan_beberapa_model"] is True
+    assert {m["model"] for m in r["model_terlibat"]} == {"ZZ3257V404JF1", "ZZ4256V324HF1B"}
+    slot = {s["slot"]: s for s in r["slot"]}
+    # Slot yang dipakai SEMUA model didahulukan & ditandai (prioritas stok)
+    assert r["slot"][0]["slot"] == "oil filter"
+    assert slot["oil filter"]["di_semua_model"] is True
+    assert slot["oil filter"]["varian"][0]["dipakai_di_unit"] == {
+        "ZZ3257V404JF1": "3/3", "ZZ4256V324HF1B": "2/2"}   # porsi PER MODEL
+    # Slot khusus satu model menyebutkan modelnya
+    assert slot["v-belt"]["di_semua_model"] is False
+    assert slot["v-belt"]["model"] == ["ZZ4256V324HF1B"]
+    assert "di_semua_model" in r["catatan"] and "jangan dijumlahkan" in r["catatan"]
+
+
+def test_gabungan_excel_memuat_semua_baris(per_vin, monkeypatch):
+    monkeypatch.setattr(fast_moving, "data", lambda: {"model": {
+        "ZZ3257V404JF1": _DATA["model"]["ZZ3257V404JF1"],
+        "ZZ4256V324HF1B": {**_DATA["model"]["ZZ4256V324HF1B"], "n_sampel": 1,
+                           "slot": [{"kategori": "belt", "slot": "v-belt", "varian": [
+                               {"pn": "VG1246060003", "nama": "V-belt", "qty": 1,
+                                "n_unit": 1, "tahun": [], "pn_sub": [],
+                                "pengganti": []}]}]},
+    }})
+    r = ai._t_part_fast_moving({"rangka": [VIN_A, VIN_C], "excel": True}, ADMIN)
+    assert r["export_id"] and r["filename"].endswith(".xlsx")
+    # 5 varian model A (1 filter + 2 sepatu rem + 2 karet) + 1 belt model C
+    assert r["jumlah_baris"] == 6
+
+
+def test_unit_tak_dikenal_dilaporkan_apa_adanya(per_vin):
+    r = ai._t_part_fast_moving({"rangka": [VIN_A, VIN_X]}, ADMIN)
+    assert r["found"] is True and r["jumlah_rangka"] == 2
+    x = [u for u in r["unit"] if u["rangka"] == VIN_X][0]
+    assert x["model"] is None and "tak dikenal" in x["catatan"]
+
+
+def test_semua_unit_gagal_tak_mengarang(per_vin):
+    r = ai._t_part_fast_moving({"rangka": [VIN_X]}, ADMIN)
+    assert r["found"] is False and "JANGAN mengarang" in r["catatan"]
+    assert "part_aus_dari_rangka" in r["catatan"]      # tawarkan jalur per-VIN
+
+
+def test_populasi_jadi_jaring_saat_epc_bisu(patched, monkeypatch):
+    monkeypatch.setattr(ai, "_configs_rangka", lambda rgs: {})
+    monkeypatch.setattr(fast_moving, "peta_populasi",
+                        lambda: {VIN_A[-8:]: {"model": "ZZ3257V404JF1",
+                                              "jenis": "HOWO-NX 6X4", "tahun": "2022"}})
+    r = ai._t_part_fast_moving({"rangka": [VIN_A]}, ADMIN)
+    assert r["found"] and r["model"] == "ZZ3257V404JF1"
+    assert "populasi" in r["unit"][0]["sumber_model"]
+
+
+def test_kategori_tetap_menyaring_di_jalur_rangka(per_vin):
+    r = ai._t_part_fast_moving({"rangka": [VIN_A], "kategori": "rem"}, ADMIN)
+    assert [s["kategori"] for s in r["slot"]] == ["rem"]
+
+
+def test_tanpa_model_dan_tanpa_rangka_minta_keduanya(patched):
+    r = ai._t_part_fast_moving({}, ADMIN)
+    assert "nomor rangka" in r["error"] and "NX400" in r["error"]

@@ -120,6 +120,15 @@ def _peta_populasi() -> dict[str, dict]:
         return {}
 
 
+def peta_populasi() -> dict[str, dict]:
+    """NOMOR RANGKA (8 char akhir) → {model, jenis, tahun} dari populasi.
+
+    Dipakai TOOL asisten (fast moving per nomor rangka) sebagai JARING kedua
+    setelah EPC getVehicleConfig: EPC otoritatif untuk unitnya sendiri, populasi
+    menolong unit yang EPC-nya sedang tak menjawab / tak mengenalnya."""
+    return _peta_populasi()
+
+
 def _klasifikasi(nama_en: str, nama_cn: str, kamus: dict) -> str | None:
     """Kategori fast-moving untuk satu baris EPC, None bila bukan."""
     hay_en = f" {nama_en.lower()} "
