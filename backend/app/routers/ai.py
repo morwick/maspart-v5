@@ -148,7 +148,21 @@ def ai_chat_stream(body: AIChatRequest, user: dict = Depends(require_ai)):
     history = [{"role": m.role, "content": m.content} for m in body.messages]
     if not any(m["role"] == "user" and m["content"].strip() for m in history):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pesan kosong.")
+    return _sse_chat(user, history, sheet_id=(body.sheet_id or "").strip(),
+                     conversation_id=(body.conversation_id or "").strip(),
+                     stream_tokens=bool(body.stream_tokens))
 
+
+def _sse_chat(user: dict, history: list[dict], sheet_id: str = "",
+              conversation_id: str = "", stream_tokens: bool = False,
+              extra: dict | None = None) -> StreamingResponse:
+    """Jalankan satu giliran chat di thread & alirkan frame SSE.
+
+    SATU sumber untuk /chat-stream DAN /chat-sheet?stream=1 — giliran ber-LAMPIRAN
+    dulu tak punya jalur ini sama sekali, sehingga user yang mengunggah Excel
+    menatap layar tanpa indikator apa pun sampai jawaban jadi (keluhan pemilik
+    2026-08-06). `extra` = field yang ditempelkan ke hasil di frame `done`
+    (mis. sheet_id & ringkasan lampiran)."""
     q: "queue.Queue" = queue.Queue()
     _SENTINEL = object()
     box: dict = {}
@@ -158,12 +172,12 @@ def ai_chat_stream(body: AIChatRequest, user: dict = Depends(require_ai)):
             # Kwarg on_delta KONDISIONAL: tanpa opt-in, chat() dipanggil dengan
             # tanda tangan yang persis sama seperti sebelum fitur ini.
             kw: dict = {}
-            if body.stream_tokens:
+            if stream_tokens:
                 kw["on_delta"] = lambda potongan: q.put(("delta", potongan))
             box["result"] = ai_assistant.chat(
-                user, history, sheet_id=(body.sheet_id or "").strip(),
+                user, history, sheet_id=sheet_id,
                 on_progress=lambda label: q.put(("progress", label)),
-                conversation_id=(body.conversation_id or "").strip(), **kw)
+                conversation_id=conversation_id, **kw)
         except ai_assistant.AINotConfigured:
             box["error"] = "Asisten AI belum dikonfigurasi (DEEPSEEK_API_KEY kosong)."
         except Exception as e:  # pragma: no cover - dijaga generator
@@ -190,7 +204,9 @@ def ai_chat_stream(body: AIChatRequest, user: dict = Depends(require_ai)):
         if "error" in box:
             yield _frame({"type": "error", "message": box["error"]})
         else:
-            yield _frame({"type": "done", "result": box.get("result")})
+            hasil = dict(box.get("result") or {})
+            hasil.update(extra or {})
+            yield _frame({"type": "done", "result": hasil})
 
     return StreamingResponse(
         _gen(), media_type="text/event-stream",
@@ -294,11 +310,21 @@ async def ai_chat_sheet(
     file: UploadFile | None = File(None, description="File Excel (.xlsx/.xlsm) atau CSV (.csv) yang diunggah user."),
     gsheet_url: str = Form("", description="Alternatif file: link berbagi Google Sheets."),
     conversation_id: str = Form("", description="Id percakapan (memori sesi server)."),
+    stream: bool = Form(False, description="true → jawaban dialirkan SSE (progress/delta/done)."),
+    stream_tokens: bool = Form(False, description="Khusus stream=true: ikut alirkan DRAF jawaban."),
     user: dict = Depends(require_ai),
 ):
     """Chat dengan LAMPIRAN EXCEL. File dibaca di server (kolom dikenali otomatis),
     disimpan sementara (TTL 2 jam, discoped per-user), lalu asisten menjawab dengan
     tool `sheet_ringkasan`/`sheet_isi_kolom`.
+
+    `stream=true` → respons SSE dengan frame yang SAMA seperti /chat-stream
+    (progress/delta/reset/done), dan frame `done` membawa `sheet_id` + ringkasan
+    lampiran seperti respons JSON biasa. Tanpa `stream` perilakunya persis seperti
+    dulu (satu JSON di akhir) — klien lama & APK lama tak terpengaruh.
+    ⚠️ Giliran ber-lampiran bisa berjalan menit-menit (isi kolom + foto + gambar
+    teknis); tanpa jalur stream, user hanya melihat layar diam tanpa indikator —
+    itu keluhan pemilik 2026-08-06 yang melahirkan opsi ini.
 
     Isi file TIDAK pernah masuk ke system prompt — hanya lewat hasil tool, agar
     kalimat di dalam sel tak bisa menyetir asisten (prompt injection)."""
@@ -339,6 +365,15 @@ async def ai_chat_sheet(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, parsed.get("error") or "File tidak terbaca.")
 
     sheet_id = ai_sheet.put_sheet(user.get("username", ""), parsed)
+    # Ringkasan lampiran & sheet_id SELALU ikut hasil — di jalur SSE ia ditempel
+    # ke frame `done` (lihat _sse_chat `extra`), di jalur JSON di bawah.
+    extra = {"sheet_id": sheet_id, "sheet": ai_sheet.ringkas(parsed)}
+    if stream:
+        # Berkas sudah terbaca & tersimpan → galat file tetap jadi HTTP 4xx biasa
+        # (di atas), bukan error di tengah aliran yang sulit ditangani klien.
+        return _sse_chat(user, history, sheet_id=sheet_id,
+                         conversation_id=(conversation_id or "").strip(),
+                         stream_tokens=bool(stream_tokens), extra=extra)
     try:
         result = ai_assistant.chat(user, history, sheet_id=sheet_id,
                                    conversation_id=(conversation_id or "").strip())
@@ -351,6 +386,5 @@ async def ai_chat_sheet(
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Asisten AI gagal merespons: {e}")
 
     # Frontend menyimpan sheet_id & menampilkan ringkasan lampiran.
-    result["sheet_id"] = sheet_id
-    result["sheet"] = ai_sheet.ringkas(parsed)
+    result.update(extra)
     return result

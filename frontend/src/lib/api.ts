@@ -2414,6 +2414,19 @@ export async function aiChatStream(
     }),
     signal,
   });
+  return bacaAliranChat(res, onProgress, onDelta);
+}
+
+/**
+ * Baca aliran SSE asisten (frame `progress`/`delta`/`reset`/`done`/`error`) →
+ * hasil AKHIR. Dipakai `aiChatStream` DAN `aiChatSheetStream` supaya protokolnya
+ * tak pernah bercabang antar-endpoint.
+ */
+async function bacaAliranChat(
+  res: Response,
+  onProgress: (label: string) => void,
+  onDelta?: (text: string | null) => void,
+): Promise<AIChatResult> {
   if (!res.ok || !res.body) throw new ApiError(res.status, await parseError(res));
 
   const reader = res.body.getReader();
@@ -2578,6 +2591,38 @@ export async function aiChatSheet(
   });
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
+}
+
+/**
+ * Versi STREAMING dari [aiChatSheet]: giliran ber-LAMPIRAN pun mengalirkan status
+ * langkah ("Membaca lampiran…", "Mengisi Excel lampiran…", "Menyusun jawaban…").
+ * Tanpa ini user yang mengunggah Excel menatap layar diam berpuluh detik sampai
+ * menit — keluhan pemilik 2026-08-06. Frame & `onDelta` identik dengan
+ * `aiChatStream`; pemanggil sebaiknya fallback ke `aiChatSheet` bila ini gagal
+ * (mis. proxy mem-buffer SSE).
+ */
+export async function aiChatSheetStream(
+  token: string,
+  messages: AIChatTurn[],
+  file: File,
+  onProgress: (label: string) => void,
+  conversationId?: string,
+  signal?: AbortSignal,
+  onDelta?: (text: string | null) => void,
+): Promise<AIChatResult> {
+  const form = new FormData();
+  form.append("messages", JSON.stringify(messages));
+  form.append("file", file);
+  form.append("conversation_id", conversationId || "");
+  form.append("stream", "true");
+  if (onDelta) form.append("stream_tokens", "true");
+  const res = await fetch(`${API_BASE}/api/ai/chat-sheet`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+    signal,
+  });
+  return bacaAliranChat(res, onProgress, onDelta);
 }
 
 // ── Pembeli: lokasi gudang ──────────────────────────────────────────

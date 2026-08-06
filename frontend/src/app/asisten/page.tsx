@@ -9,6 +9,7 @@ import {
   ApiError,
   aiChat,
   aiChatSheet,
+  aiChatSheetStream,
   aiChatStream,
   downloadBlob,
   exportAiExcel,
@@ -521,16 +522,21 @@ export default function AsistenPage() {
     setPendingSheet(null);
     resetTextarea();
     setBusy(true);
-    try {
-      const payload: AIChatTurn[] = next.map((m) => ({ role: m.role, content: m.content }));
-      const res = await aiChatSheet(token, payload, file, getConversationId());
+    stickBottom.current = true;
+    // Placeholder BER-STATUS, sama seperti giliran biasa. Tanpa ini giliran
+    // ber-lampiran tak menampilkan apa pun — tak ada dots, tak ada "Menyusun
+    // jawaban…" — padahal ia justru yang paling lama (baca file + isi kolom +
+    // foto + gambar teknis). Keluhan pemilik 2026-08-06.
+    setMsgs((m) => [...m, { role: "assistant", content: "", streamStatus: [], at: Date.now() }]);
+
+    const applyResult = (res: AIChatResult) => {
       if (res.sheet_id) {
         setSheetId(res.sheet_id);
         setSheetName(file.name);
       }
-      setMsgs((m) => [
-        ...m,
-        {
+      setMsgs((m) => {
+        const copy = [...m];
+        copy[copy.length - 1] = {
           role: "assistant",
           content: res.reply || "(tidak ada jawaban)",
           tools: res.tools_used,
@@ -538,11 +544,70 @@ export default function AsistenPage() {
           bandingExports: res.banding_exports,
           excelExports: res.excel_exports,
           explodedImages: res.exploded_images,
+          pertanyaan: res.pertanyaan,
           sheet: res.sheet,
           at: Date.now(),
-        },
-      ]);
+        };
+        return copy;
+      });
+    };
+    const onStatus = (label: string) =>
+      setMsgs((m) => {
+        const copy = [...m];
+        const last = copy[copy.length - 1];
+        if (last?.role === "assistant" && last.streamStatus) {
+          const prev = last.streamStatus[last.streamStatus.length - 1];
+          if (prev !== label) {
+            copy[copy.length - 1] = { ...last, streamStatus: [...last.streamStatus, label] };
+          }
+        }
+        return copy;
+      });
+    const onDelta = (chunk: string | null) =>
+      setMsgs((m) => {
+        const last = m[m.length - 1];
+        if (!last || last.role !== "assistant" || !last.streamStatus) return m;
+        const copy = [...m];
+        if (chunk === null) {
+          const steps = last.streamStatus;
+          copy[copy.length - 1] = {
+            ...last,
+            content: "",
+            draft: false,
+            streamStatus:
+              steps[steps.length - 1] === LABEL_RAPI ? steps : [...steps, LABEL_RAPI],
+          };
+          return copy;
+        }
+        copy[copy.length - 1] = { ...last, content: last.content + chunk, draft: true };
+        return copy;
+      });
+
+    const ac = new AbortController();
+    abortRef.current = ac;
+    try {
+      const payload: AIChatTurn[] = next.map((m) => ({ role: m.role, content: m.content }));
+      const convId = getConversationId();
+      let res: AIChatResult;
+      try {
+        res = await aiChatSheetStream(token, payload, file, onStatus, convId, ac.signal, onDelta);
+      } catch (streamErr) {
+        if (isAbort(streamErr)) throw streamErr;
+        if (streamErr instanceof ApiError && streamErr.status === 401) throw streamErr;
+        // Unggahan gagal karena FILE-nya (400/413) bukan karena streaming —
+        // mengulang lewat jalur lama hanya membuat user menunggu dua kali.
+        if (streamErr instanceof ApiError && streamErr.status < 500) throw streamErr;
+        onDelta(null);   // draf separuh jalan tak boleh menggantung saat fallback
+        res = await aiChatSheet(token, payload, file, convId);
+      }
+      applyResult(res);
     } catch (err) {
+      if (isAbort(err)) {
+        setMsgs((m) => m.slice(0, -1));   // buang placeholder; pesan user tetap
+        setPendingSheet(file);
+        setInput(caption);
+        return;
+      }
       if (err instanceof ApiError && err.status === 401) {
         clearSession();
         return router.replace("/login");
@@ -551,8 +616,9 @@ export default function AsistenPage() {
       // Kembalikan lampiran & teks agar user bisa langsung coba kirim lagi.
       setPendingSheet(file);
       setInput(caption);
-      setMsgs((m) => m.slice(0, -1));
+      setMsgs((m) => m.slice(0, -2));     // placeholder + pesan user
     } finally {
+      abortRef.current = null;
       setBusy(false);
       if (sheetRef.current) sheetRef.current.value = "";
       taRef.current?.focus();
