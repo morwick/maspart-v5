@@ -3962,7 +3962,10 @@ def _fm_payload_model(kode: str, m: dict, kategori: str, user: dict) -> dict:
     n = m.get("n_sampel") or 0
     slot_all = [s for s in m.get("slot") or []
                 if not kategori or s.get("kategori") == kategori]
-    slot_all.sort(key=lambda s: (_fm_kat_rank(s.get("kategori") or ""), s.get("slot") or ""))
+    # Slot ber-ISTILAH LAPANGAN naik duluan: itu barang servis yang dicari orang
+    # bengkel (filter oli/solar/udara/water separator). Sisanya menyusul.
+    slot_all.sort(key=lambda s: (_fm_kat_rank(s.get("kategori") or ""),
+                                 0 if s.get("nama_id") else 1, s.get("slot") or ""))
     slot_src = slot_all[:_FM_MAX_SLOT]
     pns = [v["pn"] for s in slot_src for v in s.get("varian") or []]
     local = part_index.rows_for_pns(pns)
@@ -3990,6 +3993,8 @@ def _fm_payload_model(kode: str, m: dict, kategori: str, user: dict) -> dict:
             varian.append(item)
         row = {"kategori": s.get("kategori"), "slot": s.get("slot"),
                "varian": varian}
+        if s.get("nama_id"):
+            row["nama_lapangan"] = s["nama_id"]
         if s.get("ko_eksis"):
             row["ko_eksis"] = True
         slots.append(row)
@@ -4015,11 +4020,14 @@ def _fm_baris_gabungan(model_unit: dict, semua: dict, kategori: str) -> list[dic
             if kategori and s.get("kategori") != kategori:
                 continue
             k = (s.get("kategori") or "", s.get("slot") or "")
-            e = agg.setdefault(k, {"model": [], "ko_eksis": False, "varian": {}})
+            e = agg.setdefault(k, {"model": [], "ko_eksis": False, "varian": {},
+                                   "nama_id": ""})
             if kode not in e["model"]:
                 e["model"].append(kode)
             if s.get("ko_eksis"):
                 e["ko_eksis"] = True
+            if s.get("nama_id") and not e["nama_id"]:
+                e["nama_id"] = s["nama_id"]
             for v in s.get("varian") or []:
                 vv = e["varian"].setdefault(v["pn"], {
                     "pn": v["pn"], "nama": v["nama"],
@@ -4034,14 +4042,31 @@ def _fm_baris_gabungan(model_unit: dict, semua: dict, kategori: str) -> list[dic
         row = {"kategori": kat, "slot": slot, "di_semua_model": semua_model,
                "varian": sorted(e["varian"].values(),
                                 key=lambda v: (-len(v["dipakai_di_unit"]), v["pn"]))}
+        if e.get("nama_id"):
+            row["nama_lapangan"] = e["nama_id"]
         if not semua_model:
             row["model"] = sorted(e["model"])
         if e["ko_eksis"]:
             row["ko_eksis"] = True
         baris.append(row)
     baris.sort(key=lambda r: (not r["di_semua_model"], _fm_kat_rank(r["kategori"]),
-                              r["slot"]))
+                              0 if r.get("nama_lapangan") else 1, r["slot"]))
     return baris
+
+
+# Aturan penyajian yang berlaku di SEMUA jalur tool ini. Lahir dari keluhan
+# pemilik 2026-08-06: filter oli / solar atas / solar bawah / water separator
+# ADA di data (dan muncul di Excel), tapi di chat tenggelam — sebagian jadi
+# catatan kaki "tanpa data stok", sebagian bernama EPC harfiah yang tak dikenali
+# orang bengkel ("Oil filter element component", "Filter cartridge").
+_FM_SAJI_NOTE = (
+    " CARA MENYAJIKAN: pakai 'nama_lapangan' sebagai JUDUL tiap baris (nama EPC "
+    "boleh jadi keterangan dalam kurung) — slot ber-'nama_lapangan' sudah "
+    "diurutkan paling atas per kategori karena itu barang servis rutin. "
+    "⛔ JANGAN memindahkan part ke catatan kaki hanya karena stoknya kosong/'—': "
+    "filter servis (oli, solar halus & kasar, water separator, udara) WAJIB tetap "
+    "muncul sebagai BARIS lengkap dengan PN-nya, stok ditulis apa adanya "
+    "(0/kosong = perlu indent) — justru itu yang dicari user.")
 
 
 def _fm_potong_note(sisa: int) -> str:
@@ -4055,8 +4080,8 @@ def _fm_potong_note(sisa: int) -> str:
 def _fm_excel_gabungan(judul: str, baris: list[dict], boleh_harga: bool,
                        local: dict) -> tuple[str, str, int]:
     """Excel LENGKAP (tanpa plafon baris chat) untuk daftar gabungan."""
-    kolom = ["No", "Kategori", "Slot / Fungsi", "Part Number", "Nama Part",
-             "Qty per Unit", "Dipakai di Model", "Stok"]
+    kolom = ["No", "Kategori", "Nama Lapangan", "Slot / Fungsi", "Part Number",
+             "Nama Part", "Qty per Unit", "Dipakai di Model", "Stok"]
     if boleh_harga:
         kolom.append("Harga")
     rows: list[list] = []
@@ -4064,8 +4089,9 @@ def _fm_excel_gabungan(judul: str, baris: list[dict], boleh_harga: bool,
         for v in r["varian"]:
             lr = local.get(v["pn"], {})
             porsi = "; ".join(f"{k}: {p}" for k, p in sorted(v["dipakai_di_unit"].items()))
-            baris_x = [str(len(rows) + 1), r["kategori"], r["slot"], v["pn"],
-                       v["nama"], ai_export.ke_angka(v.get("qty_per_unit") or ""),
+            baris_x = [str(len(rows) + 1), r["kategori"], r.get("nama_lapangan") or "—",
+                       r["slot"], v["pn"], v["nama"],
+                       ai_export.ke_angka(v.get("qty_per_unit") or ""),
                        porsi, lr.get("stok") if lr else "—"]
             if boleh_harga:
                 baris_x.append(lr.get("harga") if lr else "—")
@@ -4136,7 +4162,7 @@ def _t_fm_rangka(rgs: list[str], semua: dict, args: dict, user: dict) -> dict:
             "tampilkan semua + 'tahun_unit' bila ada. ⚠️ Ini level MODEL (dasar "
             "perencanaan stok), BUKAN bacaan EPC unit-unit ini satu per satu: untuk "
             "PN pasti milik satu unit pakai part_aus_dari_rangka. ⛔ JANGAN mengarang "
-            "PN di luar daftar.")
+            "PN di luar daftar." + _FM_SAJI_NOTE)
         if out.get("slot_tak_ditampilkan"):
             out["catatan"] += _fm_potong_note(out["slot_tak_ditampilkan"])
         if out.get("export_id"):
@@ -4191,7 +4217,8 @@ def _t_fm_rangka(rgs: list[str], semua: dict, args: dict, user: dict) -> dict:
         "PER MODEL (mis. {'ZZ…': '3/3'}) — jangan dijumlahkan antar model. "
         "'ko_eksis' = PN-PN itu terpasang BERSAMAAN (kiri+kanan), bukan pilihan. "
         "⚠️ Level MODEL (dasar perencanaan stok), BUKAN bacaan EPC tiap unit: untuk "
-        "PN pasti milik satu unit pakai part_aus_dari_rangka. ⛔ JANGAN mengarang PN.")
+        "PN pasti milik satu unit pakai part_aus_dari_rangka. ⛔ JANGAN mengarang PN."
+        + _FM_SAJI_NOTE)
     if dipotong_slot:
         catatan += _fm_potong_note(dipotong_slot)
     if out.get("export_id"):
@@ -4278,7 +4305,7 @@ def _t_part_fast_moving(args: dict, user: dict) -> dict:
             "tampilkan semua + 'tahun_unit' bila ada, jangan pilih diam-diam. "
             "Ini untuk PERENCANAAN stok/penawaran: untuk unit spesifik minta nomor "
             "rangka lalu pakai part_aus_dari_rangka/cari_part_di_unit (per-VIN). "
-            "⛔ JANGAN mengarang PN di luar daftar." + ekor),
+            "⛔ JANGAN mengarang PN di luar daftar." + _FM_SAJI_NOTE + ekor),
     }
 
 

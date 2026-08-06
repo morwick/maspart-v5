@@ -171,3 +171,72 @@ def test_hp_dari_model():
     assert fast_moving.hp_dari_model("ZZ4257V324HE1B") == 320
     assert fast_moving.hp_dari_model("ZZ3257N3847B2R") == 380
     assert fast_moving.hp_dari_model("TAZ5466TYT") is None
+
+
+# ── Nama LAPANGAN + saringan aksesori (keluhan pemilik 2026-08-06) ──────────
+# "filter banyak yang gaada: filter oli, filter solar atas, filter solar bawah,
+# filter water separator" — ternyata ADA di data (dan di Excel), tapi bernama
+# EPC harfiah & berdesakan dengan kabel/saklar/dudukan.
+_FILTER_ASLI = [
+    # nama & kode PERSIS seperti di EPC produksi (unit NJ248278)
+    {"pn": "080V05504-6096", "nama": "Oil filter element component",
+     "nama_cn": "机油滤芯组件", "qty": 1, "pengganti": []},
+    {"pn": "WG9925550180+001", "nama": "Fuel filter element",
+     "nama_cn": "燃油滤清器滤芯", "qty": 1, "pengganti": []},
+    {"pn": "WG9925550182", "nama": "Fuel coarse filter element (Parker)",
+     "nama_cn": "燃油粗滤器滤芯（Parker）", "qty": 1, "pengganti": []},
+    {"pn": "WG9925550180", "nama": "Fuel coarse filter", "nama_cn": "燃油粗滤器",
+     "qty": 1, "pengganti": []},
+    {"pn": "WG9525195201", "nama": "Main filter element - Flame retardant",
+     "nama_cn": "主滤芯-阻燃", "qty": 1, "pengganti": []},
+    # ⛔ aksesori: bukan barang aus, tak boleh ikut daftar filter
+    {"pn": "752W25455-6001", "nama": "Oil-water separator extension cord (1100)",
+     "nama_cn": "油水分离器延长线（1100）", "qty": 1, "pengganti": []},
+    {"pn": "WG1200190040", "nama": "Plugging indicator switch of dry air filter",
+     "nama_cn": "干式空滤器堵塞指示器开关", "qty": 1, "pengganti": []},
+    {"pn": "WG9925550961", "nama": "Filter seat", "nama_cn": "滤座",
+     "qty": 1, "pengganti": []},
+    {"pn": "201V12504-0030", "nama": "Filter cover with O-ring",
+     "nama_cn": "滤清器盖 带O型圈", "qty": 1, "pengganti": []},
+]
+
+
+def _slot_id(d: dict) -> dict:
+    return {s["slot"]: s.get("nama_id") for s in d["slot"]}
+
+
+def test_filter_servis_terklasifikasi_dan_bernama_lapangan(dunia):
+    _tulis_unit(dunia, "PJ295852", _FILTER_ASLI)
+    fast_moving.build()
+    d = fast_moving.data()["model"]["ZZ3257V404JF1"]
+    peta = _slot_id(d)
+    nama = set(peta.values())
+    # keempat yang disebut pemilik hadir dengan istilah lapangan
+    assert "filter oli mesin" in nama
+    assert "filter solar halus (atas)" in nama
+    assert "filter solar kasar (bawah)" in nama
+    assert "filter udara — elemen utama" in nama
+    # 'Fuel coarse filter' (tanpa kata 'fuel filter'/滤清器) dulu TERBUANG
+    assert any(s["slot"] == "fuel coarse filter" for s in d["slot"])
+
+
+def test_aksesori_filter_tak_ikut_daftar(dunia):
+    _tulis_unit(dunia, "PJ295852", _FILTER_ASLI)
+    fast_moving.build()
+    d = fast_moving.data()["model"]["ZZ3257V404JF1"]
+    pns = {v["pn"] for s in d["slot"] for v in s["varian"]}
+    for buang in ("752W25455-6001", "WG1200190040", "WG9925550961", "201V12504-0030"):
+        assert buang not in pns, f"{buang} bukan barang aus — tak boleh masuk"
+
+
+def test_istilah_kosong_bila_tak_ada_aturan(dunia):
+    _tulis_unit(dunia, "PJ295852", [
+        {"pn": "WG9525470325+002", "nama": "Steering oil tank filter element",
+         "nama_cn": "转向油罐滤芯", "qty": 1, "pengganti": []},
+        {"pn": "XX0000000000", "nama": "Cartridge", "nama_cn": "滤芯",
+         "qty": 1, "pengganti": []}])
+    fast_moving.build()
+    d = fast_moving.data()["model"]["ZZ3257V404JF1"]
+    peta = _slot_id(d)
+    assert peta.get("steering oil tank filter element") == "filter oli power steering"
+    assert peta.get("cartridge") is None      # tak dikenal → jangan dikarang

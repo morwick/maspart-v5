@@ -43,11 +43,24 @@ logger = logging.getLogger("maspart.fast_moving")
 # hardware pendukung (bracket filter ≠ filter).
 _KAMUS_DEFAULT = {
     "negatif": ["bracket", "clamp", "bolt", "nut", "washer", "screw",
-                "pipe", "hose", "flange", "gasket", "seat wrench"],
+                "pipe", "hose", "flange", "gasket", "seat wrench",
+                # Aksesori sekitar filter yang bukan barang aus (keluhan pemilik
+                # 2026-08-06: daftar filter terisi kabel & saklar, sementara
+                # filter servisnya sendiri tenggelam).
+                "filter seat", "filter shell", "filter cover", "end cover",
+                "extension cord", "wiring harness", "switch", "sensor",
+                "indicator", "connector", "filter mesh", "casing", "alarm",
+                "suction filter"],
     "kategori": {
+        # ⚠️ Nama EPC harfiah: 'fuel coarse filter' TIDAK memuat 'fuel filter',
+        # dan CN 粗滤器 bukan 滤清器 — tanpa kata-kata ini filter solar kasar /
+        # water separator hilang dari daftar (keluhan pemilik 2026-08-06).
         "filter": ["filter element", "oil filter", "fuel filter", "air filter",
-                   "water separator", "filter insert", "cartridge", "滤清器",
-                   "滤芯", "干燥筒", "干燥罐"],
+                   "coarse filter", "fine filter", "water separator",
+                   "oil-water separator", "urea filter", "adblue filter",
+                   "filter insert", "cartridge", "滤清器", "滤芯", "粗滤器",
+                   "精滤器", "机油滤", "柴油滤", "空滤器", "油水分离器",
+                   "尿素滤", "干燥筒", "干燥罐"],
         "rem": ["brake lining", "brake pad", "brake shoe", "brake disc",
                 "brake drum", "摩擦片", "制动蹄", "制动盘", "制动鼓", "刹车片"],
         "kopling": ["clutch disc", "clutch plate", "clutch driven",
@@ -60,6 +73,50 @@ _KAMUS_DEFAULT = {
                   "rubber bearing", "cab mount", "橡胶支座", "橡胶衬套",
                   "橡胶轴承", "缓冲块"],
     },
+    # Nama LAPANGAN Indonesia (lihat _istilah). Aturan BERURUT: yang khusus
+    # dulu ('fuel coarse filter' sebelum 'fuel filter'), umum belakangan.
+    "istilah": [
+        {"id": "filter water separator (solar bawah)",
+         "kata": ["oil-water separator", "water separator", "油水分离器"]},
+        {"id": "filter solar kasar (bawah)",
+         "kata": ["fuel coarse filter", "coarse filter element", "燃油粗滤"]},
+        {"id": "filter solar halus (atas)",
+         "kata": ["fuel filter", "diesel filter", "燃油滤清器", "柴油滤"]},
+        {"id": "filter oli mesin",
+         "kata": ["engine oil filter", "oil filter element", "机油滤"]},
+        {"id": "filter udara — elemen utama",
+         "kata": ["main filter element", "主滤芯"]},
+        {"id": "filter udara — elemen safety",
+         "kata": ["safety filter element", "安全滤芯"]},
+        {"id": "filter udara (rumah/assembly)",
+         "kata": ["air filter", "空滤器"]},
+        {"id": "filter urea / AdBlue",
+         "kata": ["urea filter", "adblue", "尿素滤"]},
+        {"id": "filter oli power steering",
+         "kata": ["steering oil tank filter", "转向油罐滤", "转向油滤"]},
+        {"id": "tabung air dryer (pengering angin)",
+         "kata": ["air drying", "air dryer", "干燥筒", "干燥罐"]},
+        {"id": "filter oli (transmisi/hidrolik)",
+         "kata": ["oil filter", "油滤器"]},
+        {"id": "kampas rem",
+         "kata": ["brake lining", "brake friction", "摩擦片", "刹车片"]},
+        {"id": "sepatu rem", "kata": ["brake shoe", "制动蹄"]},
+        {"id": "cakram rem", "kata": ["brake disc", "制动盘"]},
+        {"id": "tromol rem", "kata": ["brake drum", "制动鼓"]},
+        {"id": "kampas kopling",
+         "kata": ["clutch disc", "clutch driven", "离合器片", "从动盘"]},
+        {"id": "matahari/dekrup kopling", "kata": ["pressure plate", "压盘"]},
+        {"id": "drek lahar (release bearing)",
+         "kata": ["release bearing", "分离轴承"]},
+        {"id": "bearing roda",
+         "kata": ["hub bearing", "wheel bearing", "轮毂轴承"]},
+        {"id": "seal oli", "kata": ["oil seal", "油封"]},
+        {"id": "v-belt / tali kipas",
+         "kata": ["v-belt", "fan belt", "drive belt", "poly v", "皮带"]},
+        {"id": "karet support/mounting",
+         "kata": ["rubber mount", "rubber support", "rubber bushing",
+                  "rubber bearing", "cab mount", "橡胶支座", "缓冲块"]},
+    ],
 }
 
 _CJK_RE = re.compile(r"[一-鿿]")
@@ -80,7 +137,9 @@ def _kamus_path() -> Path:
 def _kamus() -> dict:
     d = load_json(_kamus_path(), default=None)
     if isinstance(d, dict) and d.get("kategori"):
-        return d
+        # File data boleh hanya menimpa sebagian: tanpa 'istilah' sendiri, nama
+        # lapangan JANGAN ikut hilang (editor kamus tak wajib tahu bagian itu).
+        return d if d.get("istilah") else {**d, "istilah": _KAMUS_DEFAULT["istilah"]}
     return _KAMUS_DEFAULT
 
 
@@ -145,6 +204,26 @@ def _klasifikasi(nama_en: str, nama_cn: str, kamus: dict) -> str | None:
     return None
 
 
+def _istilah(nama_en: str, nama_cn: str, kamus: dict) -> str:
+    """Nama LAPANGAN Indonesia untuk satu baris ('filter oli mesin', 'filter
+    solar halus (atas)', 'kampas rem') — '' bila tak ada aturan yang cocok.
+
+    Ada karena nama EPC harfiah tak dikenali orang bengkel: 'Oil filter element
+    component', 'Fuel filter element With O-ring', 'Filter cartridge (Shanghai
+    Yida)' — pemilik membaca daftar itu lalu menyimpulkan filter oli & filter
+    solarnya TIDAK ADA (2026-08-06), padahal ada. Aturan berurut: yang pertama
+    cocok dipakai (khusus dulu, umum belakangan)."""
+    hay_en = f" {(nama_en or '').lower()} "
+    for aturan in kamus.get("istilah") or []:
+        for k in aturan.get("kata") or []:
+            if _CJK_RE.search(k):
+                if k in (nama_cn or ""):
+                    return aturan.get("id") or ""
+            elif k in hay_en:
+                return aturan.get("id") or ""
+    return ""
+
+
 def _slot_key(nama_en: str, nama_cn: str) -> str:
     """Nama slot fungsi ternormalisasi (buang 'assembly', rapikan spasi)."""
     s = _SLOT_BUANG_RE.sub(" ", (nama_en or "").lower())
@@ -198,6 +277,7 @@ def build() -> dict:
                 continue
             baris.append({
                 "kat": kat, "slot": _slot_key(nama, nama_cn),
+                "id": _istilah(nama, nama_cn, kamus),
                 "pn": _SUFFIX_RE.sub("", pn), "pn_asli": pn,
                 "nama": nama, "nama_cn": nama_cn, "qty": row.get("qty"),
                 "assembly": " ".join(str((row.get("dari_assembly") or {})
@@ -242,10 +322,13 @@ def build() -> dict:
                 ko[k] = max(ko[k], len(pns))
 
         agg: dict = {}
+        nama_id: dict = {}           # slot → Counter(istilah lapangan)
         for frame, rows in frames.items():
             terlihat: set = set()    # (slot, pn) unik per unit — qty>1 ≠ 2 unit
             for r in rows:
                 k = _key(r)
+                if r.get("id"):
+                    nama_id.setdefault(k, Counter())[r["id"]] += 1
                 if (k, r["pn"]) in terlihat:
                     continue
                 terlihat.add((k, r["pn"]))
@@ -266,8 +349,13 @@ def build() -> dict:
         slots = []
         for (kat, nama_slot), varian in sorted(agg.items()):
             vs = sorted(varian.values(), key=lambda v: (-v["n_unit"], v["pn"]))
+            c_id = nama_id.get((kat, nama_slot))
             slots.append({
                 "kategori": kat, "slot": nama_slot,
+                # Istilah lapangan (bila ada aturan yang cocok): dipakai ASISTEN
+                # sebagai judul baris, nama EPC jadi keterangan.
+                **({"nama_id": sorted(c_id.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]}
+                   if c_id else {}),
                 **({"ko_eksis": True} if ko[(kat, nama_slot)] > 1 else {}),
                 "varian": [{**v, "tahun": sorted(v["tahun"]),
                             "pn_sub": sorted(v["pn_sub"])} for v in vs],
