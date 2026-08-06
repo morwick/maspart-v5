@@ -588,6 +588,15 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
                 with _stash_lock:
                     d["_path"] = str(p)
             return data, d["filename"]
+        if b.get("kind") == "sheet_exploded":
+            data, err = sheet_exploded_excel(b)
+            if data is None:
+                return None, err
+            p = _cache_write(export_id, data)
+            if p:
+                with _stash_lock:
+                    d["_path"] = str(p)
+            return data, d["filename"]
         if b.get("kind") == "sheet_status":
             data, err = sheet_status_excel(b)
             if data is None:
@@ -858,6 +867,136 @@ def sheet_foto_excel(b: dict) -> tuple[bytes | None, str]:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue(), ""
+
+
+# ── Excel UNGGAHAN USER + GAMBAR TEKNIS exploded view (tool `sheet_isi_exploded`) ──
+# Ukuran tampil & lebar kolom SENGAJA sama dengan kolom "Exploded View" Batch
+# Download (services/catalog.py): balon harus terbaca dan file harus tetap bisa
+# dicetak. PNG-nya TIDAK di-resample — hanya ukuran TAMPIL yang diatur, jadi zoom
+# di Excel tetap tajam.
+_EXPL_IMG_W = 620          # px lebar tampil maks
+_EXPL_IMG_H = 500          # px tinggi tampil maks
+_EXPL_COL_W = 88           # satuan lebar openpyxl (±7 px/satuan, Calibri 11)
+_EXPL_INFO_COL_W = 46      # kolom teks "Info Gambar Teknis"
+_EXPL_ROW_PT_MAX = 409     # batas KERAS tinggi baris Excel = 409,5 pt (±546 px)
+# Anggaran waktu SATU file (lebih pendek dari batch download 15 menit): unduhan
+# kartu chat menunggu di satu request HTTP. PN yang tak terjangkau ditandai jujur.
+_EXPL_ANGGARAN = 600
+
+
+def _info_exploded_sel(d: dict, rangka: str) -> str:
+    """Isi sel "Info Gambar Teknis". Sumber teks = catalog._teks_info_exploded
+    (satu sumber dengan Batch Download) + baris asal gambar untuk jalur per-VIN.
+    ⛔ Tak ditemukan/gagal → tulis ALASANNYA apa adanya, jangan karang figure."""
+    from . import catalog          # impor lokal: hindari siklus impor saat modul dimuat
+    teks = catalog._teks_info_exploded(d)
+    if rangka and d and d.get("found"):
+        frame = d.get("frame_number") or rangka
+        return f"Sumber: figure unit {frame} (per-VIN)\n{teks}"
+    return teks
+
+
+def sheet_exploded_excel(b: dict) -> tuple[bytes | None, str]:
+    """Bangun Excel unggahan user + GAMBAR TEKNIS (exploded view EPC) tertanam.
+
+    Dipanggil saat kartu unduh diklik (lihat generic_excel) — BUKAN saat tool
+    dijalankan: satu PN bisa makan puluhan detik, jadi menahannya di giliran chat
+    akan membuat asisten tampak menggantung. Payload:
+      {kind:"sheet_exploded", judul, kolom, baris, pns:[per-baris],
+       rangka:"" (lintas-model) | VIN (per-VIN), kol_info, kol_gambar}
+    Return (bytes, pesan_error)."""
+    from openpyxl.drawing.image import Image as XLImage
+
+    from . import exploded_view
+
+    kolom: list[str] = b.get("kolom") or []
+    baris: list[list] = b.get("baris") or []
+    pns: list[str] = b.get("pns") or []
+    rangka = (b.get("rangka") or "").strip()
+    kol_info = b.get("kol_info")
+    kol_gambar = b.get("kol_gambar")
+    if not kolom or kol_gambar is None:
+        return None, "Data sheet tidak ditemukan — minta asisten membuat ulang."
+
+    unik = [p for p in dict.fromkeys(pns) if p]
+    # Gerbang: hanya SATU batch exploded boleh jalan di server ini (1 vCPU + EPC
+    # mudah menolak). Sama seperti Batch Download; diambil DI DALAM thread pekerja.
+    try:
+        peta = exploded_view.bangun_dengan_gerbang(
+            exploded_view.png_batch, unik, anggaran=_EXPL_ANGGARAN, rangka=rangka)
+    except exploded_view.SedangSibuk:
+        return None, ("Server sedang menyusun satu batch gambar exploded lain (hanya "
+                      "boleh satu sekaligus — server 1 vCPU dan server EPC mudah "
+                      "menolak). Coba klik unduh lagi beberapa menit lagi.")
+    except Exception:
+        return None, "Gagal mengambil gambar exploded dari EPC. Coba lagi sebentar."
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.sheet_view.showGridLines = False
+    sub = (f"{len(baris)} baris · gambar teknis EPC per-VIN (unit {rangka})"
+           if rangka else
+           f"{len(baris)} baris · gambar teknis EPC LINTAS MODEL (bukan milik unit tertentu)")
+    start = _title(ws, _safe(b.get("judul") or "Data + Gambar Teknis"),
+                   sub + " · MASPART Asisten AI", max(2, len(kolom)))
+
+    mono_cols = {j for j, h in enumerate(kolom, start=1) if _MONO_HEAD_RE.search(h or "")}
+    for j, h in enumerate(kolom, start=1):
+        c = ws.cell(row=start, column=j, value=_safe(h))
+        c.fill = _HEAD_FILL
+        c.font = _WHITE
+        c.alignment = _CENTER
+        c.border = _BORDER
+        if j - 1 == kol_gambar:
+            ws.column_dimensions[get_column_letter(j)].width = _EXPL_COL_W
+        elif j - 1 == kol_info:
+            ws.column_dimensions[get_column_letter(j)].width = _EXPL_INFO_COL_W
+        else:
+            w = max([len(str(h or ""))]
+                    + [len(str(r[j - 1])) for r in baris if j - 1 < len(r)] or [0])
+            ws.column_dimensions[get_column_letter(j)].width = max(8, min(60, w + 4))
+
+    # Kolom Harga/Stok/Qty milik FILE USER tetap ditulis sebagai ANGKA (rumus
+    # user harus tetap jalan) — sama seperti generic_excel; kolom info & gambar
+    # tak pernah kena koersi (nama headernya bukan kolom angka).
+    num_cols = kolom_angka(kolom)
+    col_fmts = [num_format(h) for h in kolom]
+    r = start + 1
+    for i, row in enumerate(baris):
+        pn = pns[i] if i < len(pns) else ""
+        d = peta.get(exploded_view.kunci(pn, rangka)) if pn else None
+        row = list(row)
+        if kol_info is not None and kol_info < len(row):
+            row[kol_info] = _info_exploded_sel(d, rangka) if pn else ""
+        for j in range(1, len(kolom) + 1):
+            val = row[j - 1] if j - 1 < len(row) else ""
+            if j - 1 in num_cols:
+                val = ke_angka(val, num_cols[j - 1])
+            c = ws.cell(row=r, column=j, value=_safe(val))
+            c.border = _BORDER
+            angka = isinstance(c.value, (int, float)) and not isinstance(c.value, bool)
+            if angka:
+                c.alignment = _RIGHT
+                c.number_format = col_fmts[j - 1]
+            else:
+                c.alignment = (_CENTER if j == 1 or j in mono_cols or j - 1 == kol_gambar
+                               else _LEFT)
+            c.font = _MONO if j in mono_cols else _INK
+            if i % 2:
+                c.fill = _ZEBRA
+        png = (d or {}).get("png")
+        if png:
+            img = XLImage(io.BytesIO(png))
+            w, h = int(img.width or 1), int(img.height or 1)
+            skala = min(_EXPL_IMG_W / w, _EXPL_IMG_H / h, 1.0)
+            img.width, img.height = max(1, int(w * skala)), max(1, int(h * skala))
+            ws.add_image(img, f"{get_column_letter(kol_gambar + 1)}{r}")
+            ws.row_dimensions[r].height = min(_EXPL_ROW_PT_MAX, img.height * 0.78 + 8)
+        r += 1
+    ws.freeze_panes = ws.cell(row=start + 1, column=1)
+
+    return _save_stable(wb), ""
 
 
 # ── KATALOG BERGAMBAR per kategori (exploded view EPC) ──────────────────────

@@ -2034,6 +2034,19 @@ def _t_sheet_isi_foto(args: dict, user: dict) -> dict:
     )
 
 
+def _t_sheet_isi_exploded(args: dict, user: dict) -> dict:
+    """Gambar TEKNIS (exploded view) ke Excel unggahan. Gerbang 'tanya dulu soal
+    VIN' ada di ai_sheet.fill_exploded — bukan cuma di prompt: tanpa rangka DAN
+    tanpa keputusan lintas-model, tool menolak & menyuruh model bertanya."""
+    return ai_sheet.fill_exploded(
+        sheet_id=args.get("_sheet_id", ""),
+        user=user,
+        rangka=(args.get("rangka") or "").strip(),
+        lintas_model=bool(args.get("lintas_model")),
+        kolom_pn=(args.get("kolom_pn") or "").strip(),
+    )
+
+
 # ── Isi Part Number dari NAMA part, dibatasi BOM satu unit (per nomor rangka) ──
 # Arah KEBALIKAN sheet_isi_kolom: user punya kolom NAMA → cari Part Number-nya.
 # Lingkup pencarian DIKUNCI ke BOM unit (VIN) agar deterministik: dalam satu unit

@@ -219,6 +219,7 @@ _DISPATCH = {
     "sheet_ringkasan": _t_sheet_ringkasan,
     "sheet_isi_kolom": _t_sheet_isi_kolom,
     "sheet_isi_foto": _t_sheet_isi_foto,
+    "sheet_isi_exploded": _t_sheet_isi_exploded,
     "sheet_isi_part_number": _t_sheet_isi_part_number,
     "sheet_cek_qty": _t_sheet_cek_qty,
     "sheet_pilih_sheet": _t_sheet_pilih_sheet,

@@ -2290,7 +2290,8 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "radiator) — memasang foto dari nama berarti memasang foto yang SALAH. Bila "
                     "file tak punya kolom Part Number, katakan itu apa adanya & minta kolom PN; "
                     "JANGAN menebak lewat nama. Part yang memang tak punya foto di SIMS ditandai "
-                    "'-' dan tidak dikarang."
+                    "'-' dan tidak dikarang. Untuk GAMBAR TEKNIS / EXPLODED VIEW (diagram uraian "
+                    "ber-nomor balon dari EPC) pakai sheet_isi_exploded — BUKAN tool ini."
                 ),
                 "parameters": {
                     "type": "object",
@@ -2298,6 +2299,51 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "jumlah": {
                             "type": "integer",
                             "description": "Foto per part (1-3). Kosong = 2.",
+                        },
+                        "kolom_pn": {
+                            "type": "string",
+                            "description": ("Kolom sumber Part Number. Kosongkan bila sudah "
+                                            "terdeteksi otomatis (lihat sheet_ringkasan)."),
+                        },
+                    },
+                },
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "sheet_isi_exploded",
+                "description": (
+                    "Tempelkan GAMBAR TEKNIS / EXPLODED VIEW EPC ke Excel unggahan user "
+                    "(kolom gambar + kolom info figure & nomor balon di ujung kanan), lalu "
+                    "hasilkan file Excel yang bisa diunduh. Dipakai saat user minta 'isikan "
+                    "gambar exploded view-nya', 'tambahkan gambar teknis part di file ini', "
+                    "'lengkapi dengan diagram/skema part'. BEDA dengan sheet_isi_foto (foto "
+                    "FISIK part dari SIMS) — ini gambar URAIAN/diagram EPC ber-nomor balon. "
+                    "⛔ WAJIB TANYA DULU: sebelum memakai tool ini, tanyakan ke user APAKAH "
+                    "ADA nomor rangka/VIN unitnya. Bila ADA → minta VIN-nya lalu panggil "
+                    "dengan 'rangka' (gambar diambil dari figure unit itu sendiri = paling "
+                    "tepat). Bila TIDAK ADA → panggil dengan lintas_model=true (gambar dicari "
+                    "LINTAS MODEL: figure EPC mana pun yang memuat PN itu — peringatan "
+                    "lintas-model WAJIB disampaikan ke user). Dipanggil tanpa keduanya, tool "
+                    "hanya mengembalikan perintah bertanya. Gambar dicocokkan lewat PART "
+                    "NUMBER (nama part tak cukup). ⚠️ LAMBAT: tiap PN diambil satu per satu "
+                    "dari EPC — maksimum 60 PN per-VIN / 25 PN lintas model, dan unduhan "
+                    "pertama butuh beberapa menit (sampaikan ini ke user). Part yang tak "
+                    "punya figure dibiarkan tanpa gambar + alasannya ditulis apa adanya."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {
+                            "type": "string",
+                            "description": ("Nomor rangka/VIN unit — isi HANYA bila user "
+                                            "menyebutkannya. ⛔ Jangan menebak."),
+                        },
+                        "lintas_model": {
+                            "type": "boolean",
+                            "description": ("true HANYA setelah user menyatakan TIDAK punya "
+                                            "nomor rangka → gambar dicari lintas model."),
                         },
                         "kolom_pn": {
                             "type": "string",

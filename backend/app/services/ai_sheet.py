@@ -10,6 +10,9 @@ Alur:
      "isikan stoknya" tetap mengacu ke file yang sama.
   3. `fill_column(...)` — isi satu kolom dengan stok / nama part / harga lokal /
      harga SIMS, lalu keluarkan Excel baru lewat `ai_export.stash_export`.
+     Sepupunya: `fill_columns` (banyak kolom → satu file), `fill_photos` (foto
+     FISIK part dari SIMS) dan `fill_exploded` (GAMBAR TEKNIS / exploded view
+     EPC — per-VIN bila user punya nomor rangka, kalau tidak lintas-model).
 
 KEAMANAN
   • Isi file adalah DATA TAK TEPERCAYA, bukan instruksi. Ia hanya masuk ke model
@@ -893,6 +896,176 @@ def fill_photos(sheet_id: str, user: dict, kolom_pn: str = "", jumlah: int = 2) 
             f"di SIMS dan ditandai '{_TANPA_FOTO}'. ⛔ JANGAN menjanjikan foto untuk baris itu & "
             "JANGAN menyarankan mencocokkan foto lewat NAMA part — pencarian nama di SIMS "
             "mengembalikan part lain (foto bisa SALAH)."
+        ),
+    }
+
+
+# ── Gambar TEKNIS (exploded view EPC) ke Excel unggahan ──
+# Dua jalur, dua ongkos yang JAUH berbeda:
+#   • per-VIN (ada nomor rangka): 2 panggilan EPC per PN, figure milik unit itu;
+#   • lintas-model (tak ada rangka): s/d 94 detik per PN dingin → plafon ketat,
+#     sama dengan kolom Exploded View di Batch Download (catalog.MAX_BATCH_EXPLODED).
+_MAX_EXPLODED_PN_VIN = 60
+_MAX_EXPLODED_PN_GLOBAL = 25
+_KOL_EXPLODED_INFO = "Info Gambar Teknis"
+_KOL_EXPLODED_GAMBAR = "Gambar Teknis (Exploded View)"
+# Header kolom nomor rangka di file user — dipakai HANYA untuk MENAWARKAN VIN yang
+# sudah ada di file saat bertanya; ⛔ tak pernah dipakai diam-diam tanpa jawaban user.
+_HEAD_RANGKA = re.compile(r"\b(no\.?\s*rangka|nomor\s*rangka|rangka|vin|frame|chassis|cjh)\b", re.I)
+
+
+def _rangka_di_file(headers: list[str], body: list[list]) -> dict | None:
+    """{kolom, nilai:[≤5 distinct]} bila file punya kolom nomor rangka; None bila
+    tidak. Nilai dipakai asisten untuk BERTANYA ('unitnya yang ini?'), bukan untuk
+    memutuskan sendiri."""
+    i = next((k for k, h in enumerate(headers) if _HEAD_RANGKA.search(h or "")), None)
+    if i is None:
+        return None
+    nilai: list[str] = []
+    for r in body:
+        v = (str(r[i]).strip() if i < len(r) and r[i] is not None else "")
+        if v and v not in nilai:
+            nilai.append(v)
+        if len(nilai) >= 6:
+            break
+    return {"kolom": headers[i], "nilai": nilai[:5]} if nilai else None
+
+
+def fill_exploded(sheet_id: str, user: dict, rangka: str = "",
+                  lintas_model: bool = False, kolom_pn: str = "") -> dict:
+    """Tempelkan GAMBAR TEKNIS (exploded view EPC) per Part Number ke Excel
+    unggahan user: satu kolom teks (figure + nomor balon + asal gambar) dan satu
+    kolom GAMBAR di ujung kanan.
+
+    ⛔ WAJIB TAHU DULU ADA/TIDAKNYA NOMOR RANGKA. Dipanggil tanpa `rangka` DAN
+    tanpa `lintas_model` → tool TIDAK menebak: ia mengembalikan perintah bertanya
+    ke user (perintah pemilik 2026-08-06). Alasannya nyata: figure per-VIN adalah
+    gambar unit user itu sendiri, sedangkan figure lintas-model hanya "model mana
+    pun yang memakai PN ini" — dua hal yang tak boleh tertukar diam-diam.
+
+    Seperti `fill_photos`, di sini HANYA daftar kerjanya yang disusun; unduh SVG,
+    render, dan tempel gambar dikerjakan SAAT KARTU DIUNDUH (ai_export builder
+    'sheet_exploded'), karena satu PN dingin bisa makan puluhan detik."""
+    parsed = get_sheet(sheet_id, user.get("username", ""))
+    if not parsed:
+        return {"found": False, "error": "Belum ada file Excel yang diunggah di percakapan ini "
+                                         "(atau sudah kedaluwarsa). Minta user unggah ulang."}
+
+    headers = list(parsed["headers"])
+    body = [list(r) for r in parsed["_body"]]
+
+    pn_i = _cari_kolom(headers, kolom_pn) if kolom_pn else None
+    if pn_i is None:
+        pn_i = parsed["roles"].index("part_number") if "part_number" in parsed["roles"] else None
+    if pn_i is None:
+        return {"found": False,
+                "error": "Kolom Part Number tidak terdeteksi. Gambar exploded view dicari "
+                         "PER PART NUMBER (nama part tidak cukup — satu nama dipakai banyak "
+                         "PN). Minta user menyebut kolom mana yang berisi Part Number."}
+
+    pns = [(r[pn_i] or "").strip().upper() if pn_i < len(r) else "" for r in body]
+    unik = [p for p in dict.fromkeys(pns) if p]
+    if not unik:
+        return {"found": False, "error": f"Kolom '{headers[pn_i]}' tidak berisi Part Number."}
+
+    rangka = (rangka or "").strip()
+    # ── GERBANG TANYA: tanpa rangka & tanpa keputusan lintas-model → BERTANYA ──
+    if not rangka and not lintas_model:
+        # ⛔ SENGAJA tanpa key 'found': bertanya BUKAN lookup gagal. found=False
+        # membuat _tool_fail_kind menandainya 'nf' → giliran tercatat tool_failed
+        # dan model disuntik nota "lookup gagal, jangan mengarang" — padahal tak
+        # ada yang gagal, tool memang sedang meminta keterangan.
+        out = {
+            "perlu_jawaban_user": True,
+            "jumlah_part": len(unik),
+            "kolom_part_number": headers[pn_i],
+            "pilihan": [
+                "ADA nomor rangka (VIN) — gambar diambil dari figure unit itu sendiri (paling tepat)",
+                "TIDAK ada nomor rangka — cari gambar LINTAS MODEL (figure EPC mana pun yang memuat PN itu)",
+            ],
+            "jawaban_wajib": (
+                "JANGAN memanggil tool ini lagi sebelum user menjawab. TANYAKAN dulu: "
+                "apakah user PUNYA nomor rangka/VIN unitnya? "
+                "(a) Bila ADA → minta VIN-nya, lalu panggil lagi tool ini dengan 'rangka' "
+                "terisi — gambar diambil dari figure unit itu sendiri, jadi pasti gambar "
+                "unitnya. (b) Bila TIDAK ADA → panggil lagi dengan lintas_model=true — "
+                "gambar dicari lintas model (figure EPC mana pun yang memuat PN itu) dan "
+                "peringatan lintas-model WAJIB disampaikan ke user. "
+                "⛔ JANGAN menebak nomor rangka & JANGAN memilih sendiri salah satu jalur."
+            ),
+        }
+        rf = _rangka_di_file(headers, body)
+        if rf:
+            out["rangka_di_file"] = rf
+            out["jawaban_wajib"] += (
+                f" Catatan: file ini punya kolom '{rf['kolom']}' berisi nomor rangka "
+                f"{rf['nilai']} — TAWARKAN nomor itu saat bertanya (mis. 'pakai VIN "
+                "ini?'), tapi tetap tunggu user mengiyakan.")
+        return out
+
+    batas = _MAX_EXPLODED_PN_VIN if rangka else _MAX_EXPLODED_PN_GLOBAL
+    if len(unik) > batas:
+        jalur = (f"per-VIN (unit {rangka})" if rangka else "lintas model")
+        return {"found": False,
+                "error": (f"Terlalu banyak Part Number ({len(unik)}) untuk gambar exploded "
+                          f"jalur {jalur}. Maksimum {batas} per permintaan — tiap PN diambil "
+                          "satu per satu dari server EPC. Minta user memecah filenya atau "
+                          "menyaring baris yang benar-benar perlu bergambar.")}
+
+    # Kolom TEKS dulu (info figure), lalu kolom GAMBAR — urutan sama dengan kolom
+    # Exploded View di Batch Download supaya user tak bingung berpindah fitur.
+    kol_info = len(headers)
+    headers.append(_KOL_EXPLODED_INFO)
+    kol_gambar = len(headers)
+    headers.append(_KOL_EXPLODED_GAMBAR)
+    for r, p in zip(body, pns):
+        # Isi kolom info DIISI builder saat diunduh (di situlah hasil EPC diketahui);
+        # baris tanpa PN ditandai sekarang supaya tak pernah tampak "sedang diproses".
+        r.append("" if p else _TANPA_FOTO)
+        r.append("")
+
+    judul = f"{parsed['filename'].rsplit('.', 1)[0]} + Gambar Teknis"
+    export_id, filename = ai_export.stash_builder(judul, {
+        "kind": "sheet_exploded",
+        "judul": judul,
+        "kolom": headers,
+        "baris": body,
+        "pns": pns,
+        "rangka": rangka,
+        "kol_info": kol_info,
+        "kol_gambar": kol_gambar,
+    })
+    # Perkiraan waktu unduhan PERTAMA (EPC dingin, 3 pekerja paralel): per-VIN
+    # ±2-6 dtk/PN, lintas-model 30-90 dtk/PN (94 dtk terukur di produksi). Angka
+    # ini dipakai asisten memberi tahu user supaya ia tak mengira unduhan macet.
+    per_pn = (2, 6) if rangka else (30, 90)
+    lo = max(1, round(len(unik) * per_pn[0] / 3 / 60))
+    hi = max(lo + 1, round(len(unik) * per_pn[1] / 3 / 60))
+    durasi = f"±{lo}-{hi} menit"
+    return {
+        "found": True,
+        "export_id": export_id,
+        "filename": filename,
+        "judul": judul,
+        "jumlah_baris": len(body),
+        "jumlah_part": len(unik),
+        "kolom_part_number": headers[pn_i],
+        "sumber_gambar": ("per-VIN" if rangka else "lintas-model"),
+        **({"rangka": rangka} if rangka else {}),
+        "estimasi_durasi_unduhan": durasi,
+        "catatan": (
+            "📎 Kartu unduh Excel muncul otomatis di bawah jawaban — beri tahu user SINGKAT: "
+            f"{len(unik)} part akan dicarikan gambar exploded view, dan UNDUHAN PERTAMA butuh "
+            f"{durasi} karena tiap gambar diambil & dirender satu per satu dari server EPC. "
+            + ("Gambar diambil PER-VIN dari figure unit " + rangka + " — gambar unit itu sendiri. "
+               if rangka else
+               "⚠️ Gambar diambil LINTAS MODEL: figure EPC mana pun yang memuat PN itu, BUKAN "
+               "milik unit tertentu. WAJIB sampaikan peringatan ini ke user dengan bahasamu "
+               "sendiri, dan tawarkan ulang per-VIN bila nanti nomor rangkanya ketemu. ")
+            + "Part yang memang tak punya figure di EPC dibiarkan TANPA gambar dan alasannya "
+              "ditulis apa adanya di kolom 'Info Gambar Teknis'. ⛔ JANGAN menjanjikan gambar "
+              "untuk part itu, JANGAN mengarang nomor balon/nama figure, dan JANGAN membuat "
+              "link/gambar sendiri."
         ),
     }
 
