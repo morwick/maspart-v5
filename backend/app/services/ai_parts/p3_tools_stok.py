@@ -1884,6 +1884,169 @@ def _t_buat_penawaran(args: dict, user: dict) -> dict:
                            args.get("catatan") or "")
 
 
+# ── PERMINTAAN BARANG (Purchase Requisition) Accurate ───────────────────────
+# Dari HAR UI pemilik (2026-08-06). Tiga kolom WAJIB per baris: Sektor
+# (charField1), No Unit (charField2), Kts Jkt (charField4). Keputusan pemilik:
+# No Unit selalu "STOK", Kts Jkt = stok Jakarta saat ini (otomatis dari indeks),
+# qty default 1 bila user tak menyebut, nomor dipasok MASPART (PERMINTAAN-NN).
+_PR_MAX_BARIS = 60
+
+
+def _pr_kts_jkt(pn: str) -> int:
+    """Isi kolom WAJIB 'Kts Jkt' = stok gudang JAKARTA saat ini dari indeks
+    Accurate. 0 bila part tak ada di indeks — ⛔ jangan dikarang."""
+    try:
+        br = accurate.gudang_breakdown(pn) or {}
+    except Exception:
+        return 0
+    for g, q in br.items():
+        if "JAKARTA" in str(g).upper():
+            try:
+                return int(_acc_qty(q))
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+def _t_buat_permintaan_barang(args: dict, user: dict) -> dict:
+    """PERMINTAAN BARANG (Purchase Requisition) di Accurate — dokumen permintaan
+    stok ke bagian pembelian. ⚠️ OPERASI TULIS ke ERP: WAJIB 2 langkah (pratinjau
+    → konfirmasi). ADMIN-ONLY.
+
+    ⛔ RUANG LINGKUP TERKUNCI (sejalan aturan penawaran): HANYA MEMBUAT dokumen &
+    mengatur KUANTITAS. Tak mengubah/menghapus apa pun di Accurate, tak mengisi
+    harga (harga urusan bagian pembelian)."""
+    if not _is_admin(user):
+        return {"denied": True,
+                "error": "Membuat Permintaan Barang di Accurate hanya untuk admin."}
+    if not accurate.available():
+        return {"error": "Accurate belum terkonfigurasi/aktif."}
+
+    barang = args.get("barang") or args.get("items") or []
+    if isinstance(barang, dict):
+        barang = [barang]
+    if not isinstance(barang, list) or not barang:
+        return {"error": "Sebutkan 'barang' = daftar {part_number, qty} yang diminta "
+                         "(ambil PERSIS dari daftar yang sudah tampil di percakapan ini)."}
+
+    # Normalisasi + qty default 1 (keputusan pemilik) — dedup PN, qty dijumlah.
+    urut: list[str] = []
+    qty_pn: dict[str, float] = {}
+    tanpa_qty: list[str] = []
+    for b in barang:
+        if isinstance(b, dict):
+            pn = str(b.get("part_number") or b.get("pn") or "").strip().upper()
+            q_raw = b.get("qty", b.get("jumlah"))
+        else:
+            pn, q_raw = str(b).strip().upper(), None
+        if not pn:
+            continue
+        try:
+            q = float(q_raw) if q_raw not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            q = 0.0
+        if q <= 0:
+            q = 1.0
+            if pn not in tanpa_qty:
+                tanpa_qty.append(pn)
+        if pn not in qty_pn:
+            urut.append(pn)
+            qty_pn[pn] = 0.0
+        qty_pn[pn] += q
+    if not urut:
+        return {"error": "Tak ada Part Number yang bisa diminta."}
+    if len(urut) > _PR_MAX_BARIS:
+        return {"error": f"Terlalu banyak baris ({len(urut)}). Maksimum {_PR_MAX_BARIS} "
+                         "per dokumen — pecah permintaannya."}
+
+    # Anti-karangan: PN wajib pernah muncul dari tool/riwayat giliran ini.
+    grounded = args.get("_grounded")
+    if isinstance(grounded, set):
+        bad = _drop_unit_tokens(sorted(set(urut) - grounded))
+        if bad:
+            return {"error": ("PN berikut TIDAK pernah muncul dari hasil tool/riwayat "
+                              "percakapan (dugaan karangan): " + ", ".join(bad[:10]) +
+                              ". ⛔ Panggil tool datanya dulu, lalu ulangi.")}
+
+    try:
+        accurate.ensure_session_force()
+    except accurate.AccurateError:
+        return {"found": False, "error":
+                "Accurate sedang tak bisa diakses (login gagal). Kemungkinan akun "
+                "Accurate sedang dipakai login di perangkat lain (akun hanya 1 sesi). "
+                "Coba lagi sebentar."}
+
+    sektor = (args.get("sektor") or accurate._PR_SEKTOR_DEFAULT).strip()
+    no_unit = (args.get("no_unit") or accurate._PR_NO_UNIT_DEFAULT).strip()
+    tanggal = (args.get("tanggal") or "").strip() or time.strftime("%d/%m/%Y")
+
+    lines: list[dict] = []
+    tak_ada: list[str] = []
+    for pn in urut:
+        try:
+            it = accurate.item_for_quotation(pn)
+        except accurate.AccurateError as e:
+            return {"found": False, "error": f"Accurate bermasalah saat mencari '{pn}': {e}"}
+        if not it:
+            tak_ada.append(pn)
+            continue
+        lines.append({"item_id": it["id"], "name": it["name"], "qty": qty_pn[pn],
+                      "unit_id": it["unit_id"], "unit": it["unit"], "pn": pn,
+                      "sektor": sektor, "no_unit": no_unit,
+                      "kts_jkt": _pr_kts_jkt(pn)})
+    if tak_ada:
+        # Pola sama dengan penawaran: satu PN tak dikenal = BATAL semua, jangan
+        # diam-diam membuat dokumen setengah isi di ERP.
+        return {"found": False, "pn_tidak_ada": tak_ada,
+                "error": (f"{len(tak_ada)} Part Number tidak ada di Accurate — permintaan "
+                          "DIBATALKAN seluruhnya (dokumen tak dibuat). Sampaikan daftarnya "
+                          "ke user; ⛔ JANGAN mengganti dengan PN mirip/pengganti.")}
+
+    baris_tampil = [{"part_number": ln["pn"], "nama": ln["name"], "qty": ln["qty"],
+                     "satuan": ln["unit"], "kts_jkt": ln["kts_jkt"]} for ln in lines]
+
+    if not args.get("konfirmasi"):
+        nomor = (args.get("nomor") or "").strip()
+        try:
+            nomor = nomor or accurate.next_pr_number()
+        except accurate.AccurateError as e:
+            return {"found": False, "error": f"Gagal menghitung nomor permintaan: {e}"}
+        return {
+            "found": False, "pratinjau": True, "nomor_diusulkan": nomor,
+            "tanggal": tanggal, "sektor": sektor, "no_unit": no_unit,
+            "jumlah_baris": len(lines), "baris": baris_tampil,
+            **({"qty_default_1": tanpa_qty} if tanpa_qty else {}),
+            "jawaban_wajib": (
+                "Ini PRATINJAU — dokumen BELUM dibuat. Tampilkan ke user: nomor, tanggal, "
+                f"dan {len(lines)} baris (PN, nama, qty, satuan). "
+                + (f"⚠️ Qty {len(tanpa_qty)} part TIDAK disebut user → dipakai 1; sebutkan "
+                   "ini supaya bisa dikoreksi. " if tanpa_qty else "")
+                + "Kolom wajib terisi otomatis: Sektor='" + sektor + "', No Unit='" + no_unit
+                + "', Kts Jkt = stok Jakarta saat ini per part. MINTA PERSETUJUAN user, lalu "
+                  "panggil lagi tool ini dengan konfirmasi=true + 'barang' yang SAMA "
+                  "(ikutkan 'nomor' dari 'nomor_diusulkan'). ⛔ JANGAN konfirmasi sendiri."),
+        }
+
+    nomor = (args.get("nomor") or "").strip()
+    try:
+        nomor = nomor or accurate.next_pr_number()
+        hasil = accurate.create_purchase_requisition(
+            number=nomor, lines=lines, transdate=tanggal,
+            description=(args.get("catatan") or "").strip())
+    except accurate.AccurateError as e:
+        return {"found": False, "error": f"Accurate menolak membuat permintaan: {e}"}
+    return {
+        "found": True, "nomor": hasil.get("number") or nomor, "id": hasil.get("id"),
+        "tanggal": tanggal, "jumlah_baris": len(lines), "baris": baris_tampil,
+        "sektor": sektor, "no_unit": no_unit,
+        "catatan": ("Permintaan Barang BERHASIL dibuat di Accurate. Sebut NOMOR + jumlah "
+                    "baris + tanggalnya; sarankan user mengeceknya di menu Permintaan "
+                    "Barang Accurate. ⛔ JANGAN mengklaim dokumen sudah disetujui/diproses "
+                    "pembelian, dan JANGAN menjanjikan bisa mengubah/menghapusnya lewat "
+                    "asisten — asisten hanya bisa MEMBUAT."),
+    }
+
+
 def _t_sheet_jadi_penawaran(args: dict, user: dict) -> dict:
     """Jadikan Excel unggahan (PN + Qty) → Penawaran Accurate + PDF. Admin / grant
     ai_penawaran. ⛔ PN tak ada di Accurate = BATAL (tak pakai 'mungkin maksud').

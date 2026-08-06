@@ -2062,6 +2062,68 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         })
 
+    # Permintaan Barang (Purchase Requisition) — TULIS ke Accurate, ADMIN saja.
+    if _is_admin(user):
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "buat_permintaan_barang",
+                "description": (
+                    "Buat PERMINTAAN BARANG (Purchase Requisition) di Accurate — dokumen "
+                    "permintaan stok ke bagian pembelian. Dipakai saat user minta 'masukkan "
+                    "ke permintaan barang Accurate', 'buatkan permintaan barang', 'request "
+                    "stok part ini ke pembelian' — termasuk melanjutkan daftar yang BARU "
+                    "SAJA tampil di chat (mis. hasil part_fast_moving): ambil PN-nya PERSIS "
+                    "dari daftar itu.\n"
+                    "⚠️ OPERASI TULIS & PERMANEN. WAJIB 2 LANGKAH: panggil DULU tanpa "
+                    "konfirmasi → tampilkan PRATINJAU (nomor, tanggal, daftar PN+qty) dan "
+                    "MINTA PERSETUJUAN user; hanya setelah user setuju panggil lagi dengan "
+                    "konfirmasi=true. ⛔ JANGAN langsung konfirmasi=true.\n"
+                    "⛔ NOMOR dibuat sistem = 'PERMINTAAN-01', 'PERMINTAAN-02', dst — jangan "
+                    "minta nomor ke user. QTY: pakai yang user sebut; yang tak disebut diisi "
+                    "1 dan itu DIBERITAHUKAN di pratinjau. Kolom wajib Accurate (Sektor, No "
+                    "Unit, Kts Jkt) diisi sistem: 'MASPART', 'STOK', dan stok Jakarta saat "
+                    "ini. HARGA tidak diisi (urusan bagian pembelian).\n"
+                    "⛔ Asisten HANYA bisa MEMBUAT: tak bisa mengubah, menghapus, atau "
+                    "menyetujui dokumen. PN yang tak ada di Accurate → SELURUH permintaan "
+                    "dibatalkan (jangan ganti dengan PN mirip)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "barang": {
+                            "type": "array",
+                            "description": ("Daftar barang yang diminta — PN diambil PERSIS "
+                                            "dari hasil tool/daftar di percakapan ini."),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "part_number": {"type": "string", "description": "Part Number (harus ada di Accurate)."},
+                                    "qty": {"type": "number", "description": "Kuantitas diminta. Kosong = 1."},
+                                },
+                                "required": ["part_number"],
+                            },
+                        },
+                        "konfirmasi": {
+                            "type": "boolean",
+                            "description": ("true HANYA setelah user menyetujui pratinjau. "
+                                            "Default false = pratinjau."),
+                        },
+                        "nomor": {"type": "string",
+                                  "description": "Ikutkan 'nomor_diusulkan' dari pratinjau saat konfirmasi."},
+                        "tanggal": {"type": "string",
+                                    "description": "Tanggal dd/mm/yyyy (opsional; default hari ini)."},
+                        "sektor": {"type": "string",
+                                   "description": "Kolom wajib 'Sektor'. Kosong = MASPART."},
+                        "no_unit": {"type": "string",
+                                    "description": "Kolom wajib 'No Unit'. Kosong = STOK (permintaan pengisian stok)."},
+                        "catatan": {"type": "string", "description": "Keterangan dokumen (opsional)."},
+                    },
+                    "required": ["barang"],
+                },
+            },
+        })
+
     # Template Excel kosong — TANPA lampiran (semua peran). User isi PN+Qty lalu
     # unggah lagi untuk diolah/dijadikan penawaran.
     specs.append({

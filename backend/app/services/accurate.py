@@ -1526,8 +1526,11 @@ def _report_base() -> str:
     return f"https://{get_settings().accurate_host}".replace(".accurate.id", "-report.accurate.id")
 
 
-def _harvest_usi(session: dict[str, str]) -> str:
-    """Ambil token `_usi` dari respons init-sales-quotation.do (satu-satunya sumber)."""
+def _harvest_usi(session: dict[str, str],
+                 path: str = "customer/init-sales-quotation.do") -> str:
+    """Ambil token `_usi` dari respons init-<modul>.do (satu-satunya sumber).
+    `path` bisa modul lain (mis. vendor/init-purchase-requisition.do) — tokennya
+    milik SESI, tapi hanya keluar lewat halaman init sebuah modul."""
     dsi = session["dsi"]
     headers = {
         "User-Agent": _UA, "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -1536,10 +1539,10 @@ def _harvest_usi(session: dict[str, str]) -> str:
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         "Cookie": f"JSESSIONID={session['jsessionid']}",
     }
-    r = requests.post(f"{_base()}/accurate/customer/init-sales-quotation.do",
+    r = requests.post(f"{_base()}/accurate/{path}",
                       data={"_dsi": dsi}, headers=headers, timeout=_HTTP_TIMEOUT, allow_redirects=False)
     if _looks_expired(r):
-        raise AccurateSessionExpired("Sesi Accurate kadaluarsa saat init penawaran.")
+        raise AccurateSessionExpired("Sesi Accurate kadaluarsa saat init dokumen.")
     m = _USI_RE.search(r.text)
     if not m:
         raise AccurateError("Gagal memperoleh token _usi dari init penawaran.")
@@ -1829,6 +1832,229 @@ def sales_quotation_pdf(quotation_id: int, *, layout_id: int = 50) -> bytes:
         if not credentials_configured():
             raise
         return _flow(_refresh_session())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  PERMINTAAN BARANG (Purchase Requisition / PR) — modul `vendor/`
+#
+#  Dibedah dari HAR UI Accurate (iris.accurate.id11.har, 2026-08-06). Sama pola
+#  dengan Penawaran (param.* form-urlencoded + _dsi & _usi), dengan tiga beda:
+#    • SIMPAN LEWAT LATAR: bg-save-purchase-requisition.do balas {b: bgPid},
+#      hasilnya baru muncul saat polling company/bg-proc-response.do FINISHED.
+#    • Header khas: requisitionType=PURCHASE, canProcess/canTransfer, TANPA
+#      pelanggan/gudang (ini dokumen permintaan, bukan transaksi barang).
+#    • TIGA kolom WAJIB di tiap baris (custom field perusahaan ini — labelnya
+#      dibaca dari init-purchase-requisition.do):
+#         charField1 = "Sektor"  charField2 = "No Unit"  charField4 = "Kts Jkt"
+#      Kosongkan salah satunya → Accurate menolak simpan.
+#  Aturan pemilik 2026-08-06: No Unit selalu "STOK", Kts Jkt = stok Jakarta saat
+#  ini (otomatis dari indeks), nomor dokumen dipasok MASPART (PERMINTAAN-NN).
+# ═══════════════════════════════════════════════════════════════════════════
+_PR_NUM_RE = re.compile(r"PERMINTAAN-0*(\d+)\s*$", re.I)
+_prdefaults_cache: dict[str, Any] = {"at": 0.0, "val": None}
+_PR_SEKTOR_DEFAULT = "MASPART"
+_PR_NO_UNIT_DEFAULT = "STOK"
+
+
+def _pr_defaults(session: dict[str, str]) -> dict[str, Any]:
+    """Default header (branch/currency/tax/countAutoNumber) dari PR TERAKHIR —
+    dibaca sekali & di-cache. Pola sama dgn _company_defaults: jangan hardcode id
+    yang bisa berbeda antar perusahaan."""
+    now = time.time()
+    if _prdefaults_cache["val"] and (now - _prdefaults_cache["at"]) < _QDEFAULTS_TTL:
+        return _prdefaults_cache["val"]
+    rows = _call(session, "vendor/search-purchase-requisition.do",
+                 {"start": 0, "limit": 1, "sp.pageSize": 1, "sp.start": 0,
+                  "sp.limit": 1}).get("d") or []
+    if not rows:
+        raise AccurateError("Tak ada dokumen Permintaan Barang acuan untuk membaca "
+                            "default perusahaan.")
+    v = _call(session, "vendor/view-purchase-requisition.do",
+              {"id": rows[0]["id"]}).get("d") or {}
+    val = {
+        "branchId": v.get("branchId") or 50,
+        "currencyId": v.get("currencyId") or 50,
+        "tax1Id": v.get("tax1Id") or 50,
+        "countAutoNumber": v.get("countAutoNumber") or 4,
+    }
+    _prdefaults_cache.update(at=now, val=val)
+    return val
+
+
+def next_pr_number() -> str:
+    """Nomor Permintaan Barang BERIKUTNYA: 'PERMINTAAN-NN'. Dihitung dari dokumen
+    Accurate sendiri (tahan restart, tak bentrok) — sama seperti penawaran,
+    penomoran otomatis Accurate TIDAK dipakai."""
+    def _do(sess):
+        rows = _call(sess, "vendor/search-purchase-requisition.do",
+                     {"start": 0, "limit": 200, "keywords": "PERMINTAAN",
+                      "sp.pageSize": 200, "sp.start": 0, "sp.limit": 200}).get("d") or []
+        mx = 0
+        for r in rows:
+            m = _PR_NUM_RE.match(str(r.get("number") or "").strip())
+            if m:
+                mx = max(mx, int(m.group(1)))
+        return f"PERMINTAAN-{mx + 1:02d}"
+
+    sess = _ensure_session()
+    try:
+        return _do(sess)
+    except AccurateSessionExpired:
+        if not credentials_configured():
+            raise
+        return _do(_refresh_session())
+
+
+def _pr_detail_body(lines: list[dict], transdate: str) -> dict[str, Any]:
+    """Bagian detailItem[i].* untuk calculate & save (satu sumber, jadi angka yang
+    dihitung Accurate persis atas baris yang akan disimpan)."""
+    body: dict[str, Any] = {}
+    for i, ln in enumerate(lines):
+        p = f"param.detailItem[{i}]."
+        body[p + "_status"] = "insert"
+        body[p + "seq"] = i + 1
+        body[p + "itemId"] = ln["item_id"]
+        body[p + "detailName"] = ln.get("name", "")
+        body[p + "quantity"] = ln["qty"]
+        body[p + "itemUnitId"] = ln.get("unit_id", 100)
+        body[p + "unitRatio"] = 1
+        # Permintaan Barang tak memutuskan harga — biar bagian pembelian yang
+        # mengisinya. Semua nol, persis seperti dokumen contoh pemilik.
+        body[p + "unitPrice"] = 0
+        body[p + "totalPrice"] = 0
+        body[p + "useTax1"] = "true"
+        body[p + "useTax2"] = "false"
+        body[p + "useTax3"] = "false"
+        body[p + "taxableAmount3"] = 0
+        body[p + "requiredDate"] = ln.get("required_date") or transdate
+        body[p + "orderedQuantity"] = 0
+        body[p + "receivedQuantity"] = 0
+        body[p + "transferQuantity"] = 0
+        body[p + "manualClosed"] = "false"
+        body[p + "manualClosedVisible"] = "false"
+        # ⛔ WAJIB — Accurate menolak baris bila salah satu kosong.
+        body[p + "charField1"] = ln.get("sektor") or _PR_SEKTOR_DEFAULT
+        body[p + "charField2"] = ln.get("no_unit") or _PR_NO_UNIT_DEFAULT
+        body[p + "charField4"] = ln.get("kts_jkt", 0)
+    return body
+
+
+def _calc_totals_pr(session, usi, defaults, lines, transdate) -> dict[str, Any]:
+    """Minta Accurate menghitung total/pajak PR (kita tak menebak rumus PPN)."""
+    body = {
+        "_dsi": session["dsi"], "_usi": usi,
+        "param.uniqueDataNumber": int(time.time() * 1000),
+        "param.needDetailResult": "false",
+        "param.transDate": transdate,
+        "param.requisitionType": "PURCHASE",
+        "param.currencyId": defaults["currencyId"], "param.rate": 1,
+        "param.branchId": defaults["branchId"], "param.tax1Id": defaults["tax1Id"],
+        "param.taxable": "true", "param.forceCalculatePercentTaxable": "true",
+        "param.canProcess": "true", "param.canTransfer": "true",
+        **_pr_detail_body(lines, transdate),
+    }
+    r = requests.post(f"{_base()}/accurate/vendor/calculate-header-purchase-requisition.do",
+                      data=body, headers=_sq_headers(session["dsi"], session["jsessionid"]),
+                      timeout=_HTTP_TIMEOUT, allow_redirects=False)
+    if _looks_expired(r):
+        raise AccurateSessionExpired("Sesi kadaluarsa saat hitung total permintaan.")
+    j = r.json()
+    if not j.get("s"):
+        raise AccurateError(f"Hitung total permintaan ditolak: {str(j.get('d'))[:150]}")
+    return j.get("d") or {}
+
+
+def _bg_tunggu(session: dict[str, str], usi: str, bgpid: str,
+               batas_detik: int = 90) -> dict[str, Any]:
+    """Tunggu proses LATAR Accurate selesai → isi `d.response`. Simpan PR memakai
+    jalur ini (bg-save), jadi 's:true' pertama BELUM berarti tersimpan."""
+    hdr = _sq_headers(session["dsi"], session["jsessionid"])
+    for _ in range(batas_detik):
+        rp = requests.post(f"{_base()}/accurate/company/bg-proc-response.do",
+                           data={"bgPid": bgpid, "keepCache": "true",
+                                 "_usi": usi, "_dsi": session["dsi"]},
+                           headers=hdr, timeout=_HTTP_TIMEOUT, allow_redirects=False)
+        if _looks_expired(rp):
+            raise AccurateSessionExpired("Sesi kadaluarsa saat menunggu proses latar.")
+        d = rp.json().get("d") or {}
+        if d.get("status") == "FINISHED":
+            return d.get("response") or {}
+        if d.get("status") in ("FAILED", "ERROR"):
+            raise AccurateError(f"Proses latar Accurate gagal: {str(d)[:200]}")
+        time.sleep(1)
+    raise AccurateError("Proses simpan di Accurate tak selesai (timeout).")
+
+
+def _save_pr(session, usi, defaults, *, number, lines, transdate, description,
+             totals) -> dict[str, Any]:
+    """POST bg-save-purchase-requisition.do lalu tunggu hasil latar → dict 'r'."""
+    body = {
+        "_dsi": session["dsi"], "_usi": usi,
+        "param.uniqueDataNumber": int(time.time() * 1000),
+        "param.needDetailResult": "false",
+        "param.attachmentCount": 0, "param.commentCount": 0,
+        "param.number": number,                       # MANUAL — bukan penomoran otomatis
+        "param.countAutoNumber": defaults["countAutoNumber"],
+        "param.transDate": transdate,
+        "param.description": description or "",
+        "param.requisitionType": "PURCHASE",
+        "param.currencyId": defaults["currencyId"], "param.rate": 1,
+        "param.branchId": defaults["branchId"], "param.tax1Id": defaults["tax1Id"],
+        "param.taxable": "true", "param.forceCalculatePercentTaxable": "true",
+        "param.saveAsStatusType": "UNAPPROVED",
+        "param.canProcess": "true", "param.canTransfer": "true",
+        "param.attachments": "[]",
+        "param.manualClosed": "false", "param.manualClosedVisible": "false",
+        # total & pajak DIHITUNG Accurate (bukan tebakan kita)
+        "param.subTotal": totals.get("subTotal", 0),
+        "param.totalAmount": totals.get("totalAmount", 0),
+        "param.tax1Amount": totals.get("tax1Amount", 0),
+        "param.tax1Rate": totals.get("tax1Rate", 0),
+        "param.percentTaxable": totals.get("percentTaxable", 100),
+        **_pr_detail_body(lines, transdate),
+    }
+    r = requests.post(f"{_base()}/accurate/vendor/bg-save-purchase-requisition.do",
+                      data=body, headers=_sq_headers(session["dsi"], session["jsessionid"]),
+                      timeout=_HTTP_TIMEOUT + 15, allow_redirects=False)
+    if _looks_expired(r):
+        raise AccurateSessionExpired("Sesi kadaluarsa saat simpan permintaan barang.")
+    j = r.json()
+    if not j.get("s") or not j.get("b"):
+        raise AccurateError(f"Accurate menolak simpan permintaan: {str(j.get('d'))[:200]}")
+    resp = _bg_tunggu(session, usi, j["b"])
+    if not resp.get("s"):
+        raise AccurateError(f"Simpan permintaan gagal: {str(resp.get('d'))[:200]}")
+    return resp.get("r") or {}
+
+
+def create_purchase_requisition(*, number: str, lines: list[dict], transdate: str,
+                                description: str = "") -> dict[str, Any]:
+    """Buat PERMINTAAN BARANG (Purchase Requisition).
+
+    `lines` = [{item_id, name, qty, unit_id, sektor, no_unit, kts_jkt}] —
+    tiga yang terakhir mengisi kolom WAJIB Sektor/No Unit/Kts Jkt.
+    `number` WAJIB (manual, lihat next_pr_number). Return {id, number, jumlah_baris}."""
+    if not (number or "").strip():
+        raise AccurateError("Nomor permintaan barang wajib diisi (manual).")
+    if not lines:
+        raise AccurateError("Minimal satu baris barang.")
+
+    def _flow(sess):
+        usi = _harvest_usi(sess, "vendor/init-purchase-requisition.do")
+        defs = _pr_defaults(sess)
+        totals = _calc_totals_pr(sess, usi, defs, lines, transdate)
+        return _save_pr(sess, usi, defs, number=number, lines=lines, transdate=transdate,
+                        description=description, totals=totals)
+
+    sess = _ensure_session()
+    try:
+        r = _flow(sess)
+    except AccurateSessionExpired:
+        if not credentials_configured():
+            raise
+        r = _flow(_refresh_session())
+    return {"id": r.get("id"), "number": r.get("number") or number,
+            "jumlah_baris": len(lines)}
 
 
 # ⛔⛔ SENGAJA TIDAK ADA fungsi hapus/ubah penawaran (delete/update/void). Aturan

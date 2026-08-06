@@ -1622,6 +1622,7 @@ _TOOL_LABEL = {
     "banding_rangka_massal": "Membandingkan banyak unit",
     "banding_part_armada": "Membandingkan part armada",
     "buat_penawaran": "Membuat penawaran (Accurate)",
+    "buat_permintaan_barang": "Membuat permintaan barang (Accurate)",
     "buat_excel": "Menyiapkan file Excel",
     "excel_bom_rangka": "Menyiapkan Excel BOM unit",
     "excel_stok_gudang": "Menyiapkan Excel stok",
@@ -2216,7 +2217,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 for lc in leaked:
                     name = lc["name"]
                     lc_args = dict(lc["arguments"] or {})
-                    if name in ("buat_excel", "hitung_part"):   # pagar anti-karangan PN
+                    if name in ("buat_excel", "hitung_part",
+                                "buat_permintaan_barang"):   # pagar anti-karangan PN
                         lc_args["_grounded"] = grounded
                     if _args_has_rangka(lc_args):
                         rangka_tool_attempted = True
@@ -2430,7 +2432,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 args = json.loads(fn.get("arguments") or "{}")
             except Exception:
                 args = {}
-            if name in ("buat_excel", "hitung_part"):   # pagar anti-karangan PN
+            if name in ("buat_excel", "hitung_part",
+                        "buat_permintaan_barang"):           # pagar anti-karangan PN
                 args = {**args, "_grounded": grounded}
             return name, args
 

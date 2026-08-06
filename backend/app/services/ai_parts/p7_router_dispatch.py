@@ -225,6 +225,7 @@ _DISPATCH = {
     "sheet_cek_qty": _t_sheet_cek_qty,
     "sheet_pilih_sheet": _t_sheet_pilih_sheet,
     "buat_penawaran": _t_buat_penawaran,
+    "buat_permintaan_barang": _t_buat_permintaan_barang,
 }
 
 
