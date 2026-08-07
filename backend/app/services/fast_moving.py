@@ -72,6 +72,11 @@ _KAMUS_DEFAULT = {
         "karet": ["rubber mount", "rubber support", "rubber bushing",
                   "rubber bearing", "cab mount", "橡胶支座", "橡胶衬套",
                   "橡胶轴承", "缓冲块"],
+        # Aksesori LISTRIK yang menempel di mesin. Untuk unit bermesin Weichai
+        # keduanya TIDAK ADA di pohon Atlas (sama seperti element filter mesin)
+        # — ikut ditambal dari EPC Weichai, lihat _lengkapi_mesin.
+        "kelistrikan_mesin": ["alternator", "generator", "starter motor",
+                              "start motor", "发电机", "起动机", "启动机"],
     },
     # Nama LAPANGAN Indonesia (lihat _istilah). Aturan BERURUT: yang khusus
     # dulu ('fuel coarse filter' sebelum 'fuel filter'), umum belakangan.
@@ -116,6 +121,10 @@ _KAMUS_DEFAULT = {
         {"id": "karet support/mounting",
          "kata": ["rubber mount", "rubber support", "rubber bushing",
                   "rubber bearing", "cab mount", "橡胶支座", "缓冲块"]},
+        {"id": "motor starter (dinamo starter)",
+         "kata": ["starter motor", "start motor", "起动机", "启动机"]},
+        {"id": "alternator (dinamo ampere)",
+         "kata": ["alternator", "generator", "发电机"]},
     ],
 }
 
@@ -273,6 +282,111 @@ def _slot_key(nama_en: str, nama_cn: str) -> str:
 _SUFFIX_RE = re.compile(r"/\d{1,2}$")
 
 
+# ── Pelengkap MESIN WEICHAI ─────────────────────────────────────────────────
+# Katalog EPC Sinotruk BERHENTI di batas mesin: untuk unit bermesin Weichai,
+# element filter oli & solar mesin TIDAK ADA di pohon Atlas — mereka hanya hidup
+# di EPC Weichai. Akibatnya daftar fast moving bolong justru di part yang paling
+# sering diganti (terukur 2026-08-07: 17 dari 42 model tanpa slot filter oli
+# mesin sama sekali). `_t_filter_unit` sudah lama menambal ini per-unit lewat
+# `_weichai_filter_fallback`; di sini tambalannya dipasang di HULU (builder)
+# supaya dataset per-model ikut lengkap.
+#
+# Dibayar SEKALI saat build harian, bukan tiap kali user bertanya: jembatan SSO
+# Weichai panggilan pertamanya lambat. Hasilnya di-cache per RANGKA di disk —
+# BOM mesin praktis statis, jadi build besok tak menembak jaringan lagi.
+# PEMICU: dua element inilah yang PASTI hilang saat mesinnya Weichai (preseden
+# `_t_filter_unit`), jadi ketiadaannya = sinyal "unit ini bermesin Weichai".
+_ID_MESIN_PEMICU = {"filter oli mesin", "filter solar halus (atas)"}
+# PANEN: begitu bridge terbuka, sekalian ambil aksesori listrik mesin — mahalnya
+# ada di panggilan pertama, bukan di jumlah baris yang dibaca.
+_ID_MESIN_AMBIL = _ID_MESIN_PEMICU | {"alternator (dinamo ampere)",
+                                      "motor starter (dinamo starter)"}
+_WC_TERMS = ["filter", "滤芯", "alternator", "generator", "发电机",
+             "starter", "起动机", "启动机"]
+_WC_SAMPEL_MAKS = 2          # unit sampel yang dicoba per model
+_WC_TTL = 30 * 24 * 3600.0   # sukses: BOM mesin statis
+_WC_TTL_GAGAL = 6 * 3600.0   # gagal: jangan menghantam bridge tiap build
+_WC_AKTIF = True             # kill-switch (di-monkeypatch test)
+
+
+def _wc_cache_path() -> Path:
+    return _dir_out() / "weichai_mesin.json.gz"
+
+
+def _wc_ambil(frame: str, cache: dict, stat: Counter) -> list[dict]:
+    """Baris filter mesin Weichai untuk satu rangka — lewat cache disk.
+    [] bila unit ini bukan bermesin Weichai / bridge gagal (fail-open:
+    kegagalan TIDAK boleh menjatuhkan build seluruh dataset)."""
+    import time as _t
+
+    e = cache.get(frame)
+    if e:
+        umur = _t.time() - float(e.get("at") or 0)
+        if umur <= (_WC_TTL_GAGAL if e.get("err") else _WC_TTL):
+            stat["cache"] += 1
+            return list(e.get("rows") or [])
+    try:
+        from . import epc_weichai
+        res = epc_weichai.find_parts(frame, _WC_TERMS) or {}
+    except Exception:
+        logger.exception("fast_moving: EPC Weichai gagal utk %s", frame)
+        res = {"_err": "exception"}
+    if res.get("_err") or not res.get("found"):
+        # BUKAN unit Weichai, atau bridge/sesi bermasalah — dua-duanya tak ada
+        # yang bisa ditambahkan. Dibedakan hanya untuk TTL cache & telemetri.
+        stat["gagal" if res.get("_err") else "bukan_weichai"] += 1
+        cache[frame] = {"at": _t.time(), "err": res.get("_err") or "not_found",
+                        "rows": []}
+        return []
+    rows = [{"pn": str(h.get("pn") or "").strip().upper(),
+             "nama": " ".join(str(h.get("nama") or "").split()),
+             "group": " ".join(str(h.get("group") or "").split())}
+            for h in (res.get("hasil") or []) if (h or {}).get("pn")]
+    stat["ambil"] += 1
+    cache[frame] = {"at": _t.time(), "rows": rows}
+    return rows
+
+
+def _lengkapi_mesin(per_model: dict, kamus: dict) -> Counter:
+    """Tambahkan baris filter mesin Weichai ke model yang pohon Sinotruk-nya
+    tak memuatnya. Memutasi `per_model` di tempat; return telemetri."""
+    stat: Counter = Counter()
+    if not _WC_AKTIF or not per_model:
+        return stat
+    cache = load_json(_wc_cache_path(), default={}) or {}
+    for model, m in sorted(per_model.items()):
+        punya = {r.get("id") for rows in m["unit"].values() for r in rows}
+        if _ID_MESIN_PEMICU & punya:
+            continue                       # pohon Sinotruk sudah lengkap
+        stat["model_bolong"] += 1
+        for frame in list(m["unit"])[:_WC_SAMPEL_MAKS]:
+            tambah = 0
+            for h in _wc_ambil(frame, cache, stat):
+                kat = _klasifikasi(h["nama"], h["nama"], kamus)
+                if not kat:
+                    continue
+                idl = _istilah(h["nama"], h["nama"], kamus)
+                if idl not in _ID_MESIN_AMBIL:
+                    continue               # hanya tutup lubang MESIN-nya
+                pn = h["pn"]
+                m["unit"][frame].append({
+                    "kat": kat, "slot": _slot_key(h["nama"], h["nama"]),
+                    "id": idl, "pn": _SUFFIX_RE.sub("", pn), "pn_asli": pn,
+                    "nama": h["nama"], "nama_cn": h["nama"], "qty": None,
+                    "assembly": h["group"], "pengganti": [], "wc": True,
+                })
+                tambah += 1
+            if tambah:
+                stat["baris"] += tambah
+                stat["model_ditambal"] += 1
+                break                      # satu unit sampel sudah cukup
+    try:
+        write_json_gz(_wc_cache_path(), cache)
+    except Exception:  # pragma: no cover — cache gagal tulis ≠ build gagal
+        logger.exception("fast_moving: gagal menyimpan cache Weichai")
+    return stat
+
+
 def build() -> dict:
     """Bangun data/fast_moving/fast_moving.json.gz dari cache EPC + populasi.
     Return ringkasan {model_n, slot_n, unit_dipakai, unit_tanpa_populasi}."""
@@ -324,6 +438,10 @@ def build() -> dict:
                               if (g or {}).get("pn")],
             })
 
+    # Tambal lubang MESIN sebelum agregasi: unit bermesin Weichai tak punya
+    # element filter oli/solar di pohon Sinotruk (lihat _lengkapi_mesin).
+    stat_wc = _lengkapi_mesin(per_model, kamus)
+
     # bentuk final (deterministik: sort model, slot, varian)
     final_model: dict[str, dict] = {}
     slot_n = 0
@@ -372,7 +490,10 @@ def build() -> dict:
                 v = agg.setdefault(k, {}).setdefault(r["pn"], {
                     "pn": r["pn"], "nama": r["nama"], "nama_cn": r["nama_cn"],
                     "qty": r["qty"], "n_unit": 0, "tahun": set(),
-                    "pn_sub": set(), "pengganti": []})
+                    "pn_sub": set(), "pengganti": [],
+                    # Asal katalog: baris dari EPC Weichai TIDAK boleh tampak
+                    # seolah datang dari pohon Sinotruk unit itu.
+                    **({"sumber": "EPC Weichai"} if r.get("wc") else {})})
                 v["n_unit"] += 1
                 if r["pn_asli"] != r["pn"]:
                     v["pn_sub"].add(r["pn_asli"])
@@ -394,6 +515,10 @@ def build() -> dict:
                 **({"nama_id": sorted(c_id.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]}
                    if c_id else {}),
                 **({"ko_eksis": True} if ko[(kat, nama_slot)] > 1 else {}),
+                # Slot yang SELURUH variannya dari EPC Weichai: penyaji wajib
+                # bisa menyebut asalnya (part mesin memang tak ada di Atlas).
+                **({"sumber": "EPC Weichai"}
+                   if vs and all(v.get("sumber") == "EPC Weichai" for v in vs) else {}),
                 "varian": [{**v, "tahun": sorted(v["tahun"]),
                             "pn_sub": sorted(v["pn_sub"])} for v in vs],
             })
@@ -409,7 +534,8 @@ def build() -> dict:
     write_json_gz(_dir_out() / "fast_moving.json.gz",
                   {"versi": 1, "model": final_model})
     ringkas = {"model_n": len(final_model), "slot_n": slot_n,
-               "unit_dipakai": unit_dipakai, "unit_tanpa_populasi": unit_tanpa_pop}
+               "unit_dipakai": unit_dipakai, "unit_tanpa_populasi": unit_tanpa_pop,
+               "mesin_weichai": dict(stat_wc)}
     logger.info("fast_moving: build %s", ringkas)
     return ringkas
 

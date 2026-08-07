@@ -114,6 +114,15 @@
       "橡胶衬套",
       "橡胶轴承",
       "缓冲块"
+    ],
+    "kelistrikan_mesin": [
+      "alternator",
+      "generator",
+      "starter motor",
+      "start motor",
+      "发电机",
+      "起动机",
+      "启动机"
     ]
   },
   "istilah": [
@@ -314,6 +323,23 @@
         "缓冲块"
       ],
       "urut": 60
+    },
+    {
+      "id": "motor starter (dinamo starter)",
+      "kata": [
+        "starter motor",
+        "start motor",
+        "起动机",
+        "启动机"
+      ]
+    },
+    {
+      "id": "alternator (dinamo ampere)",
+      "kata": [
+        "alternator",
+        "generator",
+        "发电机"
+      ]
     }
   ]
 }

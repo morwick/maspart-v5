@@ -132,6 +132,22 @@ def _jangan_status_jual_sims_nyata(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _jangan_bridge_weichai_nyata(request, monkeypatch):
+    """`fast_moving.build()` (2026-08-07) menambal lubang part MESIN dari EPC
+    Weichai — itu panggilan JARINGAN via bridge SSO. Setiap test yang memanggil
+    build() jadi ikut menembak Weichai sungguhan: lambat, rapuh, dan hasilnya
+    menyusup ke dataset uji (2 test fast_moving sempat gagal karenanya).
+    Dimatikan untuk semua test; modul pengujinya sendiri menyalakan ulang —
+    pola yang sama dgn _jangan_cari_master_sims_nyata."""
+    try:
+        from app.services import fast_moving
+        if request.module.__name__ != "test_fast_moving_weichai":
+            monkeypatch.setattr(fast_moving, "_WC_AKTIF", False)
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _bersihkan_idempotensi_order():
     """Cache idempotensi POST /orders (L5) proses-lokal → bersihkan antar-test
     agar hasil order satu test tak bocor ke test lain yang sidik jarinya sama."""
