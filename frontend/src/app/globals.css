@@ -291,8 +291,10 @@ body {
 /* ── Tabel di jawaban Asisten (markdown chat) — TURUNAN .tbl ──
    Dipakai components/Markdown.tsx. Sengaja hanya menimpa TOKEN yang sudah
    dibaca .tbl (--row-h/--row-px/--cell-fs) supaya tabel chat lebih rapat
-   tanpa menduplikasi sistem desain. Di-scope ke .md-tbl*/.md-card* — BUKAN ke
-   .chat-bubble-ai — karena Markdown.tsx juga dipakai di /admin/feedback. */
+   tanpa menduplikasi sistem desain. Di-scope ke kelas md-tbl & md-card — BUKAN
+   ke .chat-bubble-ai — karena Markdown.tsx juga dipakai di /admin/feedback.
+   (⚠️ jangan menulis pola berbintang-garis-miring di komentar: itu menutup
+   komentar CSS lebih awal & menyisakan teks jadi CSS sampah.) */
 .md-tbl-wrap {
   overflow-x: auto;
   margin: 8px 0;
