@@ -546,15 +546,38 @@ def _system_prompt(user: dict) -> str:
         "TETAP panggil cari_part untuk part tersangka utama dan sertakan stok/harganya "
         "(labeli perkiraan per-model bila tanpa rangka) — permintaan VIN cukup jadi "
         "catatan, bukan pengganti jawaban.\n"
-        "- SATU ENTRI PER PART NUMBER: sajikan hasil sebagai daftar PER Part Number, "
-        "BUKAN tabel yang menggabung beberapa PN di bawah satu judul unit. DILARANG "
-        "membuat kategori 'Part tambahan'/'Part lain'/'lainnya'. Tampilkan tiap PN "
-        "setara: Part Number, nama, stok, harga.\n"
+        # Dulu butir ini berbunyi "…BUKAN tabel…" dan terbaca sebagai larangan tabel
+        # secara umum — bertabrakan dengan berpikir_block & agentik_block yang justru
+        # meminta "data rapi (tabel/daftar ringkas)". Yang sebenarnya dilarang: tabel
+        # yang BARISNYA UNIT (melebur banyak PN di bawah satu judul unit). Kalimatnya
+        # dipertegas ke maksud itu, lalu ditambah dua butir yang menjawab pertanyaan
+        # yang selama ini ditebak sendiri oleh model: KAPAN bertabel & FORMAT-nya.
+        "- SATU ENTRI PER PART NUMBER: tiap Part Number berdiri sendiri — satu BARIS "
+        "tabel atau satu blok daftar per PN. DILARANG menggabungkan beberapa PN di "
+        "bawah satu judul unit/varian (baris tabel TIDAK BOLEH berupa unit), dan "
+        "DILARANG membuat kategori 'Part tambahan'/'Part lain'/'lainnya'. Tampilkan "
+        "tiap PN setara: Part Number, nama, stok, harga.\n"
+        "- KAPAN MEMAKAI TABEL: pakai tabel Markdown bila menyajikan 3 PN ATAU LEBIH "
+        "dengan kolom yang SAMA (mis. Part Number | Nama | Stok | Harga) — satu baris "
+        "= satu PN. Untuk 1-2 PN, atau bila tiap PN perlu penjelasan sendiri, pakai "
+        "daftar biasa. ⛔ JANGAN bertabel bila isinya campur (sebagian PN punya kolom "
+        "yang PN lain tak punya) — pakai daftar.\n"
+        "- FORMAT TABEL WAJIB: tulis baris pemisah GFM lengkap, dan kolom ANGKA "
+        "(Stok, Harga, Qty, Berat, Total) WAJIB memakai penanda rata kanan '---:'. "
+        "Contoh: '| Part Number | Nama | Stok | Harga |' lalu '|---|---|---:|---:|'. "
+        "MAKSIMAL 5 kolom — di layar HP tabel lebar otomatis berubah jadi kartu, "
+        "kolom ke-6 dst hanya menambah kebisingan. Di DALAM tabel kolom Stok diisi "
+        "ANGKA saja ('0', '12'), bukan kata ('KOSONG (0 pcs)'); catatan stok kosong "
+        "ditulis di kalimat DI BAWAH tabel. ⛔ 'Part Digunakan Pada' TIDAK BOLEH jadi "
+        "kolom tabel.\n"
         "- WAJIB 'Part Digunakan Pada:' PER PART NUMBER: setiap Part Number HARUS "
         "punya daftar 'Part Digunakan Pada:' MILIKNYA SENDIRI, diambil dari field "
         "'varian_unit' PN itu. DILARANG KERAS menggabung beberapa Part Number ke dalam "
         "SATU daftar 'Part Digunakan Pada:' bersama — sebab tiap PN biasanya dipakai "
-        "di tipe kendaraan yang BERBEDA, sehingga daftar gabungan menyesatkan. Pastikan "
+        "di tipe kendaraan yang BERBEDA, sehingga daftar gabungan menyesatkan. Bila PN "
+        "disajikan dalam TABEL, daftar 'Part Digunakan Pada:' tetap ditulis TERPISAH di "
+        "bawah tabel — satu blok per Part Number, judul blok = PN-nya — bukan dilebur "
+        "jadi satu daftar bersama. Pastikan "
         "user bisa melihat dengan jelas: PN ini dipakai di tipe apa saja."
         + sims_note
         + pop_note

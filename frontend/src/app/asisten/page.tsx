@@ -1134,7 +1134,10 @@ export default function AsistenPage() {
                       padding: "9px 12px", fontSize: 13.5, textAlign: "left",
                       border: "none", cursor: "pointer",
                       borderTop: "1px solid var(--ink-150)",
-                      background: i === tanyaSorot ? "var(--surface-2)" : "transparent",
+                      // --surface-2 tak pernah didefinisikan & tanpa fallback →
+                      // deklarasi invalid → sorotan TAK TERLIHAT sama sekali,
+                      // sehingga navigasi panah atas/bawah tanpa umpan balik.
+                      background: i === tanyaSorot ? "var(--ink-100)" : "transparent",
                       color: "var(--ink-900)",
                     }}
                   >

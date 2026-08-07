@@ -288,6 +288,110 @@ body {
   color: var(--ink-900);
 }
 
+/* ── Tabel di jawaban Asisten (markdown chat) — TURUNAN .tbl ──
+   Dipakai components/Markdown.tsx. Sengaja hanya menimpa TOKEN yang sudah
+   dibaca .tbl (--row-h/--row-px/--cell-fs) supaya tabel chat lebih rapat
+   tanpa menduplikasi sistem desain. Di-scope ke .md-tbl*/.md-card* — BUKAN ke
+   .chat-bubble-ai — karena Markdown.tsx juga dipakai di /admin/feedback. */
+.md-tbl-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+  scrollbar-width: thin;
+}
+.md-tbl {
+  --row-h: 34px;
+  --row-px: 10px;
+  --cell-fs: 12.5px;
+}
+/* .tbl thead th sticky berguna di halaman berdaftar panjang; di dalam bubble
+   chat tak ada kontainer bertinggi tetap → sticky justru membuat header hanyut. */
+.md-tbl thead th {
+  position: static;
+  white-space: nowrap;
+}
+.md-tbl tbody tr:last-child td {
+  border-bottom: none;
+}
+.md-tbl td.pn,
+.md-tbl td.num {
+  white-space: nowrap;
+}
+.md-tbl .ctr {
+  text-align: center;
+}
+/* Chip <code> di dalam sel menumpuk abu-abu di atas baris — di tabel, teksnya
+   sudah cukup dibedakan lewat kolom. */
+.md-tbl td code {
+  background: transparent;
+  padding: 0;
+}
+/* Header di mode gelap: --ink-50 hampir menyatu dgn --paper (selisih ~2%). */
+[data-theme="dark"] .md-tbl thead th {
+  background: var(--ink-100);
+  border-bottom-color: var(--ink-200);
+}
+
+/* Kartu-per-baris: tabel >=4 kolom di layar sempit (bahasa visual ExcelCardShell) */
+.md-cards {
+  display: none;
+}
+.md-card {
+  border: 1px solid var(--ink-200);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+.md-card-title {
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-900);
+  border-bottom: 1px solid var(--ink-150);
+}
+.md-card-title.pn {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 500;
+}
+.md-card-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ink-100);
+}
+.md-card-row:last-child {
+  border-bottom: none;
+}
+.md-card-k {
+  font-size: 12px;
+  color: var(--ink-500);
+  flex-shrink: 0;
+}
+.md-card-v {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-900);
+  text-align: right;
+  min-width: 0;
+}
+.md-card-v.num {
+  font-variant-numeric: tabular-nums;
+}
+.md-card-v.pn {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+@media (max-width: 640px) {
+  .md-tbl-block.is-wide > .md-tbl-wrap {
+    display: none;
+  }
+  .md-tbl-block.is-wide > .md-cards {
+    display: grid;
+    gap: 8px;
+    margin: 8px 0;
+  }
+}
+
 /* ── Pills / badges ── */
 .pill {
   display: inline-flex;
