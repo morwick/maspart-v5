@@ -94,6 +94,29 @@ def test_deteksi_pn_weichai_murni_angka(monkeypatch):
     assert roles["Harga"] != "part_number"
 
 
+def test_deteksi_pn_pemaaf_suffix_varian(monkeypatch):
+    """Deteksi kolom PN memakai lookup yang SAMA dengan pengisian (rows_for_pns,
+    pemaaf suffix varian EPC). Dulu deteksi pakai search_exact_pns yang ketat →
+    kolom PN ber-suffix dinilai 'tak cocok katalog' dan KALAH oleh kolom kode
+    internal, padahal saat diisi part-nya ketemu."""
+    kat = [{"part_number": "WG9925520270", "part_name": "Spring bracket"},
+           {"part_number": "AZ9925520271", "part_name": "Leaf spring"}]
+    monkeypatch.setattr(ai_sheet.part_index, "search_exact_pns",
+                        lambda pns: [r for r in kat
+                                     if r["part_number"] in {str(p).upper() for p in pns}])
+    monkeypatch.setattr(ai_sheet.part_index, "_pn_flat_map", lambda: {})
+    data = _xlsx([
+        ["Kode Internal", "Part No."],          # kolom kode duluan (kiri)
+        ["ABC12345", "WG9925520270/2"],         # suffix varian pemasok
+        ["ABC12346", "AZ9925520271/1"],
+    ])
+    p = ai_sheet.parse_upload(data, "varian.xlsx")
+    assert p["ok"]
+    assert p["kolom_pn"] == "Part No."          # bukan 'Kode Internal'
+    assert p["pn_dikenal"] == 2                 # sinyal deteksi & pengisian sejalan
+    assert p["pn_tidak_dikenal_contoh"] == []
+
+
 def test_kolom_murni_angka_tanpa_bukti_katalog_bukan_pn(monkeypatch):
     """Guard: kolom murni-angka TANPA bukti katalog (mis. no. telp) TAK dipaksa PN."""
     monkeypatch.setattr(ai_sheet.part_index, "search_exact_pns", lambda pns: [])

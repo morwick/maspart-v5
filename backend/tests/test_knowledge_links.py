@@ -121,6 +121,33 @@ def test_terkait_exclude_dedup_cap(dunia):
     assert len(refs) == len(set(refs))
 
 
+def test_epc_edges_menyebut_cakupan_parsial(dunia):
+    """Edges EPC lahir dari cache yang isinya HANYA unit yang kebetulan pernah
+    disebut user → daftar modelnya POTONGAN. Judul posting terbawa apa adanya ke
+    jawaban model, jadi 'Dipakai di: A, B' polos terbaca sebagai klaim tuntas."""
+    from app.services.knowledge_util import write_json_gz
+    write_json_gz(dunia / "data" / "ai_belajar" / "part_unit_edges.json.gz",
+                  {"1754911580": {"models": ["SD16", "SD22"], "frames_n": 4,
+                                  "nama": "Oil filter"},
+                   "1754911581": {"models": [], "frames_n": 2, "nama": "Seal"}})
+    _fresh_load()
+    ents = kl.build()["entitas"]
+    p = next(x for x in ents["pn:1754911580"] if x["store"] == "epc_unit")
+    assert p["judul"].startswith("Dipakai di: SD16, SD22")
+    assert "unit terpantau" in p["judul"]          # cakupan ikut terbawa…
+    assert "unit_dari_part" in p["judul"]          # …beserta jalan ke daftar penuh
+    assert len(p["judul"]) <= kl._MAX_JUDUL_EPC    # kualifikasi tak terpotong
+    # Posting sisi MODEL juga jujur soal asal datanya.
+    pm = next(x for x in ents["model:SD16"] if x["store"] == "epc_unit")
+    assert "terpantau" in pm["judul"]
+
+
+def test_judul_store_lain_tetap_dipotong_70(dunia):
+    """Plafon longgar khusus epc_unit — store lain tak ikut melar."""
+    kl.build()
+    assert kl._judul("x" * 200) == "x" * kl._MAX_JUDUL
+
+
 def test_terkait_kosong_dan_file_absen(tmp_path, monkeypatch):
     class _S:
         data_path = tmp_path

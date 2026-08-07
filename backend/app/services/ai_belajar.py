@@ -51,9 +51,27 @@ _GAP_MAX = 100
 _GAP_OUTCOME_BUKAN_GAGAL = ("ok", "tanya")
 
 # Tool ISTILAH: kegagalan nf-nya = kandidat celah kamus sinonim.
-_TOOL_ISTILAH_NF = ("cari_part", "cari_part_di_unit", "stok_gudang",
-                    "cari_filter_shantui", "cari_manual", "cari_pengetahuan",
-                    "jadwal_perawatan")
+#
+# ⚠️ SATU SUMBER: daftar ini HARUS memuat seluruh isi
+# `ai_parts/p7_router_dispatch.py::_TOOLS_ISTILAH` (tool yang argumen kata-kunci
+# lapangannya dijaga deterministik) — kalau sebuah tool cukup "istilah" untuk
+# dijaga di sana, kegagalan nf-nya juga bukti celah kamus di sini. Daftar ini
+# LEBIH LUAS: tool pencarian teks lain (manual, pengetahuan, jadwal, filter)
+# tidak punya penjaga istilah tapi nf-nya sama-sama bicara soal kosakata.
+# Sengaja TIDAK di-import dari sana: p7 hidup di namespace facade `ai_assistant`
+# (exec 9 file), dan TIDAK ADA satu pun modul services yang meng-import facade
+# itu — miner harian bukan tempat memulai ketergantungan seberat itu. Jadi:
+# tambah tool di p7._TOOLS_ISTILAH → tambahkan juga di sini.
+_TOOL_ISTILAH_NF = (
+    # ── cermin p7._TOOLS_ISTILAH (dijaga test_ai_belajar) ──
+    "cari_part", "cari_part_di_unit", "stok_gudang", "part_aus_dari_rangka",
+    "cek_massal_part_rangka", "cek_massal_part_mesin", "banding_part_armada",
+    "bom_dari_rangka", "excel_bom_rangka", "excel_stok_gudang",
+    # ── pencarian ber-istilah lain (tak punya penjaga argumen, nf-nya tetap
+    #    bicara soal kosakata) ──
+    "filter_unit", "cari_filter_shantui", "cari_manual", "cari_pengetahuan",
+    "jadwal_perawatan",
+)
 
 _PN_LIKE = re.compile(r"^[A-Z0-9\-./]{6,}$", re.IGNORECASE)
 _FRAME_RE = re.compile(r"\b(?:L[A-HJ-NPR-Z0-9]{16}|[A-Z]{2}\d{6})\b")

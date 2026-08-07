@@ -161,6 +161,108 @@ def test_generate_auto_approve_dan_reject(_env, monkeypatch):
     assert learn.generate(limit=10)["dibuat"] == 0
 
 
+# ── Anti-generik: trigger LLM tak boleh membajak pencarian ──────────────────
+
+def test_trigger_generik_dibuang_dan_ditandai(_env, monkeypatch):
+    """Keyword sudah lama dipagari katalog; TRIGGER dulu masuk apa adanya —
+    padahal trigger yang menentukan KAPAN keyword disuntikkan ke pencarian."""
+    search_log.record_miss("karet stabil", "nama", "search")
+    monkeypatch.setattr(learn, "_llm_usulan", lambda misses: [{
+        "query": "karet stabil",
+        # 'atas' (posisi) & 'harga part' (semua katanya generik) = pembajak;
+        # 'per daun' campuran → justru bentuk trigger terbaik, harus LOLOS.
+        "triggers": ["karet stabil", "atas", "harga part", "per daun", "ke"],
+        "keywords": ["stabilizer bushing"], "grup": "poros", "confidence": 0.95,
+    }])
+    monkeypatch.setattr(learn.part_index, "search_part_name", lambda k: [{"pn": "X"}])
+
+    u = learn.generate(limit=10)["usulan"][0]
+    assert u["triggers"] == ["karet stabil", "per daun"]
+    assert set(u["triggers_dibuang"]) == {"atas", "harga part", "ke"}
+    learn.approve("karet stabil")
+    assert sinonim.load()[0]["triggers"] == ["karet stabil", "per daun"]
+
+
+def test_semua_trigger_generik_ditolak_otomatis(_env, monkeypatch):
+    """Tak ada trigger yang selamat → entri mustahil berguna. Disimpan sbg
+    'rejected' supaya istilah itu tak dibelikan panggilan LLM lagi besok."""
+    search_log.record_miss("gambar unit", "nama", "search")
+    monkeypatch.setattr(learn, "_llm_usulan", lambda misses: [{
+        "query": "gambar unit", "triggers": ["gambar unit", "unit"],
+        "keywords": ["frame"], "grup": "umum", "confidence": 0.99}])
+    monkeypatch.setattr(learn.part_index, "search_part_name", lambda k: [{"pn": "X"}])
+
+    res = learn.generate(limit=10, auto_approve=True)
+    assert res["ditolak_generik"] == 1 and res["auto_disetujui"] == 0
+    assert sinonim.load() == []                       # kamus TIDAK tersentuh
+    assert learn.list_usulan("pending") == []
+    assert learn.list_usulan("rejected")[0]["id"] == "gambar unit"
+    # Tak diusulkan ulang → LLM tak dipanggil lagi.
+    monkeypatch.setattr(learn, "_llm_usulan", lambda misses: (_ for _ in ()).throw(
+        AssertionError("tidak boleh dipanggil — istilahnya sudah ditolak")))
+    assert learn.generate(limit=10)["dibuat"] == 0
+
+
+def test_approve_gerbang_terakhir_saat_admin_mengedit_trigger(_env, monkeypatch):
+    """Admin boleh mengedit triggers saat approve → saringan diulang di _apply."""
+    search_log.record_miss("karet stabil", "nama", "search")
+    monkeypatch.setattr(learn, "_llm_usulan", lambda misses: [{
+        "query": "karet stabil", "triggers": ["karet stabil"],
+        "keywords": ["stabilizer bushing"], "grup": "poros", "confidence": 0.9}])
+    monkeypatch.setattr(learn.part_index, "search_part_name", lambda k: [{"pn": "X"}])
+    learn.generate(limit=10)
+
+    with pytest.raises(RuntimeError, match="terlalu umum"):
+        learn.approve("karet stabil", triggers=["atas", "yang"])
+    assert sinonim.load() == []
+    # Trigger campuran tetap lolos; yang generik dibuang & dicatat.
+    u = learn.approve("karet stabil", triggers=["karet stabil", "atas"])
+    assert u["triggers"] == ["karet stabil"] and u["triggers_dibuang"] == ["atas"]
+    assert sinonim.load()[0]["triggers"] == ["karet stabil"]
+
+
+def test_validate_triggers_tak_menyentuh_istilah_lapangan_asli():
+    """Pagar kejut: istilah pendek yang MEMANG dipakai kamus kurasi ('per',
+    'aki', 'sein', 'kem') tak boleh ikut tersapu — saringan ini cuma untuk
+    pipeline otomatis, bukan koreksi kamus manusia."""
+    asli = ["per", "aki", "sein", "kem", "abs", "per daun", "cucuk per"]
+    layak, buang = learn._validate_triggers(asli)
+    assert layak == asli and buang == []
+
+
+def test_validate_triggers_membiarkan_frasa_gejala_dua_kata():
+    """'asap' & 'hitam' sendiri-sendiri tak menunjuk sistem apa pun, tapi 'asap
+    hitam' justru bentuk trigger paling berharga — dua kata sifat digabung sudah
+    membatasi diri sendiri. Hanya frasa yang SEMUANYA kata isi-kalimat yang jatuh."""
+    layak, buang = learn._validate_triggers(
+        ["asap hitam", "setir berat", "rem blong", "harga part", "cek stok"])
+    assert layak == ["asap hitam", "setir berat", "rem blong"]
+    assert buang == ["harga part", "cek stok"]
+
+
+# ── Kandidat: miss yang kamusnya SUDAH punya jawabannya ─────────────────────
+
+def test_kandidat_lewati_miss_yang_sudah_dicover_kamus(_env):
+    """Saringan sinonim.hit dulu hanya ada di jalur feedback; jalur miss
+    tertinggal, jadi 'kaca spion pecah' tetap dibelikan panggilan LLM padahal
+    trigger 'spion' sudah ada (hasilnya cuma entri kembar)."""
+    sinonim.add("body", ["spion"], ["mirror"])
+    search_log.record_miss("kaca spion pecah", "nama", "search")   # ter-cover
+    search_log.record_miss("spionnya buram", "nama", "search")     # ter-cover (klitika)
+    search_log.record_miss("karet stabil", "nama", "search")       # celah sungguhan
+    with learn._lock:
+        kandidat = learn._kandidat(10)
+    assert [k["query"] for k in kandidat] == ["karet stabil"]
+
+
+def test_cover_kamus_tak_kena_substring(_env):
+    """Pra-saring cepat tak boleh mengubah arti hit(): 'per' bukan 'persneling'."""
+    sinonim.add("suspensi", ["per"], ["spring"])
+    search_log.record_miss("persneling keras", "nama", "search")
+    with learn._lock:
+        assert [k["query"] for k in learn._kandidat(10)] == ["persneling keras"]
+
+
 def test_kandidat_skip_pn_dan_yang_sudah_di_kamus(_env, monkeypatch):
     sinonim.add("body", ["spion"], ["mirror"])
     search_log.record_miss("spion", "nama", "search")        # sudah di kamus

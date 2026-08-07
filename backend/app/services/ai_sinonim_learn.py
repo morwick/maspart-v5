@@ -4,7 +4,9 @@ Belajar sinonim OTOMATIS dari pencarian nihil (search_misses) — loop belajar a
 Alur: search_misses.json (istilah lapangan yang gagal dicari) → LLM (DeepSeek)
 mengusulkan mapping istilah Indonesia → kata kunci nama part Inggris → tiap
 keyword DIVALIDASI ke katalog lokal (part_index.search_part_name harus kena ≥1
-part; keyword yang tak terbukti ada di katalog dibuang) → usulan tersimpan di
+part; keyword yang tak terbukti ada di katalog dibuang) + tiap TRIGGER disaring
+anti-generik (_validate_triggers — trigger menentukan KAPAN keyword disuntikkan,
+jadi yang generik membajak pencarian) → usulan tersimpan di
 data/sinonim/usulan.json menunggu keputusan admin.
 
 Approve = sinonim.add() (langsung aktif di asisten, reload per-mtime) +
@@ -27,6 +29,7 @@ import requests
 
 from ..core.config import get_settings
 from . import ai_feedback, part_index, search_log, sinonim
+from .maksud import _GENERIK as _GENERIK_RUTE
 
 logger = logging.getLogger("maspart.sinonim")
 
@@ -81,13 +84,63 @@ def _existing_triggers() -> set[str]:
     return out
 
 
-def _fb_kandidat(have: set, seen: dict, taken: set, limit: int) -> list[dict]:
+# ── "Sudah ter-cover kamus?" — dipakai KEDUA jalur kandidat (miss & feedback) ──
+# Sumber kebenarannya tetap `sinonim.hit` (satu-satunya definisi cocok-tidaknya
+# trigger, termasuk toleransi klitika '-nya/-ku/-mu'). Yang ditambahkan di sini
+# hanya PRA-SARING murah: memanggil hit() untuk 1.000+ trigger × 300 miss makan
+# ±20 detik (cache regex `re` jebol di ±512 pola), dan ini jalan sambil memegang
+# `_lock`. Pra-saring memakai KATA PERTAMA trigger: agar hit() bisa benar, kata
+# itu WAJIB muncul sebagai kata utuh di pertanyaan — jadi trigger yang tak lolos
+# pra-saring mustahil cocok. Bila suatu saat hit() belajar toleransi AWALAN
+# (bukan cuma akhiran), pra-saring ini jadi terlalu ketat; akibatnya cuma
+# kandidat berlebih ke antrean admin, bukan kamus salah.
+_KLITIKA = ("nya", "ku", "mu")
+
+
+def _kata_kunci_teks(teks: str) -> set[str]:
+    """Kata pada teks + bentuk tanpa klitika ('filternya' → {'filternya','filter'})."""
+    out: set[str] = set()
+    for w in re.findall(r"\w+", (teks or "").lower()):
+        out.add(w)
+        for k in _KLITIKA:
+            if w.endswith(k) and len(w) - len(k) >= 3:   # ambang = sinonim._KLITIKA_MIN_LEN
+                out.add(w[: -len(k)])
+    return out
+
+
+def _peta_trigger(have) -> dict[str, list[str]]:
+    """kata PERTAMA trigger → daftar trigger utuh (indeks pra-saring)."""
+    peta: dict[str, list[str]] = {}
+    for t in have or []:
+        kata = re.findall(r"\w+", str(t).lower())
+        if kata:
+            peta.setdefault(kata[0], []).append(str(t))
+    return peta
+
+
+def _dicover_kamus(q: str, peta: dict[str, list[str]]) -> bool:
+    """True bila SATU trigger kamus sudah meng-cover pertanyaan ini — gap-nya
+    bukan di kamus, jadi jangan buang panggilan LLM untuk mengusulkannya lagi."""
+    for w in _kata_kunci_teks(q):
+        for t in peta.get(w) or []:
+            try:
+                if sinonim.hit(t, q):
+                    return True
+            except Exception:
+                return False       # kamus rusak ≠ alasan membuang kandidat
+    return False
+
+
+def _fb_kandidat(have: set, seen: dict, taken: set, limit: int,
+                 peta: dict[str, list[str]] | None = None) -> list[dict]:
     """Kandidat dari pertanyaan 👎 (ai_feedback rating='down' belum resolved) —
     loop feedback 2026-07-23: down-vote yang berbentuk FRASA ISTILAH pendek
     (1-6 kata) sering = istilah lapangan yang gagal dipahami; kalimat panjang
     bukan bahan kamus. Feedback TIDAK di-auto-resolve saat usulan disetujui
     (sinonim baru ≠ keluhan pasti beres — antrean admin tetap loop manusia)."""
     out: list[dict] = []
+    if peta is None:                       # pemanggil lama (tanpa indeks) tetap jalan
+        peta = _peta_trigger(have)
     try:
         rows = ai_feedback.list_feedback(rating="down", only_open=True, limit=100)
     except Exception:
@@ -102,11 +155,8 @@ def _fb_kandidat(have: set, seen: dict, taken: set, limit: int) -> list[dict]:
             continue
         if _PN_LIKE.match(q.replace(" ", "")) and any(c.isdigit() for c in q):
             continue
-        try:   # kamus sudah meng-cover istilahnya → gap-nya bukan di kamus
-            if any(sinonim.hit(t, q) for t in have):
-                continue
-        except Exception:
-            pass
+        if _dicover_kamus(q, peta):
+            continue   # kamus sudah meng-cover istilahnya → gap-nya bukan di kamus
         out.append({"query": q, "count": 1, "sumber": "feedback"})
         if len(out) >= limit:
             break
@@ -119,6 +169,7 @@ def _kandidat(limit: int) -> list[dict]:
     suggest_pns, bukan kamus sinonim. Sisa slot diisi kandidat dari umpan
     balik 👎 (_fb_kandidat)."""
     have = _existing_triggers()
+    peta = _peta_trigger(have)
     seen = _load()  # dipanggil dalam _lock oleh generate()
     out: list[dict] = []
     for m in search_log.top_misses(300):
@@ -128,13 +179,19 @@ def _kandidat(limit: int) -> list[dict]:
             continue
         if _PN_LIKE.match(q.replace(" ", "")) and any(c.isdigit() for c in q):
             continue
+        # Kamus SUDAH meng-cover istilahnya (mis. miss 'kaca spion pecah' sedang
+        # trigger 'spion' ada) → gagalnya BUKAN karena kamus, dan mengusulkannya
+        # cuma menghasilkan entri kembar. Saringan yang sama sudah dipakai jalur
+        # feedback sejak 2026-07-23; jalur miss tertinggal.
+        if _dicover_kamus(q, peta):
+            continue
         out.append(m)
         if len(out) >= limit:
             break
     if len(out) < limit:
         out += _fb_kandidat(have, seen,
                             {(m.get("query") or "").strip().lower() for m in out},
-                            limit - len(out))
+                            limit - len(out), peta)
     return out
 
 
@@ -185,6 +242,66 @@ def _llm_usulan(misses: list[dict]) -> list[dict]:
     return [i for i in (items or []) if isinstance(i, dict)]
 
 
+# ── Validasi TRIGGER: anti-generik ────────────────────────────────────────────
+# Keyword LLM sudah lama dipagari katalog (_validate_keywords), tapi TRIGGER-nya
+# dulu masuk kamus apa adanya — padahal justru trigger yang menentukan KAPAN satu
+# grup keyword disuntikkan ke pencarian. Satu trigger generik ('atas', 'harga
+# part') mencemari hampir setiap query: expand_query menambahkan keyword SETIAP
+# grup yang cocok. Aturannya diambil dari tiga daftar yang sudah ada di repo:
+#   • maksud._GENERIK — kata yang muncul di hampir semua kalimat user (di-IMPORT,
+#     jadi penambahan di sana ikut berlaku di sini);
+#   • _GENERIK_TUNGGAL — kembaran tools/build_gejala_map.py::_GENERIK_TUNGGAL
+#     (kata SIFAT yang, berdiri sendiri, tak menunjuk sistem mana pun). Disalin,
+#     BUKAN di-import: arah import repo ini tools → services, dan modul di
+#     backend/tools/ tidak importable dari services. Bila daftar di sana berubah,
+#     ubah juga di sini.
+#   • _GENERIK_POSISI — kembaran p7_router_dispatch._ISTILAH_STOP untuk kata
+#     posisi/ukuran yang tak membuktikan part apa pun bila berdiri sendiri.
+# ⚠️ Saringan ini HANYA menjaga pipeline OTOMATIS (usulan LLM). Kamus kurasi
+# admin (menu Kamus Sinonim / sinonim.add langsung) tidak disentuh — entri
+# sengaja seperti 'per' → spring tetap sah, dan memang sudah ada di kamus.
+_GENERIK_TUNGGAL = frozenset("""
+bunyi suara berisik berat ringan panas dingin putih hitam biru abu asap keras
+lembek bocor getar goyang macet longgar kendor susah cepat lambat rusak mati
+hidup aus retak patah pecah oleng miring kasar halus boros lemah turun naik
+kurang lebih tidak kadang sering jarang mesin truk mobil unit part kondisi
+masalah gangguan klik grem kaku sulit jelek parah aneh
+""".split())
+_GENERIK_POSISI = frozenset(
+    "atas bawah depan belakang kiri kanan luar dalam besar kecil baru lama".split())
+_GENERIK_TRIGGER = frozenset(_GENERIK_RUTE) | _GENERIK_TUNGGAL | _GENERIK_POSISI
+# Trigger 1-2 huruf tak pernah menunjuk istilah lapangan, tapi pasti mencocoki
+# banyak kalimat (ambang sama dgn sinonim._KLITIKA_MIN_LEN).
+_TRIGGER_MIN_LEN = 3
+
+
+def _validate_triggers(triggers) -> tuple[list[str], list[str]]:
+    """Pisahkan trigger yang layak vs GENERIK/terlalu pendek.
+
+    Satu kata → ditolak bila kata itu generik (union ketiga daftar) atau < 3
+    huruf. Dua kata ke atas → ditolak hanya bila SELURUH katanya kata ISI-KALIMAT
+    (_GENERIK_RUTE saja, aturan yang sama dgn maksud._validasi_frasa): 'harga
+    part' dibuang, tapi 'asap hitam' & 'setir berat' TIDAK — dua kata sifat yang
+    sendirian tak berarti apa-apa justru menjadi gejala khas begitu digabung,
+    dan itulah bentuk trigger paling berharga yang kita punya."""
+    layak: list[str] = []
+    buang: list[str] = []
+    for t in triggers or []:
+        s = " ".join(str(t).split())
+        if not s:
+            continue
+        kata = re.findall(r"\w+", s.lower())
+        if not kata:
+            buang.append(s)
+            continue
+        if len(kata) == 1:
+            tolak = kata[0] in _GENERIK_TRIGGER or len(kata[0]) < _TRIGGER_MIN_LEN
+        else:
+            tolak = all(k in _GENERIK_RUTE for k in kata)
+        (buang if tolak else layak).append(s)
+    return layak, buang
+
+
 # ── Validasi keyword terhadap katalog nyata ───────────────────────────────────
 
 def _validate_keywords(keywords: list[str]) -> tuple[list[str], list[str]]:
@@ -233,8 +350,8 @@ def generate(limit: int = 10, auto_approve: bool = False) -> dict:
             valid, invalid = _validate_keywords(item.get("keywords") or [])
             if not valid:
                 continue  # tak ada keyword yang terbukti di katalog → tak berguna
-            triggers = [t for t in (item.get("triggers") or [q])
-                        if str(t).strip()] or [q]
+            triggers, trig_buang = _validate_triggers(
+                [t for t in (item.get("triggers") or [q]) if str(t).strip()] or [q])
             try:
                 conf = float(item.get("confidence") or 0)
             except Exception:
@@ -252,6 +369,22 @@ def generate(limit: int = 10, auto_approve: bool = False) -> dict:
                 "status": "pending",
                 "created": int(time.time()),
             }
+            if trig_buang:
+                # Ditandai supaya admin tahu ada yang disaring — bukan hilang diam-diam.
+                u["triggers_dibuang"] = trig_buang
+            if not triggers:
+                # SEMUA trigger generik → entri ini akan membajak pencarian, bukan
+                # menolongnya. Disimpan sbg 'rejected' (bukan dilewati) supaya
+                # generate() berikutnya tak membuang panggilan LLM untuk istilah
+                # yang sama — pola yang sama dengan reject() manual.
+                u["status"] = "rejected"
+                u["catatan_apply"] = (
+                    "Ditolak otomatis: semua istilah lapangan yang diusulkan terlalu "
+                    f"umum ({', '.join(trig_buang)}) — trigger seperti itu ikut cocok "
+                    "di hampir semua pertanyaan dan akan mencemari pencarian.")
+                d[key] = u
+                made.append(u)
+                continue
             if auto_approve and not invalid and conf >= _AUTO_MIN_CONF:
                 ok, msg = _apply(u)
                 u["status"] = "approved" if ok else "pending"
@@ -261,15 +394,30 @@ def generate(limit: int = 10, auto_approve: bool = False) -> dict:
             d[key] = u
             made.append(u)
         _save(d)
-    return {"dibuat": len(made), "auto_disetujui": auto_ok, "usulan": made}
+    tolak_generik = sum(1 for u in made if u["status"] == "rejected")
+    return {"dibuat": len(made), "auto_disetujui": auto_ok,
+            "ditolak_generik": tolak_generik, "usulan": made}
 
 
 def _apply(u: dict) -> tuple[bool, str]:
     """Masukkan satu usulan ke kamus + resolve miss-nya. Duplikat trigger-set
-    dianggap sukses (kamus sudah punya)."""
+    dianggap sukses (kamus sudah punya).
+
+    Saringan anti-generik diulang DI SINI (bukan cuma di generate) karena admin
+    boleh mengedit triggers saat approve — gerbang terakhir sebelum kamus live."""
+    triggers, buang = _validate_triggers(u.get("triggers") or [])
+    if not triggers:
+        return False, ("Istilah lapangan terlalu umum "
+                       f"({', '.join(buang) or '-'}) — trigger seperti itu cocok di "
+                       "hampir semua pertanyaan dan akan membajak pencarian. Ganti "
+                       "dengan istilah yang khas (mis. 'per daun', bukan 'atas').")
+    if buang:
+        u["triggers"] = triggers
+        u["triggers_dibuang"] = sorted(set((u.get("triggers_dibuang") or []) + buang))
     try:
-        sinonim.add(u["grup"], u["triggers"], u["keywords"])
-        msg = "Masuk kamus."
+        sinonim.add(u["grup"], triggers, u["keywords"])
+        msg = "Masuk kamus." + (f" Trigger terlalu umum dibuang: {', '.join(buang)}."
+                                if buang else "")
     except ValueError as e:
         msg = f"Kamus sudah punya entri serupa: {e}"
     except Exception as e:

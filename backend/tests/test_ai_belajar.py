@@ -57,6 +57,32 @@ def test_nf_istilah_masuk_misses(dunia, monkeypatch):
     assert [m["query"] for m in search_log.top_misses()] == ["karet stabil howo"]
 
 
+def test_nf_tool_istilah_yang_dulu_tertinggal(dunia, monkeypatch):
+    """`filter_unit` & `part_aus_dari_rangka` sama-sama dicari lewat ISTILAH
+    lapangan, tapi dulu tak ada di _TOOL_ISTILAH_NF → nf-nya hilang begitu saja
+    dan celah kamusnya tak pernah sampai ke loop belajar sinonim."""
+    _logs(monkeypatch, [
+        {"created_at": "2026-08-06T01:00:00Z", "question": "filter solar",
+         "tools_failed": "filter_unit:nf", "outcome": "ok"},
+        {"created_at": "2026-08-06T01:01:00Z", "question": "kampas rem depan",
+         "tools_failed": "part_aus_dari_rangka:nf", "outcome": "ok"},
+    ])
+    res = belajar.mine_chat_logs()
+    assert res["miss_terekam"] == 2
+    assert {m["query"] for m in search_log.top_misses()} == {"filter solar",
+                                                            "kampas rem depan"}
+
+
+def test_daftar_tool_istilah_memuat_penjaga_p7():
+    """SATU SUMBER (dijaga di sini karena services sengaja tak meng-import facade
+    ai_assistant): tool yang argumen istilahnya dijaga p7._TOOLS_ISTILAH WAJIB
+    ikut ditambang nf-nya. Test ini gagal kalau daftar p7 bertambah & di sini
+    lupa — persis cara temuan ini lolos dulu."""
+    from app.services import ai_assistant as ai
+    kurang = set(ai._TOOLS_ISTILAH) - set(belajar._TOOL_ISTILAH_NF)
+    assert not kurang, f"tool istilah belum ditambang: {sorted(kurang)}"
+
+
 def test_watermark_anti_dobel(dunia, monkeypatch):
     _logs(monkeypatch, [
         {"created_at": "2026-07-23T01:00:00Z", "question": "karet stabil",

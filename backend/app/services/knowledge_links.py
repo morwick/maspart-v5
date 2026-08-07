@@ -38,6 +38,11 @@ _FILE = "knowledge_links.json.gz"
 
 _MAX_POSTING_PER_ENTITAS = 12
 _MAX_JUDUL = 70
+# Judul store `epc_unit` WAJIB memuat kualifikasi cakupan ("antara unit
+# terpantau…") — dengan plafon 70 kualifikasi itulah yang terpotong duluan dan
+# klaimnya balik terdengar tuntas. Plafon longgar khusus store ini; +40 char pada
+# maks 12 posting/entitas = ongkos token yang bisa diabaikan.
+_MAX_JUDUL_EPC = 110
 
 # Urutan prioritas store saat menyajikan tautan (yang paling "berisi" duluan).
 _PRIORITAS = ("pengetahuan", "manual_teks", "dtc_codes", "jadwal_perawatan",
@@ -163,16 +168,17 @@ def terkait(ents: list[str], exclude_store: str = "", limit: int = 5,
 # ═══════════════════════════════════════════════════════════════════════
 #  BUILDER — kumpulkan (entitas → posting) dari semua store
 # ═══════════════════════════════════════════════════════════════════════
-def _judul(s: str) -> str:
+def _judul(s: str, maks: int = _MAX_JUDUL) -> str:
     s = " ".join(str(s or "").split())
-    return s[:_MAX_JUDUL]
+    return s[:maks]
 
 
 def _emit(acc: dict, ent: str | None, store: str, judul: str, buka: str,
-          ref: str, pembeli: bool | None = None) -> None:
+          ref: str, pembeli: bool | None = None,
+          maks_judul: int = _MAX_JUDUL) -> None:
     if not ent or not judul or not ref:
         return
-    row = {"store": store, "judul": _judul(judul), "buka": buka, "ref": ref}
+    row = {"store": store, "judul": _judul(judul, maks_judul), "buka": buka, "ref": ref}
     if pembeli is False:
         row["pembeli"] = False
     acc.setdefault(ent, [])
@@ -436,13 +442,24 @@ def build() -> dict:
         n = 0
         for npn, e in (edges or {}).items():
             models = [m for m in (e.get("models") or []) if m][:3]
-            judul = ("Dipakai di: " + ", ".join(models)
-                     if models else f"Terpasang di {e.get('frames_n') or '?'} unit terpantau")
+            # ⚠️ CAKUPAN PARSIAL — ikut di JUDUL, bukan cuma di dokumentasi ini.
+            # Edges dibangun ai_belajar dari cache EPC yang isinya HANYA unit yang
+            # kebetulan pernah disebut user (prefetch), jadi daftar model ini
+            # potongan, bukan daftar lengkap. Judul posting terbawa apa adanya ke
+            # jawaban model ('pengetahuan_terkait'), dan "Dipakai di: A, B" polos
+            # terbaca sebagai klaim TUNTAS ("berarti cuma A dan B"). Kualifikasi
+            # ditulis melekat + penunjuk tool yang tahu daftar penuhnya.
+            judul = (f"Dipakai di: {', '.join(models)} (antara unit terpantau; "
+                     "daftar lengkap: unit_dari_part)" if models else
+                     f"Terpasang di {e.get('frames_n') or '?'} unit terpantau "
+                     "(daftar lengkap: unit_dari_part)")
             buka = "unit_dari_part(pn='" + npn + "')"
-            _emit(acc, f"pn:{npn}", "epc_unit", judul, buka, npn)
+            _emit(acc, f"pn:{npn}", "epc_unit", judul, buka, npn,
+                  maks_judul=_MAX_JUDUL_EPC)
             for m in models:
                 _emit(acc, _k_model(m), "epc_unit",
-                      f"{e.get('nama') or npn} dipakai model ini", buka, npn)
+                      f"{e.get('nama') or npn} dipakai model ini (dari unit terpantau)",
+                      buka, npn, maks_judul=_MAX_JUDUL_EPC)
             n += 1
         cakupan["epc_unit"] = n
     except Exception:

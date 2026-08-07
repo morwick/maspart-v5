@@ -53,7 +53,7 @@ _MAX_FOTO_PER_PART = 3         # plafon foto per part (jaga ukuran file & RAM)
 # (ai_export._safe) menambah apostrof di depan teks berawalan '-' → sel tampil "'-".
 _TANPA_FOTO = "—"
 
-_STASH_TTL_SEC = 2 * 3600.0
+_STASH_TTL_SEC = 2 * 3600.0    # dihitung dari akses TERAKHIR (get_sheet menyegarkan)
 _STASH_MAX = 40                # pagar RAM global (semua user)
 # Eviksi dulu MILIK PENGUNGGAH sendiri. Tanpa ini, `_STASH_MAX` global membuat
 # unggahan user LAIN menggusur lampiran yang sedang dipakai user ini sebelum TTL
@@ -176,7 +176,13 @@ def _detect_roles(headers: list[str], cols: list[list[str]]) -> tuple[list[str],
     if kandidat:
         semua = {v.upper() for vals in kandidat.values() for v in vals[:60]}
         try:
-            ada = {(r.get("part_number") or "").upper() for r in part_index.search_exact_pns(semua)}
+            # PEMAAF suffix varian — lookup yang SAMA dengan yang nanti dipakai
+            # mengisi kolom (fill_columns/_finish_parse: part_index.rows_for_pns).
+            # Dulu di sini pakai search_exact_pns yang ketat, jadi sheet berisi PN
+            # ber-suffix varian EPC ('WG9525160004/2') dinilai "tak cocok katalog"
+            # → kolom PN-nya bisa kalah oleh kolom kode lain, padahal saat diisi
+            # part-nya ketemu. Sinyal deteksi & sinyal pengisian wajib satu bahasa.
+            ada = set(part_index.rows_for_pns(sorted(semua)))
         except Exception:
             ada = set()
         for i, vals in kandidat.items():
@@ -597,6 +603,16 @@ def get_sheet(sheet_id: str, username: str) -> dict | None:
             return None
         if e["user"] != (username or "").lower():
             return None
+        # TOUCH-ON-READ: TTL 2 jam dihitung dari akses TERAKHIR, bukan dari waktu
+        # unggah. Tanpa ini percakapan panjang (isi stok → tambah kolom harga →
+        # rekap → gambar exploded yang unduhannya sendiri bermenit-menit) bisa
+        # menabrak TTL di tengah jalan: dari sisi user, asisten mendadak "lupa"
+        # ada file padahal file itu justru yang sedang dikerjakan. Efek sampingnya
+        # dipakai juga oleh eviksi kuota per-user di put_sheet — `min(at)` kini
+        # benar-benar berarti "paling lama tak disentuh", bukan "paling dulu
+        # diunggah". Hanya akses SUKSES yang menyegarkan (user lain gagal di cek
+        # kepemilikan di atas → tak bisa menahan lampiran orang lain tetap hidup).
+        e["at"] = time.monotonic()
         return e["data"]
 
 
