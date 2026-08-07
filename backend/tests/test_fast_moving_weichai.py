@@ -113,6 +113,36 @@ def test_alternator_dan_starter_ikut_ditambal(monkeypatch):
     assert {"612600090206", "612630030029"} <= pns
 
 
+def test_nama_weichai_sadar_konteks_mesin():
+    """Nama asli dari BOM Weichai (terukur di produksi 2026-08-07)."""
+    k = fm._kamus()
+    # 'Oil Filter' polos: di kamus umum jatuh ke transmisi/hidrolik, di BOM
+    # MESIN artinya filter oli mesin.
+    assert fm._istilah("Oil Filter", "", k) == "filter oli (transmisi/hidrolik)"
+    assert fm._wc_istilah("Oil Filter", k) == "filter oli mesin"
+    assert fm._wc_istilah("Fuel Filter", k) == "filter solar halus (atas)"
+    assert fm._wc_istilah("Fuel Fine Filter Element", k) == "filter solar halus (atas)"
+    assert fm._wc_istilah("Fuel Coarse Filter Element", k) == "filter solar kasar (bawah)"
+    # Dudukan/braket/gasket BUKAN barang habis pakai — jangan mengotori daftar.
+    for n in ("Fuel Filter Seat", "Oil Filter Seat", "Fuel Filter Bracket",
+              "Oil Filter Base Gasket"):
+        assert fm._wc_istilah(n, k) == "", n
+    # Ambigu (tak jelas oli atau solar) → lebih baik dilewat daripada salah label
+    assert fm._wc_istilah("Filter Element", k) == ""
+
+
+def test_filter_oli_polos_dari_weichai_masuk(monkeypatch):
+    _mock_weichai(monkeypatch, hasil=[
+        {"pn": "1000442956", "nama": "Oil Filter", "group": "Engine Block Group"},
+        {"pn": "1000424916", "nama": "Fuel Filter Seat", "group": "Fuel System Group"},
+    ])
+    pm = _per_model(punya_filter_mesin=False)
+    fm._lengkapi_mesin(pm, fm._kamus())
+    rows = pm["ZZ1TEST"]["unit"][FRAME_A]
+    assert "filter oli mesin" in {r.get("id") for r in rows}
+    assert "1000424916" not in {r["pn"] for r in rows}   # dudukan tak ikut
+
+
 def test_klasifikasi_alternator_starter_dari_kamus():
     """Baris Sinotruk pun kini terklasifikasi — bukan hanya jalur Weichai."""
     k = fm._kamus()

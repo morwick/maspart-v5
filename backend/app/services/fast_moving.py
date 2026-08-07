@@ -306,7 +306,36 @@ _ID_MESIN_PEMICU = {"filter oli mesin"}
 # bridge terbuka, sekalian ambil filter solar & aksesori listrik mesin:
 # mahalnya ada di panggilan pertama, bukan di jumlah baris yang dibaca.
 _ID_MESIN_AMBIL = {"filter oli mesin", "filter solar halus (atas)",
+                   "filter solar kasar (bawah)", "filter water separator (solar bawah)",
                    "alternator (dinamo ampere)", "motor starter (dinamo starter)"}
+
+# Bagian filter yang BUKAN barang habis pakai — di BOM Weichai mereka berdiri
+# sebagai baris sendiri ('Fuel Filter Seat' 27×, 'Oil Filter Seat' 15×,
+# 'Fuel Filter Bracket' 12×, 'Oil Filter Base Gasket' 9×) dan akan mengotori
+# daftar fast moving kalau ikut terbawa.
+_WC_BUKAN_ELEMENT = ("seat", "bracket", "base", "gasket", "cover", "housing",
+                     "cap", "support", "clamp", "bolt", "screw", "pipe", "hose")
+
+
+def _wc_istilah(nama: str, kamus: dict) -> str:
+    """Istilah lapangan untuk satu baris EPC MESIN Weichai.
+
+    Konteksnya sudah PASTI mesin, dan itu mengubah arti: 'Oil Filter' polos di
+    sini adalah filter oli MESIN, sedangkan kamus umum menjatuhkannya ke 'filter
+    oli (transmisi/hidrolik)' (aturan mesin menuntut kata 'engine'/'element').
+    Terukur 2026-08-07: gara-gara itu 17 model tetap tanpa filter oli mesin
+    meski bridge Weichai sudah terbuka."""
+    low = " ".join((nama or "").lower().split())
+    if any(n in low for n in _WC_BUKAN_ELEMENT):
+        return ""
+    idl = _istilah(nama, nama, kamus)
+    if idl in _ID_MESIN_AMBIL:
+        return idl                       # kamus sudah yakin (halus/kasar/dsb)
+    if "oil filter" in low:
+        return "filter oli mesin"
+    if "fuel" in low and "filter" in low:
+        return "filter solar halus (atas)"
+    return ""
 _WC_TERMS = ["filter", "滤芯", "alternator", "generator", "发电机",
              "starter", "起动机", "启动机"]
 _WC_SAMPEL_MAKS = 2          # unit sampel yang dicoba per model
@@ -375,7 +404,7 @@ def _lengkapi_mesin(per_model: dict, kamus: dict) -> Counter:
                 kat = _klasifikasi(h["nama"], h["nama"], kamus)
                 if not kat:
                     continue
-                idl = _istilah(h["nama"], h["nama"], kamus)
+                idl = _wc_istilah(h["nama"], kamus)
                 if idl not in _ID_MESIN_AMBIL:
                     continue               # hanya tutup lubang MESIN-nya
                 pn = h["pn"]
