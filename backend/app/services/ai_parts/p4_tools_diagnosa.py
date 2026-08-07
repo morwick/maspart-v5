@@ -481,12 +481,53 @@ def _t_diagnosa(args: dict, user: dict) -> dict:
             "Indonesia bila English), jangan menambah langkah karangan."
         )
     if fmi_fallback:
-        out["fmi_diminta_tak_terdaftar"] = fmi
-        out["catatan_dtc"] = (
-            f"⚠️ Pasangan SPN {spn} + FMI {fmi} TIDAK ADA di database — sampaikan "
-            "TEGAS. 'kode_kesalahan_lokal' berisi FMI LAIN untuk SPN yang sama "
-            "(kemungkinan yang dimaksud); minta user cek ulang angka FMI di scan-tool."
-        )
+        # ⚠️ Klaim "pasangan ini TIDAK ADA" hanya SAH bila TAK ADA sumber lain
+        # yang punya pasangan SPN+FMI persisnya. `fmi_fallback` di atas cuma
+        # bicara soal tabel Bosch (fault_codes) — kontradiksi yang sama sudah
+        # ditutup di _t_cari_kode_kesalahan tapi masih hidup di sini: SPN 520264
+        # FMI 11 dijawab found=True (kartu diagnosa + PDF resmi TERLAMPIR)
+        # SEKALIGUS "FMI 11 tak terdaftar" — dua pesan yang bertentangan.
+        # Catatan: search_spn_fmi & abs_scr_codes.search ikut FALLBACK SPN-saja,
+        # jadi kecocokan diuji BARIS PER BARIS, bukan dari "ada hasil".
+        try:
+            _kanonik = dtc_codes.search_spn_fmi(spn, fmi, limit=20)
+        except Exception:  # pragma: no cover
+            _kanonik = []
+        kanonik_eksak = [r for r in _kanonik
+                         if r.get("spn") == spn and r.get("fmi") == fmi]
+        cocok_eksak = bool(
+            kanonik_eksak
+            or any(r.get("spn") == spn and r.get("fmi") == fmi for r in abs_scr_rows)
+            or rinci                       # dtc_diagnosa.for_pair = pasangan PERSIS
+            or any(c.get("spn") == spn and c.get("fmi") == fmi for c in pdf_cards))
+        if kanonik_eksak:
+            # Sumber yang cocok persis bisa jadi HANYA ada di store kanonik (mis.
+            # baris EOL ber-SPN/FMI hasil parse string kode) — tanpa disertakan,
+            # model diberi tahu "sumber lain punya" tapi tak pernah melihatnya.
+            out["kode_kesalahan_kanonik"] = [
+                {"sumber": r.get("sumber"), "unit_kontrol": r.get("unit"),
+                 "kode": r.get("kode"), "spn": r.get("spn"), "fmi": r.get("fmi"),
+                 "deskripsi": r.get("deskripsi") or "",
+                 "penyebab": r.get("penyebab") or "",
+                 "perbaikan": r.get("perbaikan") or "",
+                 "part_terkait": r.get("part") or ""}
+                for r in kanonik_eksak[:3]]
+        if not cocok_eksak:
+            out["fmi_diminta_tak_terdaftar"] = fmi
+            out["catatan_dtc"] = (
+                f"⚠️ Pasangan SPN {spn} + FMI {fmi} TIDAK ADA di database — sampaikan "
+                "TEGAS. 'kode_kesalahan_lokal' berisi FMI LAIN untuk SPN yang sama "
+                "(kemungkinan yang dimaksud); minta user cek ulang angka FMI di scan-tool."
+            )
+        else:
+            out["catatan_dtc"] = (
+                f"ℹ️ Tabel Bosch tidak memuat SPN {spn} + FMI {fmi}, TAPI sumber LAIN "
+                "PUNYA pasangan PERSIS itu ('kode_kesalahan_kanonik' / "
+                "'kode_kesalahan_abs_scr' / 'diagnosa_rinci' / 'pdf_diagnosa') — "
+                "DASARI jawaban dari sumber itu. ⛔ JANGAN bilang kodenya tidak "
+                "terdaftar. 'kode_kesalahan_lokal' berisi FMI LAIN untuk SPN yang "
+                "sama; sajikan hanya sebagai pembanding, bukan jawaban."
+            )
     if eol.get("found"):
         out["diagnosa_sims"] = eol["jawaban"]
         out["sims_log_id"] = eol.get("log_id")
@@ -1946,6 +1987,184 @@ _FOTO_KLAIM_PRIORITAS = ("faultStartPhoto_file", "detachPhoto_file",
                         "nameplatePhoto_file", "vinPhoto_file")
 _MAX_FOTO_KLAIM = 4
 
+# ── Kejujuran data SIMS: "gagal ambil" ≠ "memang tidak ada" ──────────────
+# sims_warranty melebur keduanya jadi nilai kosong (info_unit → None;
+# semua_klaim → {"klaim": []} saat halaman-1 gagal, DAN hasil kosong itu
+# ikut mengendap 10 menit di cache-nya). Akibatnya rekap/Excel/cek massal
+# menyimpulkan "tidak ada klaim"/"TIDAK ADA DI SIMS" dari KEGAGALAN API.
+# Service-nya tak boleh disentuh dari sini, jadi pemisahnya dikerjakan di
+# lapis tool ini — memakai sinyal yang memang dibedakan service: daftar_klaim
+# mengembalikan None saat gagal (dan TIDAK men-cache kegagalan), dan balasan
+# MENTAH endpoint unit membedakan transport gagal dari "unit tak terdaftar".
+_KLAIM_GAGAL = ("SIMS tidak merespons saat mengambil daftar klaim — coba lagi "
+                "sebentar lagi. ⚠️ Ini KEGAGALAN AMBIL DATA, BUKAN bukti bahwa "
+                "klaimnya tidak ada; ⛔ JANGAN menyimpulkan 'tidak ada klaim'.")
+_SIMS_PATH_UNIT = "/intl.service.basic/vehicleApi/getVehicleInfoAndMaintNum"
+_UNIT_GAGAL = "SIMS tidak merespons saat mengecek unit"
+
+# Ingatan hasil PROBE unit (lihat _info_unit_teliti). Probe = GET mentah TANPA
+# cache di sisi service, jadi frame yang memang tak terdaftar diulang mentah
+# tiap giliran — dan saat SIMS lambat tiap ulangan itu menggantung belasan
+# detik. Yang disimpan cuma VONISNYA (2 kemungkinan), bukan datanya:
+#   'terjawab' → SIMS menjawab, unitnya memang tak terdaftar
+#   'gagal'    → transport/HTTP gagal (⛔ JANGAN dibaca sebagai 'tak terdaftar')
+_UNIT_PROBE_TTL = 600.0        # 10 menit
+_UNIT_PROBE_MAKS = 500         # cap entri (frame unik) — jaga memori
+_unit_probe_cache: dict[str, tuple[float, str]] = {}   # frame → (kapan, vonis)
+_unit_probe_lock = threading.Lock()
+
+
+def _reset_unit_probe_cache() -> None:
+    """Kosongkan ingatan probe unit (dipakai test)."""
+    with _unit_probe_lock:
+        _unit_probe_cache.clear()
+
+
+def _unit_probe_ingat(frame: str) -> str:
+    """Vonis probe yang masih segar untuk frame ini, atau '' bila belum ada."""
+    k = (frame or "").strip().upper()
+    with _unit_probe_lock:
+        c = _unit_probe_cache.get(k)
+        if not c:
+            return ""
+        kapan, vonis = c
+        if (time.monotonic() - kapan) >= _UNIT_PROBE_TTL:
+            _unit_probe_cache.pop(k, None)
+            return ""
+        return vonis
+
+
+def _unit_probe_simpan(frame: str, vonis: str) -> None:
+    k = (frame or "").strip().upper()
+    with _unit_probe_lock:
+        if len(_unit_probe_cache) >= _UNIT_PROBE_MAKS:
+            # buang yang paling tua (cap sederhana; entri probe sangat ringan)
+            tua = min(_unit_probe_cache, key=lambda x: _unit_probe_cache[x][0])
+            _unit_probe_cache.pop(tua, None)
+        _unit_probe_cache[k] = (time.monotonic(), vonis)
+
+
+def _klaim_buang_cache(frame: str) -> None:
+    """Buang entri cache `semua:<frame>:*` milik sims_warranty.
+
+    semua_klaim menyimpan hasilnya 10 menit TANPA membedakan "memang kosong"
+    dari "halaman-1 gagal" — daftar kosong buatan SIMS mati ikut mengendap dan
+    menjawab "tidak ada klaim" selama 10 menit berikutnya, jauh setelah SIMS
+    pulih. Fail-open: struktur cache berubah/di-stub → dilewati diam-diam."""
+    try:
+        cache = sims_warranty._CACHE
+        awalan = f"semua:{frame}:"
+        with sims_warranty._cache_lock:
+            for k in [k for k in cache if str(k).startswith(awalan)]:
+                cache.pop(k, None)
+    except Exception:
+        logger.debug("buang cache semua_klaim dilewati", exc_info=True)
+
+
+def _klaim_semua(rangka: str = "") -> dict:
+    """semua_klaim + PEMISAH gagal / memang-kosong / terpotong.
+
+    Return SELALU dict: {"total", "klaim", "_err", "_terpotong"}.
+      _err       → halaman-1 SIMS gagal: hasil kosong TIDAK BOLEH dibaca sebagai
+                   "tidak ada klaim", dan entri cache beracunnya dibuang.
+      _terpotong → paginasi putus/mentok cap: baris yang terambil < total SIMS,
+                   jadi ringkasan apa pun di atasnya SEBAGIAN, bukan lengkap."""
+    try:
+        frame = sims_warranty.frame_dari_rangka(rangka) if rangka else ""
+    except Exception:  # pragma: no cover
+        frame = (rangka or "").strip().upper()
+    kosong = {"total": None, "klaim": [], "_err": _KLAIM_GAGAL, "_terpotong": False}
+    try:
+        d = sims_warranty.semua_klaim(vin=rangka)
+    except Exception:
+        # _get tak menangkap RequestException — jaringan putus menembus ke sini.
+        logger.exception("semua_klaim gagal (dianggap GAGAL AMBIL, bukan kosong)")
+        _klaim_buang_cache(frame)
+        return dict(kosong)
+    if d is None:
+        _klaim_buang_cache(frame)
+        return dict(kosong)
+
+    rows = list(d.get("klaim") or [])
+    total = d.get("total")
+    if not rows:
+        # KOSONG itu AMBIGU. daftar_klaim membedakannya (None = gagal) dan tak
+        # men-cache kegagalan; saat halaman-1 sukses, jawabannya sudah ada di
+        # cache-nya sendiri → probe ini gratis di jalur normal.
+        try:
+            p1 = sims_warranty.daftar_klaim(vin=frame, halaman=1, page_size=50)
+        except Exception:
+            p1 = None
+        if p1 is None:
+            _klaim_buang_cache(frame)
+            return dict(kosong)
+        if p1.get("klaim"):
+            # Halaman-1 BERISI tapi semua_klaim bilang kosong = entri cache
+            # beracun dari kegagalan sebelumnya. Buang lalu ambil ulang.
+            _klaim_buang_cache(frame)
+            try:
+                d2 = sims_warranty.semua_klaim(vin=rangka) or {}
+            except Exception:  # pragma: no cover
+                d2 = {}
+            rows = list(d2.get("klaim") or [])
+            total = d2.get("total")
+            if not rows:  # pragma: no cover — masih kosong: pakai halaman-1 saja
+                return {"total": p1.get("total"), "klaim": list(p1.get("klaim") or []),
+                        "_err": "", "_terpotong": True}
+    terpotong = bool(isinstance(total, int) and total > len(rows))
+    return {"total": total, "klaim": rows, "_err": "", "_terpotong": terpotong}
+
+
+def _klaim_awas_terpotong(d: dict, terambil: int) -> str:
+    """Satu kalimat peringatan bila daftar klaim TERPOTONG (untuk 'catatan')."""
+    if not d.get("_terpotong"):
+        return ""
+    return (f" ⚠️ DAFTAR KLAIM TERPOTONG: baru {terambil} dari {d.get('total')} "
+            "klaim yang berhasil diambil (paginasi SIMS putus di tengah) — semua "
+            "angka di atas dihitung dari SEBAGIAN data. Sebutkan keterbatasan ini "
+            "apa adanya; ⛔ JANGAN menyajikannya sebagai rekap lengkap.")
+
+
+def _info_unit_teliti(rangka: str) -> tuple[dict | None, str]:
+    """info_unit + PEMISAH "gagal dicek" dari "tak terdaftar". → (info, err).
+
+    info_unit mengembalikan None untuk KEDUANYA, sehingga saat SIMS/jaringan
+    gagal, unit yang NYATA ditulis "TIDAK ADA DI SIMS" di Excel garansi massal
+    dan dijawab "tidak ditemukan" di cek_garansi. Pemisahnya = balasan MENTAH
+    endpoint unit: None berarti transport/HTTP gagal, dict/list berarti SIMS
+    menjawab (unitnya memang tak terdaftar).
+
+    Probe hanya jalan di jalur MISS (jarang) dan hanya untuk frame 8-karakter
+    yang sah — frame salah-format memang dibalas HTTP 500 oleh SIMS (jebakan
+    HAR), itu kesalahan input user, bukan gangguan server. Vonisnya diingat
+    _UNIT_PROBE_TTL detik (lihat _unit_probe_ingat) supaya frame yang sama tak
+    memicu GET mentah berulang tiap giliran."""
+    try:
+        frame = sims_warranty.frame_dari_rangka(rangka)
+    except Exception:  # pragma: no cover
+        frame = (rangka or "").strip().upper()
+    try:
+        info = sims_warranty.info_unit(rangka)
+    except Exception:
+        # _get tak menangkap RequestException — jaringan putus menembus ke sini.
+        logger.exception("info_unit gagal (dianggap GAGAL DICEK, bukan tak ada)")
+        return None, _UNIT_GAGAL
+    if info:
+        return info, ""
+    if len(frame) != 8:
+        return None, ""          # input tak sah → memang "tidak ditemukan"
+    ingat = _unit_probe_ingat(frame)
+    if ingat:
+        return None, (_UNIT_GAGAL if ingat == "gagal" else "")
+    try:
+        mentah = sims_warranty._get(_SIMS_PATH_UNIT, {"chassisNo": frame})
+    except Exception:
+        _unit_probe_simpan(frame, "gagal")
+        return None, _UNIT_GAGAL
+    vonis = "terjawab" if mentah is not None else "gagal"
+    _unit_probe_simpan(frame, vonis)
+    return (None, "") if vonis == "terjawab" else (None, _UNIT_GAGAL)
+
 
 def _t_cek_garansi(args: dict, user: dict) -> dict:
     """Status garansi + spek + nomor seri komponen SATU unit (SIMS DMS)."""
@@ -1956,7 +2175,17 @@ def _t_cek_garansi(args: dict, user: dict) -> dict:
     rangka = (args.get("rangka") or args.get("frame") or "").strip()
     if not rangka:
         return {"error": "Sebutkan nomor rangka (VIN penuh atau frame number)."}
-    info = sims_warranty.info_unit(rangka)
+    info, gagal = _info_unit_teliti(rangka)
+    if gagal:
+        # `_cek_tak_lengkap` → telemetri 'err', BUKAN 'nf': kita TIDAK TAHU unitnya
+        # ada atau tidak; menyebutnya nihil sama saja mengarang.
+        return {"found": False, "gagal_dicek": True, "_cek_tak_lengkap": True,
+                "rangka": rangka,
+                "catatan": (f"⚠️ GAGAL DICEK — {gagal} (frame "
+                            f"'{sims_warranty.frame_dari_rangka(rangka)}'). Ini "
+                            "kegagalan AMBIL DATA, BUKAN bukti unitnya tak "
+                            "terdaftar. ⛔ JANGAN bilang unit tidak ada di SIMS; "
+                            "minta user mengulang beberapa saat lagi.")}
     if not info:
         return {"found": False,
                 "rangka": rangka,
@@ -2042,10 +2271,11 @@ def _riwayat_klaim_saring_durasi(rangka: str, durasi_min: float | None,
                                  durasi_maks: float | None,
                                  limit: float | None) -> dict:
     """Klaim tersaring durasi, urut TERLAMA dulu (yang bermasalah di atas)."""
-    d = sims_warranty.semua_klaim(vin=rangka)
-    if d is None:
-        return {"error": "SIMS tidak merespons — coba lagi sebentar lagi."}
+    d = _klaim_semua(rangka)
+    if d.get("_err"):
+        return {"error": d["_err"]}
     semua = d.get("klaim") or []
+    awas = _klaim_awas_terpotong(d, len(semua))
     tanpa_durasi = 0
     cocok: list[dict] = []
     for k in semua:
@@ -2072,24 +2302,27 @@ def _riwayat_klaim_saring_durasi(rangka: str, durasi_min: float | None,
         return {"found": False, "jumlah_cocok": 0,
                 "jumlah_diperiksa": len(semua),
                 "jumlah_tanpa_durasi": tanpa_durasi,
+                # Nihil di atas data TERPOTONG bukan nihil beneran → 'err', bukan 'nf'.
+                **({"data_terpotong": True, "_cek_tak_lengkap": True} if awas else {}),
                 "catatan": (f"Tidak ada WO berdurasi {label_syarat} dari "
                             f"{len(semua)} klaim yang diperiksa. "
                             f"{tanpa_durasi} WO tanpa data durasi (belum "
                             "selesai/terisi) TIDAK ikut dinilai — sebutkan itu, "
-                            "jangan mengarang.")}
+                            "jangan mengarang." + awas)}
     return {
         "found": True,
         "jumlah_cocok": len(cocok),
         "jumlah_diperiksa": len(semua),
         "jumlah_tanpa_durasi": tanpa_durasi,
         "ditampilkan": len(cocok[:n]),
+        **({"data_terpotong": True, "_cek_tak_lengkap": True} if awas else {}),
         "klaim": cocok[:n],
         "catatan": (
             f"WO berdurasi {label_syarat}: {len(cocok)} dari {len(semua)} klaim "
             f"(sudah DISARING & DIURUTKAN server, terlama dulu; ditampilkan "
             f"{len(cocok[:n])}). {tanpa_durasi} WO tanpa data durasi tak ikut "
             "dinilai — sebut angka-angka ini apa adanya, jangan menghitung "
-            "ulang. Detail satu WO → detail_klaim(no_wo)."
+            "ulang. Detail satu WO → detail_klaim(no_wo)." + awas
         ),
     }
 
@@ -2104,7 +2337,18 @@ def _t_detail_klaim(args: dict, user: dict) -> dict:
     no_wo = (args.get("no_wo") or args.get("roNo") or args.get("wo") or "").strip()
     if not no_wo:
         return {"error": "Sebutkan nomor work order (mis. RIDZ00526xxxxx)."}
-    d = sims_warranty.daftar_klaim(ro_no=no_wo, page_size=3)
+    try:
+        d = sims_warranty.daftar_klaim(ro_no=no_wo, page_size=3)
+    except Exception:
+        logger.exception("daftar_klaim gagal (dianggap GAGAL AMBIL, bukan tak ada)")
+        d = None
+    if d is None:
+        # Cacat sekelas temuan info_unit: 'SIMS gagal' dulu dilaporkan sebagai
+        # "WO tidak ditemukan, cek ulang nomornya" — menyalahkan nomor user
+        # padahal servernya yang tak menjawab.
+        return {"error": ("SIMS tidak merespons saat mencari WO ini — coba lagi "
+                          "sebentar lagi. ⚠️ Ini KEGAGALAN AMBIL DATA, BUKAN bukti "
+                          f"nomor WO '{no_wo}' salah/tak ada.")}
     rec = next((x for x in (d or {}).get("klaim") or []
                 if (x.get("no_wo") or "").upper() == no_wo.upper()), None)
     if not rec:
@@ -2194,6 +2438,12 @@ def _t_detail_klaim(args: dict, user: dict) -> dict:
 # ── Garansi tambahan (2026-07-22): cek massal, Excel riwayat, rekap ──
 _GARANSI_MAKS_MASSAL = 200     # baris cek garansi massal per proses
 _GARANSI_MAKS_EXCEL = 2000     # baris export riwayat klaim
+# PEMUTUS ARUS: setelah sekian frame BERTURUT-TURUT gagal dicek, SIMS jelas
+# sedang diam — 200 frame × (2 percobaan × timeout 15 dtk) berarti giliran ini
+# menggiling berjam-jam untuk hasil yang sudah pasti "GAGAL DICEK" semua.
+# Sisa baris ditandai gagal TANPA HTTP (arti barisnya sama, hanya lebih cepat).
+_GARANSI_GAGAL_BERUNTUN_MAKS = 3
+_GARANSI_BARIS_PUTUS = "GAGAL DICEK — ULANGI (SIMS sedang tidak merespons)"
 
 
 def _t_sheet_garansi_massal(args: dict, user: dict) -> dict:
@@ -2234,8 +2484,26 @@ def _t_sheet_garansi_massal(args: dict, user: dict) -> dict:
              "No Mesin", "No Gearbox"]
     baris: list[list] = []
     ketemu = 0
+    gagal_dicek = 0
+    beruntun = 0          # gagal BERTURUT-TURUT (di-reset tiap SIMS menjawab)
+    putus = False         # pemutus arus aktif → sisa baris tak di-HTTP lagi
     for i, rk in enumerate(frames, start=1):
-        info = sims_warranty.info_unit(rk)
+        if putus:
+            gagal_dicek += 1
+            baris.append([str(i), sims_warranty.frame_dari_rangka(rk),
+                          _GARANSI_BARIS_PUTUS, "", "", "", "", "", "", "", "", ""])
+            continue
+        info, gagal = _info_unit_teliti(rk)
+        if gagal:
+            # ⛔ JANGAN tulis "TIDAK ADA DI SIMS" untuk unit yang cuma gagal
+            # diambil — baris itu dulu menuduh unit nyata tidak terdaftar.
+            gagal_dicek += 1
+            beruntun += 1
+            putus = beruntun >= _GARANSI_GAGAL_BERUNTUN_MAKS
+            baris.append([str(i), sims_warranty.frame_dari_rangka(rk),
+                          "GAGAL DICEK — ULANGI", "", "", "", "", "", "", "", "", ""])
+            continue
+        beruntun = 0      # SIMS menjawab (ada/tak ada) → rantai kegagalan putus
         if not info:
             baris.append([str(i), sims_warranty.frame_dari_rangka(rk),
                           "TIDAK ADA DI SIMS", "", "", "", "", "", "", "", "", ""])
@@ -2256,12 +2524,28 @@ def _t_sheet_garansi_massal(args: dict, user: dict) -> dict:
         ])
     judul = f"Status Garansi ({len(frames)} unit)"
     export_id, filename = ai_export.stash_export(judul, kolom, baris)
-    return {"found": True, "export_id": export_id, "filename": filename, "judul": judul,
-            "jumlah_baris": len(baris), "ketemu": ketemu, "tak_ada": len(frames) - ketemu,
-            "catatan": ("File Excel status garansi siap — kartu unduh muncul OTOMATIS di bawah. "
-                        f"Jawab SINGKAT ({len(frames)} unit dicek, {ketemu} ketemu, "
-                        f"{len(frames) - ketemu} tak ada di SIMS). ⛔ JANGAN tulis ulang tabel & "
-                        "JANGAN buat link sendiri.")}
+    tak_ada = len(frames) - ketemu - gagal_dicek
+    out = {"found": True, "export_id": export_id, "filename": filename, "judul": judul,
+           "jumlah_baris": len(baris), "ketemu": ketemu, "tak_ada": tak_ada,
+           "gagal_dicek": gagal_dicek}
+    if gagal_dicek:
+        out["_cek_tak_lengkap"] = True     # telemetri 'err': sebagian belum terjawab
+    if putus:
+        out["dihentikan_dini"] = True
+    out["catatan"] = (
+        "File Excel status garansi siap — kartu unduh muncul OTOMATIS di bawah. "
+        f"Jawab SINGKAT ({len(frames)} unit dicek, {ketemu} ketemu, "
+        f"{tak_ada} tak ada di SIMS"
+        + (f", {gagal_dicek} GAGAL DICEK). ⚠️ Baris 'GAGAL DICEK — ULANGI' = SIMS "
+           "tidak menjawab untuk unit itu — ⛔ JANGAN sebut unit-unit itu tidak "
+           "terdaftar; sarankan mengulang cek untuk baris tersebut."
+           if gagal_dicek else ").")
+        + (f" ⚠️ Pengecekan DIHENTIKAN setelah {_GARANSI_GAGAL_BERUNTUN_MAKS} unit "
+           "berturut-turut gagal (SIMS sedang tidak merespons): sisa baris TIDAK "
+           "sempat dicek sama sekali. Minta user mengulang file itu beberapa saat "
+           "lagi." if putus else "")
+        + " ⛔ JANGAN tulis ulang tabel & JANGAN buat link sendiri.")
+    return out
 
 
 def _t_excel_riwayat_klaim(args: dict, user: dict) -> dict:
@@ -2272,14 +2556,17 @@ def _t_excel_riwayat_klaim(args: dict, user: dict) -> dict:
         return {"error": "Koneksi SIMS belum siap di server."}
     rangka = (args.get("rangka") or args.get("vin") or "").strip()
     status_f = (args.get("status") or "").strip().lower()
-    d = sims_warranty.semua_klaim(vin=rangka)
-    if d is None:
-        return {"error": "SIMS tidak merespons — coba lagi sebentar lagi."}
+    d = _klaim_semua(rangka)
+    if d.get("_err"):
+        return {"error": d["_err"]}
     klaim = d.get("klaim") or []
+    awas = _klaim_awas_terpotong(d, len(klaim))
     if status_f:
         klaim = [k for k in klaim if status_f in (k.get("status") or "").lower()]
     if not klaim:
-        return {"found": False, "catatan": "Tidak ada klaim yang cocok dengan filter."}
+        return {"found": False,
+                **({"data_terpotong": True, "_cek_tak_lengkap": True} if awas else {}),
+                "catatan": "Tidak ada klaim yang cocok dengan filter." + awas}
     klaim = klaim[:_GARANSI_MAKS_EXCEL]
 
     kolom = ["No", "No WO", "Frame", "Tanggal", "KM", "Gejala", "Tindakan",
@@ -2297,9 +2584,11 @@ def _t_excel_riwayat_klaim(args: dict, user: dict) -> dict:
     export_id, filename = ai_export.stash_export(judul, kolom, baris)
     return {"found": True, "export_id": export_id, "filename": filename, "judul": judul,
             "jumlah_baris": len(baris), "total_klaim": d.get("total"),
+            **({"data_terpotong": True, "_cek_tak_lengkap": True} if awas else {}),
             "catatan": ("File Excel riwayat klaim siap — kartu unduh muncul OTOMATIS di bawah. "
                         "Jawab SINGKAT (judul + jumlah klaim). Nilai CNY tidak ada di daftar ini "
-                        "(pakai detail_klaim untuk nilai per WO). ⛔ JANGAN tulis ulang tabel.")}
+                        "(pakai detail_klaim untuk nilai per WO). ⛔ JANGAN tulis ulang tabel."
+                        + awas)}
 
 
 def _t_rekap_klaim(args: dict, user: dict) -> dict:
@@ -2309,12 +2598,15 @@ def _t_rekap_klaim(args: dict, user: dict) -> dict:
     if not sims_warranty.available():
         return {"error": "Koneksi SIMS belum siap di server."}
     rangka = (args.get("rangka") or args.get("vin") or "").strip()
-    d = sims_warranty.semua_klaim(vin=rangka)
-    if d is None:
-        return {"error": "SIMS tidak merespons — coba lagi sebentar lagi."}
+    d = _klaim_semua(rangka)
+    if d.get("_err"):
+        return {"error": d["_err"]}
     klaim = d.get("klaim") or []
+    awas = _klaim_awas_terpotong(d, len(klaim))
     if not klaim:
-        return {"found": False, "catatan": "Tidak ada klaim untuk direkap."}
+        return {"found": False,
+                **({"data_terpotong": True, "_cek_tak_lengkap": True} if awas else {}),
+                "catatan": "Tidak ada klaim untuk direkap." + awas}
 
     from collections import Counter
     per_status: Counter = Counter()
@@ -2340,6 +2632,11 @@ def _t_rekap_klaim(args: dict, user: dict) -> dict:
     out = {
         "found": True,
         "total_klaim": d.get("total"),
+        # Yang benar-benar DIHITUNG di bawah = baris yang terambil. Sama dengan
+        # total_klaim pada kondisi normal; berbeda saat paginasi terpotong —
+        # dan bedanya harus KELIHATAN, bukan disamarkan jadi rekap "lengkap".
+        "jumlah_dianalisis": len(klaim),
+        **({"data_terpotong": True, "_cek_tak_lengkap": True} if awas else {}),
         "rentang_tanggal": ({"dari": min(tanggal), "sampai": max(tanggal)}
                             if tanggal else None),
         "per_status": [{"status": s, "jumlah": n}
@@ -2366,7 +2663,7 @@ def _t_rekap_klaim(args: dict, user: dict) -> dict:
     out["catatan"] = (
         "Rekap klaim garansi SIMS DMS armada. Angka dari daftar klaim (queryRepairOrder). "
         f"⚠️ {nilai_ket} 'gejala_tersering' = teks keluhan apa adanya (belum dikelompokkan "
-        "makna). Sajikan ringkas & jujur."
+        "makna). Sajikan ringkas & jujur." + awas
     )
     return out
 

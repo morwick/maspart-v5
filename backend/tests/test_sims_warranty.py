@@ -196,8 +196,14 @@ def test_tool_cek_garansi_admin(dunia, monkeypatch):
 
 def test_tool_cek_garansi_unit_tak_ada_jujur(dunia, monkeypatch):
     monkeypatch.setattr(ai.sims_warranty, "info_unit", lambda r: None)
+    # `_get` = balasan MENTAH endpoint unit; dict (bukan None) berarti SIMS
+    # MENJAWAB dan unitnya memang tak terdaftar — bedakan dari SIMS gagal
+    # (lihat test_garansi_gagal_bukan_tak_ada.py).
+    monkeypatch.setattr(ai.sims_warranty, "_get",
+                        lambda path, params=None: {"code": 0, "data": None})
     r = ai._t_cek_garansi({"rangka": "XX999999"}, ADMIN)
     assert r["found"] is False and "tidak ditemukan" in r["catatan"].lower()
+    assert not r.get("gagal_dicek")
 
 
 def test_tool_riwayat_klaim(dunia, monkeypatch):
@@ -450,13 +456,17 @@ def test_sheet_garansi_massal(monkeypatch):
                     "komponen": {"mesin": {"no_seri": "E1"}, "gearbox": {"no_seri": "G1"}}}
         return None
     monkeypatch.setattr(ai.sims_warranty, "info_unit", fake_info)
+    # SIMS MENJAWAB untuk XX000000 (balasan mentah non-None) → unit itu memang
+    # tak terdaftar, bukan gagal dicek.
+    monkeypatch.setattr(ai.sims_warranty, "_get",
+                        lambda path, params=None: {"code": 0, "data": None})
     monkeypatch.setattr(ai.sims_warranty, "frame_dari_rangka",
                         lambda x: x[-8:] if len(x) >= 17 else x)
     monkeypatch.setattr(ai.ai_export, "stash_export",
                         lambda judul, kolom, baris: ("EXP", "garansi.xlsx"))
     r = ai._t_sheet_garansi_massal({"_sheet_id": "s1"}, ADMIN)
     assert r["found"] and r["jumlah_baris"] == 2
-    assert r["ketemu"] == 1 and r["tak_ada"] == 1
+    assert r["ketemu"] == 1 and r["tak_ada"] == 1 and r["gagal_dicek"] == 0
     assert list(r.keys())[-1] == "catatan"
 
 
