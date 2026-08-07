@@ -94,6 +94,9 @@ def test_pengganti_stok_dari_accurate(monkeypatch):
     monkeypatch.setattr(ai.accurate, "stock_full",
                         lambda pn: {"available_to_sell": 7.0, "unit": "PCS", "price": 250000,
                                     "name": "FILTER", "per_gudang": []})
+    # pengganti_part kini juga menanyakan status jual RESMI SIMS (isSale) —
+    # 1 HTTP live per PN. Di test WAJIB di-mock (tak ada jaringan nyata).
+    monkeypatch.setattr(ai.sims, "status_jual", lambda pn: None)
     r = ai._t_pengganti_part({"part_number": "612600081334"}, USER)
     row = r["digantikan_oleh"][0]
     assert row["stok_total"].startswith("7") and row.get("harga_lokal")

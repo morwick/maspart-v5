@@ -536,7 +536,8 @@ def _atlas_children(frame: str, root_id, module: str, part_id,
 
 
 def _pasok_of(p: dict) -> str | None:
-    """Nilai mentah `marketability` item EPC ('g'/'b') — DISIMPAN, TAK DISAJIKAN.
+    """Kode MENTAH `marketability` item EPC ('g'/'b') apa adanya — DISIMPAN, TAK
+    DISAJIKAN, dan TIDAK DITERJEMAHKAN.
 
     ⛔⛔ JANGAN memakai ini untuk klaim "discontinued / tidak dipasok lagi".
     Tafsir HAR 2026-07-23 ('g'=dipasok, 'b'=stop) TERBUKTI SALAH ARAH. Uji silang
@@ -548,13 +549,18 @@ def _pasok_of(p: dict) -> str | None:
     dijual terpisah — belum dikonfirmasi, karena itu TIDAK dipakai untuk klaim
     apa pun. Nilai tetap disimpan di cache untuk penelitian lanjutan.
 
-    Status pasok yang SAH hanya dari SIMS (`sims.get_part_info().raw.isSale`,
-    `isPreOffShelves`) — portal tempat kita benar-benar memesan. Sebelum dipakai
-    untuk klaim NEGATIF, arah sebaliknya wajib diuji dulu.
+    Tabel terjemahan {'g':'dipasok','b':'stop'} DIHAPUS 2026-08-06: selama kata
+    'stop'/'dipasok' masih tercetak di baris item, satu `json.dumps` hasil tool
+    saja sudah cukup membuat model menyimpulkan ulang klaim yang sudah dibuang
+    dari lapisan penyajian. Kode mentah tak punya arti bawaan → tak bisa bocor.
+
+    Status pasok yang SAH hanya dari SIMS (`sims.status_jual()` →
+    `raw.isSale`/`isPreOffShelves`) — portal tempat kita benar-benar memesan.
+    Sebelum dipakai untuk klaim NEGATIF, arah sebaliknya wajib diuji dulu.
 
     None = tak ada datanya (mis. cache dibangun sebelum field ini diekstrak)."""
     mk = str(p.get("marketability") or "").strip().lower()
-    return {"g": "dipasok", "b": "stop"}.get(mk)
+    return mk or None
 
 
 def _atlas_item_row(p: dict, module: str) -> dict | None:
@@ -578,9 +584,11 @@ def _atlas_item_row(p: dict, module: str) -> dict | None:
     row = {"pn": pn, "nama": name_en, "nama_cn": name_cn, "qty": p.get("amount"),
            "posisi": ATLAS_POSISI.get(module), "modul": module,
            "pengganti": alt, "berat": p.get("weight")}
-    pasok = _pasok_of(p)
-    if pasok:
-        row["pasok"] = pasok
+    # Kunci NETRAL & apa adanya (dulu 'pasok' berisi 'stop'/'dipasok') — lihat
+    # _pasok_of: artinya belum diketahui, jadi namanya pun tak boleh mengandaikan.
+    mk = _pasok_of(p)
+    if mk:
+        row["marketability_epc"] = mk
     return row
 
 
@@ -1132,9 +1140,9 @@ def assembly_components_global(pn: str, max_figures: int = 10,
                 "nama_cn": " ".join(str(p.get("originalName") or "").split()),
                 "qty": p.get("amount"), "balon": p.get("ballNum"),
                 "pengganti": _item_pengganti(p, cpn)}
-            pasok = _pasok_of(p)
-            if pasok:
-                krow["pasok"] = pasok
+            mk = _pasok_of(p)
+            if mk:
+                krow["marketability_epc"] = mk   # kode mentah, TANPA tafsir (lihat _pasok_of)
             komponen.append(krow)
         svgs = [s for s in (data.get("d2s") or []) if isinstance(s, str)]
         return {
@@ -1971,8 +1979,8 @@ def search_items_in_unit(rangka: str, keywords: list[str]) -> dict:
         item = {"pn": row["pn"], "nama": row["nama"], "nama_cn": row["nama_cn"],
                 "qty": row.get("qty"), "kata_kunci": kw_hit,
                 "dari_assembly": row.get("dari_assembly")}
-        if row.get("pasok"):
-            item["pasok"] = row["pasok"]
+        if row.get("marketability_epc"):
+            item["marketability_epc"] = row["marketability_epc"]
         skored.append((skor, len(row["nama"] or ""), item))
     # skor tertinggi dulu; lalu nama TERPENDEK (paling spesifik) dulu
     skored.sort(key=lambda x: (-x[0], x[1]))

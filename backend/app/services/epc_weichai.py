@@ -587,7 +587,12 @@ def find_part_massal(engine_nos: list[str], terms: list[str]) -> dict:
     nomor ke order, KELOMPOKKAN per dhhNumber (banyak mesin berbagi konfigurasi
     sama), lalu walk BOM SEKALI per order unik. Hasil dipetakan balik per mesin.
     {per_engine:{no:{found,model,dhhNumber,hits:[{pn,nama,group}] | reason}},
-     orders_unik, pn_unik:[...]} atau {_err}."""
+     orders_unik, pn_unik:[...]} atau {_err}.
+
+    `reason` terisi untuk DUA jenis kegagalan: resolusi nomor→order (input/
+    no_order/network/api) DAN walk BOM order-nya (network/api/empty). Keduanya
+    WAJIB dibedakan pemanggil dari found=False+hits kosong — yang terakhir
+    barulah jawaban sah "part itu tak ada di BOM mesin ini"."""
     tok = _ensure_token()
     if not tok:
         return {"_err": "no_session"}
@@ -613,20 +618,31 @@ def find_part_massal(engine_nos: list[str], terms: list[str]) -> dict:
         if dhh:
             orders.setdefault((dhh, dd, md), []).append(no)
 
+    # Kegagalan walk DIBAWA KELUAR (alasan ketiga return). Dulu bom.found=False
+    # (jaringan/API/token) diam-diam jadi hits kosong — tak terbedakan dari BOM
+    # yang memang tak punya part itu, sehingga pemanggil memvonis "tidak ada
+    # part ini di mesin tsb" untuk BOM yang tak pernah sempat terbuka.
     def _walk_filter(key):
         dhh, dd, md = key
-        bom = _walk_bom(tok, dhh, dd, {"model": md})
+        try:
+            bom = _walk_bom(tok, dhh, dd, {"model": md})
+        except Exception:
+            return key, [], "api"
+        if not bom.get("found"):
+            return key, [], str(bom.get("reason") or "api")
         hh = []
-        if bom.get("found"):
-            for g in bom.get("groups") or []:
-                for p in g.get("parts") or []:
-                    if _match(p):
-                        hh.append({"pn": p["pn"], "nama": p["nama"], "group": g["nama"]})
-        return key, hh
+        for g in bom.get("groups") or []:
+            for p in g.get("parts") or []:
+                if _match(p):
+                    hh.append({"pn": p["pn"], "nama": p["nama"], "group": g["nama"]})
+        return key, hh, ""
     hits_by_order: dict = {}
+    gagal_by_order: dict = {}
     with ThreadPoolExecutor(max_workers=min(_WORKERS, max(1, len(orders)))) as ex:
-        for key, hh in ex.map(_walk_filter, list(orders)):
+        for key, hh, why in ex.map(_walk_filter, list(orders)):
             hits_by_order[key] = hh
+            if why:
+                gagal_by_order[key] = why
 
     # 3) petakan balik per mesin.
     per_engine: dict = {}
@@ -634,6 +650,13 @@ def find_part_massal(engine_nos: list[str], terms: list[str]) -> dict:
     for no, (dhh, dd, md) in resolved.items():
         if not dhh:
             per_engine[no] = {"found": False, "reason": md}
+            continue
+        why = gagal_by_order.get((dhh, dd, md))
+        if why:
+            # Order-nya ter-resolve, tapi BOM-nya gagal dibuka → mesin ini BELUM
+            # terperiksa sama sekali.
+            per_engine[no] = {"found": False, "reason": why, "model": md,
+                              "dhhNumber": dhh}
             continue
         hh = hits_by_order.get((dhh, dd, md)) or []
         for h in hh:

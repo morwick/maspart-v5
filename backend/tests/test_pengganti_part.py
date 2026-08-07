@@ -8,6 +8,15 @@ from app.services import epc_weichai, sims, ai_assistant as ai
 ADMIN = {"username": "admin", "role": "admin"}
 
 
+@pytest.fixture(autouse=True)
+def _sims_status_jual_offline(monkeypatch):
+    """pengganti_part kini menyertakan status jual RESMI SIMS (`isSale`) — satu
+    HTTP LIVE per PN saat cache dingin (login RSA + partInfo). ⛔ Test tidak
+    boleh menyentuh jaringan, jadi seluruh modul ini dijalankan dengan helper
+    itu di-nol-kan; test yang memang mengujinya me-monkeypatch ulang sendiri."""
+    monkeypatch.setattr(ai.sims, "status_jual", lambda pn: None)
+
+
 # ── sims.get_part_equivalents: klasifikasi ARAH (lama→pengganti) ─────────────
 def test_sims_equivalents_arah(monkeypatch):
     recs = [

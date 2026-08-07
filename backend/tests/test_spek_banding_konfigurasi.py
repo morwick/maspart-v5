@@ -1,9 +1,10 @@
 """Tool spek_massal_rangka + banding_konfigurasi_rangka (2026-07-23): spesifikasi
 & banding KONFIGURASI banyak unit dari EPC getVehicleConfig (bukan part). Juga
-flag `pasok` (marketability) dari HAR — nilainya tetap DISIMPAN di baris item,
-tapi sejak 2026-08-04 TIDAK BOLEH disajikan sebagai klaim "discontinued"
-(tafsirnya terbukti terbalik; lihat _pasok_of di epc_bom.py). Semua jaringan
-di-MOCK."""
+flag `marketability` dari HAR — nilainya tetap DISIMPAN di baris item (kunci
+netral `marketability_epc`, kode mentah), tapi sejak 2026-08-04 TIDAK BOLEH
+disajikan sebagai klaim "discontinued" dan sejak 2026-08-06 tak lagi
+diterjemahkan sama sekali (tafsirnya terbukti terbalik; lihat _pasok_of di
+epc_bom.py). Semua jaringan di-MOCK."""
 import json
 
 import pytest
@@ -103,19 +104,31 @@ def test_dua_tool_di_gate_dari_pembeli():
     assert {"spek_massal_rangka", "banding_konfigurasi_rangka"} <= names_admin
 
 
-# ── Flag pasok (marketability) dari HAR tree/item ────────────────────────────
+# ── Flag marketability dari HAR tree/item: MENTAH, tanpa tafsir ──────────────
 
-def test_atlas_item_row_pasok():
+def test_atlas_item_row_marketability_mentah():
+    """Nilai `marketability` disimpan APA ADANYA ('g'/'b') di kunci netral.
+
+    Sampai 2026-08-06 ia diterjemahkan jadi 'stop'/'dipasok' di kunci `pasok`.
+    Terjemahan itu TERBALIK (uji 50 PN ke SIMS isSale) dan, walau lapisan
+    penyajian sudah membuangnya, kata 'stop' tetap ikut tercetak setiap kali
+    baris item di-dump ke model → cukup untuk melahirkan kembali klaim
+    'discontinued'. Kode mentah tak punya arti bawaan, jadi tak bisa bocor."""
     row = ai.epc_bom._atlas_item_row(
-        {"code": "WG9525470676", "name": "Backing plate", "originalName": "垫板",
+        {"code": "AZ9998887776", "name": "Backing plate", "originalName": "垫板",
          "amount": 1, "marketability": "b"}, "")
-    assert row["pasok"] == "stop"
+    assert row["marketability_epc"] == "b"
     row2 = ai.epc_bom._atlas_item_row(
-        {"code": "WG1", "name": "Bolt", "amount": 1, "marketability": "g"}, "")
-    assert row2["pasok"] == "dipasok"
+        {"code": "AZ9998887777", "name": "Bolt", "amount": 1, "marketability": "g"}, "")
+    assert row2["marketability_epc"] == "g"
+    # ⛔ tak ada satu pun kata bertafsir di baris item
+    for r in (row, row2):
+        assert "pasok" not in r
+        teks = json.dumps(r, ensure_ascii=False).lower()
+        assert "stop" not in teks and "dipasok" not in teks
     # tanpa marketability (cache lama) → field tak ada
-    row3 = ai.epc_bom._atlas_item_row({"code": "WG2", "name": "Nut"}, "")
-    assert "pasok" not in row3
+    row3 = ai.epc_bom._atlas_item_row({"code": "AZ9998887778", "name": "Nut"}, "")
+    assert "marketability_epc" not in row3
 
 
 def test_cari_part_di_unit_TIDAK_klaim_discontinued(monkeypatch):
@@ -129,8 +142,8 @@ def test_cari_part_di_unit_TIDAK_klaim_discontinued(monkeypatch):
     monkeypatch.setattr(ai.epc_bom, "warm_items_index", lambda r: None)
     monkeypatch.setattr(ai.epc_bom, "search_in_unit", lambda r, k: {
         "found": True, "frame_number": "SJ346500",
-        "hasil": [{"pn": "WG111", "nama": "Old part", "kata_kunci": "part",
-                   "pasok": "stop"}]})
+        "hasil": [{"pn": "AZ9998887776", "nama": "Old part", "kata_kunci": "part",
+                   "marketability_epc": "b"}]})
     monkeypatch.setattr(ai.part_index, "rows_for_pns", lambda pns: {})
     monkeypatch.setattr(ai.epc_bom, "reverse_find_in_unit",
                         lambda r, pn: {"found": False, "instances": []})

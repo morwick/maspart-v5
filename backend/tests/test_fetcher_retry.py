@@ -92,9 +92,14 @@ def test_epc_get_config_lolos_blip(monkeypatch):
 
 
 def test_epc_get_config_gagal_total_tak_dicache(monkeypatch):
+    """Gagal total → sentinel `{'_err':'network'}`, BUKAN `{}`.
+
+    `{}` dipakai untuk jawaban SAH 'VIN tak dikenal EPC'; menyamakan keduanya
+    membuat asisten menyuruh user mengeja ulang nomor rangkanya setiap kali
+    server EPC yang sebenarnya sedang mati. Tetap TIDAK di-cache."""
     get, calls = _flaky([real_requests.ConnectionError("mati")])
     monkeypatch.setattr(epc.requests, "get", get)
     monkeypatch.setattr(epc.time, "sleep", lambda s: None)
     epc._cache.clear()
-    assert epc.get_config("RT108966") == {}
+    assert epc.get_config("RT108966") == {"_err": "network"}
     assert calls["n"] == 2 and not epc._cache

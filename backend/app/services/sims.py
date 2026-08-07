@@ -10,6 +10,7 @@ berjalan dari folder backend/).
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 from ..core.config import get_settings
@@ -205,6 +206,89 @@ def get_part_spec_cached(part_number: str) -> dict:
     membuat jalur massal tak bisa memakai get_part_spec — 100 PN dgn cache lama
     berarti 100 fetch berturut-turut. Di sini cache lama cukup dibalas apa adanya."""
     return _spec_from_info(_part_info_cached(part_number))
+
+
+# ── STATUS JUAL RESMI (portal dealer SIMS) ───────────────────────────────────
+# SATU-SATUNYA sumber sah untuk "part ini masih dijual?". Flag `marketability`
+# EPC pernah dipakai untuk itu dan TERBUKTI TERBALIK (uji silang 50 PN,
+# 2026-08-04: 25/25 part ber-'b' yang kita sebut "discontinued" justru DIJUAL di
+# SIMS) — lihat epc_bom._pasok_of. Kamus kode SIMS mengikuti pola isLoss/isBatch.
+_ISSALE = {"10021001": True, "10021002": False}
+
+
+# ── Rem darurat latensi (cooldown per-proses) ────────────────────────────────
+# Satu panggilan status_jual = 1 HTTP live lewat sims_fetcher (attempts=2 ×
+# timeout 15 dtk) → saat SIMS lambat, SATU PN dingin menggantung ~31 dtk;
+# pengganti_part (beberapa PN) menumpuknya jadi menit-menitan dan detail_part
+# ikut memikulnya. Begitu SIMS terbukti LAMBAT-DAN-GAGAL sekali, jalur ini
+# dibungkam sebentar: pemanggil tetap menerima None — arti yang sama persis
+# ("tak bisa dipastikan") — hanya SEKETIKA, bukan setelah setengah menit.
+# ⚠️ Miss CEPAT (server menjawab, PN memang tak ada di master) TIDAK membungkam
+# apa pun: itu jawaban sah, bukan gangguan.
+_STATUS_JUAL_LAMBAT = 4.0       # dtk: di atas ini panggilan dianggap menggantung
+_STATUS_JUAL_COOLDOWN = 120.0   # dtk: lama jalur dibungkam setelah gagal-lambat
+_status_jual_diam_sampai = 0.0  # monotonic; 0 = tak ada cooldown aktif
+
+
+def _reset_status_jual_cooldown() -> None:
+    """Buang cooldown status_jual (dipakai test; juga bila SIMS diyakini pulih)."""
+    global _status_jual_diam_sampai
+    _status_jual_diam_sampai = 0.0
+
+
+def _status_jual_live(pn: str) -> dict | None:
+    """Isi status_jual TANPA rem latensi. Boleh melempar (ditangkap pemanggil)."""
+    info = get_part_info(pn)
+    # Entri cache LAMA dibangun sebelum 'raw' ikut disimpan; pemeriksa cache
+    # yang ada (get_part_spec dkk) hanya menengok roughWeightKg/lengthCm, jadi
+    # entri begitu tak pernah tersegarkan → sekali paksa di sini.
+    if info and "raw" not in info:
+        info = get_part_info(pn, force_refresh=True)
+    raw = (info or {}).get("raw")
+    if not isinstance(raw, dict):
+        return None
+    kode = str(raw.get("isSale") or "").strip()
+    if not kode:
+        return None
+    dijual = _ISSALE.get(kode)
+    pra = raw.get("isPreOffShelves")
+    return {
+        "dijual": dijual,
+        "label": ("dijual di SIMS" if dijual is True else
+                  "TIDAK dijual di SIMS" if dijual is False else
+                  f"tak diketahui (kode isSale '{kode}' belum dikenal)"),
+        "pra_turun_rak": bool(pra) if pra is not None else None,
+        "sumber": "SIMS partInfo (isSale)",
+    }
+
+
+def status_jual(part_number: str) -> dict | None:
+    """Status jual RESMI part di portal dealer SIMS.
+
+    Return None bila TIDAK BISA DIPASTIKAN (SIMS mati / PN tak ada di master /
+    field `isSale` absen / jalur sedang di-cooldown karena SIMS baru saja
+    menggantung) — pemanggil WAJIB membedakannya dari "tidak dijual". Kalau bisa:
+    {'dijual': bool|None, 'label': str, 'pra_turun_rak': bool|None,
+    'sumber': 'SIMS partInfo (isSale)'}.
+
+    ⚠️ BOLEH JARINGAN & MAHAL (1 HTTP live per PN, bisa login-ulang). Pakai HANYA
+    di jalur detail/pengganti dengan SEDIKIT PN — ⛔ jangan di loop massal.
+    """
+    global _status_jual_diam_sampai
+    pn = (part_number or "").strip()
+    if not _SIMS_OK or not pn:
+        return None
+    if time.monotonic() < _status_jual_diam_sampai:
+        return None                      # SIMS menggantung barusan → jangan digiling
+    t0 = time.monotonic()
+    try:
+        hasil = _status_jual_live(pn)
+    except Exception:
+        hasil = None
+    if hasil is None and (time.monotonic() - t0) > _STATUS_JUAL_LAMBAT:
+        # LAMBAT dan tetap nihil = gejala SIMS terganggu, bukan PN yang tak ada.
+        _status_jual_diam_sampai = time.monotonic() + _STATUS_JUAL_COOLDOWN
+    return hasil
 
 
 def get_part_equivalents(part_number: str) -> dict:

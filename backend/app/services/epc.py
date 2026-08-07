@@ -45,7 +45,17 @@ def available() -> bool:
 
 
 def get_config(rangka: str) -> dict:
-    """Ambil config mentah dari EPC (cache in-memory). {} bila gagal/tak ada."""
+    """Ambil config mentah dari EPC (cache in-memory).
+
+    TIGA kembalian yang WAJIB dibedakan pemanggil — dulu ketiganya sama-sama `{}`,
+    sehingga EPC yang MATI dilaporkan ke user sebagai "nomor rangka Anda salah":
+      - dict berisi field  → unit dikenal EPC;
+      - `{}`               → EPC menjawab, unit TIDAK dikenal (jawaban sah);
+      - `{"_err": "network"}` → EPC gagal dihubungi/dibaca — status unit BELUM
+        diketahui. ⛔ JANGAN diperlakukan sebagai 'tak dikenal'.
+    Sentinel dipilih berkunci '_err' (bukan exception) agar pemanggil lama yang
+    hanya memeriksa kebenaran-nilai tetap jalan, cuma tak lagi menyalahkan user.
+    """
     cjh = _frame(rangka)
     if not cjh:
         return {}
@@ -53,6 +63,7 @@ def get_config(rangka: str) -> dict:
         if cjh in _cache:
             return _cache[cjh]
     data: dict = {}
+    err: str | None = None
     # Retry 1x utk blip jaringan — dulu satu ConnectionError = 'rangka tidak
     # ditemukan' palsu di giliran itu (miss memang tak di-cache, tapi jawaban
     # asisten giliran tsb sudah terlanjur salah).
@@ -63,8 +74,10 @@ def get_config(rangka: str) -> dict:
             j = r.json()
             if isinstance(j, dict) and j.get("success") and isinstance(j.get("data"), dict):
                 data = j["data"]
+            err = None       # server MENJAWAB (walau 'tak dikenal') → bukan error
             break
         except Exception:
+            err = "network"
             if _attempt == 1:
                 time.sleep(0.8)
                 continue
@@ -75,12 +88,21 @@ def get_config(rangka: str) -> dict:
     if data:
         with _lock:
             _cache[cjh] = data
-    return data
+        return data
+    return {"_err": err} if err else {}
 
 
 def lookup(rangka: str) -> dict:
     """Ringkasan config kendaraan (field bersih + sebagian enum diterjemahkan)."""
     d = get_config(rangka)
+    if d.get("_err"):
+        # EPC tak terjangkau ≠ nomor rangka salah. Pisahkan, supaya asisten tak
+        # menyuruh user "cek ejaan" padahal servernya yang sedang mati.
+        return {"found": False, "input": (rangka or "").strip(),
+                "frame_number": _frame(rangka), "_err": d["_err"],
+                "catatan": "EPC Sinotruk GAGAL DIHUBUNGI (jaringan) — status unit ini "
+                           "BELUM bisa dipastikan. ⛔ JANGAN bilang nomor rangkanya "
+                           "salah/tak terdaftar; minta user coba lagi sebentar."}
     if not d:
         return {"found": False, "input": (rangka or "").strip(),
                 "frame_number": _frame(rangka),
