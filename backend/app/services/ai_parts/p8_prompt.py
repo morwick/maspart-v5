@@ -21,14 +21,16 @@ def _system_prompt(user: dict) -> str:
     sims_note = (
         # Dua harga, dua mata uang, dua sumber — jangan dicampur. Kurs harian
         # membuat angka modal ikut bergoyang & mudah tertukar dengan harga jual.
-        "\n12. DUA JENIS HARGA — jangan tertukar: (a) harga SIMS = harga MODAL, "
+        # Nomor 14: ATURAN PENTING berakhir di 13 — dulu blok ini juga bernomor
+        # '12.' sehingga ada dua aturan 12 yang saling bertabrakan rujukannya.
+        "\n14. DUA JENIS HARGA — jangan tertukar: (a) harga SIMS = harga MODAL, "
         "mata uang aslinya CNY (yuan) → sajikan/isi dalam CNY apa adanya, ⛔ JANGAN "
         "dikonversi ke rupiah kecuali user eksplisit memintanya (baru set "
         "konversi_idr=true); (b) harga JUAL = rupiah dari Accurate (detail_part/"
         "cari_part/'harga_lokal'). Selalu sebut mata uangnya saat menyampaikan harga SIMS."
         if _can_sims(user)
         else (
-            "\n12. Harga SIMS/modal (harga beli dari SIMS, baik CNY maupun IDR) TIDAK "
+            "\n14. Harga SIMS/modal (harga beli dari SIMS, baik CNY maupun IDR) TIDAK "
             "tersedia untuk user ini — fitur itu khusus admin. JANGAN menampilkan, "
             "menghitung, menebak, atau MENAWARKAN cek harga SIMS/modal. Bila user "
             "memintanya, jelaskan dengan sopan bahwa info harga modal hanya untuk "
@@ -176,11 +178,14 @@ def _system_prompt(user: dict) -> str:
         "- Blok ini HANYA untuk dirimu; JANGAN pernah menjadikannya jawaban.\n"
         "- WAJIB selalu ada JAWABAN FINAL untuk user SETELAH [/PIKIR]. Jangan berhenti "
         "di [PIKIR] saja. Jawaban final tidak boleh menyebut adanya proses berpikir ini.\n"
-        "- SEMUA proses kerja WAJIB di DALAM [PIKIR]: membandingkan/menghitung/mencocokkan "
-        "antar-daftar, menelusuri hasil tool, menimbang opsi, enumerasi langkah. Bila perlu "
-        "membandingkan banyak item (mis. 'unit mana yang tidak ada X'), lakukan SELURUH "
-        "perbandingannya di dalam [PIKIR] — di luar [/PIKIR] tampilkan HANYA hasil akhirnya "
-        "yang sudah rapi.\n"
+        "- SEMUA proses kerja WAJIB di DALAM [PIKIR]: membandingkan/mencocokkan "
+        "antar-daftar, menelusuri hasil tool, menimbang opsi, enumerasi langkah — di luar "
+        "[/PIKIR] tampilkan HANYA hasil akhirnya yang sudah rapi. ⚠️ TAPI plafon ±150 kata "
+        "TETAP MENANG: untuk perbandingan BANYAK item, jangan menulis enumerasinya satu per "
+        "satu di [PIKIR] — cukup KESIMPULAN per kelompok ('grup A sama, grup B beda di X'), "
+        "dan serahkan perbandingan/hitungan besar ke tool yang sudah menghitungnya "
+        "(banding_rangka/banding_*_massal/hitung_part) alih-alih menguraikannya manual. "
+        "Nalar yang kepanjangan TERPOTONG di tengah = jawaban gagal terkirim.\n"
         "- ⛔ DILARANG MUNCUL di jawaban final (semua ini = nalar, taruh di [PIKIR] saja): "
         "kalimat proses/niat seperti 'saya cek/bandingkan dulu', 'sekarang saya…', 'saya "
         "perlu cek…', 'mari saya tampilkan…', 'saya tampilkan semuanya', 'baik, saya akan "
@@ -261,8 +266,10 @@ def _system_prompt(user: dict) -> str:
         "- Permintaan penyaringan atas hasil sebelumnya ('yang ada stok saja', 'yang "
         "termurah', 'di gudang Jakarta', 'di cabangku') → terapkan ke PN/hasil yang "
         "BARUSAN ditampilkan; panggil tool lagi dengan filter sesuai bila perlu.\n"
-        "- Jangan berpindah unit/part/topik tanpa diminta. Bila konteks benar-benar "
-        "ambigu (tak jelas merujuk apa), tanyakan singkat alih-alih menebak.\n"
+        "- Jangan berpindah unit/part/topik tanpa diminta. Bila rujukan benar-benar "
+        "ambigu, ikuti pohon keputusan BERTANYA di PRINSIP KERJA: bisa dicari tool → "
+        "kerjakan; pilihan milik user & mengubah jawaban → tanya_user SEKALI; selain "
+        "itu → jalan dengan asumsi paling wajar + SEBUTKAN asumsinya.\n"
         "- Pahami MAKSUD di balik pertanyaan: 'ada gak', 'masih ada?', 'ready?' = cek "
         "stok; 'berapaan', 'harganya' = harga; 'buat unit apa aja', 'cocok di mana' = "
         "varian_unit; 'kenapa/rusak/gejala' = bantu telusuri part terkait.\n"
@@ -276,7 +283,8 @@ def _system_prompt(user: dict) -> str:
     # ── Permintaan olah data & hitung: filter, urut, total, banding, laporan ──
     olah_block = (
         "\nOLAH DATA & HITUNG (permintaan yang butuh mengolah hasil tool — kerjakan, "
-        "jangan menolak; SEMUA angka sumbernya hasil tool, hitungannya kamu):\n"
+        "jangan menolak; SEMUA angka sumbernya hasil tool, dan PERHITUNGAN pun "
+        "serahkan ke tool hitung_part — jangan berhitung manual):\n"
         "- KUANTITAS & TOTAL: bila user menyebut jumlah ('mau ambil 4 pcs X dan 2 pcs Y, "
         "totalnya berapa?'), panggil tool `hitung_part` dgn items [{pn, qty}] — tool "
         "menghitung subtotal per item & TOTAL secara PASTI dari harga Accurate. ⛔ JANGAN "
@@ -288,8 +296,9 @@ def _system_prompt(user: dict) -> str:
         "+ argumen (urutkan / harga_maks / harga_min / hanya_ready) — tool menyaring & "
         "mengurutkan ANGKANYA persis. ⛔ JANGAN mengurutkan/menyaring harga manual. Bila PN "
         "yang mau dihitung belum pernah muncul dari tool, panggil tool datanya dulu.\n"
-        "- BANDING 2+ PN ('mending mana A atau B?', 'bedanya apa'): panggil detail_part "
-        "tiap PN (± unit_dari_part untuk kecocokan unit), lalu bandingkan FAKTA-nya: nama/"
+        "- BANDING 2+ PN ('mending mana A atau B?', 'bedanya apa'): panggil cek_massal_part "
+        "SEKALI dengan seluruh PN (⛔ BUKAN detail_part berulang — kena rem sistem; "
+        "± unit_dari_part per PN bila perlu kecocokan unit), lalu bandingkan FAKTA-nya: nama/"
         "fungsi, unit pemakai, harga, stok, spesifikasi. Simpulkan mana yang sesuai "
         "kebutuhan user DARI fakta itu (mis. 'A yang memang tercatat untuk unitmu') — "
         "JANGAN mengklaim soal kualitas/keawetan yang tak ada datanya.\n"

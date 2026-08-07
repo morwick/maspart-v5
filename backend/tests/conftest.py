@@ -114,6 +114,24 @@ def _jangan_cari_master_sims_nyata(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _jangan_status_jual_sims_nyata(request, monkeypatch):
+    """sims.status_jual (baru 2026-08-07) bisa menembak partInfo NYATA (login +
+    GET per PN, bahkan force_refresh utk entri cache lama tanpa 'raw') — dan kini
+    dipanggil detail_part & pengganti_part. Test biasa tak boleh menyentuh
+    jaringan → di-no-op (None = status TAK DIKETAHUI, field absen). Test yang
+    memang mengujinya cukup monkeypatch ulang di badan test-nya (menang atas
+    fixture ini) — pola yang sama dgn _jangan_cari_master_sims_nyata."""
+    try:
+        from app.services import sims
+        # test_kejujuran_klaim_epc menguji logika status_jual ASLI (get_part_info
+        # sudah ia mock sendiri) → dikecualikan, pola _jangan_cari_master_sims_nyata.
+        if request.module.__name__ != "test_kejujuran_klaim_epc":
+            monkeypatch.setattr(sims, "status_jual", lambda pn: None)
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _bersihkan_idempotensi_order():
     """Cache idempotensi POST /orders (L5) proses-lokal → bersihkan antar-test
     agar hasil order satu test tak bocor ke test lain yang sidik jarinya sama."""

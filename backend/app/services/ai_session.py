@@ -37,8 +37,14 @@ import time
 # Percakapan dianggap "hangat" seharian kerja; lebih lama dari itu, konteks
 # lapangan (unit yang sedang dikerjakan) hampir pasti sudah berganti.
 _TTL_SEC = 12 * 3600.0
-_MAX_PER_USER = 4      # tab/percakapan aktif per user
+_MAX_PER_USER = 8      # tab/percakapan aktif per user (memo ≈ KB-an; 4 terbukti
+                       # sempit — tab baru menggusur percakapan yang masih aktif)
 _MAX_GLOBAL = 300      # pagar RAM (memo ≈ beberapa KB → < 2 MB total)
+# Umur ANGKA/FAKTA yang masih layak di-ground ulang = satu siklus indeks Accurate
+# (5 jam). Lebih tua dari itu stok/harga bisa sudah berubah — faktanya tetap
+# ditampilkan (sbg 'fakta_lama', diberi label wajib-verifikasi oleh pemakai),
+# tapi ANGKANYA tidak lagi meng-ground klaim stok/harga giliran baru.
+_FRESH_SEC = 5 * 3600.0
 
 # conversation_id datang dari KLIEN → perlakukan sebagai input tak tepercaya.
 # Hanya bentuk UUID-ish yang diterima; selain itu memori sesi tidak aktif
@@ -51,6 +57,7 @@ _CONV_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
 _CAP_RANGKA = 2
 _CAP_MESIN = 2
 _CAP_WO = 3
+_CAP_UNIT = 2          # nama MODEL/unit aktif (tanpa VIN) — dari argumen tool
 _CAP_PN = 200          # BOM satu unit bisa ratusan baris; 200×~30B = 6 KB/sesi
 _CAP_NUMS = 120
 _CAP_FAKTA = 12
@@ -83,6 +90,38 @@ def _gabung(lama: list, baru, cap: int) -> list:
     return out[:cap]
 
 
+def _gabung_ts(lama: list, baru, cap: int, now: float) -> list:
+    """Gabung ber-STEMPEL WAKTU, terbaru-dulu. Entri = {'s': teks, 'at': waktu}.
+    Yang disebut ULANG giliran ini naik ke depan dgn stempel BARU — data yang
+    baru dikonfirmasi tool memang segar lagi."""
+    out: list = []
+    seen: set[str] = set()
+    for x in list(baru or []):
+        s = str(x or "").strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append({"s": s, "at": now})
+    for e in list(lama or []):
+        s = (e.get("s") if isinstance(e, dict) else str(e or "")).strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(e if isinstance(e, dict) else {"s": s, "at": now})
+    return out[:cap]
+
+
+def _pisah_umur(entries: list, now: float) -> tuple[list, list]:
+    """(segar, lama) — teks polos, urutan terjaga. Entri tanpa stempel = segar."""
+    segar: list = []
+    lama: list = []
+    for e in entries or []:
+        if isinstance(e, dict):
+            (segar if now - float(e.get("at") or now) <= _FRESH_SEC
+             else lama).append(e.get("s") or "")
+        else:
+            segar.append(str(e))
+    return [s for s in segar if s], [s for s in lama if s]
+
+
 def get(username: str, conv_id: str) -> dict | None:
     """Memo percakapan ini (SALINAN — pemanggil tak bisa memutasi stash).
     None bila tak ada / kedaluwarsa / conversation_id tak sah."""
@@ -97,15 +136,25 @@ def get(username: str, conv_id: str) -> dict | None:
         if now - e["at"] > _TTL_SEC:
             _stash.pop(k, None)
             return None
+        # Touch-on-read: percakapan yang DIBACA sedang aktif — tanpa ini, eviksi
+        # kuota per-user bisa menggusur justru percakapan yang sedang dipakai
+        # hanya karena giliran-giliran terakhirnya tak menulis memo baru.
+        e["at"] = now
+        nums_segar, _ = _pisah_umur(e.get("nums") or [], now)
+        fakta_segar, fakta_lama = _pisah_umur(e.get("fakta") or [], now)
         return {
             "rangka": list(e["rangka"]), "mesin": list(e["mesin"]),
-            "wo": list(e["wo"]), "pn": dict(e["pn"]),
-            "nums": list(e["nums"]), "fakta": list(e["fakta"]),
+            "wo": list(e["wo"]), "unit": list(e.get("unit") or []),
+            "pn": dict(e["pn"]),
+            # nums = HANYA yang segar: angka stok/harga basi tak boleh
+            # meng-ground klaim baru. Fakta basi tetap dikembalikan terpisah
+            # (fakta_lama) supaya pemakai bisa menampilkannya BERLABEL.
+            "nums": nums_segar, "fakta": fakta_segar, "fakta_lama": fakta_lama,
         }
 
 
 def merge(username: str, conv_id: str, *, rangka=(), mesin=(), wo=(),
-          pn=None, nums=(), fakta=()) -> bool:
+          unit=(), pn=None, nums=(), fakta=()) -> bool:
     """Tambahkan hasil satu giliran ke memo. Best-effort: False bila memori sesi
     tak aktif (conversation_id tak sah). `pn` boleh mapping {PN: label} atau
     iterable PN. Tidak melempar — pemanggil ada di jalur jawaban user."""
@@ -119,13 +168,16 @@ def merge(username: str, conv_id: str, *, rangka=(), mesin=(), wo=(),
     now = time.monotonic()
     with _lock:
         _purge_locked(now)
-        e = _stash.get(k) or {"rangka": [], "mesin": [], "wo": [],
+        e = _stash.get(k) or {"rangka": [], "mesin": [], "wo": [], "unit": [],
                               "pn": {}, "nums": [], "fakta": []}
         e["rangka"] = _gabung(e["rangka"], rangka, _CAP_RANGKA)
         e["mesin"] = _gabung(e["mesin"], mesin, _CAP_MESIN)
         e["wo"] = _gabung(e["wo"], wo, _CAP_WO)
-        e["nums"] = _gabung(e["nums"], nums, _CAP_NUMS)
-        e["fakta"] = _gabung(e["fakta"], fakta, _CAP_FAKTA)
+        e["unit"] = _gabung(e.get("unit") or [], unit, _CAP_UNIT)
+        # ANGKA & FAKTA ber-stempel waktu: umur menentukan apakah masih boleh
+        # meng-ground / disajikan tanpa label 'lama' (lihat get()).
+        e["nums"] = _gabung_ts(e.get("nums") or [], nums, _CAP_NUMS, now)
+        e["fakta"] = _gabung_ts(e.get("fakta") or [], fakta, _CAP_FAKTA, now)
         # PN: LRU sederhana — yang BARU disebut naik ke depan, ekor terpotong.
         gabung_pn = dict(pn_baru)
         for p, v in e["pn"].items():

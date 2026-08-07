@@ -297,7 +297,21 @@ def _sanitize_history(history: list[dict]) -> list[dict]:
     for i, m in enumerate(out):
         cap = _HIST_CHARS_OLD if i < cut else _HIST_CHARS_RECENT
         if len(m["content"]) > cap:
-            m["content"] = m["content"][:cap] + " …(dipangkas)"
+            if i == len(out) - 1:
+                # Pesan TERAKHIR (biasanya pertanyaan user turn ini): potong di
+                # batas kata (bukan tengah token — separuh PN lebih menyesatkan
+                # daripada PN hilang) + beri tahu model secara EKSPLISIT bahwa
+                # pesan tak utuh. Dulu daftar PN panjang diproses sebagian
+                # DIAM-DIAM dan model menjawab seolah daftarnya segitu saja.
+                b = m["content"].rfind(" ", int(cap * 0.8), cap)
+                b = b if b > 0 else cap
+                m["content"] = (m["content"][:b]
+                                + " …(TERPOTONG — pesan user aslinya lebih "
+                                "panjang; bila berisi daftar PN, sebagian tak "
+                                "terbaca. Sebutkan itu & sarankan lampirkan "
+                                "Excel bila perlu)")
+            else:
+                m["content"] = m["content"][:cap] + " …(dipangkas)"
     # Obrolan panjang: pesan ke-17 ke belakang HILANG TOTAL. Tanpa penanda, model
     # membaca sisanya seolah itu awal percakapan — lalu menjawab yakin padahal
     # premisnya (rangka, unit, keluhan awal) sudah terpotong. Penanda ini membuat
@@ -316,24 +330,44 @@ def _sanitize_history(history: list[dict]) -> list[dict]:
 # Disaring lagi (>=2 huruf & >=3 angka) agar TIDAK menangkap kode model unit
 # (mis. 'LZZ1CCSD' hanya 1 angka) atau token unit ('190HP' hanya 5 char).
 _PNLIKE_RE = re.compile(r"[A-Z0-9][A-Z0-9/+.\-]{6,}")
+# PN murni-angka utk SLOT konteks: beda dgn _PN_NUMERIC_RE (guard), lookahead-nya
+# MEMBOLEHKAN titik sesudahnya — di teks percakapan PN numerik lazim mengakhiri
+# kalimat ('…: 612630010054.') dan titik kalimat itu dulu menggagalkan match.
+_PN_NUMERIC_SLOT_RE = re.compile(r"(?<![0-9.\-])[0-9]{9,}(?![0-9\-])")
 
 
 def _recent_part_numbers(history: list[dict], max_pn: int = 12, max_msgs: int = 3) -> list[str]:
     """Ambil Part Number dari sampai `max_msgs` pesan ber-PN TERAKHIR (recent-first,
     dedup) — 'memori konteks': rujukan 'itu/harganya?' bisa merujuk part yang
     disebut beberapa pesan lalu. Scan user DAN assistant: PN yang DIKETIK user
-    ('cek WG9925520270') tetap teringat walau jawaban asisten tak mengulanginya."""
+    ('cek WG9925520270') tetap teringat walau jawaban asisten tak mengulanginya.
+
+    Dua kelas token dikecualikan/ditambahkan agar slot PN paritas dgn _extract_pns:
+      • VIN/frame/nomor WO BUKAN Part Number — tanpa saringan ini 'RT108966'
+        masuk daftar 'PN yang BARU ditampilkan' dan model memakainya sbg PN;
+      • PN MURNI ANGKA (Weichai: 612630010054) dulu tak pernah tertangkap
+        (_PNLIKE_RE menuntut huruf) → follow-up 'harganya?' utk part mesin
+        kehilangan rujukan."""
     pns: list[str] = []
     seen_msgs = 0
     for m in reversed(history or []):
         if (m or {}).get("role") not in ("assistant", "user"):
             continue
+        up = (m.get("content") or "").upper()
         this: list[str] = []
-        for tok in _PNLIKE_RE.findall((m.get("content") or "").upper()):
-            tok = tok.strip(".")
+        for tok in _PNLIKE_RE.findall(up):
+            tok = tok.strip("./+-")
             letters = sum(c.isalpha() for c in tok)
             digits = sum(c.isdigit() for c in tok)
-            if len(tok) >= 8 and letters >= 2 and digits >= 3 and tok not in this:
+            if (len(tok) >= 8 and letters >= 2 and digits >= 3 and tok not in this
+                    and not _VIN_FULL_RE.fullmatch(tok)
+                    and not _FRAME_RE.fullmatch(tok)
+                    and not _WO_RE.fullmatch(tok)):
+                this.append(tok)
+        for tok in _PN_NUMERIC_SLOT_RE.findall(up):
+            # POTONGAN digit dari PN alfanumerik ('9725190712' di 'WG9725190712')
+            # bukan PN tersendiri — jangan menduakan slot (pola _mentioned_part_pns).
+            if tok not in this and not any(tok in a for a in this):
                 this.append(tok)
         if this:
             seen_msgs += 1
@@ -349,20 +383,62 @@ def _recent_part_numbers(history: list[dict], max_pn: int = 12, max_msgs: int = 
 # Ambang ini menjauhkannya dari PN (huruf-angka berselang) & frame (2h+6a).
 _WO_RE = re.compile(r"\bR[A-Z]{2,4}\d{7,}\b")
 
+# Kata kunci pertanyaan KECOCOKAN part↔unit. Dipakai guard EPC-FIRST: PN yang
+# user ketik sendiri biasanya bebas guard ('cek stok WG…'), TAPI bila ia
+# menanyakan cocok/tidaknya part itu utk sebuah unit, jawabannya WAJIB lewat EPC.
+_FITMENT_KATA = ("COCOK", "SESUAI", "KOMPATIBEL", "BISA DIPAKAI", "BISA DIPASANG",
+                 "PAS BUAT", "PAS UNTUK", "PAS GA", "PAS TIDAK")
 
-def _recent_wo(history: list[dict], max_n: int = 3) -> list[str]:
-    """No WO/klaim yang PALING BARU disebut (user/assistant) — 'klaim aktif' untuk
-    follow-up 'detail klaim itu'/'statusnya' tanpa user mengulang nomor WO."""
-    out: list[str] = []
-    for m in reversed(history or []):
-        if (m or {}).get("role") not in ("assistant", "user"):
+
+def _recent_wo(history: list[dict], max_n: int = 3, user_only: bool = False) -> list[str]:
+    """No WO/klaim yang PALING BARU disebut — 'klaim aktif' untuk follow-up
+    'detail klaim itu'/'statusnya' tanpa user mengulang nomor WO.
+
+    Pesan USER diprioritaskan: tabel buatan asisten (riwayat_klaim) bisa memuat
+    puluhan WO ORANG LAIN, dan dulu semuanya ikut jadi 'klaim aktif' — kelas bug
+    yang sama dgn rangka (sudah dibereskan di _recent_rangka) tapi terlewat di
+    sini. Fallback: WO dari SATU pesan assistant TERAKHIR ber-WO saja (follow-up
+    'yang pertama' atas tabel yang barusan ditampilkan tetap terjawab).
+    `user_only=True` = tanpa fallback assistant — dipakai penulis MEMO sesi:
+    yang boleh menetap lintas-giliran hanya WO yang user sendiri sebut (WO dari
+    tabel bisa milik unit orang lain).
+
+    KEBARUAN dibandingkan, bukan sekadar user-menang: WO yang user ketik puluhan
+    giliran lalu TIDAK boleh mengalahkan tabel klaim yang BARU SAJA ditampilkan
+    ('yang ketiga di tabel itu' harus merujuk tabel, bukan WO lama)."""
+    hist = list(history or [])
+    user_out: list[str] = []
+    user_terbaru = -1
+    for i in range(len(hist) - 1, -1, -1):
+        m = hist[i] or {}
+        if m.get("role") != "user":
             continue
-        for tok in _WO_RE.findall((m.get("content") or "").upper()):
-            if tok not in out:
-                out.append(tok)
-        if len(out) >= max_n:
+        toks = _WO_RE.findall((m.get("content") or "").upper())
+        if not toks:
+            continue
+        if user_terbaru < 0:
+            user_terbaru = i
+        for t in toks:
+            if t not in user_out:
+                user_out.append(t)
+        if len(user_out) >= max_n:
             break
-    return out[:max_n]
+    if user_only:
+        return user_out[:max_n]
+    asst_out: list[str] = []
+    asst_terbaru = -1
+    for i in range(len(hist) - 1, -1, -1):
+        m = hist[i] or {}
+        if m.get("role") != "assistant":
+            continue
+        toks = _WO_RE.findall((m.get("content") or "").upper())
+        if toks:
+            asst_terbaru = i
+            asst_out = list(dict.fromkeys(toks))
+            break
+    if asst_terbaru > user_terbaru:
+        return asst_out[:max_n]
+    return user_out[:max_n]
 
 
 # VIN China (17 char, mulai 'L', tanpa I/O/Q) & frame number 8 char (2 huruf+6 angka,
@@ -381,6 +457,23 @@ _LABEL_NON_UNIT_RE = re.compile(
     r"\b(?:NO\.?\s*)?(?:SO|PO|INV|INVOICE|FAKTUR|NOTA|KWITANSI|DO|SJ)\b"
     r"\s*[:#.\-]?\s*([A-Z]{2}\d{6})\b"
 )
+# DERET nomor dokumen setelah satu label ("cek SO AB123456, CD654321 dan
+# EF111222"): label hanya ditulis SEKALI, tapi seluruh deret itu dokumen —
+# regex tunggal di atas cuma melindungi token pertama, sisanya dulu dianggap
+# rangka (prefetch EPC bogus + 'rangka aktif' salah).
+_LABEL_SERIES_RE = re.compile(
+    r"\b(?:NO\.?\s*)?(?:SO|PO|INV|INVOICE|FAKTUR|NOTA|KWITANSI|DO|SJ)\b"
+    r"\s*[:#.\-]?\s*"
+    r"([A-Z]{2}\d{6}(?:\s*(?:,|/|&|\bDAN\b|\s)\s*[A-Z]{2}\d{6})*)"
+)
+
+
+def _label_doc_frames(text_up: str) -> set[str]:
+    """Semua frame 8-char yang berada dalam DERET berlabel dokumen."""
+    out: set[str] = set()
+    for m in _LABEL_SERIES_RE.finditer(text_up):
+        out.update(_FRAME_RE.findall(m.group(1)))
+    return out
 
 
 def _rangka_candidates(text_up: str) -> list[str]:
@@ -402,8 +495,9 @@ def _rangka_candidates(text_up: str) -> list[str]:
         drop |= (_unit_name_tokens() & set(frames))
     except Exception:
         pass
-    # Nomor dokumen berlabel — hanya token yang BENAR-BENAR didahului labelnya.
-    drop |= set(_LABEL_NON_UNIT_RE.findall(text_up)) & set(frames)
+    # Nomor dokumen berlabel — token yang didahului label, TERMASUK deret
+    # lanjutannya ("SO AB123456, CD654321" → keduanya dokumen).
+    drop |= _label_doc_frames(text_up) & set(frames)
     return [t for t in toks if not (len(t) == 8 and t in drop)]
 
 
@@ -482,7 +576,8 @@ def _user_context_line(user: dict) -> str:
 _FAKTA_BLOK_CAP = 1200   # plafon karakter seksi FAKTA TERVERIFIKASI
 
 
-def _active_context_block(history: list[dict], memo: dict | None = None) -> str:
+def _active_context_block(history: list[dict], memo: dict | None = None,
+                          user: dict | None = None) -> str:
     """Blok 'KONTEKS AKTIF': PN + nomor rangka yang BARU dibahas, agar model
     menyelesaikan rujukan follow-up tanpa menebak/minta ulang. Disuntik SETELAH
     riwayat (bukan di system prompt) supaya prefix system+riwayat lama stabil →
@@ -497,16 +592,59 @@ def _active_context_block(history: list[dict], memo: dict | None = None) -> str:
          ia temukan sendiri."""
     memo = memo or {}
     pns = _recent_part_numbers(history)
-    rangka = _recent_rangka(history) or list(memo.get("rangka") or [])
+    pns_memo = False
+    if not pns:
+        # Riwayat terpangkas/klien memotong → PN hasil tool giliran lalu masih
+        # ada di memo (urutan simpan ≈ urutan tampil sejak _extract_pns_urut).
+        # Tanpa fallback ini slot PN kosong padahal 200 PN tersimpan & tak
+        # pernah dirujuk. Kalimatnya DIBEDAKAN: daftar memo bukan jaminan
+        # persis apa yang user lihat di layar.
+        pns = list(memo.get("pn") or {})[:12]
+        pns_memo = bool(pns)
+    rangka_hist = _recent_rangka(history)
+    rangka = rangka_hist or list(memo.get("rangka") or [])
     wo = _recent_wo(history) or list(memo.get("wo") or [])
     mesin = list(memo.get("mesin") or [])
+    unit_aktif = list(memo.get("unit") or [])
+    # Pesan terakhir user menyebut MODEL unit lain tanpa VIN? → rangka lama
+    # mungkin bukan unit yang sedang ditanya; instruksinya harus ikut ragu.
+    last_user_up = next((str((m or {}).get("content") or "").upper()
+                         for m in reversed(history or [])
+                         if (m or {}).get("role") == "user"), "")
+    ganti_model = ""
+    if rangka and not _rangka_candidates(last_user_up):
+        try:
+            toks = {t for t in _unit_name_tokens() if len(t) >= 3}
+            disebut = sorted(t for t in toks
+                             if re.search(rf"(?<![A-Z0-9]){re.escape(t)}(?![A-Z0-9])",
+                                          last_user_up))[:3]
+            if disebut:
+                ganti_model = (
+                    " ⚠️ TAPI pesan terakhir menyebut model unit ("
+                    + ", ".join(disebut) + ") tanpa VIN — bila yang ditanya "
+                    "unit BERBEDA dari rangka di atas, JANGAN pakai rangka "
+                    "lama; berlakukan aturan minta-VIN."
+                )
+        except Exception:  # pragma: no cover — deteksi opsional, jangan jatuhkan chat
+            pass
     lines = ["KONTEKS AKTIF (rujukan untuk pesan terakhir user — data yang BARU dibahas):"]
-    if rangka:
+    if rangka and rangka_hist:
         lines.append(
             "- Nomor rangka AKTIF: " + ", ".join(rangka) + ". Bila user bertanya lanjutan "
             "soal part/posisi/spesifikasi unit TANPA mengulang rangka ('yang belakang?', "
             "'kalau injectornya?', 'part remnya?'), pakai rangka ini pada tool EPC yang "
-            "sesuai — JANGAN minta rangka ulang."
+            "sesuai — JANGAN minta rangka ulang." + ganti_model
+        )
+    elif rangka:
+        # Rangka hanya dari MEMORI SESI (sudah tak terlihat di riwayat) — masih
+        # sangat mungkin unit yang sama, tapi jangan seyakin rangka yang baru
+        # diketik: beri model izin memakai SEKALIGUS syarat berhenti memakainya.
+        lines.append(
+            "- Nomor rangka TERAKHIR yang dibahas (dari memori sesi): "
+            + ", ".join(rangka) + ". Bila pertanyaan lanjutan masih soal unit "
+            "yang sama, pakai rangka ini pada tool EPC — jangan minta user "
+            "mengulang. Bila user sudah beralih ke unit/model lain, minta "
+            "rangka baru." + ganti_model
         )
     else:
         lines.append(
@@ -515,13 +653,34 @@ def _active_context_block(history: list[dict], memo: dict | None = None) -> str:
             "DULU: awali jawaban dengan meminta nomor rangka, dan labeli hasil katalog "
             "sebagai 'perkiraan per-model (belum tentu PN unit Anda)'."
         )
-    if pns:
+    if not rangka and unit_aktif:
         lines.append(
-            "- Part Number yang BARU ditampilkan: " + ", ".join(pns) + ". Bila user merujuk "
-            "tak langsung ('itu', 'yang pertama', 'harganya?', 'stoknya?'), gunakan daftar "
-            "ini dan panggil detail_part/harga_sims untuk PN yang dimaksud — JANGAN minta "
-            "user mengulang nomor part."
+            "- Unit/MODEL yang sedang dibahas (tanpa VIN): " + ", ".join(unit_aktif)
+            + ". Pertanyaan part lanjutan kemungkinan masih soal unit ini — pakai "
+            "sebagai filter 'unit' pada tool pencarian, dan tetap labeli hasilnya "
+            "'perkiraan per-model'."
         )
+    if pns:
+        # harga_sims hanya utk akun ber-akses SIMS; menyarankannya ke user lain
+        # membuat model memanggil tool yang pasti ditolak.
+        _tool_harga = "detail_part/harga_sims" if (user and _can_sims(user)) else "detail_part"
+        if pns_memo:
+            lines.append(
+                "- Part Number TERSIMPAN DI MEMORI SESI (riwayat obrolan terpangkas; "
+                "daftar ini belum tentu persis urutan yang user lihat di layar): "
+                + ", ".join(pns) + ". Untuk rujukan tak langsung ('itu', 'harganya?', "
+                f"'stoknya?') pakai daftar ini + {_tool_harga} — jangan minta user "
+                "mengulang nomor part. ⛔ TAPI rujukan ORDINAL ('yang pertama/kedua') "
+                "JANGAN ditebak dari daftar ini — pastikan lewat tool/riwayat, atau "
+                "tanyakan singkat."
+            )
+        else:
+            lines.append(
+                "- Part Number yang BARU ditampilkan: " + ", ".join(pns) + ". Bila user merujuk "
+                f"tak langsung ('itu', 'yang pertama', 'harganya?', 'stoknya?'), gunakan daftar "
+                f"ini dan panggil {_tool_harga} untuk PN yang dimaksud — JANGAN minta "
+                "user mengulang nomor part."
+            )
     if mesin:
         # Nomor mesin Weichai tak punya bentuk yang bisa dikenali regex secara
         # andal (formatnya beragam), jadi slot ini HANYA terisi dari argumen tool
@@ -553,6 +712,25 @@ def _active_context_block(history: list[dict], memo: dict | None = None) -> str:
                 "- FAKTA TERVERIFIKASI GILIRAN SEBELUMNYA (hasil tool, sudah dicek "
                 "sistem — boleh kamu rujuk langsung tanpa memanggil ulang tool; bila "
                 "ragu atau user minta angka terbaru, verifikasi ulang via tool):\n  "
+                + "\n  ".join(blok)
+            )
+    # Fakta BASI (lebih tua dari siklus indeks Accurate): stok/harga di dalamnya
+    # bisa sudah berubah. Tetap ditampilkan (konteks 'apa yang dulu dibahas'),
+    # tapi WAJIB berlabel — dan angkanya memang tak lagi di-ground (ai_session
+    # tak mengembalikannya di 'nums').
+    fakta_lama = [f for f in (memo.get("fakta_lama") or []) if f]
+    if fakta_lama:
+        blok, n = [], 0
+        for f in fakta_lama:
+            if n + len(f) > _FAKTA_BLOK_CAP:
+                break
+            blok.append(f)
+            n += len(f) + 1
+        if blok:
+            lines.append(
+                "- CATATAN LAMA (hasil tool >5 jam lalu — stok/harga bisa sudah "
+                "berubah; bila user menanyakan angkanya lagi, WAJIB verifikasi "
+                "ulang via tool, jangan mengutip dari sini):\n  "
                 + "\n  ".join(blok)
             )
     return "\n".join(lines)
@@ -650,8 +828,11 @@ def _fakta_from_tool(name: str, args: dict, result: dict) -> list[str]:
     inti = _dari_row(result)
     if inti:
         _tambah(f"[{ctx}] {inti}")
-    elif result.get("ringkasan") or result.get("catatan"):
-        _tambah(f"[{ctx}] {result.get('ringkasan') or result.get('catatan')}")
+    elif result.get("ringkasan"):
+        # HANYA 'ringkasan' — 'catatan' kerap berisi INSTRUKSI penyetir model
+        # (⛔/JANGAN/…), bukan fakta; menyimpannya sbg FAKTA TERVERIFIKASI
+        # membuat instruksi lama ikut menyetir giliran-giliran berikutnya.
+        _tambah(f"[{ctx}] {result.get('ringkasan')}")
     return baris
 
 
@@ -1007,6 +1188,7 @@ class _DeltaGate:
         self._window = ""     # ekor teks yang SUDAH dialirkan (deteksi markup)
         self._open = False    # True = sudah pasti di wilayah jawaban
         self._mati = False    # markup tool bocor → berhenti total
+        self._tahan_pikir = False  # sedang di dalam blok [PIKIR] SUSULAN (tengah jawaban)
 
     def feed(self, potongan: str) -> "str | None":
         if self._mati:
@@ -1036,6 +1218,25 @@ class _DeltaGate:
             return ""
         s = self._ekor + self._buf
         self._buf = self._ekor = ""
+        # Blok nalar susulan yang utuh di ekor dibuang; yang TAK tertutup saat
+        # aliran berakhir juga dibuang (isinya nalar, bukan jawaban).
+        out: list[str] = []
+        while True:
+            if self._tahan_pikir:
+                m = _REASON_CLOSE_RE.search(s)
+                if not m:
+                    s = ""
+                    break
+                s = s[m.end():]
+                self._tahan_pikir = False
+                continue
+            m = _REASON_OPEN_RE.search(s)
+            if not m:
+                break
+            out.append(s[:m.start()])
+            s = s[m.end():]
+            self._tahan_pikir = True
+        s = "".join(out) + s
         if _TOOL_MARKUP_TAG_RE.search(self._window + s):
             self._mati = True
             return ""
@@ -1050,11 +1251,37 @@ class _DeltaGate:
             return None                       # sinyal supress → pemanggil reset
         s = self._ekor + self._buf
         self._buf = ""
+        # Blok [PIKIR] SUSULAN di tengah jawaban: dulu hanya blok PEMBUKA yang
+        # disaring — model yang 'berpikir lagi' di tengah membocorkan nalarnya
+        # live ke layar (frame `done` menghapusnya, tapi user terlanjur baca).
+        keluar_awal: list[str] = []
+        while True:
+            if self._tahan_pikir:
+                m = _REASON_CLOSE_RE.search(s)
+                if not m:
+                    # Masih di dalam nalar — tahan SEMUA sisa (bukan cuma ekor
+                    # 8 char) sampai [/PIKIR] lewat; buang saat close() bila
+                    # tak pernah tertutup.
+                    self._ekor = s
+                    out = "".join(keluar_awal)
+                    self._window = (self._window + out)[-_GATE_WINDOW:]
+                    return out
+                s = s[m.end():]
+                self._tahan_pikir = False
+                continue
+            m = _REASON_OPEN_RE.search(s)
+            if not m:
+                break
+            keluar_awal.append(s[:m.start()])
+            s = s[m.end():]
+            self._tahan_pikir = True
         if len(s) <= _GATE_EKOR:
             self._ekor = s
-            return ""
+            out = "".join(keluar_awal)
+            self._window = (self._window + out)[-_GATE_WINDOW:]
+            return out
         self._ekor = s[-_GATE_EKOR:]
-        keluar = s[:-_GATE_EKOR]
+        keluar = "".join(keluar_awal) + s[:-_GATE_EKOR]
         self._window = (self._window + keluar)[-_GATE_WINDOW:]
         return keluar
 
@@ -1193,6 +1420,31 @@ def _extract_pns(text: str) -> set[str]:
     return out
 
 
+def _extract_pns_urut(text: str) -> list[str]:
+    """Seperti _extract_pns tapi LIST BERURUT sesuai kemunculan di teks — untuk
+    memo sesi: fallback slot PN memakai '12 pertama', dan follow-up ordinal
+    ('yang pertama') hanya bermakna bila urutan simpan ≈ urutan tampil, bukan
+    urutan iterasi set yang arbitrer."""
+    if not text:
+        return []
+    up = text.upper()
+    matches = sorted(
+        list(_PN_TOKEN_RE.finditer(up)) + list(_PN_NUMERIC_RE.finditer(up)),
+        key=lambda m: m.start())
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in matches:
+        tok = m.group(0).strip(".-")
+        if tok and tok not in seen:
+            seen.add(tok)
+            out.append(tok)
+    # Buang POTONGAN digit dari PN alfanumerik ('9925520270' dari 'WG9925520270')
+    # — pola yang sama dgn _mentioned_part_pns/_recent_part_numbers.
+    alnum = [p for p in out if not p.isdigit()]
+    return [p for p in out
+            if not (p.isdigit() and any(p in a for a in alnum))]
+
+
 def _mentioned_part_pns(reply: str, grounded: set[str], limit: int = 6) -> list[str]:
     """PN yang DISEBUT di jawaban DAN grounded (bukan kode unit/seri) — dipakai UI
     untuk menampilkan thumbnail foto part di bawah jawaban. Dibatasi agar jawaban
@@ -1242,11 +1494,45 @@ def _canon_num(s: str) -> str:
     return re.sub(r"[.,\s]", "", s or "")
 
 
+# Angka DESIMAL ('1500000.0', '12.5') — _canon_num membuang SEMUA titik, jadi
+# '1500000.0' terkanonik jadi '15000000' dan kutipan harga model 'Rp 1.500.000'
+# (kanonik '1500000') dulu dicap karangan. Utk grounding, bentuk desimal
+# di-ground DUA rupa: utuh-tanpa-pemisah DAN bagian bulatnya.
+_NUM_DECIMAL_RE = re.compile(r"^(\d+)[.,]\d{1,2}$")
+
+
 def _extract_nums(text: str) -> set[str]:
     """Semua angka (dinormalisasi tanpa pemisah) di teks — untuk grounding."""
     if not text:
         return set()
-    return {c for m in _NUM_RUN_RE.finditer(text) if (c := _canon_num(m.group(0)))}
+    out: set[str] = set()
+    for m in _NUM_RUN_RE.finditer(text):
+        raw = m.group(0)
+        c = _canon_num(raw)
+        if not c:
+            continue
+        out.add(c)
+        md = _NUM_DECIMAL_RE.match(raw)
+        if md:
+            out.add(md.group(1))
+    return out
+
+
+def _row_count_nums(result) -> set[str]:
+    """JUMLAH BARIS tiap list di hasil tool — di-ground sbg angka sah. Model
+    lazim (dan benar) menulis 'ada 12 varian' dari daftar 12 baris; angka 12
+    itu tak pernah tertulis di dump, dulu selalu kena cap 'karangan'."""
+    out: set[str] = set()
+    if not isinstance(result, dict):
+        return out
+    for v in result.values():
+        if isinstance(v, list) and v:
+            out.add(str(len(v)))
+        elif isinstance(v, dict):
+            for vv in v.values():
+                if isinstance(vv, list) and vv:
+                    out.add(str(len(vv)))
+    return out
 
 
 def _claimed_nums(reply: str) -> set[str]:
@@ -1255,6 +1541,27 @@ def _claimed_nums(reply: str) -> set[str]:
         return set()
     out: set[str] = set()
     for rx in (_STOK_CLAIM_RE, _HARGA_CLAIM_RE, _SPEC_CLAIM_RE, _HARGA_POLOS_RE):
+        for m in rx.finditer(reply):
+            c = _canon_num(m.group(1))
+            if c:
+                out.add(c)
+    return out
+
+
+# Klaim 'KERAS' = subset klaim yang TIDAK boleh diselamatkan grounding jumlah-
+# baris (_row_count_nums): stok ber-satuan barang (pcs/buah/…; 'unit' sengaja
+# TIDAK ikut — 'ada 12 unit' lazimnya jumlah KENDARAAN hasil hitung baris),
+# harga, dan spesifikasi. Tanpa pemisahan ini, "stok 3 pcs" karangan lolos
+# hanya karena sebuah list kebetulan berisi 3 baris.
+_STOK_KERAS_RE = re.compile(
+    r"(\d[\d.,]{0,8})\s*(?:pcs?|buah|biji|set|pasang|lembar)\b", re.IGNORECASE)
+
+
+def _claimed_nums_keras(reply: str) -> set[str]:
+    if not reply:
+        return set()
+    out: set[str] = set()
+    for rx in (_STOK_KERAS_RE, _HARGA_CLAIM_RE, _SPEC_CLAIM_RE, _HARGA_POLOS_RE):
         for m in rx.finditer(reply):
             c = _canon_num(m.group(1))
             if c:
@@ -1277,11 +1584,18 @@ def _num_correction_msg(nums: list[str]) -> str:
     )
 
 
+# Penanda banner angka-tak-terverifikasi. Konstanta TERSENDIRI karena dipakai
+# dua arah: (a) ditulis _annotate_unverified_nums, (b) DIKENALI ULANG saat scan
+# riwayat — angka dari jawaban yang sudah dicap tak-terverifikasi TIDAK boleh
+# 'tercuci' jadi grounded hanya karena pernah tampil di riwayat.
+_NUM_WARN_MARK = "angka stok/harga di bawah TIDAK terverifikasi"
+
+
 def _annotate_unverified_nums(reply: str, nums: list[str]) -> str:
     """Jaring terakhir bila model tetap menulis angka stok/harga tak terverifikasi:
     beri peringatan di atas (tidak dihapus — angka turunan sah bisa saja benar,
     tapi ditandai agar user tak menelannya mentah)."""
-    return ("⚠️ Perhatian: sebagian angka stok/harga di bawah TIDAK terverifikasi dari hasil "
+    return (f"⚠️ Perhatian: sebagian {_NUM_WARN_MARK} dari hasil "
             "tool (bisa keliru) — mohon konfirmasi ulang sebelum dipakai.\n\n" + reply)
 
 
@@ -1710,7 +2024,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     # disuntik sebagai pesan system TERPISAH tepat sebelum pesan user terakhir.
     messages: list[dict] = [{"role": "system", "content": _system_prompt(user)}]
     messages.extend(_sanitize_history(history))
-    ctx = _active_context_block(history, memo)
+    ctx = _active_context_block(history, memo, user)
     if sheet_expired:
         ctx = ((ctx + "\n") if ctx else "") + (
             "[LAMPIRAN KEDALUWARSA] File Excel yang tadi dilampirkan sudah TIDAK "
@@ -1848,6 +2162,10 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     # Angka (stok/harga) yang SAH: dari pesan user + hasil tool (diisi saat tool
     # jalan). Klaim stok/harga di jawaban yang tak ada di sini = dugaan karangan.
     grounded_nums: set[str] = set()
+    # JUMLAH BARIS list hasil tool — grounding KELAS DUA: cukup untuk klaim
+    # hitungan ('ada 12 unit/varian') tapi TIDAK untuk klaim keras stok-pcs/
+    # harga/spesifikasi (lihat _claimed_nums_keras).
+    grounded_rowcounts: set[str] = set()
     _asst_pns: set[str] = set()
     for _m in history:
         role = (_m or {}).get("role")
@@ -1861,11 +2179,17 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             # Angka yang PERNAH disajikan asisten = sah diulang di follow-up
             # (memungkinkan guard angka juga MENYALA di follow-up tanpa tool —
             # angka BARU yang tiba-tiba muncul tetap tertangkap).
-            grounded_nums |= _extract_nums(_content)
+            # KECUALI jawaban yang sudah DICAP tak-terverifikasi: angka di
+            # dalamnya belum pernah terbukti, dan meng-ground-nya dari riwayat
+            # berarti cap itu 'tercuci' sendiri satu giliran kemudian.
+            if _NUM_WARN_MARK not in _content:
+                grounded_nums |= _extract_nums(_content)
     if _asst_pns:
         try:
-            _ada = {(r.get("part_number") or "").upper()
-                    for r in part_index.search_exact_pns(list(_asst_pns))}
+            # rows_for_pns = pemaaf suffix varian EPC (aturan pemilik: lookup via
+            # accurate.index_key). search_exact_pns dulu menolak 'WG…004/2' yang
+            # katalognya menyimpan 'WG…004' → jawaban benar ikut tersanitasi.
+            _ada = {p.upper() for p in part_index.rows_for_pns(list(_asst_pns))}
             grounded |= {p for p in _asst_pns if p.upper() in _ada}
         except Exception:
             pass  # gagal cek katalog → jangan ground dari assistant (aman by default)
@@ -1877,6 +2201,9 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     # ini MEMPERKETAT model ancaman forgery, bukan melonggarkannya.
     if memo:
         grounded |= set(memo.get("pn") or {})
+        # nums memo sudah disaring UMUR oleh ai_session (hanya < _FRESH_SEC):
+        # harga/stok >5 jam tak lagi meng-ground klaim baru — model dipaksa
+        # verifikasi ulang via tool, bukan mengutip angka basi dengan yakin.
         grounded_nums |= set(memo.get("nums") or [])
     guard_retries = 0
     # Jenis guard yang MENYALA giliran ini (urut, tanpa duplikat). Dulu telemetri
@@ -1922,6 +2249,23 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     _recent_up = [((_m or {}).get("content") or "").upper()
                   for _m in history[-6:] if (_m or {}).get("role") == "user"]
     user_rangka_recent = any(_rangka_candidates(c) for c in _recent_up)
+    # PN yang giliran lalu TERBUKTI per-VIN (EPC) / resmi per-klaim (memo
+    # menyimpan label tool asal) — follow-up sah 'harganya?' atas PN itu tak
+    # boleh menyalakan guard EPC-FIRST lagi. TAPI verifikasi MELEKAT ke rangka
+    # yang dulu dicek: bila pesan user terkini menyebut rangka BARU yang tak ada
+    # di memo, pengecualian DIMATIKAN — PN sah utk unit lama bukan jaminan utk
+    # unit baru (dua unit bermodel sama pun bisa beda PN).
+    _memo_pn_verified: set[str] = {
+        p for p, t in ((memo or {}).get("pn") or {}).items()
+        if t in _EPC_VIN_PART_TOOLS or t in _KLAIM_TOOLS}
+    if _memo_pn_verified:
+        _recent_rangka_toks: set[str] = set()
+        for _c in _recent_up:
+            _recent_rangka_toks.update(_rangka_candidates(_c))
+        _memo_rangka_set = {str(r).upper()
+                           for r in ((memo or {}).get("rangka") or [])}
+        if _recent_rangka_toks - _memo_rangka_set:
+            _memo_pn_verified = set()
     _rangka_tokens: set[str] = set()
     for _m in history:
         _rangka_tokens.update(_rangka_candidates(((_m or {}).get("content") or "").upper()))
@@ -1935,6 +2279,15 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     user_dtc_tokens = _dtc_tokens(_last_user_msg)
     dtc_tool_attempted = False
     dtc_first_retried = False
+    # PN yang user KETIK SENDIRI di pesan terakhir ('cek stok WG…'): menjawabnya
+    # tak wajib lewat EPC — user bertanya soal PN itu, bukan minta pemetaan
+    # part-untuk-unitnya. Dikecualikan dari guard EPC-FIRST di bawah — KECUALI
+    # pertanyaannya soal KECOCOKAN ('WG… cocok gak buat RT…?'): memutus cocok/
+    # tidaknya part utk sebuah unit justru inti aturan EPC-FIRST, PN ketikan
+    # user bukan pembebasan di situ.
+    _user_pns_last = _extract_pns(_last_user_msg)
+    if any(k in _last_user_msg.upper() for k in _FITMENT_KATA):
+        _user_pns_last = set()
     # Guard SUBSTITUSI katalog-lokal: bila tool EPC per-VIN sukses, PN yg HANYA dari
     # cari_part (lokal per-model) & tak ada di hasil EPC = suspect (salah utk unit ini).
     epc_vin_pns: set[str] = set()
@@ -1996,6 +2349,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     memo_fakta: list[str] = []
     memo_rangka: list[str] = []
     memo_mesin: list[str] = []
+    memo_wo: list[str] = []       # dari ARGUMEN tool klaim yang sukses (bukan regex tabel)
+    memo_unit: list[str] = []     # MODEL/unit aktif dari argumen 'unit' tool sukses
     _MEMO_PN_PER_TOOL = 200   # BOM besar tak boleh membengkakkan memo tanpa batas
 
     def _track_memori(name: str, args: dict, res: dict, res_pns: set[str],
@@ -2009,7 +2364,9 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             return
         if res.get("found") is False:
             return
-        for p in list(res_pns)[:_MEMO_PN_PER_TOOL]:
+        # BERURUT sesuai kemunculan di dump (≈ urutan tampil), bukan iterasi set:
+        # fallback slot PN memo mengambil '12 pertama' — dgn set, itu 12 acak.
+        for p in _extract_pns_urut(dump)[:_MEMO_PN_PER_TOOL]:
             memo_pn.setdefault(p, name)
         for n in _extract_nums(dump):
             if n not in memo_nums:
@@ -2026,6 +2383,18 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         for m in _args_mesin(name, args):
             if m not in memo_mesin:
                 memo_mesin.append(m)
+        # Slot WO: dari ARGUMEN tool klaim yang sukses — pola yang sama dengan
+        # mesin/rangka (regex teks bisa memungut WO orang lain dari tabel).
+        for k in ("no_wo", "roNo", "ro_no", "wo", "nomor_wo"):
+            s = str((args or {}).get(k) or "").strip().upper()
+            if s and _WO_RE.fullmatch(s) and s not in memo_wo:
+                memo_wo.append(s)
+        # Slot UNIT/MODEL aktif (tanpa VIN): argumen 'unit' tool pencarian yang
+        # sukses. Menutup lubang 'konteks unit menguap setelah riwayat terpangkas'
+        # untuk user yang bekerja per-model tanpa nomor rangka.
+        _u = str((args or {}).get("unit") or "").strip()
+        if _u and _u.upper() not in {x.upper() for x in memo_unit}:
+            memo_unit.append(_u)
 
     def _track_pn_source(name: str, res: dict, res_pns: set[str]) -> None:
         nonlocal epc_vin_used
@@ -2056,12 +2425,21 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         # Teks jawaban model sengaja TIDAK ikut — kalau ucapan model bisa
         # meng-ground dirinya sendiri di giliran berikutnya, guard anti-karangan
         # kehilangan artinya.
+        # Entitas yang USER SENDIRI ketik ikut disimpan meski giliran ini tanpa
+        # tool (giliran 'tanya'/salam): rangka & WO dari teks user tetap konteks
+        # sah, dan tanpa ini mereka menguap begitu riwayat terpangkas.
+        _rangka_user = _recent_rangka(history)
+        _wo_user = _recent_wo(history, user_only=True)
         if memori_aktif and (memo_pn or memo_nums or memo_fakta
-                             or memo_rangka or memo_mesin):
+                             or memo_rangka or memo_mesin or memo_wo
+                             or memo_unit or _rangka_user or _wo_user):
             try:
                 ai_session.merge(user.get("username", ""), conversation_id,
-                                 rangka=memo_rangka, mesin=memo_mesin,
-                                 wo=_recent_wo(history), pn=memo_pn,
+                                 rangka=memo_rangka or _rangka_user,
+                                 mesin=memo_mesin,
+                                 wo=memo_wo + [w for w in _wo_user
+                                               if w not in memo_wo],
+                                 unit=memo_unit, pn=memo_pn,
                                  nums=memo_nums, fakta=memo_fakta)
             except Exception:  # pragma: no cover
                 logger.exception("gagal menyimpan memori sesi (dilewati)")
@@ -2116,7 +2494,10 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             _subst = _drop_unit_tokens([p for p in _extract_pns(reply) if p in _suspect])
             if _subst:
                 reply = _annotate_subst(reply, _subst)
-        _num_bad = sorted(_claimed_nums(reply) - grounded_nums)
+        _keras = _claimed_nums_keras(reply)
+        _num_bad = sorted(n for n in _claimed_nums(reply)
+                          if n not in grounded_nums
+                          and (n not in grounded_rowcounts or n in _keras))
         if _num_bad:
             reply = _annotate_unverified_nums(reply, _num_bad)
         return reply
@@ -2236,6 +2617,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     _res_pns = _extract_pns(_dump)
                     grounded |= _res_pns
                     grounded_nums |= _extract_nums(_dump)
+                    grounded_rowcounts |= _row_count_nums(result)
                     _track_pn_source(name, result, _res_pns)
                     _track_memori(name, lc["arguments"] or {}, result, _res_pns, _dump)
                     _capture_meta(name, lc["arguments"] or {}, result)
@@ -2265,7 +2647,10 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                         # sudah menjelaskan sendiri & menunjuk tool massal.
                         if _kind != "brake" and not lookup_gagal:
                             lookup_gagal = True
-                            messages.append({"role": "user", "content": _LOOKUP_GAGAL_NOTE})
+                            # Nota BER-RINCIAN (tool + argumen kunci) — model tahu
+                            # persis lookup MANA yang gagal, bukan menebak.
+                            messages.append({"role": "user",
+                                             "content": _lookup_gagal_note([(name, lc_args)])})
                 continue
 
             reply = _strip_reasoning(content)
@@ -2343,7 +2728,9 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             # tool garansi/klaim (`klaim_pns`) juga tidak — sudah resmi per-unit.
             if user_rangka_recent and not rangka_tool_attempted and not epc_first_retried:
                 _pn_reply = [p for p in _drop_unit_tokens(list(_extract_pns(reply)))
-                             if p not in _rangka_tokens and p not in klaim_pns]
+                             if p not in _rangka_tokens and p not in klaim_pns
+                             and p not in _memo_pn_verified
+                             and p not in _user_pns_last]
                 if _pn_reply:
                     epc_first_retried = True
                     _catat_guard("epc")
@@ -2372,7 +2759,11 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             # MAUPUN riwayat → dugaan karangan. Kini juga menyala di follow-up
             # tanpa tool (angka riwayat asisten sudah diground di atas → angka
             # lama sah diulang; angka BARU yang tiba-tiba muncul tertangkap).
-            num_bad: list[str] = sorted(_claimed_nums(reply) - grounded_nums)
+            _keras = _claimed_nums_keras(reply)
+            num_bad: list[str] = sorted(
+                n for n in _claimed_nums(reply)
+                if n not in grounded_nums
+                and (n not in grounded_rowcounts or n in _keras))
             # Catat SEBAB-nya, bukan cuma "ada guard menyala". Tiga sebab ini
             # dulu menyatu jadi satu boolean padahal artinya jauh berbeda:
             # `pn`/`angka` = dugaan KARANGAN (serius), sedangkan `subst` = PN
@@ -2483,6 +2874,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         kartu_tanya = None            # sentinel tanya_user giliran ini (maks SATU)
         tanya_pengantar = ""          # teks yang ikut tampil DI ATAS kartu
         tanya_bebas_pagar = False     # kartu konfirmasi aksi eksplisit user
+        _gagal_ronde: list[tuple] = []  # (nama, args) yang gagal → nota ber-rincian
         for tc, name, args, result in executed:
             tools_used.append(name)
             # tanya_user: kartu pertanyaan. Ambil yang PERTAMA saja — dua kartu
@@ -2506,6 +2898,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             _res_pns = _extract_pns(_dump)
             grounded |= _res_pns
             grounded_nums |= _extract_nums(_dump)
+            grounded_rowcounts |= _row_count_nums(result)
             _track_pn_source(name, result, _res_pns)
             _track_memori(name, args, result, _res_pns, _dump)
             _capture_meta(name, args, result)
@@ -2525,12 +2918,15 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 # ditolak rem itu "tidak ada di data", padahal belum dicek.
                 if _kind != "brake":
                     lookup_gagal = True
+                    _gagal_ronde.append((name, args))
                 tool_gagal_pernah = True
                 _catat_tool_gagal(tools_failed, name, _kind)
         if lookup_gagal:
             # Ingatkan SEKALI per turn (setelah batch tool) agar model tak mengarang
-            # angka utk lookup yang gagal. Reset flag agar tak menumpuk tiap ronde.
-            messages.append({"role": "user", "content": _LOOKUP_GAGAL_NOTE})
+            # angka utk lookup yang gagal — BER-RINCIAN (tool + argumen kunci)
+            # supaya jelas lookup mana yang gagal. Reset flag agar tak menumpuk.
+            messages.append({"role": "user",
+                             "content": _lookup_gagal_note(_gagal_ronde)})
             lookup_gagal = False
 
         if kartu_tanya:
@@ -2594,7 +2990,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
            and any(t in reply.upper() for t in user_dtc_tokens))
           or (user_rangka_recent and not rangka_tool_attempted
               and [p for p in _drop_unit_tokens(list(_extract_pns(reply)))
-                   if p not in klaim_pns])):
+                   if p not in klaim_pns and p not in _memo_pn_verified
+                   and p not in _user_pns_last])):
         reply += ("\n\n⚠️ Jawaban ini belum sempat diverifikasi penuh ke database/EPC "
                   "— mohon tanyakan ulang untuk kepastian.")
     return _finalize(reply, outcome=_sv_outcome)
