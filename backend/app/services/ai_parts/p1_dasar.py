@@ -369,7 +369,7 @@ def _load_maksud_entries() -> list:
 
 def _maksud_subset_block(messages: list[dict]) -> str:
     """[RUTE MAKSUD GILIRAN INI] — SUBSET Kamus Maksud (frasa user → TOOL) yang
-    frasanya muncul di ≤6 pesan user terakhir.
+    frasanya muncul di pesan user TERAKHIR.
 
     Saudara kembar _kamus_subset_block, tapi menjawab pertanyaan yang BERBEDA:
     kamus sinonim mengurus "kata apa yang dicari", store ini mengurus "tool mana
@@ -377,13 +377,21 @@ def _maksud_subset_block(messages: list[dict]) -> str:
     ai_domain.md (file kode → butuh deploy); sejak 2026-08-01 pemilik bisa
     menambahnya lewat menu Rute Maksud atau langsung dari chat.
 
+    ⚠️ Jendelanya SENGAJA berbeda dari kamus istilah (yang membaca 6 pesan
+    terakhir), dan bedanya berasal dari akibat salah rute masing-masing: kamus
+    hanya menambah kata kunci — istilah basi paling-paling jadi sinonim ekstra
+    yang tak terpakai. Rute maksud MENYETIR PILIHAN TOOL, jadi frasa dari
+    pertanyaan lima giliran lalu ("gambar teknisnya mana?") terus memaksa
+    gambar_exploded pada pertanyaan berikutnya yang sudah pindah topik. Maksud
+    itu milik kalimat yang sedang ditanyakan — bukan milik percakapan.
+
     Sama seperti kamus: disuntik sbg pesan system DINAMIS di ekor (zona bebas
     prompt-cache) dan hanya entri yang RELEVAN giliran ini — store boleh tumbuh
     tanpa membebani setiap percakapan."""
-    teks = " ".join(
-        str((m or {}).get("content") or "") for m in (messages or [])[-6:]
-        if (m or {}).get("role") == "user")
-    if not teks:
+    teks = next((str((m or {}).get("content") or "")
+                 for m in reversed(messages or [])
+                 if (m or {}).get("role") == "user"), "")
+    if not teks.strip():
         return ""
     try:
         return maksud.block(teks, _load_maksud_entries)

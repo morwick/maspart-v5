@@ -103,10 +103,31 @@ def entries() -> list[dict]:
     return out
 
 
+# Klitika (akhiran milik) Bahasa Indonesia yang MENEMPEL di ujung kata tanpa
+# spasi: '-nya', '-ku', '-mu'. Tanpa ini seluruh kanal berbasis kamus mati pada
+# bentuk follow-up paling alami di lapangan — "filternya apa?", "gambar
+# teknisnya mana?", "cucuk pernya berapa?" — karena `(?!\w)` menolak huruf 'n'
+# sesudah trigger. Satu fungsi ini dipakai kamus istilah (expand_query,
+# umbrella_keywords, subset prompt), Rute Maksud (maksud.cocok), dan penjaga
+# istilah deterministik (_paksa_istilah_kamus), jadi tambalannya cukup di sini.
+_KLITIKA = r"(?:nya|ku|mu)?"
+
+# Trigger PENDEK tidak boleh berklitika: banyak kata Indonesia biasa kebetulan
+# berupa 2 huruf + klitika — 'hanya' (ha+nya), 'punya' (pu+nya), 'tanya',
+# 'kamu' (ka+mu), 'ilmu', 'buku' (bu+ku). Ambang 3 huruf menjauhkan itu semua
+# sambil tetap melayani trigger lapangan terpendek yang nyata ('per' → 'pernya').
+_KLITIKA_MIN_LEN = 3
+
+
 def hit(trigger: str, text: str) -> bool:
     """Trigger cocok sbg KATA/FRASA utuh, bukan substring di tengah kata
-    (mis. trigger 'per' TIDAK boleh cocok di dalam 'persneling')."""
-    return re.search(r"(?<!\w)" + re.escape((trigger or "").lower()) + r"(?!\w)",
+    (mis. trigger 'per' TIDAK boleh cocok di dalam 'persneling') — dengan
+    toleransi KLITIKA di ujung ('filternya', 'gambar teknisnya')."""
+    t = (trigger or "").strip().lower()
+    if not t:
+        return False
+    ekor = _KLITIKA if len(t) >= _KLITIKA_MIN_LEN else ""
+    return re.search(r"(?<!\w)" + re.escape(t) + ekor + r"(?!\w)",
                      (text or "").lower()) is not None
 
 

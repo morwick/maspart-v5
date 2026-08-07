@@ -37,12 +37,13 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
+                        # ⛔ JANGAN hidupkan lagi parameter 'mode' (pn|nama): handler
+                        # _t_cari_part TIDAK pernah membacanya — pencarian selalu
+                        # menyisir PN dan nama sekaligus. Spec-nya dulu malah
+                        # menyebut 'pn' sebagai default sementara deskripsi tool
+                        # bilang "tak perlu menentukan mode": model diberi tuas mati
+                        # yang berbunyi seolah bisa mempersempit hasil.
                         "query": {"type": "string", "description": "Part Number atau kata kunci nama part (mis. 'injector')."},
-                        "mode": {
-                            "type": "string",
-                            "enum": ["pn", "nama"],
-                            "description": "'pn' = cari per Part Number (default), 'nama' = cari per nama part.",
-                        },
                         "unit": {
                             "type": "string",
                             "description": "Opsional. Filter hasil ke unit/model tertentu (mis. 'NX360', 'HOWO-7', 'SITRAK', 'SG21'). Kosongkan untuk cari di semua unit.",
@@ -89,7 +90,12 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "kali dan sisa PN tak akan terjawab. PN yang tidak ada ditandai jujur. "
                     "Set dimensi=true bila user memang menanyakan UKURAN/DIMENSI (agak lambat, "
                     "dibatasi 40 PN pertama). Set excel=true untuk file Excel unduhan. "
-                    "Hasil bisa langsung dijadikan penawaran (buat_penawaran) bila user mau."
+                    "Hasil bisa langsung dijadikan penawaran (buat_penawaran) bila user mau. "
+                    "⛔ 'MASSAL' di sini = BANYAK PN, SATU pertanyaan stok/harga — BUKAN "
+                    "untuk mengecek satu part di BANYAK RANGKA/UNIT ('injector untuk 5 VIN "
+                    "ini sama tidak?'): itu cek_massal_part_rangka (daftar VIN) atau "
+                    "cek_massal_part_mesin (daftar nomor mesin). Tool ini tidak tahu unit "
+                    "apa pun — ia hanya melihat PN di gudang."
                 ),
                 "parameters": {
                     "type": "object",
@@ -116,12 +122,20 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "stok_accurate",
                 "description": (
-                    "Stok dari sistem akunting/ERP Accurate untuk satu Part Number persis "
-                    "(disinkron berkala dari Accurate): 'stok_dapat_dijual' + 'stok_per_gudang' "
-                    "(rincian kuantitas per gudang/cabang, mis. 01.Jakarta, 05.Makasar). Pakai "
-                    "bila user tanya stok di Accurate, stok per cabang/gudang, atau "
-                    "untuk membandingkan stok Accurate vs stok katalog lokal. Ini SUMBER "
-                    "TAMBAHAN, tidak menggantikan stok gudang lokal dari detail_part."
+                    "Rincian MENTAH satu Part Number di indeks ERP Accurate: "
+                    "'stok_dapat_dijual', 'kuantitas', satuan, tipe barang, kode & nama "
+                    "Accurate, 'stok_per_gudang' (qty per gudang/cabang). "
+                    "⚠️ SUMBER STOKNYA SAMA PERSIS dengan detail_part — indeks Accurate "
+                    "yang sama, angka yang sama. Ini BUKAN sumber kedua dan TIDAK bisa "
+                    "dipakai untuk 'membandingkan'/'cross-check' stok: dua angka yang "
+                    "berbeda tak akan pernah muncul, dan memanggil keduanya untuk PN yang "
+                    "sama hanya membakar waktu. Pakai HANYA bila: (a) user minta rincian "
+                    "mentah Accurate (kode/nama/tipe barang di Accurate, qty per gudang "
+                    "apa adanya), atau (b) detail_part gagal/tidak mengembalikan stok. "
+                    "Untuk pertanyaan stok biasa → detail_part (1 PN) / cek_massal_part "
+                    "(≥2 PN) — keduanya membaca indeks Accurate yang sama, dan "
+                    "detail_part baru turun ke Excel bila Accurate memang tak tersedia "
+                    "(lihat field 'sumber_stok' di hasilnya)."
                 ),
                 "parameters": {
                     "type": "object",
@@ -171,7 +185,11 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "rem ABS WABCO (SPN/FMI + Blink Code + langkah perbaikan) & SCR gas 国V (kode P) "
                     "— pakai unit='ABS' atau 'SCR'. ⛔ Untuk "
                     "KELUHAN/GEJALA bebas tanpa kode (mis. 'RPM tidak mau naik', 'asap hitam') "
-                    "→ pakai tool `diagnosa` (asisten perbaikan resmi Sinotruk yang menalar)."
+                    "→ pakai tool `diagnosa` (asisten perbaikan resmi Sinotruk yang menalar). "
+                    "URUTAN BAKU bila KODE-nya diketahui (termasuk 'apa penyebab kode X'): "
+                    "cari_kode_kesalahan DULU — instan & sudah memuat penyebab + langkah "
+                    "perbaikan resmi; `diagnosa` (20–90 dtk) hanya bila kamus lokal nihil "
+                    "atau user minta penalaran lebih dalam."
                 ),
                 "parameters": {
                     "type": "object",
@@ -284,9 +302,14 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "diagnosa",
                 "description": (
-                    "⭐ DIAGNOSA KERUSAKAN — pakai untuk 'kenapa …', 'apa penyebab kode X', "
-                    "'bagaimana cara memperbaiki', atau KELUHAN/GEJALA truk ('RPM terkunci 1500', "
-                    "'rem angin lemah', 'asap hitam'). Menggabungkan ASISTEN PERBAIKAN RESMI "
+                    "⭐ DIAGNOSA KERUSAKAN — pakai untuk 'kenapa …', 'bagaimana cara "
+                    "memperbaiki', atau KELUHAN/GEJALA truk ('RPM terkunci 1500', "
+                    "'rem angin lemah', 'asap hitam'). "
+                    "URUTAN BAKU bila KODE-nya diketahui (termasuk 'apa penyebab kode X'): "
+                    "cari_kode_kesalahan DULU — instan & sudah memuat penyebab + langkah "
+                    "perbaikan resmi; tool ini (20–90 dtk) hanya bila kamus lokal nihil "
+                    "atau user minta penalaran lebih dalam. "
+                    "Menggabungkan ASISTEN PERBAIKAN RESMI "
                     "SINOTRUK (SIMS EOL AI: manual perbaikan pabrik + kasus kerusakan nyata) "
                     "dengan kamus DTC lokal (arti kode + lampu MIL/SVS). Jawabannya memuat "
                     "definisi kerusakan, kemungkinan penyebab, dan langkah pemeriksaan. "
@@ -1085,13 +1108,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "injector untuk rangka A, B, C, …'). Efisien: unit ber-konfigurasi sama "
                     "diproses sekali. Otomatis deteksi pengganti (supersession) → 'pn_order_terkini' "
                     "+ silang stok/harga lokal. Set excel=true untuk kartu unduh Excel. Istilah "
-                    "Indonesia diterjemahkan otomatis. ⛔ JANGAN panggil cari_part_di_unit berulang."
+                    "Indonesia diterjemahkan otomatis. ⛔ JANGAN panggil cari_part_di_unit berulang. "
+                    "⛔ JANGAN tertukar dengan cek_massal_part: yang itu BANYAK PN tanpa unit; "
+                    "yang INI SATU komponen × BANYAK unit."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "daftar_rangka": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Daftar nomor rangka/VIN (array ATAU string dipisah baris/koma) — mis. ['LZZ1BG3H0SJ398963','LZZ1BG3H1SJ398969']."},
-                        "part": {"type": "string", "description": "Komponen yang dicek di semua unit (mis. 'injector', 'kampas rem', 'filter oli')."},
+                        "part": {"type": "string", "description": "NAMA komponen yang dicek di semua unit — SATU komponen saja, istilah user apa adanya (mis. 'injector', 'kampas rem', 'filter oli'); istilah lapangan Indonesia diterjemahkan otomatis di server. ⚠️ Pencariannya lewat indeks NAMA katalog EPC per-unit: mengisi Part Number di sini bukan jalur yang dirancang (PN unit lain belum tentu terindeks sbg kata cari). Punya DAFTAR PN dan ingin stok/harganya → cek_massal_part."},
                         "excel": {"type": "boolean", "description": "true = buat file Excel (kartu unduh) berisi tabel per nomor rangka."},
                     },
                     "required": ["daftar_rangka", "part"],

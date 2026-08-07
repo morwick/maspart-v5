@@ -237,11 +237,22 @@ _DISPATCH = {
 # kamus dan kata kunci model tidak memuaskan SATU grup pun (bukan trigger,
 # bukan keyword resmi, bukan PN), kata kunci model DITIMPA istilah mentah user
 # — ekspansi sinonim di handler yang menerjemahkannya dengan benar.
+# Guard-nya generik; yang dulu kurang cuma TABEL ini — tool pencarian yang tak
+# terdaftar tetap menerima karangan model apa adanya. Nama field = nama argumen
+# sebenarnya di _tool_specs/handler (alias ikut didaftarkan bila handler
+# menerimanya), dan SEMUA tool di sini meneruskan nilainya lewat _expand_query,
+# jadi menimpanya dengan istilah MENTAH user justru yang benar.
 _TOOLS_ISTILAH = {
     "cari_part": ("query",),
     "cari_part_di_unit": ("kata_kunci", "query"),
     "part_aus_dari_rangka": ("query",),
     "stok_gudang": ("kata_kunci", "query"),
+    "cek_massal_part_rangka": ("part", "query"),
+    "cek_massal_part_mesin": ("part", "query"),
+    "banding_part_armada": ("part",),
+    "bom_dari_rangka": ("kata_kunci",),
+    "excel_bom_rangka": ("kata_kunci",),
+    "excel_stok_gudang": ("kata_kunci", "query"),
 }
 
 
@@ -294,8 +305,14 @@ def _paksa_istilah_kamus(name: str, args: dict, question: str) -> str:
         kata = "; ".join(str(x).strip() for x in kata_raw if str(x).strip())
     else:
         kata = str(kata_raw or "").strip()
-    if any(c.isdigit() for c in kata):
-        return ""                      # kemungkinan PN — jangan diganggu
+    # PN eksplisit dari model jangan diganggu — TAPI "mengandung satu angka" ≠ PN.
+    # Cek lama (any digit) mematikan penjaga untuk kata kunci lapangan yang wajar
+    # memuat kode unit/ukuran ('cucuk per NX400', 'gardan 6X4', 'seal 24 mm'), yaitu
+    # persis kalimat tempat istilah lapangan paling sering dikarang. Kini dipakai
+    # definisi PN yang sama dengan guard anti-halusinasi (_extract_pns): ≥7 char
+    # huruf+angka, atau ≥9 digit kontigu (PN numerik Weichai).
+    if _extract_pns(kata):
+        return ""
     cocok: list[tuple[str, dict]] = []  # (trigger yg muncul di question, entri)
     try:
         for e in _load_sinonim_entries():
@@ -447,18 +464,32 @@ def _cap_tool_content(s: str) -> str:
     return s[:head] + marker + s[-_TOOL_CAP_TAIL:]
 
 
+# Key yang KOSONGNYA adalah JAWABAN, bukan ketiadaan data. Untuk key lain
+# "tak ada field itu" dan "field itu kosong" sama saja bagi model; untuk yang
+# ini TIDAK: `digantikan_oleh: []` berarti "sudah dicek, tak ada pengganti",
+# sedangkan field yang hilang terbaca "belum dicek" — dan justru pertanyaan
+# 'ada penggantinya?' / 'ada stok di gudang lain?' yang paling sering dijawab
+# dengan tebakan saat field-nya senyap. (Kegagalan cek tetap dibedakan lewat
+# _tool_fail_kind / sumber_dicek, bukan lewat kekosongan ini.)
+_COMPACT_KEEP_EMPTY = frozenset((
+    "pengganti", "digantikan_oleh", "menggantikan", "stok_per_gudang",
+))
+
+
 def _compact_result(v):
     """Buang field KOSONG (None, '', [], {}) secara rekursif dari hasil tool
     sebelum diserialisasi ke model — memangkas 15-35% char hasil tool, komponen
     biaya token UNCACHED terbesar per giliran (system prompt sudah ter-cache).
     ⛔ JANGAN buang boolean atau 0: _tool_failed & guard bergantung pada
-    found:False / denied / stok 0. ⛔ JANGAN rename key (nama key = kosakata yang
-    sudah dikenal model). Panjang elemen LIST tak diubah (struktur tetap)."""
+    found:False / denied / stok 0. ⛔ JANGAN buang key di _COMPACT_KEEP_EMPTY:
+    kosongnya bermakna 'sudah dicek & nihil'. ⛔ JANGAN rename key (nama key =
+    kosakata yang sudah dikenal model). Panjang elemen LIST tak diubah."""
     if isinstance(v, dict):
         out = {}
         for k, val in v.items():
             c = _compact_result(val)
-            if c is None or c == "" or c == [] or c == {}:
+            if (c is None or c == "" or c == [] or c == {}) \
+                    and k not in _COMPACT_KEEP_EMPTY:
                 continue
             out[k] = c
         return out
@@ -527,6 +558,56 @@ def _dump_tool(result, name: str = "") -> str:
 
 
 _TOOL_TRIM_KEEP_LAST = 2   # ronde tool TERAKHIR yang isinya dibiarkan UTUH
+_TRIM_DIGEST_CAP = 200     # panjang maks INTISARI di dalam stub (char)
+
+
+def _digest_tool_content(name: str, content: str) -> str:
+    """INTISARI deterministik isi hasil tool ronde lama (≤_TRIM_DIGEST_CAP char).
+
+    Stub lama kosong total: setelah dua ronde, seluruh pasangan PN↔unit yang
+    ditemukan ronde awal lenyap dari pandangan model, padahal grounding masih
+    menerimanya — jadi model tahu 'PN ini boleh disebut' tapi lupa milik unit
+    mana. Rantai panjang (banding armada, cek massal per-VIN) persis yang
+    memakai trimming ini, dan persis yang paling butuh pasangannya.
+
+    Dibangun dari CONTENT-nya sendiri (bukan dari args/result) supaya tak ada
+    state baru yang harus dititipkan chat loop: content = string yang sama yang
+    dilihat model. Bila isinya JSON → dipakai `_fakta_from_tool` (satu-satunya
+    peringkas hasil tool yang sudah ada & sudah teruji); bila tidak (hasil
+    terpotong _cap_tool_content / jalur tool bocor) → jatuh ke token mirip-PN.
+    Tak pernah melempar: stub polos selalu jadi cadangan."""
+    teks = str(content or "")
+    obj = None
+    awal = teks.find("{")
+    if awal >= 0:
+        try:
+            obj = json.loads(teks[awal:])
+        except Exception:
+            obj = None
+    baris: list[str] = []
+    if isinstance(obj, dict):
+        try:
+            # Hasil tool memuat konteksnya sendiri (rangka/no mesin) sebagai key
+            # biasa → dipakai juga sbg sumber 'args' untuk label _fakta_ctx.
+            baris = _fakta_from_tool(name, obj, obj) or []
+        except Exception:  # pragma: no cover — peringkas rusak ≠ chat mati
+            logger.exception("digest stub gagal (dilewati) tool=%s", name)
+            baris = []
+    digest = "; ".join(b for b in baris if b)
+    if not digest:
+        pns = sorted(_extract_pns(teks))[:5]
+        digest = ("PN: " + ", ".join(pns)) if pns else ""
+    if len(digest) <= _TRIM_DIGEST_CAP:
+        return digest
+    # Potong di BATAS pemisah, jangan di tengah token: PN separuh ('…12345' dari
+    # '…1234567') adalah PN yang tidak pernah ada, dan stub ini dibaca model.
+    potong = digest[:_TRIM_DIGEST_CAP]
+    for sep in ("; ", ", ", " "):
+        p = potong.rfind(sep)
+        if p >= _TRIM_DIGEST_CAP // 2:
+            potong = potong[:p]
+            break
+    return potong.rstrip(" ,;") + " …"
 
 
 def _trim_old_tool_messages(messages: list[dict], tool_msg_idx: list[dict],
@@ -540,7 +621,8 @@ def _trim_old_tool_messages(messages: list[dict], tool_msg_idx: list[dict],
     `_capture_meta`, `_track_pn_source`) saat hasil di-append — trimming tak
     menghilangkannya. `role:tool` + `tool_call_id` DIPERTAHANKAN (pasangan
     assistant.tool_calls↔tool wajib valid); ronde terbaru tetap utuh agar model
-    bernalar atas data terkini."""
+    bernalar atas data terkini. Stub membawa INTISARI (_digest_tool_content) —
+    hemat konteks tanpa membuat model buta pada apa yang sudah ia temukan."""
     batas = cur_round - keep_last
     if batas < 1:
         return
@@ -549,15 +631,39 @@ def _trim_old_tool_messages(messages: list[dict], tool_msg_idx: list[dict],
             continue
         i = e["i"]
         if 0 <= i < len(messages):
-            messages[i]["content"] = (f"[hasil {e.get('name') or 'tool'} (ronde {e['round']}) "
-                                      "sudah dipakai — diringkas untuk hemat konteks]")
+            nama = e.get("name") or "tool"
+            inti = _digest_tool_content(nama, messages[i].get("content") or "")
+            messages[i]["content"] = (
+                f"[hasil {nama} (ronde {e['round']}) sudah dipakai — diringkas "
+                "untuk hemat konteks"
+                + (f"; intisari: {inti}" if inti else "")
+                + ". Panggil ulang tool bila butuh rinciannya]")
         e["stubbed"] = True
 
 
 # Marker string error yang menandakan gangguan INFRA (bukan lookup nihil jujur).
-# Sengaja sempit: banyak hasil not-found sah membawa `error` penjelas — kehadiran
-# `error` saja BUKAN bukti infra rusak.
-_FAIL_INFRA_MARKERS = ("jaringan", "gangguan internal")
+# Tetap sempit — kehadiran `error` saja BUKAN bukti infra rusak (banyak hasil
+# not-found sah membawa `error` penjelas) — tapi daftar lama cuma 2 frasa,
+# sedangkan pesan infra NYATA di repo berbunyi macam-macam: "Gagal menghubungi
+# server EPC", "SIMS tidak merespons — coba lagi sebentar lagi", "Accurate belum
+# terkonfigurasi/aktif", "Sesi Accurate kadaluarsa", "Indeks stok per-gudang
+# sedang disiapkan", "Accurate bermasalah saat mencari". Semuanya dulu jatuh ke
+# 'nf' → model diberi tahu "data memang tidak ada" padahal tak ada yang pernah
+# dicek. Frasa di bawah dipungut dari string error/pesan yang benar-benar ada di
+# kode (bukan tebakan), dan sengaja BERFRASA (bukan kata tunggal seperti
+# 'server'/'sesi') supaya tak menyenggol kalimat not-found yang sah.
+_FAIL_INFRA_MARKERS = (
+    "jaringan", "gangguan internal", "gagal", "coba lagi", "timeout",
+    "tidak merespons", "tak merespons", "terkonfigurasi", "bermasalah",
+    "sedang disiapkan", "kadaluarsa", "kedaluwarsa", "belum aktif",
+    "tak dapat diakses", "tidak dapat diakses",
+)
+
+# Field pesan yang ikut dibaca saat mencari marker infra. `error` saja tak cukup:
+# jalur Accurate mengembalikan {"tersedia": False, "pesan": "Sesi Accurate
+# kadaluarsa …"} — TANPA key `error` sama sekali, jadi klasifikasi lama tak punya
+# apa pun untuk dibaca dan otomatis memvonis 'nf'.
+_FAIL_MSG_KEYS = ("error", "pesan")
 
 
 def _tool_fail_kind(result) -> str:
@@ -573,9 +679,17 @@ def _tool_fail_kind(result) -> str:
     `brake` dipisah dari `nf` karena keduanya dulu tak terbedakan: hasil rem
     membawa found=False, sehingga model diberi nota "lookup gagal, jangan
     mengarang" dan menyimpulkan puluhan PN yang ditolak rem itu TIDAK ADA di
-    data. Yang benar: mereka belum sempat dicek."""
+    data. Yang benar: mereka belum sempat dicek.
+
+    Builder tool boleh MENYATAKAN jenisnya sendiri lewat `_err_kind` ("err"/"nf"/
+    "brake"): jalur eksplisit selalu lebih kuat dari tebakan atas prosa, dan ia
+    memberi tool baru cara menandai "gagal cek" tanpa harus menitipkan kata kunci
+    tertentu di kalimat error."""
     if not isinstance(result, dict):
         return ""
+    kind = str(result.get("_err_kind") or "").strip().lower()
+    if kind in _FAIL_KIND_RANK:
+        return kind
     if result.get("dibatasi"):
         return "brake"
     if result.get("denied") or result.get("_token_issue"):
@@ -588,8 +702,8 @@ def _tool_fail_kind(result) -> str:
         return "err"
     for k in ("found", "ditemukan", "tersedia"):
         if result.get(k) is False:
-            err = str(result.get("error") or "").lower()
-            if any(m in err for m in _FAIL_INFRA_MARKERS):
+            teks = " ".join(str(result.get(mk) or "") for mk in _FAIL_MSG_KEYS).lower()
+            if any(m in teks for m in _FAIL_INFRA_MARKERS):
                 return "err"
             return "nf"
     if result.get("error"):
@@ -623,11 +737,70 @@ def _catat_tool_gagal(daftar: list[str], name: str, kind: str) -> None:
     daftar.append(f"{name}:{kind}")
 
 
-_LOOKUP_GAGAL_NOTE = (
-    "[CATATAN SISTEM] Ada tool yang GAGAL/tak menemukan data. DILARANG mengarang "
-    "stok/harga/ketersediaan untuk item itu — sampaikan apa adanya, sarankan "
-    "langkah (cek nomor / coba lagi / hubungi admin)."
-)
+# Argumen IDENTITAS (barang/unit APA) dan argumen PENCARIAN (dicari APA).
+# Keduanya dikutip bila ada: 'cari_part_di_unit(RT110061, kampas rem)'
+# menjelaskan kegagalannya jauh lebih baik daripada salah satu saja — nomor
+# rangka tanpa istilah, atau istilah tanpa unit, dua-duanya menyisakan tebakan.
+_LOOKUP_GAGAL_ARG_ID = ("part_number", "pn", "daftar_pn", "rangka", "rangka_1",
+                        "daftar_rangka", "no_mesin", "daftar_no_mesin",
+                        "customer", "gudang")
+_LOOKUP_GAGAL_ARG_CARI = ("query", "kata_kunci", "part", "topik", "komponen",
+                          "kode", "code", "spn", "keluhan")
+_LOOKUP_GAGAL_ARG_CAP = 40      # panjang maks TIAP nilai argumen yang dikutip
+
+
+def _lookup_gagal_arg(args: dict) -> str:
+    """Argumen KUNCI sebuah panggilan tool (yang menjelaskan 'gagal untuk apa') —
+    maks satu identitas + satu kata pencarian; '' bila tak ada."""
+    out: list[str] = []
+    for grup in (_LOOKUP_GAGAL_ARG_ID, _LOOKUP_GAGAL_ARG_CARI):
+        for k in grup:
+            v = (args or {}).get(k)
+            if isinstance(v, (list, tuple)):
+                v = ", ".join(str(x).strip() for x in v if str(x).strip())
+            s = " ".join(str(v or "").split())
+            if s:
+                out.append(s[:_LOOKUP_GAGAL_ARG_CAP])
+                break
+    return ", ".join(out)
+
+
+def _lookup_gagal_note(gagal=()) -> str:
+    """[CATATAN SISTEM] 'lookup gagal' — SEBUTKAN tool & argumennya.
+
+    `gagal` = daftar (nama_tool, args) panggilan yang gagal giliran ini; kosong →
+    nota generik (perilaku lama persis). Nota generik itu masalahnya: ia disuntik
+    SEKALI per giliran, jadi saat 5 tool dipanggil dan 1 gagal, model tak punya
+    cara tahu YANG MANA — dan pilihan amannya (menganggap semuanya meragukan,
+    atau justru mengabaikan notanya) dua-duanya salah. Menyebut nama tool +
+    argumen kuncinya membuat nota ini bisa ditindaklanjuti: model tahu persis PN/
+    rangka mana yang tak boleh diklaim."""
+    rincian: list[str] = []
+    for nama, args in (gagal or ()):
+        n = str(nama or "").strip()
+        if not n:
+            continue
+        a = _lookup_gagal_arg(args if isinstance(args, dict) else {})
+        item = f"{n}({a})" if a else n
+        if item not in rincian:
+            rincian.append(item)
+    return (
+        "[CATATAN SISTEM] "
+        + (f"Tool berikut GAGAL/tak menemukan data: {'; '.join(rincian)}. "
+           if rincian else "Ada tool yang GAGAL/tak menemukan data. ")
+        + "DILARANG mengarang stok/harga/ketersediaan untuk item itu — sampaikan "
+        "apa adanya, sarankan langkah (cek nomor / coba lagi / hubungi admin)."
+        + (" Tool LAIN di giliran ini yang berhasil tetap boleh kamu pakai."
+           if rincian else "")
+    )
+
+
+# Nota generik (tanpa rincian) — bentuk yang dipakai pemanggil lama di p9.
+# ⚠️ Selama p9 masih menyuntikkan konstanta ini, rincian nama-tool BELUM sampai
+# ke model; wiring-nya: ganti pemakaian `_LOOKUP_GAGAL_NOTE` dengan
+# `_lookup_gagal_note([(nama, args), …])` atas panggilan yang _tool_fail_kind-nya
+# != "brake" pada giliran itu.
+_LOOKUP_GAGAL_NOTE = _lookup_gagal_note()
 
 
 def _units_context() -> str:
