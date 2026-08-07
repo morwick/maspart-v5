@@ -291,12 +291,28 @@ def _t_cari_part(args: dict, user: dict) -> dict:
     # Weichai numerik spt 1014167092). Sama seperti halaman Cari Part
     # (_sims_fallback): ambil NAMA PART dari SIMS supaya asisten tidak menjawab
     # 'tidak ada' untuk part yang nyata. Maks 3 PN per query (hemat panggilan).
+    # Status SIMS DICATAT, bukan cuma dipakai diam-diam sebagai syarat: dua jaring
+    # terakhir di bawah (nama resmi per-PN & master pabrik) HANYA jalan bila SIMS
+    # hidup. Saat ia mati, "0 hasil" bukan bukti part tak ada — tanpa jejak ini
+    # asisten memvonis "tidak ada" padahal jaring terakhirnya tak pernah ditarik.
+    sims_gagal = False
+    try:
+        sims_siap = bool(sims.available())
+    except Exception:
+        logger.exception("cari_part: cek ketersediaan SIMS gagal")
+        sims_siap, sims_gagal = False, True
+
     hasil_sims: list[dict] = []
-    if not items and sims.available():
+    if not items and sims_siap:
         for p in part_index.pn_tokens(q)[:3]:
             if len(p) < 4:
                 continue
-            nama_sims = (str((sims.get_part_info(p) or {}).get("partName") or "")).strip()
+            try:
+                nama_sims = (str((sims.get_part_info(p) or {}).get("partName") or "")).strip()
+            except Exception:
+                logger.exception("cari_part: SIMS get_part_info gagal (%s)", p)
+                sims_gagal = True
+                continue
             if nama_sims:
                 hasil_sims.append({"part_number": p.upper(), "part_name": nama_sims,
                                    "sumber": "SIMS (katalog resmi Sinotruk)"})
@@ -326,12 +342,18 @@ def _t_cari_part(args: dict, user: dict) -> dict:
     # nyata bisa 0 hasil di semua jalur di atas. Maks 2 keyword EN (dari ekspansi
     # sinonim yang SUDAH dihitung), cap 8 hasil, memo 1 jam di sims.
     hasil_master_sims: list[dict] = []
-    if not items and not hasil_sims and not stok_lokal and sims.available():
+    if not items and not hasil_sims and not stok_lokal and sims_siap:
         _en_kws = [t for t in search_terms
                    if len(t) >= 4 and not any(c.isdigit() for c in t)][:2]
         _seen_pc: set[str] = set()
         for _kw in _en_kws:
-            for r in sims.search_master_by_name(_kw, limit=8):
+            try:
+                _rows_master = sims.search_master_by_name(_kw, limit=8)
+            except Exception:
+                logger.exception("cari_part: SIMS master by-name gagal (%s)", _kw)
+                sims_gagal = True
+                break
+            for r in _rows_master:
                 pc = str(r.get("partCode") or "").strip().upper()
                 if pc and pc not in _seen_pc:
                     _seen_pc.add(pc)
@@ -350,6 +372,21 @@ def _t_cari_part(args: dict, user: dict) -> dict:
             "Sampaikan apa adanya; utk harga SIMS lanjutkan harga_sims. ⛔ JANGAN "
             "klaim stok/harga lokal/kompatibilitas unit dari data ini.")
 
+    # JARING TERAKHIR TAK TERTARIK (audit kejujuran 2026-08-06): nihil TOTAL padahal
+    # SIMS mati/gagal = "belum dicek", bukan "tidak ada". Dulu blok master-SIMS
+    # dilewati DIAM-DIAM saat sims.available() False, dan model membaca 0 hasil
+    # sebagai vonis. Sekarang ketidak-tahuan itu ikut dikirim.
+    sims_tak_dicek = (not items and not hasil_sims and not stok_lokal
+                      and not hasil_master_sims and (sims_gagal or not sims_siap))
+    if sims_tak_dicek:
+        note = ((note + " ") if note else "") + (
+            "⚠️ JARING TERAKHIR belum ditarik: katalog resmi SIMS (master pabrik "
+            "±670rb part) TIDAK sempat diperiksa — sumbernya sedang tak bisa "
+            "dihubungi. Jadi nihil di sini BUKAN bukti part tidak ada. Sampaikan apa "
+            "adanya ('belum bisa dipastikan, sumber katalog resmi sedang tak bisa "
+            "dicek') & tawarkan coba lagi sebentar. ⛔ JANGAN memvonis 'part tidak "
+            "ada'/'tidak dijual'.")
+
     # UMPAN BALIK KAMUS: catat pencarian yang 0 hasil. Daftar 'MISS' ini = istilah
     # lapangan yang belum dikenali sistem → kandidat tambahan untuk sinonim.json.
     # Cek log: docker logs <container> 2>&1 | grep MISS  (lihat PROJECT.md §3.5.3).
@@ -362,9 +399,12 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         # Catat ke log persisten (halaman admin 'Pencarian Nihil') — hanya bila
         # istilah tak dikenali sinonim (yang dikenali tapi 0 hasil = data belum ada,
         # bukan celah kamus) DAN SIMS/stok lokal/master juga tidak mengenalnya
-        # (kalau mereka kenal, itu bukan celah kamus istilah). Best-effort.
+        # (kalau mereka kenal, itu bukan celah kamus istilah). ⛔ JUGA bukan saat
+        # SIMS mati (`sims_tak_dicek`): nihil di giliran itu belum tentu celah
+        # kamus — jaring terakhirnya tak pernah ditarik — dan mencatatnya
+        # meracuni daftar kandidat sinonim admin. Best-effort.
         if not matched_syn and not hasil_sims and not stok_lokal \
-                and not hasil_master_sims:
+                and not hasil_master_sims and not sims_tak_dicek:
             try:
                 search_log.record_miss(q, "nama", "asisten")
             except Exception:
@@ -383,6 +423,13 @@ def _t_cari_part(args: dict, user: dict) -> dict:
         "saran_mungkin_maksud": saran,
         "hasil_sims": hasil_sims,
         "hasil_master_sims": hasil_master_sims,
+        # Field EKSPLISIT (bukan tebak-tebakan dari prosa): nihil di sini terjadi
+        # TANPA katalog resmi SIMS sempat diperiksa. `_cek_tak_lengkap` menyusul
+        # agar telemetri membacanya 'err' (belum sempat dicek) — bukan 'nf'
+        # (lookup jujur nihil) yang membuat giliran SIMS-mati tampak sebagai
+        # bukti "part memang tidak ada". Lihat _tool_fail_kind di p7.
+        **({"sims_tak_dicek": True, "_cek_tak_lengkap": True}
+           if sims_tak_dicek else {}),
         "stok_lokal_tambahan": stok_lokal,
         "urutan": "Hasil DIURUT berdasarkan KECOCOKAN/KOMPATIBILITAS part dengan katalog (BUKAN stok). Rekomendasikan part yang paling cocok untuk unit/kebutuhan user — stok hanya info, bukan dasar rekomendasi.",
         "info_stok_harga": "Stok & harga berlaku per Part Number (sama untuk semua varian unit yang memakai PN itu).",
@@ -433,6 +480,55 @@ def _acc_qty(v) -> int:
         return int(round(float(v)))
     except (TypeError, ValueError):
         return 0
+
+
+# Ambang kelayakan klaim KATEGORIS ("tidak ada part X di gudang Y"). Rincian
+# per-gudang diisi enrichment latar yang berjalan BERTAHAP; selama jendela itu,
+# sebagian besar PN masih tanpa rincian sehingga "tidak ada" hanyalah "belum
+# terbaca". 90% = daftar sudah cukup mewakili untuk dipakai menyimpulkan.
+_ENRICH_AMBANG = 0.90
+
+
+def _gudang_indeks_siap() -> bool:
+    """True bila indeks per-gudang Accurate SUDAH terisi (enrichment jalan).
+    False = 0 PN ter-enrich → angka stok per-gudang apa pun tak bisa dipercaya."""
+    try:
+        return int(accurate.gudang_enriched_count() or 0) > 0
+    except Exception:
+        logger.exception("gudang_enriched_count gagal")
+        return False
+
+
+def _enrich_progres() -> tuple[int, int, float]:
+    """(n_enriched, n_barang_berstok, rasio) progres enrichment rincian per-gudang.
+
+    ⚠️ PEMBANDING = jumlah barang BERSTOK>0, BUKAN seluruh katalog. Enrichment
+    (accurate.enrich_warehouses) memang hanya menarik rincian gudang untuk barang
+    berstok (~ribuan), sedangkan `snapshot()` memuat SELURUH katalog ber-harga
+    (puluhan ribu). Dulu keduanya dibagi begitu saja → rasio hampir selalu jauh
+    di bawah `_ENRICH_AMBANG`, dan stok_gudang / excel_stok_gudang MACET di
+    "belum bisa dipastikan" SELAMANYA (regresi produksi). Dua populasi berbeda
+    tak boleh dibagi.
+
+    `rasio` 1.0 bila populasi berstok 0 / tak terbaca (indeks agregat kosong di
+    test/cold start, atau memang tak ada yang perlu di-enrich) — kita tak boleh
+    mengarang keraguan sama seperti tak boleh mengarang kepastian. Jendela
+    "enrichment baru mulai" tetap terjaga pemeriksaan `n_enrich == 0` di
+    pemanggil. Dihitung SEKALI per panggilan tool (satu pindai dict in-memory),
+    ⛔ jangan dipanggil per-baris hasil."""
+    try:
+        n = int(accurate.gudang_enriched_count() or 0)
+    except Exception:
+        logger.exception("gudang_enriched_count gagal")
+        n = 0
+    try:
+        total = int(accurate.snapshot_berstok_count() or 0)
+    except Exception:
+        logger.exception("accurate.snapshot_berstok_count gagal")
+        total = 0
+    if total > 0:
+        return n, total, min(1.0, n / total)
+    return n, total, 1.0
 
 
 def _t_stok_gudang(args: dict, user: dict) -> dict:
@@ -523,11 +619,16 @@ def _t_stok_gudang(args: dict, user: dict) -> dict:
 
     # Indeks per-gudang belum terisi (mis. ~8 mnt pertama setelah server nyala) →
     # jangan salah lapor "tidak ada"; beri tahu apa adanya.
-    if not hasil and accurate.gudang_enriched_count() == 0:
-        return {"found": False, "gudang": gudang_kanonik,
+    n_enrich, n_total, rasio = _enrich_progres()
+    if not hasil and n_enrich == 0:
+        # _cek_tak_lengkap → 'err' di telemetri, bukan 'nf': belum sempat dicek.
+        return {"found": False, "_cek_tak_lengkap": True, "gudang": gudang_kanonik,
                 "error": "Indeks stok per-gudang sedang disiapkan (baru mulai) — coba lagi beberapa menit.",
                 "kata_kunci": kata}
 
+    # Enrichment BARU SEBAGIAN → "tidak ada" hanyalah "belum terbaca". Klaim
+    # kategoris ditarik, digantikan pernyataan ketidak-pastian yang jujur.
+    sebagian = rasio < _ENRICH_AMBANG
     if hasil:
         catatan = (
             f"{len(hasil)} part '{kata}' READY (stok>0) di gudang {gudang_kanonik}. "
@@ -535,18 +636,40 @@ def _t_stok_gudang(args: dict, user: dict) -> dict:
             "DAFTAR ringkas (PN + nama + qty di gudang), urut stok terbanyak; sebut nama "
             "gudang jelas. ⛔ JANGAN mengarang PN di luar daftar ini."
         )
+        if sebagian:
+            catatan += (
+                f" ⚠️ Rincian per-gudang BARU TERISI {n_enrich} dari {n_total} barang "
+                f"berstok ({rasio:.0%}) — daftar ini BELUM tentu lengkap; sebut itu ke "
+                "user & tawarkan cek ulang sebentar lagi. ⛔ JANGAN bilang 'hanya ini "
+                "yang ada'.")
+    elif sebagian:
+        catatan = (
+            f"BELUM BISA DIPASTIKAN apakah ada part '{kata}' berstok di gudang "
+            f"{gudang_kanonik} — indeks per-gudang baru terisi sebagian ({n_enrich} dari "
+            f"{n_total} barang berstok, {rasio:.0%}). ⛔ JANGAN menyatakan 'tidak ada'/"
+            "'kosong'; sampaikan bahwa pengecekan belum tuntas & minta coba lagi "
+            "beberapa menit."
+        )
     else:
         catatan = (
             f"Tidak ada part '{kata}' yang berstok di gudang {gudang_kanonik}. Sampaikan "
             "jujur; part kategori itu mungkin ada di GUDANG LAIN — tawarkan cek gudang lain "
             "atau total stok (detail_part/stok_accurate untuk 1 PN)."
         )
+    if unit:
+        # Filter unit di-ECHO (pola cari_part): tanpa ini giliran berikutnya kehilangan
+        # konteks "daftar ini KHUSUS unit N" dan daftarnya terbaca sebagai stok umum.
+        catatan += (f" Daftar ini DISARING ke unit '{unit}' — part gudang di luar unit itu "
+                    "TIDAK ikut; sebutkan batasan itu ke user.")
     return {
         "found": True,
         "gudang": gudang_kanonik,
         "kata_kunci": kata,
         "kata_kunci_diperluas": [t for t in search_terms if t.lower() != kata.lower()][:20],
+        "unit_filter": unit or None,
         "jumlah_part_ready": len(hasil),
+        "progres_indeks_gudang": {"ter_enrich": n_enrich, "total": n_total,
+                                  "lengkap": not sebagian},
         "ditampilkan": ditampilkan,
         "catatan": catatan,
     }
@@ -652,12 +775,20 @@ def _varian_pemasok(pn: str, user: dict, *, dengan_gudang: bool = True,
     boleh_s = dengan_stok and _boleh_stok(user)
     if not (boleh_h or boleh_s):
         return None                     # tak ada yang boleh ditampilkan
+    # ⚠️ Kegagalan di sini DULU ditelan jadi None = "part ini sendirian", persis
+    # bug produksi yang fitur ini tambal (angka satu kartu disajikan seolah seluruh
+    # stok). Sekarang gagal ≠ sendirian: sentinel 'gagal_dicek' dikembalikan supaya
+    # pemanggil menempelkan peringatan, bukan diam.
     try:
         if not accurate.family_summary(pn):
             return None                 # sendirian / indeks belum siap → jalur lama
         fam = accurate.stock_family(pn)
+    except (AttributeError, KeyError, TypeError, ValueError) as e:
+        logger.warning("varian_pemasok: indeks Accurate tak terbaca (%s): %s", pn, e)
+        return {"gagal_dicek": True}
     except Exception:
-        return None
+        logger.exception("varian_pemasok gagal tak terduga (%s)", pn)
+        return {"gagal_dicek": True}
     daftar: list[dict] = []
     for v in (fam.get("varian") or []):
         it: dict = {"kode": v.get("pn") or ""}
@@ -678,11 +809,25 @@ def _varian_pemasok(pn: str, user: dict, *, dengan_gudang: bool = True,
     return out
 
 
+# Dipakai saat cek keluarga varian GAGAL: angka yang terlanjur ada di hasil tak
+# boleh disajikan seolah final, karena bisa jadi cuma satu kartu pemasok.
+_CATATAN_VARIAN_GAGAL = (
+    "⚠️ CEK KARTU PEMASOK GAGAL untuk PN ini (indeks Accurate tak terbaca) — "
+    "'stok_total'/'harga_lokal' di sini BISA cuma mewakili SATU kartu pemasok, "
+    "bukan seluruh stok/harga part. Sampaikan angkanya dengan catatan itu apa "
+    "adanya; ⛔ JANGAN menyajikannya sebagai angka final dan JANGAN dipakai dasar "
+    "penawaran — minta coba lagi sebentar."
+)
+
+
 def _sisip_varian_pemasok(out: dict, pn: str, user: dict, **kw) -> dict:
     """Tempelkan `varian_pemasok` + `catatan_varian` ke hasil tool bila perlu.
     Mutasi di tempat + kembalikan `out` agar enak dirangkai."""
     vp = _varian_pemasok(pn, user, **kw)
-    if vp:
+    if vp and vp.get("gagal_dicek"):
+        out["varian_pemasok_gagal_dicek"] = True
+        out["catatan_varian"] = _CATATAN_VARIAN_GAGAL
+    elif vp:
         out["varian_pemasok"] = vp
         out["catatan_varian"] = _CATATAN_VARIAN_PEMASOK.format(n=vp["jumlah_varian"])
     return out
@@ -814,6 +959,17 @@ def _t_detail_part(args: dict, user: dict) -> dict:
         spec = {}
     if spec:
         result["spesifikasi"] = spec
+    # STATUS JUAL resmi SIMS (isSale) — SATU-SATUNYA sumber sah utk klaim sebuah
+    # part masih dijual/tidak (audit 2026-08-04: klaim 'STOP/discontinued' dari
+    # marketability EPC terbukti TERBALIK 25/25). Murah di sini: get_part_info
+    # cache-nya baru saja dihangatkan get_part_spec di atas. Best-effort:
+    # None → field absen = status TAK DIKETAHUI, bukan 'tidak dijual'.
+    try:
+        _sjual = sims.status_jual(pn)
+    except Exception:
+        _sjual = None
+    if _sjual:
+        result["status_jual_sims"] = _sjual
     pos = _axle_posisi(pn)
     if pos:
         result["posisi_poros"] = pos
@@ -994,22 +1150,47 @@ def _t_cek_massal_part(args: dict, user: dict) -> dict:
     peta_dim = _dimensi_massal(pns) if minta_dim else {}
     dim_dipotong = minta_dim and len(pns) > _MAX_DIM_MASSAL
 
+    # STOK DIBACA DULU untuk SELURUH daftar, baru dinilai. Alasannya: nol dari
+    # jalur GAGAL (exception / indeks per-gudang belum terisi) dulu ditulis sebagai
+    # 'stok_total: 0' dan model menyajikannya sebagai fakta "barang habis". Nol
+    # hanya sah bila indeks memang HIDUP — dibuktikan oleh minimal satu PN di
+    # daftar ini yang punya rincian, atau oleh gudang_enriched_count() > 0.
+    stok_map: dict[str, tuple[int, str] | None] = {}
+    if boleh_stok:
+        for pn in pns:
+            try:
+                stok_map[pn] = _rincian_gudang_str(pn)
+            except Exception:
+                logger.exception("cek_massal: rincian gudang gagal (%s)", pn)
+                stok_map[pn] = None
+        if not any(v and v[0] > 0 for v in stok_map.values()) and not _gudang_indeks_siap():
+            stok_map = {pn: None for pn in pns}
+
     part: list[dict] = []
     tak_ada: list[str] = []
+    belum_pasti: list[str] = []
+    stok_gagal: list[str] = []
+    varian_gagal: list[str] = []
     for pn in pns:
         r = rows.get(pn)
         nama = (r or {}).get("part_name") or ""
         item: dict = {"pn": pn, "nama": nama}
+        catatan_pn: list[str] = []
         ada = bool(r)
         if boleh_stok:
-            try:
-                total, rinci = _rincian_gudang_str(pn)
-            except Exception:
-                total, rinci = 0, ""
-            item["stok_total"] = total
-            if rinci:
-                item["stok_per_gudang"] = rinci
-            ada = ada or total > 0
+            st = stok_map.get(pn)
+            if st is None:
+                # ⛔ JANGAN menulis 0 dari jalur gagal — null = "tidak tahu".
+                item["stok_total"] = None
+                stok_gagal.append(pn)
+                catatan_pn.append("stok GAGAL dicek (indeks per-gudang tak terbaca) — "
+                                  "bukan berarti stok 0/habis")
+            else:
+                total, rinci = st
+                item["stok_total"] = total
+                if rinci:
+                    item["stok_per_gudang"] = rinci
+                ada = ada or total > 0
         if boleh_harga:
             e = snap.get(accurate.index_key(pn))
             hg = (e or {}).get("harga")
@@ -1030,17 +1211,36 @@ def _t_cek_massal_part(args: dict, user: dict) -> dict:
         # rincian gudang saat sesak) — yang wajib sampai ke model = kode + harga
         # tiap kartu supaya ia tak memilih varian diam-diam.
         vp = _varian_pemasok(pn, user, dengan_gudang=False, dengan_stok=boleh_stok)
-        if vp:
+        if vp and vp.get("gagal_dicek"):
+            varian_gagal.append(pn)
+            catatan_pn.append("cek kartu pemasok gagal — angka ini bisa cuma satu kartu")
+        elif vp:
             item["varian_pemasok"] = vp
             ada = True
         if not ada:
-            tak_ada.append(pn)
-            item["catatan_pn"] = "tidak ditemukan di indeks (cek ejaan / mungkin non-katalog)"
+            if boleh_stok and stok_map.get(pn) is None:
+                # Nama tak ketemu DAN stok tak terbaca → kita belum tahu apa-apa
+                # tentang PN ini; memasukkannya ke 'tak ada' = vonis dari nol cek.
+                belum_pasti.append(pn)
+                catatan_pn.insert(0, "BELUM bisa dipastikan ada/tidaknya — stok gagal dicek")
+            else:
+                tak_ada.append(pn)
+                catatan_pn.insert(0, "tidak ditemukan di indeks (cek ejaan / mungkin non-katalog)")
+        if catatan_pn:
+            item["catatan_pn"] = "; ".join(catatan_pn)
         part.append(item)
 
-    ketemu = len(pns) - len(tak_ada)
+    ketemu = len(pns) - len(tak_ada) - len(belum_pasti)
     out: dict = {"found": ketemu > 0, "jumlah": len(pns), "ketemu": ketemu,
                  "tak_ada": len(tak_ada), "part": part}
+    if belum_pasti:
+        out["belum_pasti"] = belum_pasti
+        if ketemu == 0:
+            # NIHIL TOTAL padahal sebagian PN tak sempat dicek (nama tak ada di
+            # katalog DAN stoknya gagal dibaca) → found=False di sini BUKAN
+            # "lookup jujur nihil". Tanpa penanda ini telemetri mencatatnya 'nf'
+            # dan giliran indeks-tumbang terhitung sebagai bukti part tak ada.
+            out["_cek_tak_lengkap"] = True
 
     if args.get("excel"):
         # Excel tak kena plafon token → dimensi ikut hanya bila memang diminta,
@@ -1057,7 +1257,10 @@ def _t_cek_massal_part(args: dict, user: dict) -> dict:
         for i, it in enumerate(part, start=1):
             row = [str(i), it["pn"], it.get("nama") or ""]
             if boleh_stok:
-                row += [ai_export.ke_angka(it.get("stok_total") if it.get("stok_total") is not None else ""),
+                # stok_total None = GAGAL dicek → tulis apa adanya, jangan sel kosong
+                # yang terbaca "0" oleh pembacanya.
+                _st = it.get("stok_total")
+                row += [ai_export.ke_angka(_st) if _st is not None else "gagal dicek",
                         it.get("stok_per_gudang") or ""]
             if boleh_harga:
                 row += [it.get("harga") if it.get("harga") is not None else "—"]
@@ -1099,6 +1302,22 @@ def _t_cek_massal_part(args: dict, user: dict) -> dict:
         catatan += (" ⚠️ Rincian stok PER-GUDANG sebagian dihilangkan karena daftar "
                     "terlalu panjang — stok_total tetap akurat; sebut rincian gudang "
                     "hanya untuk PN yang masih memilikinya.")
+    # PERINGATAN GLOBAL kegagalan cek — ditulis di catatan (bukan cuma per-baris)
+    # supaya tak tenggelam di daftar 100 PN.
+    if stok_gagal:
+        out["stok_gagal_dicek"] = stok_gagal[:20]
+        catatan += (f" ⚠️ STOK {len(stok_gagal)} PN GAGAL DICEK (indeks per-gudang belum "
+                    "siap / tak terbaca) — 'stok_total' baris itu null, ⛔ JANGAN "
+                    "menyebutnya 0/habis/kosong. Sampaikan 'stok belum bisa dicek' & "
+                    "minta coba lagi sebentar.")
+    if belum_pasti:
+        catatan += (f" ⚠️ {len(belum_pasti)} PN masuk 'belum_pasti': namanya tak ada di "
+                    "katalog DAN stoknya gagal dicek — ⛔ JANGAN memvonis PN itu tidak ada.")
+    if varian_gagal:
+        out["varian_gagal_dicek"] = varian_gagal[:20]
+        catatan += (f" ⚠️ Cek kartu varian PEMASOK gagal untuk {len(varian_gagal)} PN — "
+                    "stok/harga baris itu bisa cuma mewakili SATU kartu pemasok; sebutkan "
+                    "ketidakpastian itu & ⛔ jangan pakai sebagai dasar penawaran.")
     if dipotong:
         catatan = f"⚠️ Daftar dipotong ke {_MAX_MASSAL_PN} PN pertama. " + catatan
     if out.get("export_id"):
@@ -1373,10 +1592,10 @@ def _t_alternatif_ready(args: dict, user: dict) -> dict:
     if gud:
         out["gudang_dicari"] = gud
     out["sumber_dicek"] = sumber_dicek
+    _gagal = [k for k, v in sumber_dicek.items() if v != "ok"]
+    _nama = {"sims": "SIMS Sinotruk (sasis)", "weichai": "EPC Weichai (mesin)"}
     if not kandidat:
         out["found"] = False
-        _gagal = [k for k, v in sumber_dicek.items() if v != "ok"]
-        _nama = {"sims": "SIMS Sinotruk (sasis)", "weichai": "EPC Weichai (mesin)"}
         _stok_asli = (f"Stok PN aslinya sendiri {sum(asli.values())} pcs siap kirim."
                       if asli else "Stok PN aslinya juga kosong.")
         if _gagal:
@@ -1401,11 +1620,26 @@ def _t_alternatif_ready(args: dict, user: dict) -> dict:
             )
         return out
     out["found"] = True
+    # ADA kandidat TAPI ada sumber yang gagal: dulu tak ada hedging sama sekali di
+    # cabang ini, sehingga daftar separuh terbaca sebagai "sudah dicek SIMS &
+    # Weichai, ini semuanya". Yang benar: daftar ini bisa belum lengkap.
+    if _gagal:
+        out["sumber_gagal"] = _gagal
+        _belum = ", ".join(_nama[k] for k in _gagal)
+        out["catatan_sumber_gagal"] = (
+            f"⚠️ Sumber {_belum} GAGAL diperiksa — daftar pengganti di bawah BISA BELUM "
+            "LENGKAP (masih mungkin ada PN pengganti lain yang tak terbaca). WAJIB "
+            "sebutkan itu ke user. ⛔ JANGAN mengklaim 'sudah dicek SIMS & Weichai' / "
+            "'hanya ini penggantinya'; tawarkan cek ulang sebentar lagi."
+        )
     if not siap:
         out["jawaban_wajib"] = (
             f"Ada {len(tak_siap)} PN pengganti resmi untuk {pn}, tapi TIDAK SATU PUN yang "
             "stoknya siap kirim" + (f" di {gud}" if gud else "") + ". Sampaikan apa adanya — "
             "jangan menjanjikan barang yang tak ada."
+            + (" ⚠️ Catatan: pengecekan sumber pengganti BELUM tuntas (lihat "
+               "'catatan_sumber_gagal') — jangan menutup kemungkinan ada pengganti lain."
+               if _gagal else "")
         )
     return out
 
@@ -1732,6 +1966,48 @@ def _varian_ambigu(pn: str) -> list[dict] | None:
             for v in (full.get("varian") or [])] or None
 
 
+# Awalan/akhiran BENTUK BADAN USAHA — 'CV ANUGERAH' vs 'anugerah' adalah nama
+# yang SAMA, bukan tebakan. Di luar itu (mis. 'cio' → 'ARGCIO') kecocokan hanya
+# SEBAGIAN dan wajib dikonfirmasi manusia.
+_PEL_BENTUK = ("cv", "pt", "ud", "pd", "tb", "toko", "koperasi", "kop", "persero",
+               "tbk", "cv.", "pt.", "ud.", "pd.")
+
+
+def _pel_kata(nama: str) -> list[str]:
+    """Nama pelanggan → daftar kata huruf-kecil tanpa tanda baca ('CV. Anugerah
+    Jaya' → ['cv','anugerah','jaya'])."""
+    return [w for w in re.split(r"[^0-9a-z]+", (nama or "").lower()) if w]
+
+
+def _pel_kanonik(nama: str) -> str:
+    """Nama pelanggan tanpa bentuk badan usaha & tanda baca — untuk membedakan
+    'nama sama beda penulisan' dari 'cocok sebagian' (yang wajib dikonfirmasi)."""
+    kata = _pel_kata(nama)
+    while kata and kata[0] in _PEL_BENTUK:
+        kata.pop(0)
+    while kata and kata[-1] in _PEL_BENTUK:
+        kata.pop()
+    return " ".join(kata)
+
+
+def _pel_norm(nama: str) -> str:
+    """Nama pelanggan ternormalisasi TAPI bentuk badan usaha DIPERTAHANKAN
+    ('PT. Anugerah' → 'pt anugerah'). Dipakai saat user MENYEBUT bentuknya."""
+    return " ".join(_pel_kata(nama))
+
+
+def _pel_sebut_bentuk(nama: str) -> bool:
+    """True bila nama yang DIKETIK user memuat bentuk badan usaha (PT/CV/UD/
+    TOKO/PD/…) di awal atau akhir.
+
+    ⚠️ PT ANUGERAH, CV ANUGERAH & TOKO ANUGERAH adalah ENTITAS HUKUM BERBEDA.
+    `_pel_kanonik` membuang bentuk itu, jadi ketiganya jadi kembar dan penawaran
+    RESMI bisa terbit atas nama badan usaha yang salah. Bila user sudah repot
+    menyebut bentuknya, bentuk itu WAJIB ikut dicocokkan."""
+    kata = _pel_kata(nama)
+    return bool(kata) and (kata[0] in _PEL_BENTUK or kata[-1] in _PEL_BENTUK)
+
+
 def _penawaran_core(nama_pel: str, barang: list, tanggal: str = "",
                     catatan: str = "") -> dict:
     """INTI pembuatan Penawaran Accurate + PDF resmi (dipakai buat_penawaran &
@@ -1767,16 +2043,61 @@ def _penawaran_core(nama_pel: str, barang: list, tanggal: str = "",
         if not cust:
             return {"found": False, "error": f"Pelanggan '{nama_pel}' tidak ditemukan di Accurate."}
         exact = [c for c in cust if (c["name"] or "").strip().lower() == nama_pel.lower()]
-        if len(cust) > 1 and not exact:
+        if not exact:
+            if _pel_sebut_bentuk(nama_pel):
+                # User MENYEBUT bentuk badan usaha ('PT ANUGERAH') → PT/CV/UD/TOKO
+                # adalah ENTITAS HUKUM BERBEDA meski nama intinya sama. Pemaafan
+                # di sini hanya soal tanda baca/spasi ('PT. Anugerah' = 'PT
+                # ANUGERAH'); kandidat berbentuk LAIN jatuh ke perlu_klarifikasi.
+                _nq = _pel_norm(nama_pel)
+                exact = [c for c in cust if _nq and _pel_norm(c.get("name") or "") == _nq]
+            else:
+                # Nama SAMA, user tak menyebut bentuknya ('anugerah' vs 'CV
+                # ANUGERAH') tetap dihitung persis — itu bukan tebakan.
+                _kq = _pel_kanonik(nama_pel)
+                exact = [c for c in cust if _kq and _pel_kanonik(c.get("name") or "") == _kq]
+        if not exact:
+            # ⚠️ COCOK SEBAGIAN (Accurate mencocokkan substring: 'cio' → 'ARGCIO').
+            # Dulu kandidat TUNGGAL dipilih otomatis — dokumen resmi bisa terbit
+            # atas nama pelanggan yang salah. Satu kandidat pun WAJIB dikonfirmasi.
+            _tunggal = len(cust) == 1
+            # Sebab khusus: nama intinya SAMA, cuma bentuk badan usahanya beda
+            # (user minta 'PT ANUGERAH', yang ada 'CV ANUGERAH'). Alasan itu
+            # disebut terpisah — "cocok sebagian" saja terdengar seperti salah
+            # ketik, padahal ini dua entitas hukum yang berbeda.
+            _kq_beda = _pel_kanonik(nama_pel)
+            _beda_bentuk = bool(_pel_sebut_bentuk(nama_pel) and _kq_beda and any(
+                _pel_kanonik(c.get("name") or "") == _kq_beda for c in cust))
             return {
                 "found": False, "perlu_klarifikasi": True,
-                "pesan": (f"Ada {len(cust)} pelanggan cocok '{nama_pel}'. Tampilkan daftar ini "
-                          "ke user (nama + kode) dan minta ia memilih satu — jangan menebak. "
-                          "Setelah user memilih, panggil buat_penawaran lagi dgn nama pelanggan "
-                          "yang lebih lengkap/tepat."),
+                **({"beda_badan_usaha": True} if _beda_bentuk else {}),
+                "pesan": (
+                    ("⚠️ BENTUK BADAN USAHA BERBEDA: nama intinya sama, tapi "
+                     f"'{nama_pel}' bukan badan usaha yang sama dengan yang ada di "
+                     "Accurate — PT / CV / UD / TOKO adalah entitas hukum berbeda & "
+                     "penawaran resmi tak boleh salah entitas. " if _beda_bentuk else "") + (
+                    (f"'{nama_pel}' hanya cocok SEBAGIAN ke satu pelanggan Accurate: "
+                     f"'{cust[0]['name']}'. TANYA user dulu: maksudnya '{cust[0]['name']}'? "
+                     "Setelah dijawab, panggil buat_penawaran lagi dengan nama pelanggan "
+                     "PERSIS seperti di Accurate. ⛔ JANGAN membuat penawaran atas nama "
+                     "tebakan — dokumen resmi salah alamat susah ditarik kembali.")
+                    if _tunggal else
+                    (f"Ada {len(cust)} pelanggan cocok '{nama_pel}'. Tampilkan daftar ini "
+                     "ke user (nama + kode) dan minta ia memilih satu — jangan menebak. "
+                     "Setelah user memilih, panggil buat_penawaran lagi dgn nama pelanggan "
+                     "yang lebih lengkap/tepat."))),
                 "kandidat": [{"nama": c["name"], "kode": c["no"]} for c in cust[:12]],
             }
-        pel = exact[0] if exact else cust[0]
+        if len(exact) > 1:
+            # Beberapa akun bernama SAMA persis → tetap manusia yang memilih.
+            return {
+                "found": False, "perlu_klarifikasi": True,
+                "pesan": (f"Ada {len(exact)} akun pelanggan bernama sama '{nama_pel}' di "
+                          "Accurate. Tampilkan kode tiap akun ke user & minta ia memilih "
+                          "satu — ⛔ jangan menebak."),
+                "kandidat": [{"nama": c["name"], "kode": c["no"]} for c in exact[:12]],
+            }
+        pel = exact[0]
 
         # 2) barang — resolve tiap PN. HARGA = harga jual Accurate apa adanya
         #    (aturan pemilik: hanya kuantitas yang boleh diatur, tak menawar harga).
@@ -1892,20 +2213,31 @@ def _t_buat_penawaran(args: dict, user: dict) -> dict:
 _PR_MAX_BARIS = 60
 
 
-def _pr_kts_jkt(pn: str) -> int:
-    """Isi kolom WAJIB 'Kts Jkt' = stok gudang JAKARTA saat ini dari indeks
-    Accurate. 0 bila part tak ada di indeks — ⛔ jangan dikarang."""
-    try:
-        br = accurate.gudang_breakdown(pn) or {}
-    except Exception:
-        return 0
-    for g, q in br.items():
-        if "JAKARTA" in str(g).upper():
-            try:
-                return int(_acc_qty(q))
-            except (TypeError, ValueError):
-                return 0
-    return 0
+def _pr_kts_jkt_map(pns: list[str]) -> dict[str, int] | None:
+    """{PN: stok gudang JAKARTA} dari indeks Accurate — isi kolom WAJIB 'Kts Jkt'.
+
+    ``None`` = indeks per-gudang GAGAL/BELUM SIAP dibaca → pemanggil WAJIB
+    membatalkan dokumen. ⛔ Angka 0 karena-gagal TIDAK boleh masuk dokumen resmi
+    ERP: bagian pembelian membacanya sebagai "Jakarta kosong" lalu memesan barang
+    yang sebenarnya menumpuk (atau sebaliknya).
+
+    Nol yang SAH hanya bila indeksnya memang hidup — dibuktikan salah satu PN di
+    dokumen ini punya rincian gudang, atau ``gudang_enriched_count() > 0``."""
+    out: dict[str, int] = {}
+    ada_isi = False
+    for pn in pns:
+        try:
+            br = accurate.gudang_breakdown(pn) or {}
+        except Exception:
+            logger.exception("PR: gudang_breakdown gagal (%s)", pn)
+            return None
+        if br:
+            ada_isi = True
+        out[pn] = next((_acc_qty(q) for g, q in br.items()
+                        if "JAKARTA" in str(g).upper()), 0)
+    if not ada_isi and not _gudang_indeks_siap():
+        return None
+    return out
 
 
 def _t_buat_permintaan_barang(args: dict, user: dict) -> dict:
@@ -1980,6 +2312,16 @@ def _t_buat_permintaan_barang(args: dict, user: dict) -> dict:
     no_unit = (args.get("no_unit") or accurate._PR_NO_UNIT_DEFAULT).strip()
     tanggal = (args.get("tanggal") or "").strip() or time.strftime("%d/%m/%Y")
 
+    # Kolom WAJIB 'Kts Jkt' dibaca DULU untuk seluruh daftar. Gagal baca = BATAL
+    # TOTAL (pola sama dengan 'PN tak ada' di bawah) — lebih baik dokumen tak jadi
+    # daripada terbit dengan angka stok Jakarta yang dikarang oleh kegagalan.
+    kts = _pr_kts_jkt_map(urut)
+    if kts is None:
+        return {"found": False, "_cek_tak_lengkap": True, "error":
+                "Stok Jakarta GAGAL dibaca (indeks per-gudang Accurate belum siap/tak "
+                "terbaca) — permintaan DIBATALKAN, dokumen tidak dibuat. Kolom wajib "
+                "'Kts Jkt' tak boleh diisi angka tebakan. Coba lagi beberapa menit."}
+
     lines: list[dict] = []
     tak_ada: list[str] = []
     for pn in urut:
@@ -1993,7 +2335,7 @@ def _t_buat_permintaan_barang(args: dict, user: dict) -> dict:
         lines.append({"item_id": it["id"], "name": it["name"], "qty": qty_pn[pn],
                       "unit_id": it["unit_id"], "unit": it["unit"], "pn": pn,
                       "sektor": sektor, "no_unit": no_unit,
-                      "kts_jkt": _pr_kts_jkt(pn)})
+                      "kts_jkt": kts[pn]})
     if tak_ada:
         # Pola sama dengan penawaran: satu PN tak dikenal = BATAL semua, jangan
         # diam-diam membuat dokumen setengah isi di ERP.

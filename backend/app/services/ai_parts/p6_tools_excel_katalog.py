@@ -91,6 +91,16 @@ def _t_hitung_part(args: dict, user: dict) -> dict:
     # Angka MENTAH (bukan string 'Rp …') dari indeks Accurate + nama dari katalog.
     from . import accurate
     snap = accurate.snapshot()
+    # INDEKS BELUM SIAP ≠ "part tidak punya harga". Dulu snapshot kosong (cold
+    # start / refresh gagal) tetap menghasilkan total 'PASTI' dari 0 item plus
+    # daftar 'memang TIDAK punya harga di Accurate' — dua klaim dari nol data.
+    if not snap:
+        # _cek_tak_lengkap → _tool_fail_kind 'err', BUKAN 'nf': kita TIDAK TAHU,
+        # bukan tahu-bahwa-tidak-ada (pola yang sama dipakai alternatif_ready).
+        return {"found": False, "_cek_tak_lengkap": True, "error":
+                "Indeks harga Accurate belum siap (sedang disiapkan / gagal refresh) — "
+                "belum bisa menghitung. ⛔ JANGAN menyimpulkan part-part ini tak punya "
+                "harga; sampaikan apa adanya & minta coba lagi beberapa menit."}
     lokal = part_index.rows_for_pns([pn for pn, _ in pns_in])
 
     def _int_or_none(v):
@@ -106,13 +116,24 @@ def _t_hitung_part(args: dict, user: dict) -> dict:
 
     items_out: list[dict] = []
     tanpa_harga: list[str] = []
+    perlu_varian: list[dict] = []
     total_num = 0
     seen: set[str] = set()
     for pn, qty in pns_in:
         if pn in seen:
             continue
         seen.add(pn)
-        e = snap.get(accurate.index_key(pn) or accurate.norm_pn(pn)) if snap else None
+        # VARIAN PEMASOK AMBIGU (pola sama dgn alur penawaran): PN dasar yang di
+        # Accurate hanya ada sebagai BEBERAPA kartu pemasok berbeda harga — dulu
+        # `norm_pn` polos memilih satu diam-diam (melanggar aturan pemilik: lookup
+        # WAJIB lewat index_key) dan total dihitung dari harga kartu yang salah.
+        kv = _varian_ambigu(pn)
+        if kv:
+            perlu_varian.append({"pn_diminta": pn, "qty": qty, "varian": kv})
+            continue
+        # ⛔ TANPA fallback norm_pn: index_key sengaja mengembalikan '' saat ia tak
+        # bisa memutuskan satu kartu — itu penolakan yang harus dihormati.
+        e = snap.get(accurate.index_key(pn))
         harga_num = _int_or_none((e or {}).get("harga"))
         stok_num = _int_or_none((e or {}).get("stok"))
         nama = " ".join(((lokal.get(pn, {}) or {}).get("part_name") or "").split())
@@ -140,10 +161,23 @@ def _t_hitung_part(args: dict, user: dict) -> dict:
     elif urut in ("termahal", "mahal", "desc", "turun"):
         items_out.sort(key=lambda x: -x["harga_num"])
 
-    if not items_out and not tanpa_harga:
+    if not items_out and not tanpa_harga and not perlu_varian:
         return {"found": False,
                 "error": "Tak ada part yang cocok syarat / tak ada di indeks Accurate."}
 
+    catatan = ("Total, subtotal, & urutan DIHITUNG SISTEM = PASTI atas item di 'items'. "
+               "Sajikan apa adanya; ⛔ JANGAN menghitung ulang / mengubah angka / menebak "
+               "harga. Item di 'items_tanpa_harga' tidak punya harga jual di indeks "
+               "Accurate (bisa juga part-nya tak ada di sana) & TAK ikut total — sebutkan "
+               "apa adanya, ⛔ jangan mengarang harganya.")
+    if perlu_varian:
+        catatan += (
+            f" ⚠️ {len(perlu_varian)} PN TIDAK ikut dihitung karena punya BEBERAPA kartu "
+            "varian PEMASOK di Accurate (harga beda per pemasok) — lihat "
+            "'perlu_pilih_varian'. Tampilkan kode+stok+harga tiap varian ke user, minta ia "
+            "memilih SATU kode (suffix ikut), lalu panggil ulang hitung_part dengan kode "
+            "itu PERSIS. ⛔ JANGAN memilihkan sendiri, JANGAN merata-rata harga, dan "
+            "JANGAN menyebut total ini sebagai total SELURUH daftar.")
     return {
         "found": True,
         "items": items_out,
@@ -151,10 +185,8 @@ def _t_hitung_part(args: dict, user: dict) -> dict:
         "total": _rp(total_num),
         "total_num": total_num,
         "items_tanpa_harga": tanpa_harga,
-        "catatan": ("Total, subtotal, & urutan DIHITUNG SISTEM = PASTI. Sajikan apa adanya; "
-                    "⛔ JANGAN menghitung ulang / mengubah angka / menebak harga. Item di "
-                    "'items_tanpa_harga' memang TIDAK punya harga di Accurate & TAK ikut "
-                    "total — sebutkan apa adanya."),
+        **({"perlu_pilih_varian": perlu_varian} if perlu_varian else {}),
+        "catatan": catatan,
     }
 
 
@@ -315,10 +347,22 @@ def _t_excel_stok_gudang(args: dict, user: dict) -> dict:
                       # ANGKA mentah — `hasil` HANYA dipakai membangun sel Excel
                       # di bawah, tak pernah dikirim ke model.
                       "harga": int(price) if price else "—"})
+    n_enrich, n_total, rasio = _enrich_progres()
     if not hasil:
-        if accurate.gudang_enriched_count() == 0:
-            return {"found": False, "error": "Indeks stok per-gudang sedang disiapkan — coba lagi beberapa menit."}
+        if n_enrich == 0:
+            return {"found": False, "_cek_tak_lengkap": True,
+                    "error": "Indeks stok per-gudang sedang disiapkan — coba lagi beberapa menit."}
         tempat = f"di gudang {gudang_kanonik}" if gudang_kanonik else "di gudang mana pun"
+        # Enrichment BARU SEBAGIAN → "tidak ada" belum boleh dinyatakan (klaim
+        # kategoris dari data separuh). Samakan dengan tool chat stok_gudang.
+        if rasio < _ENRICH_AMBANG:
+            return {"found": False, "_cek_tak_lengkap": True,
+                    "progres_indeks_gudang": {"ter_enrich": n_enrich, "total": n_total},
+                    "error": (f"BELUM bisa dipastikan apakah ada part '{kata}' berstok "
+                              f"{tempat} — indeks per-gudang baru terisi sebagian "
+                              f"({n_enrich} dari {n_total} barang berstok, {rasio:.0%}), jadi file "
+                              "tak dibuat. ⛔ JANGAN menyatakan 'tidak ada'; minta user "
+                              "coba lagi beberapa menit.")}
         return {"found": False, "error": f"Tidak ada part '{kata}' yang berstok {tempat}."}
     hasil.sort(key=lambda x: x["qty"], reverse=True)
 
@@ -340,11 +384,17 @@ def _t_excel_stok_gudang(args: dict, user: dict) -> dict:
 
     judul = f"Stok {kata}" + (f" — Gudang {label_g}" if gudang_kanonik else " — Semua Gudang")
     export_id, filename = ai_export.stash_export(judul, kolom, baris)
+    _sebagian = ("" if rasio >= _ENRICH_AMBANG else
+                 f" ⚠️ Rincian per-gudang BARU TERISI {n_enrich} dari {n_total} barang "
+                 f"berstok ({rasio:.0%}) — isi file BELUM tentu lengkap; sebutkan itu ke user & "
+                 "⛔ jangan menyebutnya daftar lengkap.")
     return {"found": True, "export_id": export_id, "filename": filename, "judul": judul,
             "jumlah_baris": len(baris), "kolom_harga": dengan_harga,
+            "progres_indeks_gudang": {"ter_enrich": n_enrich, "total": n_total,
+                                      "lengkap": rasio >= _ENRICH_AMBANG},
             "catatan": ("File Excel stok siap — kartu unduh muncul OTOMATIS di bawah jawaban. "
                         "Jawab SINGKAT (judul + jumlah part). ⛔ JANGAN tulis ulang isi tabel "
-                        "& JANGAN membuat link sendiri.")}
+                        "& JANGAN membuat link sendiri." + _sebagian)}
 
 
 def _katalog_mesin_impl(args: dict, user: dict) -> dict:
@@ -549,6 +599,8 @@ def _exploded_via_reverse(rangka: str, pn: str, balon_req: int | None) -> dict |
     gambar: list[dict] = []
     daftar_balon: list[dict] = []
     nama_figure = ""
+    nama_fig_balon = ""       # figure milik 'daftar_balon' (yang PERTAMA ber-item)
+    balon_total0 = 0
     balon_pn = None
     for inst in (rev.get("instances") or [])[:_MAX_EXPLODED_FIGURES]:
         try:
@@ -568,18 +620,31 @@ def _exploded_via_reverse(rangka: str, pn: str, balon_req: int | None) -> dict |
                        "nama_figure": fig.get("nama") or inst.get("parent_nama"),
                        "kategori": "", "jumlah_item": fig.get("jumlah_item")})
         if not daftar_balon:
+            _it0 = fig.get("items_ringkas") or []
+            balon_total0 = len(_it0)
+            nama_fig_balon = fig.get("nama") or inst.get("parent_nama") or ""
             daftar_balon = [{"balon": it.get("balon"), "pn": it.get("pn"),
                              "nama": it.get("nama")}
-                            for it in (fig.get("items_ringkas") or [])][:40]
+                            for it in _it0][:40]
     if not gambar:
         return None            # tak ada figure ber-SVG → biar jalur lama mencoba
 
+    # Cakupan daftar balon APA ADANYA — satu figure & maks 40 baris, BUKAN "semua".
+    _cakupan = (
+        f"'daftar_balon_gambar' = balon figure '{nama_fig_balon}' saja"
+        + (f" — {len(daftar_balon)} dari {balon_total0} item (dipotong maks 40)"
+           if balon_total0 > len(daftar_balon) else f" ({len(daftar_balon)} item)")
+        + (f"; ada {len(gambar)} figure di jawaban ini, balon figure LAIN tidak terdaftar"
+           if len(gambar) > 1 else "")
+        + ". Bila nomor yang ditanya user tak ada di daftar, ⛔ JANGAN bilang balon itu "
+          "tidak ada — panggil lagi gambar_exploded dengan 'balon'=N. "
+    )
     catatan = (f"Gambar exploded view SIAP — tampil OTOMATIS (inline) di bawah jawabanmu. "
                f"PN {pn} = NOMOR BALON '{balon_pn}' di figure '{nama_figure}'. "
-               "'daftar_balon_gambar' berisi SEMUA balon di gambar + part-nya — bila user "
-               "lanjut tanya 'no N itu apa', jawab dari daftar itu DAN panggil lagi "
-               "gambar_exploded dengan 'balon'=N agar balon itu disorot. ⛔ JANGAN buat "
-               "link/gambar/URL sendiri; JANGAN sebut PN lain di luar data ini.")
+               + _cakupan +
+               "Bila user lanjut tanya 'no N itu apa', jawab dari daftar itu DAN panggil "
+               "lagi gambar_exploded dengan 'balon'=N agar balon itu disorot. ⛔ JANGAN "
+               "buat link/gambar/URL sendiri; JANGAN sebut PN lain di luar data ini.")
     if balon_req is not None:
         catatan = (f"Gambar exploded view SIAP (inline). NOMOR BALON {balon_req} DISOROT "
                    f"(kuning) di figure '{nama_figure}'. Jawab SINGKAT; gambar sudah "
@@ -587,6 +652,10 @@ def _exploded_via_reverse(rangka: str, pn: str, balon_req: int | None) -> dict |
     return {"found": True, "frame_number": rev.get("frame_number"), "pn": pn,
             "kategori": "", "balon_disorot": balon_req, "part_di_balon": None,
             "daftar_balon_gambar": daftar_balon,
+            "daftar_balon_figure": nama_fig_balon,
+            "daftar_balon_cakupan": {"ditampilkan": len(daftar_balon),
+                                     "total_item_figure": balon_total0,
+                                     "jumlah_figure": len(gambar)},
             "jumlah_figure_cocok": len(gambar), "gambar": gambar,
             "sumber": "reverse", "catatan": catatan}
 
@@ -728,10 +797,28 @@ def _gambar_exploded_atlas_impl(args: dict, user: dict) -> dict:
         gambar.append({"image_id": image_id, "filename": filename,
                        "balon": hl, "nama_figure": f.get("nama"),
                        "kategori": f.get("kategori"), "jumlah_item": f.get("jumlah_item")})
-    # Daftar balon→part figure pertama = konteks utk follow-up 'cek no N'.
+    # Daftar balon→part figure PERTAMA saja (dan maks 40 baris) = konteks utk
+    # follow-up 'cek no N'. Cakupannya dilaporkan apa adanya di bawah: klaim lama
+    # "SEMUA balon di gambar" tidak benar saat figure-nya lebih dari satu atau
+    # itemnya lebih dari 40 — model lalu memvonis "balon N tidak ada".
+    nama_fig0 = ""
+    balon_total0 = 0
     if d["figures"]:
+        _items0 = d["figures"][0].get("items_ringkas") or []
+        balon_total0 = len(_items0)
+        nama_fig0 = d["figures"][0].get("nama") or ""
         daftar_balon = [{"balon": it.get("balon"), "pn": it.get("pn"), "nama": it.get("nama")}
-                        for it in (d["figures"][0].get("items_ringkas") or [])][:40]
+                        for it in _items0][:40]
+    _cakupan = (
+        f"'daftar_balon_gambar' = balon figure '{nama_fig0}' saja"
+        + (f" — {len(daftar_balon)} dari {balon_total0} item (dipotong maks 40)"
+           if balon_total0 > len(daftar_balon) else f" ({len(daftar_balon)} item)")
+        + (f"; unit ini punya {len(d['figures'])} figure cocok, balon figure LAIN "
+           "TIDAK ada di daftar ini" if len(d["figures"]) > 1 else "")
+        + ". Bila nomor yang ditanya user tak ada di daftar, ⛔ JANGAN bilang balon itu "
+          "tidak ada — panggil lagi gambar_exploded dengan 'balon'=N (figure lain akan "
+          "diperiksa). "
+    )
     b0 = gambar[0]
     if balon_req is not None:
         catatan = (f"Gambar exploded view SIAP (tampil INLINE di bawah jawabanmu). NOMOR BALON "
@@ -745,14 +832,19 @@ def _gambar_exploded_atlas_impl(args: dict, user: dict) -> dict:
     else:
         catatan = (f"Gambar exploded view SIAP — tampil OTOMATIS (inline) di bawah jawabanmu. "
                    f"PN {pn} = NOMOR BALON '{b0['balon']}' di figure '{b0['nama_figure']}'. "
-                   "'daftar_balon_gambar' berisi SEMUA balon di gambar + part-nya — bila user lanjut "
-                   "tanya 'no N itu apa'/'cek baut no N', jawab dari daftar itu DAN panggil lagi "
-                   "gambar_exploded dengan 'balon'=N agar balon itu disorot. ⛔ JANGAN buat link/"
-                   "gambar/URL sendiri; JANGAN sebut PN lain di luar data ini.")
+                   + _cakupan +
+                   "Bila user lanjut tanya 'no N itu apa'/'cek baut no N', jawab dari daftar "
+                   "itu DAN panggil lagi gambar_exploded dengan 'balon'=N agar balon itu "
+                   "disorot. ⛔ JANGAN buat link/gambar/URL sendiri; JANGAN sebut PN lain di "
+                   "luar data ini.")
     return {
         "found": True, "frame_number": d.get("frame_number"), "pn": pn, "kategori": kategori,
         "balon_disorot": balon_req, "part_di_balon": part_di_balon,
         "daftar_balon_gambar": daftar_balon,
+        # Cakupan daftar balon APA ADANYA (figure mana, berapa dari berapa).
+        "daftar_balon_figure": nama_fig0,
+        "daftar_balon_cakupan": {"ditampilkan": len(daftar_balon), "total_item_figure": balon_total0,
+                                 "jumlah_figure": len(d["figures"])},
         "jumlah_figure_cocok": len(d["figures"]), "gambar": gambar,
         "catatan": catatan,
     }
@@ -822,8 +914,19 @@ def _gambar_exploded_mesin_impl(args: dict, user: dict) -> dict:
                        "kategori": f.get("kategori"), "jumlah_item": f.get("jumlah_item")})
     fig0 = d["figures"][0] if d.get("figures") else {}
     nama_fig = fig0.get("nama") or "mesin"
+    _it0 = fig0.get("items_ringkas") or []
     daftar_balon = [{"balon": it.get("balon"), "pn": it.get("pn"), "nama": it.get("nama")}
-                    for it in (fig0.get("items_ringkas") or [])][:40]
+                    for it in _it0][:40]
+    # Cakupan apa adanya (figure PERTAMA, maks 40) — samakan dengan sisi Atlas.
+    _cakupan = (
+        f"'daftar_balon_gambar' = balon figure '{nama_fig}' saja"
+        + (f" — {len(daftar_balon)} dari {len(_it0)} item (dipotong maks 40)"
+           if len(_it0) > len(daftar_balon) else f" ({len(daftar_balon)} item)")
+        + (f"; ada {len(d['figures'])} figure cocok, balon figure LAIN tidak terdaftar"
+           if len(d["figures"]) > 1 else "")
+        + ". Bila nomor yang ditanya tak ada di daftar, ⛔ JANGAN memvonis balon itu tidak "
+          "ada — panggil lagi dengan 'balon'=N. "
+    )
     b0 = gambar[0]
     if balon_req is not None:
         catatan = (f"Gambar exploded view MESIN SIAP — tampil INLINE. NOMOR BALON "
@@ -837,12 +940,17 @@ def _gambar_exploded_mesin_impl(args: dict, user: dict) -> dict:
     else:
         catatan = (f"Gambar exploded view MESIN SIAP — tampil OTOMATIS (inline). "
                    f"PN {pn} = NOMOR BALON '{b0['balon']}' di figure '{nama_fig}'. "
+                   + _cakupan +
                    "Jawab SINGKAT: figure apa + PN ini balon nomor berapa. ⛔ JANGAN "
                    "membuat link/gambar/URL sendiri; JANGAN sebut PN lain di luar data ini.")
     return {
         "found": True, "frame_number": d.get("frame_number"), "pn": pn,
         "balon_disorot": balon_req, "part_di_balon": part_di_balon,
         "daftar_balon_gambar": daftar_balon,
+        "daftar_balon_figure": nama_fig,
+        "daftar_balon_cakupan": {"ditampilkan": len(daftar_balon),
+                                 "total_item_figure": len(_it0),
+                                 "jumlah_figure": len(d["figures"])},
         "jumlah_figure_cocok": len(d["figures"]), "gambar": gambar,
         "catatan": catatan,
     }

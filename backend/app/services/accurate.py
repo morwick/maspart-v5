@@ -982,6 +982,29 @@ def gudang_enriched_count() -> int:
     return len(_index_cache.get("by_gudang") or {})
 
 
+def snapshot_berstok_count() -> int:
+    """Jumlah entri indeks yang STOKNYA > 0 — POPULASI yang di-enrich per-gudang.
+
+    Pembanding progres enrichment WAJIB memakai angka ini, bukan
+    ``len(snapshot())``: ``enrich_warehouses()`` hanya menarik rincian gudang
+    untuk barang ``available_to_sell > 0`` (~ribuan), sedangkan ``snapshot()``
+    memuat SELURUH katalog ber-harga (puluhan ribu). Membandingkan hasil
+    enrichment dengan seluruh katalog membuat rasionya nyaris selalu di bawah
+    ambang kelayakan — dua populasi berbeda tak boleh dibagi.
+
+    Nilai 'stok' dilewatkan ``_num`` (string/None dari indeks lama tak
+    meledakkan hitungan). 0 = tak ada yang perlu di-enrich."""
+    n = 0
+    for v in (snapshot() or {}).values():
+        try:
+            stok = v.get("stok")
+        except AttributeError:          # nilai bukan dict (indeks cacat) → lewati
+            continue
+        if _num(stok) > 0:
+            n += 1
+    return n
+
+
 # Batas tambalan per siklus. Rekonsiliasi = 1 panggilan search per kunci; 80 sudah
 # jauh di atas kebocoran nyata (29 barang, 2026-08-05) dan menjaga window login
 # tetap pendek. Lebih dari itu = ada yang salah di sapuan → dicatat, bukan diborong.

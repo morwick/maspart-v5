@@ -117,6 +117,11 @@ def test_cari_part_stok_lokal_dedup_terhadap_katalog(mock_catalog_kosong, monkey
 def test_cari_part_miss_tetap_dicatat_bila_stok_lokal_nihil(mock_catalog_kosong, monkeypatch):
     _seed_index(monkeypatch, [NOISE])
     monkeypatch.setattr(ai, "_expand_query", lambda q: ([q], []))
+    # SIMS HIDUP = syarat "benar-benar nihil di mana-mana". Sejak audit telemetri
+    # 2026-08-07, nihil saat SIMS MATI tak lagi dicatat sbg celah kamus (jaring
+    # terakhirnya memang tak pernah ditarik) — lihat test_klaim_jujur_stok_excel.
+    monkeypatch.setattr(sims, "available", lambda: True)
+    monkeypatch.setattr(sims, "get_part_info", lambda pn, force_refresh=False: {})
     dicatat = []
     monkeypatch.setattr(search_log, "record_miss", lambda *a, **k: dicatat.append(a))
     ai._t_cari_part({"query": "flux capacitor"}, U)
