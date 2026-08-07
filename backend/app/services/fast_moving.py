@@ -294,13 +294,19 @@ _SUFFIX_RE = re.compile(r"/\d{1,2}$")
 # Dibayar SEKALI saat build harian, bukan tiap kali user bertanya: jembatan SSO
 # Weichai panggilan pertamanya lambat. Hasilnya di-cache per RANGKA di disk —
 # BOM mesin praktis statis, jadi build besok tak menembak jaringan lagi.
-# PEMICU: dua element inilah yang PASTI hilang saat mesinnya Weichai (preseden
-# `_t_filter_unit`), jadi ketiadaannya = sinyal "unit ini bermesin Weichai".
-_ID_MESIN_PEMICU = {"filter oli mesin", "filter solar halus (atas)"}
-# PANEN: begitu bridge terbuka, sekalian ambil aksesori listrik mesin — mahalnya
-# ada di panggilan pertama, bukan di jumlah baris yang dibaca.
-_ID_MESIN_AMBIL = _ID_MESIN_PEMICU | {"alternator (dinamo ampere)",
-                                      "motor starter (dinamo starter)"}
+# PEMICU: filter OLI MESIN adalah sinyal paling andal "part sisi mesin hilang".
+# `_t_filter_unit` menuntut oli DAN solar sama-sama hilang, tapi ukuran nyata
+# dataset (2026-08-07) menunjukkan itu terlalu ketat di level model: 17 model
+# tanpa filter oli mesin, hanya 6 yang juga tanpa filter solar — filter solar
+# kerap ADA di pohon Sinotruk karena terpasang di sasis, sedangkan filter olinya
+# di sisi mesin. Memakai syarat DAN membuat 11 model tetap bolong.
+_ID_MESIN_PEMICU = {"filter oli mesin"}
+# PANEN: daftar TERSENDIRI, sengaja tidak diturunkan dari _ID_MESIN_PEMICU —
+# mempersempit pemicu tak boleh ikut mempersempit apa yang dipanen. Begitu
+# bridge terbuka, sekalian ambil filter solar & aksesori listrik mesin:
+# mahalnya ada di panggilan pertama, bukan di jumlah baris yang dibaca.
+_ID_MESIN_AMBIL = {"filter oli mesin", "filter solar halus (atas)",
+                   "alternator (dinamo ampere)", "motor starter (dinamo starter)"}
 _WC_TERMS = ["filter", "滤芯", "alternator", "generator", "发电机",
              "starter", "起动机", "启动机"]
 _WC_SAMPEL_MAKS = 2          # unit sampel yang dicoba per model
@@ -322,7 +328,11 @@ def _wc_ambil(frame: str, cache: dict, stat: Counter) -> list[dict]:
     e = cache.get(frame)
     if e:
         umur = _t.time() - float(e.get("at") or 0)
-        if umur <= (_WC_TTL_GAGAL if e.get("err") else _WC_TTL):
+        # 'bukan unit Weichai' sama statisnya dengan BOM-nya → TTL panjang.
+        # Hanya kegagalan INFRA (jaringan/sesi) yang dicoba lagi cepat; kalau
+        # tidak, mesin Sinotruk (MC/MT) akan dihantam tiap build harian.
+        ttl = _WC_TTL_GAGAL if e.get("err") not in (None, "not_found") else _WC_TTL
+        if umur <= ttl:
             stat["cache"] += 1
             return list(e.get("rows") or [])
     try:

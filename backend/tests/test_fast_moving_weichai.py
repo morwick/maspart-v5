@@ -191,6 +191,37 @@ def test_hasil_dicache_di_disk(monkeypatch, tmp_path):
     assert stat["model_ditambal"] == 1           # tetap tertambal dari cache
 
 
+def test_bukan_weichai_dicache_lama(monkeypatch):
+    """Mesin Sinotruk (MC/MT) menjawab 'tak ada di EPC Weichai' — itu sestatis
+    BOM-nya. Kalau ikut TTL gagal, tiap build harian menghantam bridge lagi."""
+    catat: list = []
+    _mock_weichai(monkeypatch, found=False, catat=catat)
+    fm._lengkapi_mesin(_per_model(punya_filter_mesin=False), fm._kamus())
+    assert len(catat) == 1
+    catat.clear()
+    stat = fm._lengkapi_mesin(_per_model(punya_filter_mesin=False), fm._kamus())
+    assert catat == [], "vonis 'bukan Weichai' harus dipakai ulang dari cache"
+    assert stat["cache"] >= 1
+
+
+def test_pemicu_hanya_butuh_filter_oli_hilang(monkeypatch):
+    """Filter solar kerap ADA di pohon Sinotruk (terpasang di sasis) sementara
+    filter olinya di sisi mesin — syarat 'kedua-duanya hilang' membuat 11 model
+    tetap bolong (ukuran produksi 2026-08-07)."""
+    catat: list = []
+    _mock_weichai(monkeypatch, catat=catat)
+    pm = _per_model(punya_filter_mesin=False)
+    pm["ZZ1TEST"]["unit"][FRAME_A].append({
+        "kat": "filter", "slot": "fuel filter", "id": "filter solar halus (atas)",
+        "pn": "VG1092080030", "pn_asli": "VG1092080030", "nama": "Fuel filter",
+        "nama_cn": "", "qty": 1, "assembly": "fuel", "pengganti": [],
+    })
+    stat = fm._lengkapi_mesin(pm, fm._kamus())
+    assert catat, "punya filter solar tapi TANPA filter oli mesin → tetap ditambal"
+    assert stat["model_ditambal"] == 1
+    assert "filter oli mesin" in {r.get("id") for r in pm["ZZ1TEST"]["unit"][FRAME_A]}
+
+
 def test_cache_gagal_ttl_pendek(monkeypatch):
     """Kegagalan di-cache SEBENTAR saja — jangan menghantam bridge tiap build,
     tapi juga jangan mengunci lubangnya selama 30 hari."""
