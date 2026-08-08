@@ -849,27 +849,6 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
-                "name": "bengkel_resmi",
-                "description": (
-                    "Daftar BENGKEL / SERVICE STATION RESMI Sinotruk (jaringan pabrik) — "
-                    "nama, alamat, telepon, email, status, dan koordinat peta. Boleh "
-                    "disaring kata kunci kota/nama/kode (mis. 'jakarta', 'surabaya', 'IDZ'). "
-                    "Pakai untuk 'bengkel resmi terdekat di mana', 'servis unit di mana', "
-                    "'alamat/nomor telepon bengkel Sinotruk'. "
-                    "⛔ Ini BUKAN daftar gudang/cabang penjualan part kita (itu stok_gudang "
-                    "/ info_aplikasi) — ini jaringan bengkel resmi pabrik."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "kata_kunci": {"type": "string", "description": "Opsional: kota / nama / kode bengkel. Kosong = semua."},
-                    },
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
                 "name": "cek_kendaraan",
                 "description": (
                     "Cek SPESIFIKASI/KONFIGURASI kendaraan dari NOMOR RANGKA (VIN / frame "

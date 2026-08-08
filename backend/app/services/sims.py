@@ -467,34 +467,6 @@ def start_equivalents_refresh() -> bool:
     return True
 
 
-# ── Direktori bengkel resmi (2026-08-08) ────────────────────────────────────
-# Dataset KECIL & stabil (36 baris, satu panggilan tanpa paginasi) → cukup cache
-# memori ber-TTL; tak perlu file. Nilai None dipakai sbg penanda "belum/GAGAL
-# diambil" supaya pemanggil tak menyamakannya dengan "jaringan bengkel kosong".
-_STATION_TTL = 6 * 3600
-_station_cache: dict = {"at": 0.0, "rows": None}
-
-
-def stations(force_refresh: bool = False) -> list | None:
-    """Bengkel/service station resmi Sinotruk. None = GAGAL diambil (≠ kosong)."""
-    if not _SIMS_OK:
-        return None
-    now = time.time()
-    c = _station_cache
-    if not force_refresh and c["rows"] is not None and (now - c["at"] < _STATION_TTL):
-        return c["rows"]
-    try:
-        rows = _sf.fetch_stations()
-    except Exception:
-        return c["rows"]                     # cache basi lebih baik daripada bohong
-    if not rows:
-        # [] dari fetcher bisa berarti gagal — jangan cache-kan sebagai fakta.
-        return c["rows"]
-    _station_cache["rows"] = rows
-    _station_cache["at"] = now
-    return rows
-
-
 def price_available() -> bool:
     return _PRICE_OK
 

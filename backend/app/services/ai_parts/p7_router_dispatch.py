@@ -163,7 +163,6 @@ _DISPATCH = {
     "part_termasuk_assy": _t_part_termasuk_assy,
     "kategori_massal_part": _t_kategori_massal_part,
     "spek_mesin": _t_spek_mesin,
-    "bengkel_resmi": _t_bengkel_resmi,
     "part_aus_katalog": _t_part_aus_katalog,
     "daftar_transmisi_assy": _t_daftar_transmisi_assy,
     "cek_populasi": _t_cek_populasi,

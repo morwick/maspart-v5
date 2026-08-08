@@ -427,37 +427,6 @@ def fetch_equivalents_page(page: int, page_size: int = 500) -> tuple:
 
 
 # ══════════════════════════════════════════════
-#  DIREKTORI BENGKEL / SERVICE STATION RESMI
-# ══════════════════════════════════════════════
-# tenantId dealer kita (IDZ005). Endpoint mengembalikan SELURUH jaringan bengkel
-# resmi yang terlihat oleh tenant ini — 36 baris pada 2026-08-08, satu panggilan,
-# TANPA paginasi. Bukan data part, jadi tak ikut cache part_info.
-STATION_TENANT_ID = "150"
-STATION_API_URL = f"{SIMS_BASE_URL}/intlapi/intl.station/stationApi/getOneStationByTenantId"
-
-
-def fetch_stations(tenant_id: str = "") -> list:
-    """Daftar bengkel/service station resmi Sinotruk. [] bila gagal (non-fatal).
-
-    ⛔ Pemanggil WAJIB membedakan [] 'gagal' dari [] 'memang kosong' — di sini
-    keduanya sama-sama [], jadi lapisan service di atasnya yang menandai kegagalan."""
-    try:
-        headers = {**BASE_HEADERS, "Authorization": _get_token()}
-        params = {"tenantId": str(tenant_id or STATION_TENANT_ID)}
-        resp = _get_retry(STATION_API_URL, params=params, headers=headers, timeout=20)
-        if resp.status_code in (401, 403):
-            _reset_token()
-            headers = {**BASE_HEADERS, "Authorization": _get_token()}
-            resp = _get_retry(STATION_API_URL, params=params, headers=headers, timeout=20)
-        resp.raise_for_status()
-        data = (resp.json() or {}).get("data")
-        return data if isinstance(data, list) else []
-    except Exception as e:
-        print(f"[sims_fetcher] Error stations: {e}")
-        return []
-
-
-# ══════════════════════════════════════════════
 #  FETCH GAMBAR
 # ══════════════════════════════════════════════
 def fetch_sims_images(part_number: str, force_refresh: bool = False) -> list:
