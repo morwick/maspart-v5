@@ -259,6 +259,290 @@ def _t_part_termasuk_assy(args: dict, user: dict) -> dict:
     }
 
 
+# ── Klasifikasi KATEGORI banyak PN sekaligus (2026-08-08) ────────────────────
+# Kelas pertanyaan lapangan yang sering muncul di log: user MENEMPEL daftar PN
+# lalu bertanya "masuk kategori barang apa?", "mana yang termasuk barang mesin?",
+# "manakah yang produk Weichai?". Sebelum tool ini model menjawabnya dengan
+# MENEBAK dari NAMA part (sambil memanggil cari_part belasan kali dalam satu
+# giliran). Tebakan itu terbukti salah di produksi: WG1671440280 & YZ167144000020
+# dijawab "SASIS (suspensi belakang)" padahal sheet katalognya 01 Kabin.
+#
+# Sumber KEBENARAN di sini bukan nama part melainkan TEMPAT PN itu benar-benar
+# terdaftar: (a) SHEET kategori 01..12 katalog unit, (b) FILE katalognya —
+# Sinotruk (unit) / Wechai (BOM mesin) / Shantui (alat berat).
+_MAX_KATEGORI_MASSAL = 120
+
+# Kategori yang dihitung "barang mesin". 02 = mesin/powertrain itu sendiri;
+# 03 = aksesori powertrain dilaporkan TERPISAH karena user memang memperlakukan
+# keduanya berbeda ("kalau klasifikasi Anda menggabungkan aksesori mesin…").
+_KAT_MESIN = "02"
+_KAT_AKSESORI_MESIN = "03"
+
+
+def _sumber_katalog(rel_path: str) -> tuple[str, str]:
+    """(kode, label) sumber katalog dari path file tempat PN terdaftar.
+
+    Folder teratas data/ menentukan: 'Wechai/…' = BOM mesin Weichai (part di
+    dalamnya part MESIN), 'Sinotruk/…' = katalog unit truk, 'Shantui/…' =
+    katalog alat berat. Ini pembeda yang dicari user saat bertanya 'ini PN
+    Weichai atau HOWO?' — dan ia FAKTA (asal file), bukan tebakan dari pola PN."""
+    root = (rel_path or "").replace("\\", "/").split("/")[0].strip().lower()
+    if root in ("wechai", "weichai"):
+        return "weichai", "Katalog MESIN Weichai"
+    if root == "shantui":
+        return "shantui", "Katalog alat berat Shantui"
+    if root == "sinotruk":
+        return "sinotruk", "Katalog unit Sinotruk/HOWO"
+    return "", ""
+
+
+def _kode_kategori_sheet(sheet: str) -> str | None:
+    """Kode kategori 01..12 dari nama sheet katalog unit ('10底盘 Chassis' → '10')."""
+    m = re.match(r"\s*(\d{2})", sheet or "")
+    kode = m.group(1) if m else None
+    return kode if kode in catalog_bom.KATEGORI_NAMA else None
+
+
+def _kategori_pn(pn: str, peta: dict) -> dict | None:
+    """Entri peta kategori untuk `pn` — PEMAAF terhadap suffix varian EPC.
+
+    Sama alasannya dengan part_index.rows_for_pns: EPC memberi 'WG…+002/1'
+    sedangkan katalog menyimpan PN dasarnya. Tanpa pemaaf ini PN bervarian
+    dilaporkan 'tidak diketahui' padahal kategorinya jelas."""
+    if not peta:
+        return None
+    e = peta.get(catalog_bom._norm(pn))
+    if e:
+        return e
+    for v in part_index.pn_query_variants(pn):
+        e = peta.get(catalog_bom._norm(v))
+        if e:
+            return e
+    return None
+
+
+def _t_kategori_massal_part(args: dict, user: dict) -> dict:
+    """Kategori resmi katalog untuk BANYAK PN dalam satu panggilan.
+
+    Tidak menyentuh jaringan: catalog_bom (sheet kategori) + part_index (file
+    katalog) keduanya indeks lokal. PN yang tak ada di kedua sumber dilaporkan
+    'tidak_diketahui' apa adanya — ⛔ jangan pernah diisi tebakan dari namanya."""
+    pns = _parse_daftar_pn(args.get("daftar_pn") or args.get("pns")
+                           or args.get("part_numbers") or args.get("pn"))
+    if not pns:
+        return {"error": "Sebutkan daftar Part Number (pisah baris/koma)."}
+    dipotong = pns[_MAX_KATEGORI_MASSAL:]
+    pns = pns[:_MAX_KATEGORI_MASSAL]
+
+    peta = catalog_bom.pn_categories_map() if catalog_bom.available() else {}
+    indeks_ok = True
+    try:
+        rows = part_index.rows_for_pns(pns)
+    except Exception:
+        logger.exception("kategori_massal: rows_for_pns gagal")
+        rows, indeks_ok = {}, False
+    # KEDUA sumber tumbang = kita belum mengecek apa pun; melaporkan seluruh
+    # daftar 'tidak diketahui' dari situ akan terbaca sbg "katalog memang tak
+    # memuatnya" — persis kekeliruan gagal-cek ≠ tidak-ada. Yang dinilai
+    # KESIAPAN sumber, bukan kekosongan hasil: `rows` kosong itu WAJAR bila
+    # PN-nya memang tak ada di indeks yang sehat.
+    if not peta and not indeks_ok:
+        return {"error": "Data katalog (catalog_bom / indeks part) belum tersedia di server — "
+                         "kategori TIDAK bisa dicek sekarang. Ini kegagalan pengecekan, "
+                         "BUKAN bukti part-nya tak berkategori.",
+                "_cek_tak_lengkap": True}
+
+    hasil: list[dict] = []
+    mesin: list[str] = []
+    aksesori: list[str] = []
+    bukan: list[str] = []
+    lintas: list[str] = []
+    tak_tahu: list[str] = []
+    per_kategori: dict[str, int] = {}
+    for pn in pns:
+        r = rows.get(pn) or {}
+        e = _kategori_pn(pn, peta)
+        sumber, sumber_label = _sumber_katalog(r.get("path") or "")
+        kodes: list[str] = list((e or {}).get("kategori") or [])
+        if not kodes:
+            k = _kode_kategori_sheet(r.get("sheet") or "")
+            kodes = [k] if k else []
+        nama = (e or {}).get("nama") or r.get("part_name") or ""
+
+        item: dict = {"pn": pn, "nama": nama}
+        if sumber_label:
+            item["sumber_katalog"] = sumber_label
+        if r.get("file"):
+            item["bukti"] = f"{r.get('file')}" + (f" › {r.get('sheet')}" if r.get("sheet") else "")
+
+        if kodes:
+            item["kategori"] = [catalog_bom.kategori_nama(k) for k in kodes]
+            item["kategori_kode"] = kodes
+            for k in kodes:
+                per_kategori[catalog_bom.kategori_nama(k)] = \
+                    per_kategori.get(catalog_bom.kategori_nama(k), 0) + 1
+            if len(kodes) > 1:
+                item["lintas_kategori"] = True
+                item["catatan_pn"] = ("terdaftar di BEBERAPA kategori (umumnya pengencang/"
+                                      "part umum) — sebutkan semuanya, jangan pilih satu")
+            # PN lintas-kategori yang salah satunya mesin/aksesori TIDAK boleh
+            # masuk daftar 'mesin' polos: baut yang dipakai di kabin DAN di dudukan
+            # mesin bukan "barang mesin" tanpa syarat. Ia dilaporkan terpisah
+            # ('sebagian') supaya jawabannya menyebut kedua sisinya.
+            tunggal = len(kodes) == 1
+            if _KAT_MESIN in kodes and tunggal:
+                item["mesin"] = "ya"
+                mesin.append(pn)
+            elif _KAT_AKSESORI_MESIN in kodes and tunggal:
+                item["mesin"] = "aksesori_mesin"
+                aksesori.append(pn)
+            elif _KAT_MESIN in kodes or _KAT_AKSESORI_MESIN in kodes:
+                item["mesin"] = "sebagian"
+                lintas.append(pn)
+            else:
+                item["mesin"] = "bukan"
+                bukan.append(pn)
+        elif sumber == "weichai":
+            # Terdaftar di BOM mesin Weichai → part mesin, meski katalog unit
+            # Sinotruk tak memuatnya (PN mesin memang hidup di katalog terpisah).
+            item["kategori"] = [catalog_bom.kategori_nama(_KAT_MESIN)]
+            item["kategori_kode"] = [_KAT_MESIN]
+            item["mesin"] = "ya"
+            item["dasar"] = "terdaftar di BOM mesin Weichai"
+            per_kategori["Mesin (BOM Weichai)"] = per_kategori.get("Mesin (BOM Weichai)", 0) + 1
+            mesin.append(pn)
+        else:
+            item["mesin"] = "tidak_diketahui"
+            # Dua sebab yang BEDA — dan dulu keduanya ditulis "tidak ada di indeks",
+            # yang bohong untuk part Shantui yang jelas-jelas KETEMU.
+            item["catatan_pn"] = (
+                (f"terdaftar di {sumber_label} — katalog itu TANPA sheet kategori, "
+                 "jadi kategorinya belum diketahui")
+                if r else
+                ("tidak ada di katalog kategori maupun indeks part — kategori BELUM "
+                 "diketahui (bukan berarti bukan part mesin)"))
+            tak_tahu.append(pn)
+        hasil.append(item)
+
+    out: dict = {
+        "found": len(tak_tahu) < len(pns),
+        "jumlah": len(pns),
+        "part": hasil,
+        "ringkasan": {
+            "mesin": mesin,
+            "aksesori_mesin": aksesori,
+            "sebagian_mesin_lintas_kategori": lintas,
+            "bukan_mesin": bukan,
+            "tidak_diketahui": tak_tahu,
+            "per_kategori": per_kategori,
+        },
+    }
+    if dipotong:
+        out["pn_belum_diproses"] = dipotong
+    if not peta:
+        # Peta kategori = SATU-SATUNYA sumber kode 01..12 untuk part katalog unit.
+        # Tanpa ia, 'tidak_diketahui' bukan temuan melainkan akibat data belum
+        # dimuat — tandai supaya telemetri & jawaban tak menganggapnya bukti.
+        out["_cek_tak_lengkap"] = True
+        out["peringatan"] = ("Peta kategori katalog (catalog_bom) TIDAK termuat di server — "
+                             "hanya sumber file katalog yang terbaca. PN ber-'tidak_diketahui' "
+                             "di sini BELUM tentu tak berkategori; sampaikan sbg data belum "
+                             "lengkap, bukan sebagai temuan.")
+
+    if args.get("excel"):
+        kolom = ["No", "Part Number", "Nama", "Kategori", "Barang Mesin?", "Sumber Katalog"]
+        baris = [[str(i), it["pn"], it.get("nama") or "",
+                  ", ".join(it.get("kategori") or []) or "tidak diketahui",
+                  it.get("mesin") or "", it.get("sumber_katalog") or ""]
+                 for i, it in enumerate(hasil, start=1)]
+        export_id, filename = ai_export.stash_export(
+            f"Kategori {len(pns)} Part", kolom, baris)
+        out["export_id"] = export_id
+        out["filename"] = filename
+        out["jumlah_baris"] = len(baris)
+
+    out["catatan"] = (
+        "Kategori di sini BUKAN tafsiran dari nama part, melainkan SHEET katalog "
+        "(01..12) tempat PN itu benar-benar terdaftar + FILE katalognya. ⛔ JANGAN "
+        "menimpanya dengan tebakan sendiri dari nama part meski terdengar masuk akal. "
+        "Jawab dari 'ringkasan': 'mesin' = kategori 02/BOM Weichai, 'aksesori_mesin' = "
+        "kategori 03 (sebut terpisah, jangan digabung diam-diam ke mesin), "
+        "'sebagian_mesin_lintas_kategori' = part umum yang dipakai DI MESIN DAN DI "
+        "BAGIAN LAIN (sebut kedua sisinya, jangan dijadikan 'part mesin' polos), "
+        "'bukan_mesin', dan 'tidak_diketahui' = PN yang kategorinya belum bisa "
+        "dipastikan — katakan apa adanya 'belum diketahui' (sebabnya di 'catatan_pn'), "
+        "⛔ jangan dikarang & jangan diam-diam dimasukkan ke 'bukan'. "
+        "PN ber-'lintas_kategori' dipakai di beberapa kategori (biasanya baut/mur umum) — "
+        "sebutkan SEMUA kategorinya. 'sumber_katalog' menjawab pertanyaan 'ini PN Weichai "
+        "atau Sinotruk?': Katalog MESIN Weichai vs Katalog unit Sinotruk/HOWO."
+    )
+    return out
+
+
+# ── SPESIFIKASI MESIN Weichai (2026-08-08) ──────────────────────────────────
+# Menutup pertanyaan lapangan yang selama berbulan-bulan dijawab "data tidak ada
+# di sistem": "berapa liter oli untuk service 40.000?". Angkanya SELAMA INI ikut
+# terkirim di respons order Weichai yang memang sudah kita panggil — hanya dibuang
+# sebelum sampai ke asisten (lihat epc_weichai._spek_dari_order).
+_SPEK_LABEL_PN = {
+    "filter_oli": "Filter oli mesin (kurasi pabrik)",
+    "filter_solar_halus": "Filter solar halus (kurasi pabrik)",
+    "filter_solar_kasar": "Filter solar kasar (kurasi pabrik)",
+    "paket_perawatan": "Paket perawatan pabrik",
+    "part_perawatan": "Part perawatan",
+    "part_inti": "Part inti mesin",
+    "paket_gasket": "Paket gasket/seal",
+    "part_kartu": "Part kartu servis",
+}
+
+
+def _t_spek_mesin(args: dict, user: dict) -> dict:
+    """Spesifikasi mesin Weichai per unit/nomor mesin: kapasitas oli, daya, emisi,
+    + PN filter KURASI PABRIK untuk konfigurasi mesin itu."""
+    rangka = (args.get("rangka") or args.get("vin") or "").strip()
+    no_mesin = (args.get("no_mesin") or args.get("serial") or "").strip()
+    if not rangka and not no_mesin:
+        return {"error": "Sebutkan nomor rangka (VIN) unit ATAU nomor mesin."}
+    try:
+        res = epc_weichai.spek_mesin(rangka=rangka, no_mesin=no_mesin)
+    except Exception:
+        logger.exception("spek_mesin gagal")
+        return {"error": "Gagal menghubungi EPC Weichai — ini kegagalan pengecekan, "
+                         "BUKAN bukti spesifikasinya tak ada. Coba lagi sebentar.",
+                "_cek_tak_lengkap": True}
+    if not res.get("found"):
+        return res
+
+    # Nama part untuk PN kurasi pabrik — indeks LOKAL, nol jaringan. Stok/harga
+    # sengaja TIDAK diambil di sini: itu tugas cek_massal_part (satu panggilan).
+    out = {k: v for k, v in res.items() if k != "part_pabrik"}
+    grup = res.get("part_pabrik") or {}
+    if grup:
+        semua = [p for pns in grup.values() for p in pns]
+        try:
+            rows = part_index.rows_for_pns(semua)
+        except Exception:
+            rows = {}
+        out["part_pabrik"] = {
+            _SPEK_LABEL_PN.get(k, k): [
+                {"pn": p, "nama": (rows.get(p) or {}).get("part_name") or ""} for p in pns
+            ] for k, pns in grup.items()
+        }
+    out["catatan"] = (
+        "Spesifikasi RESMI konfigurasi mesin ini dari EPC Weichai (terikat nomor mesin "
+        "unit itu — bukan angka umum seri). 'kapasitas_oli_liter' = isi oli mesin; "
+        "sebutkan angkanya apa adanya + model & nomor mesinnya. ⛔ JANGAN menambah "
+        "interval servis (KM/jam) dari kepalamu — field itu TIDAK ada di sini; bila "
+        "user menanyakannya, katakan intervalnya tak tercatat di data ini. "
+        "'part_pabrik' = PN yang DIPILIH PABRIK untuk konfigurasi mesin ini (filter oli/"
+        "solar dll) — ini jawaban paling tepat untuk 'filter apa yang cocok buat unit "
+        "saya'. Untuk stok & harganya panggil cek_massal_part dengan PN-PN itu. "
+        "Field yang tak muncul = TIDAK dikirim Weichai; katakan belum tercatat, "
+        "⛔ jangan dikarang."
+    )
+    return out
+
+
 # Istilah kategori assembly UTAMA (Indonesia/Inggris) → kata kunci pencocok pada
 # nama Inggris & label China daftar four-assembly. Dipakai memfilter "kabin/mesin/
 # transmisi/gardan/kopling ASSY" ke assembly TERPASANG yang tepat.
@@ -421,6 +705,29 @@ def _t_cek_kendaraan(args: dict, user: dict) -> dict:
                     "transmisi, 离合器=kopling). ⛔ JANGAN mengarang PN di luar daftar ini.")
         except Exception:
             logger.exception("assembly_list gagal (dilewati)")
+
+        # PERKAYA #2 (2026-08-08): KONFIGURASI PABRIK dari SIMS `configDesc` —
+        # satu-satunya sumber KAPASITAS TANGKI BBM yang kita punya (EPC
+        # getVehicleConfig tak punya field apa pun soal kapasitas). Best-effort:
+        # SIMS mati / configDesc kosong → spesifikasi EPC tetap tampil utuh.
+        try:
+            _iu = sims_warranty.info_unit(rangka) if sims_warranty.available() else None
+            _kf = (_iu or {}).get("konfigurasi_pabrik") or {}
+            if _kf:
+                res["konfigurasi_pabrik"] = _kf
+                res["catatan"] += (
+                    " 'konfigurasi_pabrik' = konfigurasi PABRIK unit ini dari SIMS: "
+                    "'kapasitas_tangki_liter' menjawab 'tangki solarnya berapa liter' "
+                    "(⛔ jangan menebak angka ini dari model/ingatan — ia berbeda "
+                    "per unit), 'tangki_rincian_liter' muncul bila tangkinya GANDA. "
+                    "'ruas' = seluruh konfigurasi pabrik apa adanya (Bahasa China: "
+                    "轮胎=ban, 速比=rasio gardan, 驾驶室=kabin, 变速箱=transmisi, "
+                    "空调=AC, 不带ABS=tanpa ABS) — pakai untuk pertanyaan konfigurasi "
+                    "lain & TERJEMAHKAN saat menjawab. Bila field ini tidak ada, "
+                    "SIMS memang tak mengisi konfigurasi unit itu — katakan belum "
+                    "tercatat, ⛔ jangan dikarang.")
+        except Exception:
+            logger.exception("konfigurasi pabrik SIMS gagal (dilewati)")
     elif res.get("_err"):
         # EPC MATI ≠ nomor rangka salah. Dulu keduanya memakai kalimat 'cek ejaan'
         # yang sama, jadi asisten rutin menyalahkan nomor rangka user.
@@ -3283,13 +3590,49 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
     for x in (sres.get("menggantikan") or []):
         _add(lama, seen_m, x.get("pn"), x.get("nama"), sumber="SIMS")
 
-    # 2) EPC Weichai (part MESIN) — data 替换/ECN.
+    # 2a) TABEL OFFLINE Weichai (2026-08-08) — hasil panen seluruh `replace/page`
+    #     (58.100 record) ke data/weichai_replace.json.gz. Instan & tetap menjawab
+    #     saat portal Weichai tak bisa dihubungi — dua kelemahan jalur live yang
+    #     menyebabkan 42 kegagalan `:nf` di log produksi.
+    off_hit = False
     try:
-        wres = epc_weichai.replace_part(pn, rangka)
+        ores = weichai_replace.cari(pn) if weichai_replace.available() else {}
     except Exception:
-        wres = {}
-        sumber_dicek["weichai"] = "gagal"
-    if not wres:
+        logger.exception("pengganti_part: tabel offline Weichai gagal dibaca")
+        ores = {}
+    if ores.get("found"):
+        off_hit = True
+        sumber_dicek["weichai_offline"] = "ok"
+        for x in (ores.get("digantikan_oleh") or []):
+            _add(diganti, seen_d, x.get("pn"), None, tanggal=x.get("tanggal"),
+                 tipe=x.get("tipe"), grup=x.get("grup"), sumber="Weichai (tabel offline)")
+        for x in (ores.get("menggantikan") or []):
+            _add(lama, seen_m, x.get("pn"), None, tanggal=x.get("tanggal"),
+                 tipe=x.get("tipe"), grup=x.get("grup"), sumber="Weichai (tabel offline)")
+
+    # 2b) EPC Weichai LIVE (part MESIN) — data 替换/ECN.
+    #     Dilewati HANYA bila tabel offline LENGKAP dan sudah menjawab PN ini:
+    #     panggilan live menambah detik ke giliran tanpa menambah informasi.
+    #     Tabel yang belum lengkap / tanpa entri utk PN ini → tetap tanya live,
+    #     supaya "tak ada di tabelku" tak pernah menyamar jadi "tak ada".
+    _tabel_lengkap = False
+    try:
+        _tabel_lengkap = bool(weichai_replace.status().get("lengkap"))
+    except Exception:
+        _tabel_lengkap = False
+    _lewati_live = bool(off_hit and _tabel_lengkap)
+    wres = {}
+    if _lewati_live:
+        sumber_dicek["weichai"] = "dilewati_pakai_tabel_offline"
+    else:
+        try:
+            wres = epc_weichai.replace_part(pn, rangka)
+        except Exception:
+            wres = {}
+            sumber_dicek["weichai"] = "gagal"
+    if _lewati_live:
+        pass                       # ⛔ jangan tandai 'gagal': live memang tak dipanggil
+    elif not wres:
         sumber_dicek["weichai"] = "gagal"
     elif not wres.get("found"):
         _alasan = (wres.get("reason") or "").strip()
@@ -3314,9 +3657,10 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
             except Exception:
                 pass
         if _gagal:
-            _nama = {"sims": "SIMS Sinotruk (sasis)", "weichai": "EPC Weichai (mesin)"}
-            _belum = ", ".join(_nama[k] for k in _gagal)
-            _sudah = ", ".join(_nama[k] for k in sumber_dicek if k not in _gagal)
+            _nama = {"sims": "SIMS Sinotruk (sasis)", "weichai": "EPC Weichai (mesin)",
+                     "weichai_offline": "tabel offline Weichai"}
+            _belum = ", ".join(_nama.get(k, k) for k in _gagal)
+            _sudah = ", ".join(_nama.get(k, k) for k in sumber_dicek if k not in _gagal)
             out = {
                 "found": False, "part_number": pn,
                 # Dibaca _tool_fail_kind → 'err', BUKAN 'nf'. Bedanya penting:
@@ -3393,6 +3737,11 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
             row["tanggal"] = x["tanggal"]
         if x.get("tipe"):
             row["tipe"] = x["tipe"]
+        # Relasi GRUP (banyak PN lama ↔ banyak PN baru) dari tabel offline Weichai.
+        # Tanpa diteruskan, satu PN dari grup 4-ke-4 tampak seperti pasangan
+        # tunggal — pembeli bisa memesan 1 PN padahal penggantinya satu SET.
+        if x.get("grup"):
+            row["grup"] = x["grup"]
         if lr:
             row["stok_total"] = lr.get("stok")
             row["harga_lokal"] = lr.get("harga")

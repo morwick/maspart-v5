@@ -22,6 +22,7 @@ Cache hasil bridge + BOM per-frame. Hanya untuk unit yang mesinnya memang Weicha
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -76,9 +77,125 @@ def _sino_getparam(frame: str) -> str:
     return (res.get("param") or "").strip()
 
 
+# ── SPESIFIKASI MESIN dari respons getOrderNumber (2026-08-08) ──────────────
+# Respons order Weichai selama ini hanya diperas untuk dhhNumber/root_id; padahal
+# ia MEMBAWA spesifikasi mesin yang selama berbulan-bulan dijawab "tidak ada di
+# sistem" ke user lapangan ("berapa liter oli untuk service 40.000?"). Semua field
+# di bawah datang dari panggilan yang MEMANG SUDAH dilakukan — nol HTTP tambahan.
+#
+# Kapasitas oli muncul DUA KALI di respons yang sama: `oilUpLine` (top-level) dan
+# `ibaLang['ext.oilLevel']`. Keduanya cocok pada 2 mesin uji (WP10.380E22 → 20.9;
+# WP4G130E22 → 11), jadi keduanya dibaca & ketidakcocokan ditandai, bukan dipilih
+# diam-diam salah satu.
+#
+# Grup PN di bawah = FILTER/part kurasi PABRIK per konfigurasi mesin (singkatan
+# pinyin): jylqq=机油滤清器 filter oli, ryjlx=燃油精滤芯 filter solar halus,
+# rycx=燃油粗滤 filter solar kasar, bytc=保养套餐 paket perawatan.
+_SPEK_GRUP_PN = (
+    ("jylqqPartNumbers", "filter_oli"),
+    ("ryjlxPartNumbers", "filter_solar_halus"),
+    ("rycxPartNumbers", "filter_solar_kasar"),
+    ("bytcPartNumbers", "paket_perawatan"),
+    ("maintenancePartNumbers", "part_perawatan"),
+    ("heartPartNumbers", "part_inti"),
+    ("bagPartNumbers", "paket_gasket"),
+    ("cardPartNumbers", "part_kartu"),
+)
+
+
+def _pn_list(v) -> list[str]:
+    """Ratakan nilai grup PN pabrik → daftar PN unik. Bentuknya TIDAK seragam di
+    API: bisa string tunggal, list PN, atau list-of-list (paket)."""
+    out: list[str] = []
+
+    def _isi(x):
+        if isinstance(x, (list, tuple)):
+            for y in x:
+                _isi(y)
+        elif x is not None:
+            for p in re.split(r"[\s,;]+", str(x)):
+                p = p.strip().upper()
+                if p and p not in out:
+                    out.append(p)
+    _isi(v)
+    return out
+
+
+def _spek_dari_order(od) -> dict:
+    """Spesifikasi mesin dari `data` getOrderNumber. {} bila bentuknya tak terduga.
+
+    ⛔ Field yang TIDAK dikirim API sengaja TIDAK dimasukkan (bukan diisi 0/'')
+    supaya pemanggil bisa membedakan 'tak tercatat' dari 'nol'."""
+    if not isinstance(od, dict):
+        return {}
+    iba = od.get("ibaLang") or od.get("iba") or {}
+    if not isinstance(iba, dict):
+        iba = {}
+    spek: dict = {}
+
+    def _isi(kunci: str, nilai, ubah=None):
+        s = str(nilai or "").strip()
+        if s:
+            spek[kunci] = ubah(s) if ubah else s
+
+    _isi("model", iba.get("Model") or od.get("dhhName"))
+    _isi("nama", iba.get("英文名称"))
+    _isi("seri", iba.get("Series"))
+    _isi("tipe_produk", iba.get("ProductType"))
+    _isi("jenis_mesin", iba.get("sim.modelStruct"))
+    _isi("daya_kw", iba.get("Power"))
+    _isi("emisi", iba.get("sim.emission"))
+    _isi("bahan_bakar", iba.get("ext.fueltype"))
+    _isi("pabrik_perakit", iba.get("ext.supportingHostFactory"))
+    _isi("grade_oli", od.get("oilQualityGrade") or iba.get("ext.oilQualitygrade"))
+
+    # Kapasitas oli: dua sumber, saling cek.
+    a = str(od.get("oilUpLine") or "").strip()
+    b = str(iba.get("ext.oilLevel") or "").strip()
+    if a or b:
+        spek["kapasitas_oli_liter"] = a or b
+        spek["kapasitas_oli_sumber"] = ("oilUpLine + ext.oilLevel (cocok)" if a and b and a == b
+                                        else "oilUpLine" if a else "ext.oilLevel")
+        if a and b and a != b:
+            spek["kapasitas_oli_beda_sumber"] = {"oilUpLine": a, "ext.oilLevel": b}
+
+    part_pabrik = {}
+    for kunci, label in _SPEK_GRUP_PN:
+        pns = _pn_list(od.get(kunci))
+        if pns:
+            part_pabrik[label] = pns
+    if part_pabrik:
+        spek["part_pabrik"] = part_pabrik
+    return spek
+
+
+def spek_mesin(rangka: str = "", no_mesin: str = "") -> dict:
+    """SPESIFIKASI mesin Weichai dari NOMOR RANGKA atau NOMOR MESIN.
+
+    Nol panggilan tambahan: memakai respons getOrderNumber yang sudah diambil
+    jalur bridge (per-VIN, ber-cache) / resolve_engine_order (per-serial)."""
+    frame = (rangka or "").strip().upper()
+    serial = (no_mesin or "").strip().upper()
+    if not frame and not serial:
+        return {"found": False, "reason": "input",
+                "message": "Sebutkan nomor rangka (VIN) atau nomor mesin."}
+    res = _bridge(frame) if frame else resolve_engine_order(serial)
+    if not res.get("found"):
+        return res
+    spek = res.get("spek") or {}
+    if not spek:
+        return {"found": False, "reason": "no_spec",
+                "message": ("EPC Weichai menjawab, tapi TIDAK menyertakan field spesifikasi "
+                            "untuk mesin ini. Ini kekosongan data di sisi Weichai — bukan "
+                            "bukti mesinnya tak berspesifikasi."),
+                "serial": res.get("serial") or serial, "rangka": frame or ""}
+    return {"found": True, "rangka": frame or "", "serial": res.get("serial") or serial,
+            "dhhNumber": res.get("dhhNumber") or "", **spek}
+
+
 def _bridge(frame: str) -> dict:
     """Tempuh SSO + resolusi order → {found, token, dhhNumber, dhhDate, root_id, serial,
-    engine_model} (cache per frame). {found:False, reason} bila bukan mesin Weichai."""
+    spek, engine_model} (cache per frame). {found:False, reason} bila bukan mesin Weichai."""
     with _lock:
         c = _bridge_cache.get(frame)
         if c and (time.monotonic() - c["at"] < _CACHE_TTL):
@@ -123,7 +240,11 @@ def _bridge(frame: str) -> dict:
                 "message": f"Order mesin (nomor {serial}) tak ditemukan di Weichai."}
 
     val = {"found": True, "token": token, "dhhNumber": dhh, "dhhDate": ddate,
-           "completionDate": cdate, "root_id": root, "serial": serial}
+           "completionDate": cdate, "root_id": root, "serial": serial,
+           # Respons getOrderNumber ini membawa SPESIFIKASI mesin (kapasitas oli,
+           # daya, emisi) + PN filter kurasi pabrik — dulu semuanya dibuang di
+           # sini. Diambil sekarang: NOL panggilan HTTP tambahan (lihat _spek_dari_order).
+           "spek": _spek_dari_order(od)}
     with _lock:
         _bridge_cache[frame] = {"at": time.monotonic(), "val": val}
         # Token account-level (zq-login) — cache global utk lookup lintas-part
@@ -324,7 +445,8 @@ def resolve_engine_order(no_mesin: str) -> dict:
             "dhhDate": od.get("effDate") or "",
             "completionDate": od.get("completionDate") or "",
             "model": iba.get("Model") or od.get("dhhName"),
-            "engine_nama": iba.get("英文名称") or ""}
+            "engine_nama": iba.get("英文名称") or "",
+            "spek": _spek_dari_order(od)}
 
 
 def engine_bom_by_no(no_mesin: str) -> dict:

@@ -69,3 +69,8 @@ login accurate.txt
 /login accurate.txt
 backend/_accurate_cookies.txt
 data/epc_unit_items/
+
+# Checkpoint panen tabel penggantian Weichai (build_weichai_replace.py) — file
+# kerja yang bisa berukuran puluhan MB & separuh jalan. Hasil JADI-nya
+# (data/weichai_replace.json.gz) memang ikut, checkpoint-nya TIDAK.
+data/weichai_replace.json.part

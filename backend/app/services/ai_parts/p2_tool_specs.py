@@ -735,6 +735,141 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "kategori_massal_part",
+                "description": (
+                    "⭐ KATEGORI BARANG untuk BANYAK Part Number sekaligus (SATU panggilan, "
+                    "instan, tanpa jaringan) — menjawab 'PN ini masuk kategori barang apa?', "
+                    "'mana dari daftar ini yang termasuk BARANG MESIN?', 'manakah yang produk "
+                    "WEICHAI / bukan HOWO?'. Kategorinya BUKAN tafsiran dari nama part: "
+                    "diambil dari SHEET katalog resmi tempat PN itu benar-benar terdaftar "
+                    "(01 Kabin, 02 Mesin/Powertrain, 03 Aksesori powertrain, 04 Kopling, "
+                    "05 Transmisi, 06 Poros penumpu/depan, 07 Poros penggerak/belakang, "
+                    "08 Kelistrikan, 09 Rem, 10 Sasis, 11 Lainnya, 12 Karoseri) plus FILE "
+                    "katalognya (katalog MESIN Weichai vs katalog unit Sinotruk/HOWO vs "
+                    "Shantui). Hasilnya: kategori per PN + 'ringkasan' berisi daftar PN "
+                    "mesin / aksesori_mesin / bukan_mesin / tidak_diketahui, siap dijawab "
+                    "langsung. ⛔ WAJIB dipakai untuk pertanyaan kategori/'barang mesin'/"
+                    "'produk Weichai' — JANGAN menebak dari nama part, dan JANGAN memanggil "
+                    "cari_part/detail_part berulang untuk itu (tebakan nama terbukti salah: "
+                    "part bernama 'bushing suspensi' ternyata terdaftar di sheet Kabin). "
+                    "PN yang tak ada di katalog dikembalikan 'tidak_diketahui' — sampaikan "
+                    "apa adanya. Set excel=true bila user minta filenya. "
+                    "⛔ Ini TIDAK memberi stok/harga/berat — untuk itu cek_massal_part."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "daftar_pn": {
+                            "type": "array", "items": {"type": "string"},
+                            "description": "Daftar Part Number (boleh juga satu string dipisah baris/koma).",
+                        },
+                        "excel": {"type": "boolean", "description": "true → hasil juga jadi file Excel unduhan."},
+                    },
+                    "required": ["daftar_pn"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "spek_mesin",
+                "description": (
+                    "⭐ SPESIFIKASI MESIN Weichai unit tertentu dari NOMOR RANGKA (VIN) "
+                    "atau NOMOR MESIN — data resmi pabrik untuk konfigurasi mesin unit ITU, "
+                    "bukan angka umum seri. Mengembalikan: KAPASITAS OLI MESIN (liter) + "
+                    "grade olinya, model & seri mesin, DAYA (kW), standar EMISI (Euro II/"
+                    "China V dll), bahan bakar, pabrik perakit, DAN 'part_pabrik' = PN "
+                    "FILTER PILIHAN PABRIK untuk konfigurasi itu (filter oli, filter solar "
+                    "halus & kasar, paket perawatan, paket gasket, part inti). "
+                    "WAJIB dipakai untuk: 'berapa liter oli mesin unit ini', 'oli mesinnya "
+                    "pakai apa/berapa', 'spesifikasi mesin unit X', 'berapa daya/HP mesinnya', "
+                    "'euro berapa', dan 'filter oli/solar yang cocok untuk unit ini'. "
+                    "⛔ JANGAN menjawab kapasitas oli dari ingatan/perkiraan — angka ini "
+                    "berbeda per konfigurasi mesin. ⛔ Tool ini TIDAK memuat INTERVAL servis "
+                    "(km/jam): bila user menanyakannya, katakan tak tercatat di data ini. "
+                    "Hanya untuk unit bermesin WEICHAI (bukan mesin MC/Sinotruk sendiri); "
+                    "unit non-Weichai akan dijawab 'tidak punya link EPC Weichai'."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Nomor rangka/VIN unit (boleh 8 digit akhir)."},
+                        "no_mesin": {"type": "string", "description": "Nomor mesin (serial), bila user menyebut ini alih-alih rangka."},
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "part_aus_katalog",
+                "description": (
+                    "⭐ DAFTAR PART RAWAN RUSAK / habis pakai / perawatan sebuah UNIT atau "
+                    "MODEL — dari KOLOM KETERANGAN katalog resmi pabrik ('Wearing parts' = "
+                    "易损件, 'Consumable parts', '保养件'), BUKAN tafsiran nama part. Pakai "
+                    "bila user minta DAFTARNYA tanpa menyebut part tertentu: 'part apa saja "
+                    "yang aus/mudah rusak di unit ini', 'daftar part cepat habis', 'part "
+                    "consumable/perawatan model X'. "
+                    "Dengan 'rangka' → PALING PRESISI: daftar part yang BENAR-BENAR "
+                    "terpasang di unit itu (BOM pabrik EPC) disilang cap katalog, lengkap "
+                    "dengan qty per unit. Dengan 'unit' saja → daftar per MODEL. "
+                    "Kelompoknya dipisah tegas & ⛔ JANGAN digabung: RAWAN RUSAK (易损件 — "
+                    "wajar rusak/diganti, termasuk PECAH & MATI seperti kaca depan, saklar, "
+                    "lampu) vs HABIS PAKAI (ban, karet, wiper) vs PERAWATAN vs 'sering "
+                    "dipakai after-sales' (fast moving — ⛔ BUKAN penanda rusak). "
+                    "⚠️ Katalog TIDAK mencap semua part: kampas rem/kopling/filter sering "
+                    "tak muncul di sini — ⛔ jangan menjanjikan daftar ini lengkap, dan "
+                    "untuk part itu pakai part_aus_dari_rangka. "
+                    "⛔ BEDA dari part_aus_dari_rangka: yang itu untuk SATU part spesifik "
+                    "pada SATU VIN dengan posisi depan/belakang (mis. 'kampas rem depan "
+                    "unit X') dan menelusuri EPC; yang INI daftar borongan dari katalog."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "unit": {"type": "string", "description": "Nama unit/model (mis. 'NX360', 'HOWO-380')."},
+                        "rangka": {"type": "string", "description": "Alternatif: nomor rangka; dipetakan ke model lewat populasi."},
+                        "kelompok": {
+                            "type": "string",
+                            "enum": ["aus", "habis_pakai", "perawatan", "sering_dipakai"],
+                            "description": "Opsional: batasi ke satu kelompok saja.",
+                        },
+                        "sertakan_penanda_model_lain": {
+                            "type": "boolean",
+                            "description": ("Hanya bila user MEMINTA daftar diperluas. Default "
+                                            "penanda diambil dari katalog model unit itu saja; "
+                                            "menyalakan ini menambahkan part yang dicap katalog "
+                                            "model LAIN — daftarnya jadi jauh lebih panjang dan "
+                                            "kurang tepat (pemantik rokok/relay bisa ikut)."),
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "bengkel_resmi",
+                "description": (
+                    "Daftar BENGKEL / SERVICE STATION RESMI Sinotruk (jaringan pabrik) — "
+                    "nama, alamat, telepon, email, status, dan koordinat peta. Boleh "
+                    "disaring kata kunci kota/nama/kode (mis. 'jakarta', 'surabaya', 'IDZ'). "
+                    "Pakai untuk 'bengkel resmi terdekat di mana', 'servis unit di mana', "
+                    "'alamat/nomor telepon bengkel Sinotruk'. "
+                    "⛔ Ini BUKAN daftar gudang/cabang penjualan part kita (itu stok_gudang "
+                    "/ info_aplikasi) — ini jaringan bengkel resmi pabrik."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "kata_kunci": {"type": "string", "description": "Opsional: kota / nama / kode bengkel. Kosong = semua."},
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "cek_kendaraan",
                 "description": (
                     "Cek SPESIFIKASI/KONFIGURASI kendaraan dari NOMOR RANGKA (VIN / frame "

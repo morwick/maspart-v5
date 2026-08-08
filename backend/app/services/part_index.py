@@ -451,6 +451,105 @@ def unit_models() -> list[dict]:
     return sorted(seen.values(), key=lambda x: (x["kategori"], x["unit"]))
 
 
+_REMARK_MAP: dict = {"at": None, "map": {}}
+
+
+def remark_map(unit_query: str = "") -> dict[str, list[str]]:
+    """{PN: [keterangan katalog, …]} — SEMUA keterangan berbeda yang pernah
+    diberikan katalog untuk PN itu, terurut (deterministik).
+
+    Untuk menyilangkan daftar part satu UNIT (BOM per-VIN) dengan penanda
+    aus/habis-pakai pabrik.
+
+    ⚠️ KENAPA daftar, bukan satu nilai: 13,3% PN (792 dari 5.975) diberi
+    keterangan BERBEDA di berkas katalog model yang berbeda — konflik tersering
+    'Wearing parts' vs '售后常用件' (304 PN), dan keduanya masuk KELOMPOK BERBEDA.
+    Mengambil "yang pertama ketemu" membuat klasifikasi bergantung urutan berkas.
+    Pemanggil yang memutuskan (dan menampilkan) perbedaannya.
+
+    `unit_query` mempersempit ke berkas katalog model itu saja — penanda dari
+    katalog unitnya SENDIRI lebih sahih daripada penanda model lain.
+    Cache hanya untuk peta global (unit_query kosong); scoped dihitung langsung."""
+    ensure_index()
+    q = re.sub(r"[\s_\-]", "", (unit_query or "")).upper()
+    if not q and _REMARK_MAP["at"] == _state["indexed_at"]:
+        return _REMARK_MAP["map"]
+    m: dict[str, list[str]] = {}
+    for fi in _state["excel_files"]:
+        if q and q not in re.sub(r"[\s_\-]", "", str(fi.get("simple_name") or "")).upper():
+            continue
+        df = fi.get("dataframe")
+        if df is None or "remark" not in getattr(df, "columns", []):
+            continue
+        if "part_number" not in df.columns:
+            continue
+        for pn_v, rm_v in zip(df["part_number"].tolist(), df["remark"].tolist()):
+            ket = _sel_teks(rm_v)
+            pn = _sel_teks(pn_v).upper()
+            if not pn or not ket:
+                continue
+            lst = m.setdefault(pn, [])
+            if ket not in lst:
+                lst.append(ket)
+    for lst in m.values():
+        lst.sort()
+    if not q:
+        _REMARK_MAP.update(at=_state["indexed_at"], map=m)
+    return m
+
+
+def _sel_teks(v) -> str:
+    """Sel DataFrame → teks bersih. '' untuk NaN/NA/placeholder kosong."""
+    try:
+        if v is None or pd.isna(v):
+            return ""
+    except (TypeError, ValueError):      # array/list → pd.isna balas elemen-wise
+        pass
+    s = " ".join(str(v).split())
+    return "" if s.lower() in ("nan", "none", "<na>", "nat") else s
+
+
+def rows_with_remark(unit_query: str = "", cap: int = 4000) -> list[dict]:
+    """Baris katalog yang KOLOM KETERANGAN-nya terisi (kolom `remark` sheet EPC).
+
+    Kolom itu memuat klasifikasi pemakaian resmi pabrik — 'Wearing parts',
+    '易损件', 'Consumable parts', '保养件', '售后常用件', '普通件' — 26.181 baris
+    terisi di seluruh katalog, dan selama ini tak pernah dipakai siapa pun.
+    Di sinilah jawaban 'part apa saja yang AUS di unit ini' berada, tanpa perlu
+    menebak dari nama part.
+
+    `unit_query` kosong = seluruh unit. Pencocokan unit longgar (substring pada
+    nama file/model) supaya 'NX360' menemukan 'NX360 6X4 (LZZ1BLSG)'.
+    Return [{pn, nama, remark, unit, path}] — klasifikasi diserahkan pemanggil."""
+    ensure_index()
+    q = re.sub(r"[\s_\-]", "", (unit_query or "")).upper()
+    out: list[dict] = []
+    for fi in _state["excel_files"]:
+        sn = str(fi.get("simple_name") or "")
+        if q and q not in re.sub(r"[\s_\-]", "", sn).upper():
+            continue
+        df = fi.get("dataframe")
+        if df is None or "remark" not in getattr(df, "columns", []):
+            continue
+        kol = [c for c in ("part_number", "part_name", "remark") if c in df.columns]
+        if "part_number" not in kol:
+            continue
+        for rec in df[kol].itertuples(index=False):
+            d = dict(zip(kol, rec))
+            # ⚠️ JANGAN `str(v or "")`: sel kosong bertipe pandas.NA, dan menguji
+            # kebenarannya melempar "boolean value of NA is ambiguous".
+            ket = _sel_teks(d.get("remark"))
+            pn = _sel_teks(d.get("part_number")).upper()
+            if not pn or not ket:
+                continue
+            out.append({"pn": pn, "nama": _sel_teks(d.get("part_name")),
+                        "remark": ket, "unit": sn,
+                        "path": str(fi.get("relative_path") or "")})
+            if len(out) >= cap:
+                return out
+    return out
+
+
 def gudang_breakdown(pn: str) -> dict:
     """Rincian stok {gudang: qty} untuk satu Part Number (hanya qty != 0) —
     SATU-SATUNYA sumber = INDEKS ACCURATE (tarikan 3×/hari, persist disk, enrichment

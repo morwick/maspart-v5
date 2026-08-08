@@ -148,6 +148,23 @@ def _jangan_bridge_weichai_nyata(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _jangan_pakai_tabel_replace_nyata(request, monkeypatch):
+    """`pengganti_part` (2026-08-08) menambahkan sumber TABEL OFFLINE Weichai dari
+    data/weichai_replace.json.gz (58rb record). Bila file itu ada di mesin yang
+    menjalankan test, tiap test pengganti_part ikut memuat & mengindeksnya —
+    lambat, dan hasil data NYATA menyusup ke skenario uji yang PN-nya sintetis
+    (satu tabrakan PN saja = assertion yang gagal berpindah-pindah).
+    Dimatikan untuk semua test; modul pengujinya sendiri menyalakan ulang —
+    pola yang sama dgn _jangan_bridge_weichai_nyata."""
+    try:
+        from app.services import weichai_replace
+        if request.module.__name__ != "test_weichai_replace":
+            monkeypatch.setattr(weichai_replace, "available", lambda: False)
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _bersihkan_idempotensi_order():
     """Cache idempotensi POST /orders (L5) proses-lokal → bersihkan antar-test
     agar hasil order satu test tak bocor ke test lain yang sidik jarinya sama."""

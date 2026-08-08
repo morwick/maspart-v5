@@ -19,6 +19,7 @@ Pola auth = sims_eol.py: token sims_fetcher + retry sekali saat 401/403.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -124,6 +125,60 @@ def _sekarang() -> datetime:
 
 
 # ── API publik ───────────────────────────────────────────────────────
+# ── Konfigurasi PABRIK per unit dari `configDesc` (2026-08-08) ──────────────
+# `getVehicleInfoAndMaintNum` mengembalikan 61 field; info_unit dulu memungut
+# belasan dan MEMBUANG `configDesc` — padahal di situlah konfigurasi pabrik
+# per-unit ditulis (dipisah ';'), termasuk **kapasitas tangki BBM** yang selama
+# ini dijawab "tidak ada di sistem" ke user lapangan. Contoh nyata:
+#   SJ346500 → "…12.00R24轮胎(…);400L油箱;驾驶室双侧顶置警灯;…"
+#   RT110063 → "…12.00R20(工程横向);300L油箱;TFT仪表（英文）;…"
+# Terverifikasi 14 dari 16 unit uji membawa angkanya (120L–600L); 2 sisanya
+# `configDesc`-nya memang KOSONG — itu lubang data, bukan gagal parsing.
+# ⚠️ JANGAN pakai \b sesudah L: di '400L油箱' karakter berikutnya adalah CJK,
+# dan CJK termasuk \w di Unicode → batas kata tak pernah terjadi & angkanya luput
+# (bug nyata: ruas tangki terdeteksi tapi liter selalu kosong). Yang benar =
+# 'L tidak diikuti huruf latin lain' (supaya 'LG9704…' dsb tak ikut tertangkap).
+_RE_LITER = re.compile(r"(\d+(?:[.,]\d+)?)\s*L(?![A-Za-z])", re.I)
+
+
+def _liter(teks: str) -> list[float]:
+    """Semua angka berliter dalam satu ruas ('600L+400L' → [600, 400])."""
+    out: list[float] = []
+    for m in _RE_LITER.finditer(teks or ""):
+        try:
+            out.append(float(m.group(1).replace(",", ".")))
+        except ValueError:
+            pass
+    return out
+
+
+def konfigurasi_pabrik(config_desc: str) -> dict:
+    """Ruas configDesc + kapasitas tangki BBM yang terbaca. {} bila teks kosong.
+
+    ⛔ Ruas dikembalikan APA ADANYA (Bahasa China) — penerjemahan diserahkan ke
+    lapisan jawaban. Menebak terjemahan di sini justru menyembunyikan istilah
+    aslinya dari pembaca yang bisa memverifikasi."""
+    teks = str(config_desc or "").strip()
+    if not teks:
+        return {}
+    ruas = [x.strip() for x in re.split(r"[;；]", teks) if x.strip()]
+    out: dict = {"ruas": ruas}
+
+    # 油箱 = tangki bahan bakar. Ruas bisa >1 (unit tangki ganda), dan bisa
+    # menyebut material ('120L铁油箱' = tangki besi) — angka L yang dipanen.
+    ruas_tangki = [r for r in ruas if "油箱" in r]
+    liter = [x for r in ruas_tangki for x in _liter(r)]
+    if ruas_tangki:
+        out["tangki_teks"] = ruas_tangki
+    if liter:
+        out["kapasitas_tangki_liter"] = round(sum(liter), 1)
+        if len(liter) > 1:
+            # Tangki ganda: totalnya sah, tapi rinciannya WAJIB ikut supaya
+            # user tak mengira itu satu tangki besar.
+            out["tangki_rincian_liter"] = liter
+    return out
+
+
 def info_unit(rangka: str) -> dict | None:
     """Spek unit + status garansi per frame. None bila tak ditemukan/gagal."""
     frame = frame_dari_rangka(rangka)
@@ -179,6 +234,7 @@ def info_unit(rangka: str) -> dict | None:
             "mesin": d.get("engineMaintNum"), "gearbox": d.get("gearboxMaintNum"),
             "gardan": d.get("bridgeMaintNum"), "sasis": d.get("chassisMaintNum"),
         },
+        **({"konfigurasi_pabrik": _kf} if (_kf := konfigurasi_pabrik(d.get("configDesc"))) else {}),
     }
 
 

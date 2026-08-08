@@ -386,6 +386,39 @@ def pn_category_map() -> dict[str, dict]:
     return _PNCAT["map"]
 
 
+_PNCATS: dict = {"mtime": None, "map": {}}
+
+
+def pn_categories_map() -> dict[str, dict]:
+    """Peta global {PN_norm: {'nama', 'kategori': [kode,…]}} — SEMUA kategori
+    tempat PN itu muncul di seluruh unit, bukan hanya yang PERTAMA.
+
+    Beda dari pn_category_map() (yang sengaja memilih satu kategori untuk
+    breakdown): 4,4% PN katalog (801 dari 18.095) memang muncul di LEBIH dari
+    satu kategori — mayoritas pengencang generik (ZQ…/Q… baut & mur) yang
+    dipakai dari kabin sampai gardan. Memilih satu diam-diam untuk PN semacam
+    itu = menjawab "baut ini kategori gardan" padahal ia juga ada di kabin,
+    rem, dan transmisi. Kode diurut menaik agar hasil deterministik.
+    Di-cache ikut mtime catalog_bom.json."""
+    _load()
+    if _PNCATS["mtime"] != _CACHE["mtime"]:
+        m: dict[str, dict] = {}
+        for u in _CACHE["data"].get("units", {}).values():
+            for code, c in u.get("kategori", {}).items():
+                for p in c.get("parts", []):
+                    pn = _norm(p.get("pn", ""))
+                    if not pn:
+                        continue
+                    e = m.setdefault(pn, {"nama": p.get("nama") or "", "kategori": set()})
+                    e["kategori"].add(code)
+                    if not e["nama"] and p.get("nama"):
+                        e["nama"] = p["nama"]
+        for e in m.values():
+            e["kategori"] = sorted(e["kategori"])
+        _PNCATS.update(mtime=_CACHE["mtime"], map=m)
+    return _PNCATS["map"]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  BUILD / REBUILD catalog_bom.json — dari sheet kategori (01..12) tiap unit.
 #  Dipakai oleh endpoint admin (rebuild in-process) & CLI build_catalog_bom.py.

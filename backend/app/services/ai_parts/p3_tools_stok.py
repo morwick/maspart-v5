@@ -2947,6 +2947,462 @@ def _t_sheet_pilih_sheet(args: dict, user: dict) -> dict:
                                  user, (args.get("nama_sheet") or "").strip())
 
 
+# ── Part AUS resmi katalog (2026-08-08) ─────────────────────────────────────
+# Kolom KETERANGAN sheet katalog EPC memuat klasifikasi pemakaian dari pabrik dan
+# tak pernah dipakai siapa pun (26.181 baris terisi). Sebelum ini satu-satunya
+# jalur "part aus" adalah part_aus_dari_rangka yang MENUNTUT user menyebut nama
+# partnya ('kampas rem') lalu menjaring pohon EPC dengan kata kunci — tak bisa
+# menjawab "part apa saja yang aus di unit ini".
+#
+# ⚠️ Klasifikasinya TIDAK boleh diratakan jadi "aus": '售后常用件' artinya SERING
+# DIPAKAI di after-sales (fast moving), bukan komponen aus; '普通件' = part biasa
+# dan sengaja DIBUANG. Menggabungkan semuanya akan menyebut ratusan part biasa
+# sebagai "part aus" — persis jenis klaim kategoris yang sudah pernah salah.
+_REMARK_KELOMPOK = (
+    ("aus", ("wearing parts", "易损件", "维修更换件")),
+    ("habis_pakai", ("consumable parts", "易耗件", "油液类")),
+    ("perawatan", ("保养件",)),
+    ("sering_dipakai", ("售后常用件",)),
+)
+_REMARK_LABEL = {
+    # 易损件 = 易(mudah)+损(rusak)+件(part) → "mudah RUSAK", bukan "aus" karena
+    # gesekan. Isinya memang kaca depan, saklar, lampu, kunci pintu — barang yang
+    # wajar rusak & diganti. Label lama "Part AUS" menyempitkan artinya dan
+    # membuat orang bengkel mengira daftar ini berisi kampas rem/kopling.
+    "aus": "Part RAWAN RUSAK / cepat ganti (易损件 / wearing parts)",
+    "habis_pakai": "Habis pakai (consumable / 易耗件 / oli-cairan)",
+    "perawatan": "Part perawatan berkala (保养件)",
+    "sering_dipakai": "Sering dipakai after-sales (售后常用件) — BUKAN penanda aus",
+}
+_MAX_AUS_KATALOG = 120
+
+
+def _kelompok_remark(ket: str) -> str | None:
+    k = " ".join((ket or "").split()).lower()
+    for nama, kunci in _REMARK_KELOMPOK:
+        for x in kunci:
+            if x in k:
+                return nama
+    return None                      # '普通件'/angka/lainnya → bukan penanda
+
+
+_CJK = re.compile(r"[一-鿿]")
+
+
+def _unit_katalog_dari_vin(rangka: str) -> str:
+    """Nomor rangka → PREFIKS VIN yang menamai unit di katalog ('LZZ5EXSF').
+
+    ⛔ JANGAN pakai `model` dari populasi untuk ini: isinya kode pabrik
+    ('ZZ3317V486JB1R') — namespace yang BERBEDA dari nama unit katalog, jadi
+    pencocokannya selalu nihil dan penanda katalog model unitnya tak pernah
+    terpakai. Nama unit katalog justru memuat 8 karakter awal VIN
+    ('HOWO400 8X4 (LZZ5EXSF)'), dan VIN penuh didapat dari EPC."""
+    r = (rangka or "").strip().upper()
+    vin = r if len(r) >= 17 else ""
+    if not vin:
+        try:
+            vin = str((epc.lookup(r) or {}).get("vin") or "").strip().upper()
+        except Exception:
+            logger.exception("part_aus_katalog: epc.lookup gagal (dilewati)")
+            return ""
+    if len(vin) < 8:
+        return ""
+    prefiks = vin[:8]
+    try:
+        for u in part_index.unit_models():
+            if prefiks in str(u.get("unit") or "").upper():
+                return prefiks
+    except Exception:
+        return ""
+    return ""
+
+
+def _lengkapi_stok(daftar: list, user: dict) -> None:
+    """Isi NAMA Inggris + stok/harga lokal untuk daftar item ber-'pn'
+    (indeks lokal, nol jaringan).
+
+    Nama dari BOM pabrik EPC kerap hanya berbahasa China ('制动气室') — dibiarkan
+    apa adanya, daftar part aus jadi tak terbaca orang bengkel. Nama katalog
+    (Inggris) dipakai bila ada, nama China tetap disimpan sbg 'nama_cn'."""
+    try:
+        lokal = part_index.rows_for_pns([x["pn"] for x in daftar][:400])
+    except Exception:
+        return
+    for x in daftar:
+        lr = lokal.get(x["pn"]) or {}
+        if not lr:
+            continue
+        nm = " ".join(str(lr.get("part_name") or "").split())
+        if nm and (not x.get("nama") or _CJK.search(x.get("nama") or "")):
+            if x.get("nama") and x["nama"] != nm:
+                x["nama_cn"] = x["nama"]
+            x["nama"] = nm
+        if _boleh_stok(user):
+            x["stok_total"] = lr.get("stok")
+        if _boleh_harga(user):
+            x["harga_lokal"] = lr.get("harga")
+
+
+# Urutan bila SATU PN diberi keterangan berbeda antar-katalog model (13,3% PN).
+# Yang lebih SPESIFIK menang: 'Wearing parts' adalah pernyataan tentang sifat
+# part, '售后常用件' hanya tentang seringnya dipesan — keduanya bisa benar
+# sekaligus. Perbedaannya TIDAK disembunyikan (lihat 'penanda_berbeda').
+_PRIORITAS_KELOMPOK = ("aus", "perawatan", "habis_pakai", "sering_dipakai")
+
+
+def _kelompok_dari_daftar(ket_list) -> tuple[str | None, list]:
+    """(kelompok terpilih, seluruh keterangan) dari daftar keterangan katalog."""
+    kets = [k for k in (ket_list or []) if k]
+    kels = {k2 for k2 in (_kelompok_remark(k) for k in kets) if k2}
+    if not kels:
+        return None, kets
+    for kel in _PRIORITAS_KELOMPOK:
+        if kel in kels:
+            return kel, kets
+    return None, kets
+
+
+def _aus_per_unit(ll: dict, peta: dict, peta_model: dict, rangka: str,
+                  minta: str, user: dict, warisan: bool = False) -> dict:
+    """Part aus PERSIS unit ini: BOM pabrik (EPC) disilang penanda katalog."""
+    # ⚠️ DASAR PENANDA — pelajaran mahal 2026-08-08. Semula PN yang tak dicap di
+    # katalog model unit ini "mewarisi" cap dari katalog model LAIN yang memakai
+    # PN sama. Akibatnya untuk SJ346500: 24 part aus (katalog modelnya sendiri)
+    # membengkak jadi 510, dan daftarnya berisi PEMANTIK ROKOK, relay, resistor,
+    # towing hook — karena cukup SATU dari 42 katalog menandai PN itu 'Wearing
+    # parts' untuk membuatnya lolos. Warisan kini TIDAK ikut secara default:
+    # ia dihitung terpisah dan hanya ikut bila diminta eksplisit.
+    pakai_warisan = bool(warisan)
+    dasar_ketat = bool(peta_model)
+    per_kel: dict[str, list] = {}
+    dipakai = 0
+    n_warisan = 0
+    for p in (ll.get("parts") or []):
+        pn = str(p.get("pn") or "").strip().upper()
+        if not pn:
+            continue
+        dari_model = bool(peta_model.get(pn))
+        if dasar_ketat and not dari_model:
+            # Hanya dihitung, tidak masuk daftar — kecuali diminta.
+            if peta.get(pn) and _kelompok_dari_daftar(peta.get(pn))[0]:
+                n_warisan += 1
+            if not pakai_warisan:
+                continue
+        ket_list = peta_model.get(pn) or peta.get(pn)
+        kel, kets = _kelompok_dari_daftar(ket_list)
+        if not kel or (minta and kel != minta):
+            continue
+        dipakai += 1
+        item = {"pn": pn, "nama": p.get("nama") or p.get("nama_cn") or "",
+                "keterangan_katalog": kets[0] if len(kets) == 1 else kets}
+        if len(kets) > 1:
+            item["penanda_berbeda"] = kets
+        if not dari_model:
+            item["penanda_dari_model_lain"] = True
+        if p.get("qty") is not None:
+            item["qty_di_unit"] = p.get("qty")
+        per_kel.setdefault(kel, []).append(item)
+
+    hasil: dict = {}
+    dipotong = 0
+    for kel, daftar in per_kel.items():
+        daftar.sort(key=lambda x: x["nama"] or x["pn"])
+        if len(daftar) > _MAX_AUS_KATALOG:
+            dipotong += len(daftar) - _MAX_AUS_KATALOG
+            daftar = daftar[:_MAX_AUS_KATALOG]
+        _lengkapi_stok(daftar, user)
+        hasil[_REMARK_LABEL[kel]] = daftar
+
+    # Pembeda KEKUATAN bukti: penanda dari katalog model unit ini vs warisan dari
+    # katalog model LAIN. Tanpa angka ini, satu total besar terbaca seolah semuanya
+    # dicap pabrik untuk unit itu sendiri.
+    semua_item = [x for v in per_kel.values() for x in v]
+    dari_model_lain = sum(1 for x in semua_item if x.get("penanda_dari_model_lain"))
+    out: dict = {
+        "found": bool(hasil),
+        "rangka": ll.get("frame_number") or rangka.upper(),
+        "sumber": "BOM pabrik unit ini (EPC) × keterangan katalog",
+        "dasar_penanda": ("katalog model unit ini" if dasar_ketat and not pakai_warisan
+                          else "katalog model unit ini + warisan model lain" if dasar_ketat
+                          else "katalog model LAIN (katalog model unit ini tak dikenali)"),
+        "part_terpasang_di_unit": ll.get("jumlah_part"),
+        "part_berpenanda": dipakai,
+        "jumlah_per_kelompok": {_REMARK_LABEL[k]: len(v) for k, v in per_kel.items()},
+        "part": hasil,
+    }
+    if dasar_ketat and n_warisan and not pakai_warisan:
+        out["part_bercap_di_model_lain"] = n_warisan
+        out["catatan_warisan"] = (
+            f"{n_warisan} part lain di unit ini TIDAK dicap oleh katalog modelnya, tapi "
+            "dicap oleh katalog model LAIN yang memakai PN sama — SENGAJA tidak "
+            "dimasukkan (cap model lain terbukti menggelembungkan daftar sampai memuat "
+            "pemantik rokok & relay). Sebutkan angkanya bila relevan; user bisa minta "
+            "'sertakan penanda model lain' untuk melihatnya.")
+    if dari_model_lain:
+        out["dari_katalog_model_lain"] = dari_model_lain
+    if not dasar_ketat:
+        # Katalog model unit ini tak dikenali → seluruh cap berasal dari model lain.
+        out["_cek_tak_lengkap"] = True
+        out["peringatan"] = (
+            "Katalog model unit ini TIDAK dikenali, jadi semua penanda di bawah "
+            "diambil dari katalog model LAIN yang memakai PN sama. Perlakukan sebagai "
+            "PETUNJUK, bukan cap resmi untuk unit ini.")
+    if dipotong:
+        out["terpotong"] = dipotong
+    if ll.get("partial"):
+        # BOM yang datang separuh membuat part aus terhitung KURANG — katakan.
+        out["_cek_tak_lengkap"] = True
+        out["peringatan"] = ("Daftar part unit ini datang TIDAK LENGKAP dari EPC, jadi "
+                             "part aus di bawah bisa kurang. Sampaikan apa adanya.")
+    out["catatan"] = (
+        "Ini part aus PERSIS unit tersebut: daftar part TERPASANG unit ini (BOM pabrik "
+        "EPC) disilang penanda pemakaian di katalog resmi. 'part_terpasang_di_unit' = "
+        "total part unit, 'part_berpenanda' = yang punya penanda. Kelompok BEDA arti dan "
+        "⛔ JANGAN digabung: 'Part RAWAN RUSAK' (易损件) = part yang WAJAR rusak & "
+        "diganti selama umur pakai — termasuk PECAH/MATI (kaca depan, saklar, lampu), "
+        "⛔ jangan disebut 'part aus' polos & jangan dijanjikan memuat kampas rem/"
+        "kopling (katalog kerap tak mencapnya); 'Habis pakai' = "
+        "consumable/oli; 'Part perawatan berkala' = item servis; 'Sering dipakai "
+        "after-sales' = FAST MOVING, ⛔ BUKAN penanda aus. Part unit ini yang TIDAK "
+        "berpenanda bukan berarti awet — katalog memang tak memberi cap pada semuanya. "
+        "'dasar_penanda' menyebut dari mana cap diambil. Default HANYA katalog model "
+        "unit ini — cap dari model lain sengaja TIDAK dicampur (dulu itu membuat 24 "
+        "part aus terbaca 510, lengkap dengan pemantik rokok & relay). Bila ada "
+        "'part_bercap_di_model_lain', itu jumlah part yang dicap katalog model lain "
+        "dan BELUM dihitung; sebutkan angkanya bila relevan. "
+        "'penanda_berbeda' = katalog antar-model memberi cap BERBEDA untuk PN itu "
+        "(mis. aus di satu model, sering-dipakai di model lain) — sebut apa adanya. "
+        "Untuk posisi DEPAN/BELAKANG sebuah part aus (mis. kampas rem), pakai "
+        "part_aus_dari_rangka. ⛔ Jangan menambah PN di luar daftar ini."
+    )
+    return out
+
+
+def _t_part_aus_katalog(args: dict, user: dict) -> dict:
+    """SEMUA part ber-penanda aus/habis-pakai/perawatan satu unit — dari kolom
+    keterangan katalog, tanpa user perlu menyebut nama partnya."""
+    unit = (args.get("unit") or args.get("model") or "").strip()
+    rangka = (args.get("rangka") or "").strip()
+
+    # ── Jalur PER-UNIT (paling presisi): BOM pabrik unit itu × penanda katalog.
+    # Hanya part yang BENAR-BENAR terpasang di unit ini yang dihitung — beda
+    # nyata dari daftar per-model (SJ346500: 1.078 part terpasang, 205 bercap aus).
+    if rangka:
+        try:
+            ll = epc_bom.loading_list(rangka)
+        except Exception:
+            logger.exception("part_aus_katalog: loading_list gagal")
+            ll = {"found": False, "_err": "exception"}
+        if ll.get("found"):
+            # Model unit ini (bila terdaftar) → penanda katalog MODEL-nya sendiri
+            # diutamakan; peta global jadi jaring kedua.
+            model_unit = unit or _unit_katalog_dari_vin(rangka)
+            try:
+                peta = part_index.remark_map()
+                peta_model = part_index.remark_map(model_unit) if model_unit else {}
+            except Exception:
+                logger.exception("part_aus_katalog: remark_map gagal")
+                peta, peta_model = {}, {}
+            if peta or peta_model:
+                return _aus_per_unit(ll, peta, peta_model, rangka,
+                                     minta=(args.get("kelompok") or "").strip().lower(),
+                                     user=user,
+                                     warisan=bool(args.get("sertakan_penanda_model_lain")))
+        # EPC gagal/tak kenal → BOLEH turun ke daftar per-MODEL, tapi WAJIB
+        # diberi tahu bahwa itu bukan daftar unit ini (mencampur keduanya diam-diam
+        # membuat user mengira part di daftar pasti ada di unitnya).
+        turun_ke_model = True
+    else:
+        turun_ke_model = False
+
+    if rangka and not unit:
+        # VIN → model lewat populasi (kode model EPC bersandi lain — lihat
+        # fast_moving.peta_populasi yang dipakai tool fast moving).
+        try:
+            from . import fast_moving          # impor lokal — pola p5_tools_epc
+            frame = rangka.upper()[-8:]
+            unit = ((fast_moving.peta_populasi() or {}).get(frame) or {}).get("model") or ""
+        except Exception:
+            logger.exception("part_aus_katalog: peta populasi gagal")
+    if not unit:
+        return {"error": ("Sebutkan unit/model (mis. 'NX360', 'HOWO-380') — atau nomor "
+                          "rangka yang terdaftar di populasi. Nomor rangka yang belum "
+                          "terdaftar TIDAK bisa dipetakan ke model; minta user "
+                          "menyebutkan modelnya."),
+                "unit_tersedia": [u["unit"] for u in part_index.unit_models()][:40]}
+
+    minta = (args.get("kelompok") or "").strip().lower()
+    try:
+        rows = part_index.rows_with_remark(unit)
+    except Exception:
+        logger.exception("part_aus_katalog: baca katalog gagal")
+        return {"error": "Gagal membaca katalog — ini kegagalan pengecekan, BUKAN bukti "
+                         "unit ini tak punya part aus.", "_cek_tak_lengkap": True}
+    if not rows:
+        return {"found": False, "unit_diminta": unit,
+                "unit_tersedia": [u["unit"] for u in part_index.unit_models()][:40],
+                "catatan": ("Tidak ada baris katalog berketerangan untuk unit itu. Bisa "
+                            "berarti nama unitnya beda (lihat 'unit_tersedia') ATAU "
+                            "katalog unit itu memang tak mengisi kolom keterangan — "
+                            "⛔ jangan simpulkan 'unit ini tak punya part aus'.")}
+
+    # DEDUP per PN. Satu model kerap punya BEBERAPA berkas katalog varian
+    # (HOWO-380 → LZZ1ELSF/LZZ5DLSD/LZZ5DMSD/LZZ5ELSD), jadi PN yang sama muncul
+    # berulang; tanpa dedup jumlahnya menggelembung berkali lipat dan daftar
+    # tampak penuh pengulangan. Klasifikasi pertama menang (berkas terurut),
+    # tapi varian unit tempat PN itu muncul tetap dicatat.
+    per_kel: dict[str, dict] = {}
+    lihat_kel: dict[str, str] = {}          # pn -> kelompok pertama
+    unit_nyata: set = set()
+    for r in rows:
+        kel = _kelompok_remark(r["remark"])
+        if not kel or (minta and kel != minta):
+            continue
+        unit_nyata.add(r["unit"])
+        pn = r["pn"]
+        kel0 = lihat_kel.setdefault(pn, kel)
+        item = per_kel.setdefault(kel0, {}).get(pn)
+        if item is None:
+            per_kel[kel0][pn] = {"pn": pn, "nama": r["nama"],
+                                 "keterangan_katalog": r["remark"],
+                                 "_unit": {r["unit"]}}
+        else:
+            item["_unit"].add(r["unit"])
+            if not item["nama"] and r["nama"]:
+                item["nama"] = r["nama"]
+    per_kel = {k: list(v.values()) for k, v in per_kel.items()}
+
+    if not per_kel:
+        return {"found": False, "unit_diminta": unit,
+                "catatan": "Katalog unit ini punya kolom keterangan, tapi tak ada baris "
+                           "berpenanda aus/habis-pakai/perawatan."}
+
+    # Stok & harga: sekali lookup untuk seluruh PN (indeks lokal, nol jaringan).
+    semua_pn = [x["pn"] for v in per_kel.values() for x in v]
+    lokal: dict = {}
+    if _boleh_stok(user) or _boleh_harga(user):
+        try:
+            lokal = part_index.rows_for_pns(semua_pn[:400])
+        except Exception:
+            lokal = {}
+    dipotong = 0
+    hasil: dict = {}
+    for kel, daftar in per_kel.items():
+        daftar.sort(key=lambda x: x["nama"] or x["pn"])
+        if len(daftar) > _MAX_AUS_KATALOG:
+            dipotong += len(daftar) - _MAX_AUS_KATALOG
+            daftar = daftar[:_MAX_AUS_KATALOG]
+        for x in daftar:
+            lr = lokal.get(x["pn"]) or {}
+            if lr and _boleh_stok(user):
+                x["stok_total"] = lr.get("stok")
+            if lr and _boleh_harga(user):
+                x["harga_lokal"] = lr.get("harga")
+            # PN yang hanya ada di SEBAGIAN varian model itu fakta penting bagi
+            # pembeli — disebutkan hanya bila memang tak menyeluruh.
+            unit_pn = sorted(x.pop("_unit", ()) or ())
+            if unit_pn and len(unit_pn) < len(unit_nyata):
+                x["hanya_di_varian"] = unit_pn
+        hasil[_REMARK_LABEL[kel]] = daftar
+
+    out = {"found": True, "unit_diminta": unit,
+           "unit_katalog": sorted(unit_nyata),
+           "tingkat": "per MODEL (katalog), bukan per unit",
+           "jumlah_per_kelompok": {_REMARK_LABEL[k]: len(v) for k, v in per_kel.items()},
+           "part": hasil}
+    if dipotong:
+        out["terpotong"] = dipotong
+    if turun_ke_model:
+        # User MENYEBUT nomor rangka tapi daftar per-unitnya tak bisa diambil.
+        # Menyajikan daftar model tanpa berkata apa-apa akan dibaca sebagai
+        # "ini isi unit saya" — padahal belum tentu terpasang di sana.
+        out["_cek_tak_lengkap"] = True
+        out["peringatan"] = (
+            f"Daftar part unit {rangka.upper()} TIDAK bisa diambil dari EPC sekarang, "
+            f"jadi yang ditampilkan adalah daftar per MODEL '{unit}'. Sebagian part di "
+            "sini BELUM tentu terpasang di unit itu — sampaikan hal ini ke user dan "
+            "tawarkan mencoba lagi untuk daftar persis unitnya.")
+    out["catatan"] = (
+        "Penanda ini dari KOLOM KETERANGAN katalog resmi pabrik — bukan tafsiran nama "
+        "part. Kelompoknya BEDA arti dan ⛔ JANGAN digabung: 'Part RAWAN RUSAK' (易损件) "
+        "= part yang WAJAR rusak & diganti (termasuk PECAH/MATI: kaca, saklar, lampu) — "
+        "⛔ jangan disebut 'part aus' polos; komponen "
+        "yang memang habis terpakai; 'Habis pakai' = consumable/oli-cairan; 'Part "
+        "perawatan berkala' = item servis; 'Sering dipakai after-sales' = FAST MOVING, "
+        "⛔ BUKAN penanda aus — jangan menyebutnya part aus. Ini daftar per MODEL "
+        "(katalog), bukan per-VIN: untuk part PERSIS unit tertentu dengan posisi "
+        "depan/belakang, tetap pakai part_aus_dari_rangka. Bila 'terpotong' ada, "
+        "sebutkan bahwa daftarnya dipotong. ⛔ Jangan menambah PN di luar daftar ini."
+    )
+    return out
+
+
+# ── Bengkel resmi Sinotruk (2026-08-08) ─────────────────────────────────────
+# Dataset SIMS yang selama ini tak tersentuh sama sekali (0 referensi di kode):
+# direktori jaringan bengkel resmi + alamat, telepon, dan koordinat.
+_STATUS_BENGKEL = {"s-station-status-use": "aktif", "s-station-status-stop": "berhenti"}
+_MAX_BENGKEL = 40
+
+
+def _t_bengkel_resmi(args: dict, user: dict) -> dict:
+    """Daftar bengkel/service station resmi Sinotruk, boleh disaring kata kunci
+    (kota/nama/kode). Sumber: SIMS, indeks kecil ber-cache."""
+    rows = sims.stations()
+    if rows is None:
+        return {"error": "Daftar bengkel resmi GAGAL diambil dari SIMS sekarang — ini "
+                         "kegagalan pengecekan, BUKAN berarti tidak ada bengkel. "
+                         "Coba lagi sebentar.",
+                "_cek_tak_lengkap": True}
+    q = (args.get("kata_kunci") or args.get("kota") or "").strip().lower()
+
+    def _cocok(r: dict) -> bool:
+        if not q:
+            return True
+        gabung = " ".join(str(r.get(k) or "") for k in
+                          ("stationName", "stationEngName", "stationShortName",
+                           "stationCode", "stationAddress", "stationAddressEN",
+                           "countryName")).lower()
+        return q in gabung
+
+    hasil = []
+    for r in rows:
+        if not _cocok(r):
+            continue
+        item = {
+            "kode": r.get("stationCode") or "",
+            "nama": r.get("stationName") or r.get("stationEngName") or "",
+            "alamat": r.get("stationAddress") or r.get("stationAddressEN") or "",
+            "status": _STATUS_BENGKEL.get(r.get("stationStatus") or "",
+                                          r.get("stationStatus") or ""),
+        }
+        for kunci, label in (("hotLine", "telepon"), ("email", "email"),
+                             ("serviceManagerPhone", "hp_manajer"),
+                             ("countryName", "negara")):
+            if str(r.get(kunci) or "").strip():
+                item[label] = str(r[kunci]).strip()
+        lat, lon = r.get("latitude"), r.get("longitude")
+        if lat not in (None, "") and lon not in (None, ""):
+            item["koordinat"] = f"{lat},{lon}"
+        hasil.append(item)
+
+    out = {"found": bool(hasil), "jumlah_total": len(rows), "jumlah_cocok": len(hasil),
+           "bengkel": hasil[:_MAX_BENGKEL]}
+    if len(hasil) > _MAX_BENGKEL:
+        out["terpotong"] = len(hasil) - _MAX_BENGKEL
+    if q:
+        out["kata_kunci"] = q
+    out["catatan"] = (
+        "Direktori bengkel RESMI Sinotruk dari SIMS. Sajikan nama + alamat + telepon "
+        "yang ADA; field yang tak muncul memang tak diisi SIMS — ⛔ jangan mengarang "
+        "nomor telepon/alamat. 'koordinat' boleh dipakai user untuk membuka peta. "
+        "Bila jumlah_cocok=0, katakan tak ada bengkel yang cocok kata kunci itu dan "
+        "sebutkan jumlah_total bengkel yang terdaftar — ⛔ jangan menyimpulkan "
+        "'tidak ada bengkel di Indonesia'. ⛔ Ini BUKAN gudang/cabang penjualan part "
+        "kita sendiri (itu stok_gudang) — ini jaringan bengkel resmi pabrik."
+    )
+    return out
+
+
 def _t_info_aplikasi(args: dict, user: dict) -> dict:
     st = part_index.status()
     rate, rate_note = harga.get_rate()

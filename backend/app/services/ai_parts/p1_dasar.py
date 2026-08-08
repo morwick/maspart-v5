@@ -38,7 +38,7 @@ from . import (abs_scr_codes, accurate, ai_belajar, ai_chat_log, ai_export, ai_k
                manual_teks, orders, part_index, part_taxonomy, pengetahuan,
                pengetahuan_index, pin_ecu, populasi,
                rak, repairkit, reservations, search_log, sims, sims_eol, sims_warranty, sinonim,
-               skema_ref, telematics, wiring_ref)
+               skema_ref, telematics, weichai_replace, wiring_ref)
 
 logger = logging.getLogger("maspart.ai")
 
