@@ -73,8 +73,18 @@ _TIMEOUT = 120
 # Benih per panggilan LLM. 25 terbukti terlalu banyak: 25 grup × ~5 trigger
 # menabrak max_tokens dan respons JSON-nya terpotong di tengah ("Unterminated
 # string") → seluruh batch hangus. 15 memberi ruang lega.
-_BATCH = 15
+# ⚠️ 2026-08-09: model sekarang (deepseek-v4-flash) adalah REASONING model —
+# 85-88% completion token habis untuk penalaran (terukur: 3.388 dari 3.844).
+# Dengan _BATCH=15 & max_tokens=4000, JSON balasan TERPOTONG di tengah string
+# ("Unterminated string") dan seluruh batch hangus; batch yang lolos pun
+# confidence-nya tertekan ke 0,5 (di bawah _MIN_CONF) sehingga builder ini
+# DIAM-DIAM menghasilkan NOL entri. Batch dikecilkan + anggaran token dinaikkan;
+# terukur ulang: 8 grup → 8 usulan utuh, confidence menyebar 0,5-0,85.
+_BATCH = 8
 _MIN_CONF = 0.55     # di bawah ini usulan dibuang — dataset ini tak diaudit manual
+# Batas jumlah GRUP yang boleh berbagi satu trigger saat --merge. Di atas ini
+# trigger berhenti membedakan sistem & justru mencemari expand_query.
+_MAKS_GRUP_PER_TRIGGER = 5
 _MAX_KEYWORDS = 5
 
 _PROMPT_SISTEM = (
@@ -210,7 +220,11 @@ def _llm(batch: list[dict], gap: list[str]) -> list[dict]:
                 {"role": "user", "content": f"Kelompok part:\n{daftar}"},
             ],
             "temperature": 0.0,
-            "max_tokens": 4000,
+            # Harus jauh di atas kebutuhan JSON-nya: penalaran model ikut memakan
+            # jatah ini (lihat catatan _BATCH). Kekurangan token TIDAK memberi
+            # error dari API — balasannya cuma terpotong, lalu json.loads gagal
+            # dan SELURUH batch hilang tanpa jejak selain satu baris "GAGAL".
+            "max_tokens": 12000,
             "response_format": {"type": "json_object"},
         },
         timeout=_TIMEOUT,
@@ -307,6 +321,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Bangun data/sinonim/gejala_map.json")
     ap.add_argument("--limit", type=int, default=400,
                     help="maksimal grup kamus yang diproses (default 400 = semua)")
+    ap.add_argument("--mulai", type=int, default=0,
+                    help="lewati N benih pertama — untuk memotong panen jadi beberapa "
+                         "jalan tanpa MEMBAYAR ULANG benih yang sudah diproses "
+                         "(pakai bersama --merge)")
     ap.add_argument("--dry-run", action="store_true", help="tampilkan saja, jangan tulis")
     ap.add_argument("--merge", action="store_true",
                     help="gabung dengan gejala_map.json yang sudah ada")
@@ -317,6 +335,8 @@ def main() -> int:
         return 1
 
     benih = _benih(args.limit)
+    if args.mulai:
+        benih = benih[args.mulai:]
     if not benih:
         print("❌ Kamus sinonim kosong (data/sinonim/sinonim.json) — tak ada benih.")
         return 1
@@ -351,10 +371,53 @@ def main() -> int:
                 lama = json.loads(p.read_text(encoding="utf-8")) or []
             except Exception:
                 lama = []
-        ada = {str(e.get("grup") or "").lower() for e in entri}
-        entri += [e for e in lama
-                  if isinstance(e, dict) and str(e.get("grup") or "").lower() not in ada]
-        print(f"Digabung dgn dataset lama → {len(entri)} entri")
+        # ⚠️ UNION per grup, BUKAN 'baru menimpa lama'. Aturan lama membuang
+        # trigger lama begitu grupnya diregenerasi: run 2026-08-09 menghasilkan
+        # 285 trigger BARU tapi sekaligus MENGHAPUS 302 trigger lama — total
+        # coverage TURUN (763 → 746) padahal token sudah dibayar. Kerugiannya
+        # senyap: jumlah ENTRI nyaris tak berubah, hanya jumlah TRIGGER yang
+        # menyusut. Union menjaga keduanya (763 + 285 → 1.048).
+        # LAMA dipertahankan UTUH; trigger BARU hanya diterima bila setelahnya ia
+        # masih muncul di ≤ _MAKS_GRUP grup. expand_query menyuntikkan keyword
+        # SETIAP grup yang cocok, jadi trigger yang menempel di 20-30 grup
+        # berhenti menunjuk sistem mana pun — union naif sempat menaikkan
+        # 'ngelitik' dari 7 → 20 grup dan trigger generik 24 → 53.
+        by_grup: dict[str, dict] = {}
+        for e in lama:
+            if not isinstance(e, dict) or not str(e.get("grup") or ""):
+                continue
+            by_grup[str(e["grup"]).lower()] = {
+                "grup": e["grup"], "triggers": list(e.get("triggers") or []),
+                "keywords": list(e.get("keywords") or [])}
+        hitung: dict[str, int] = {}
+        for e in by_grup.values():
+            for t in e["triggers"]:
+                hitung[str(t).lower()] = hitung.get(str(t).lower(), 0) + 1
+        ditolak = 0
+        for e in entri:
+            g = str(e.get("grup") or "")
+            if not g:
+                continue
+            cur = by_grup.setdefault(g.lower(), {"grup": g, "triggers": [], "keywords": []})
+            punya = {str(t).lower() for t in cur["triggers"]}
+            for t in (e.get("triggers") or []):
+                tl = str(t).lower()
+                if tl in punya:
+                    continue
+                if hitung.get(tl, 0) + 1 > _MAKS_GRUP_PER_TRIGGER:
+                    ditolak += 1
+                    continue
+                cur["triggers"].append(t)
+                punya.add(tl)
+                hitung[tl] = hitung.get(tl, 0) + 1
+            for w in (e.get("keywords") or []):
+                if w and w not in cur["keywords"]:
+                    cur["keywords"].append(w)
+        sebelum_t = len({str(t).lower() for e in lama for t in (e.get("triggers") or [])})
+        entri = sorted(by_grup.values(), key=lambda e: str(e.get("grup") or ""))
+        sesudah_t = len({str(t).lower() for e in entri for t in (e.get("triggers") or [])})
+        print(f"Digabung (UNION, lama dipertahankan) → {len(entri)} entri, "
+              f"trigger {sebelum_t} → {sesudah_t}; ditolak krn generik: {ditolak}")
 
     for e in entri[:10]:
         print(f"  · {', '.join(e['triggers'][:3])} → {', '.join(e['keywords'])}")

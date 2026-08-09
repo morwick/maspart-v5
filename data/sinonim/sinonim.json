@@ -3981,5 +3981,100 @@
     "keywords": [
       "swing bearing"
     ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "kunci kap",
+      "kunci kap mesin"
+    ],
+    "keywords": [
+      "hood lock"
+    ]
+  },
+  {
+    "grup": "kelistrikan",
+    "triggers": [
+      "kotak aki"
+    ],
+    "keywords": [
+      "battery box"
+    ]
+  },
+  {
+    "grup": "gejala:gardan-dengung",
+    "triggers": [
+      "gardan berdengung",
+      "gardan gemuruh"
+    ],
+    "keywords": [
+      "differential bearing",
+      "differential",
+      "rear axle"
+    ]
+  },
+  {
+    "grup": "gejala:kopling-nyeplos",
+    "triggers": [
+      "kopling nyeplos",
+      "kopling ngelos",
+      "kopling los"
+    ],
+    "keywords": [
+      "clutch master cylinder",
+      "release bearing",
+      "clutch driven disc"
+    ]
+  },
+  {
+    "grup": "gejala:king-pin-oblak",
+    "triggers": [
+      "king pin oblak"
+    ],
+    "keywords": [
+      "king pin"
+    ]
+  },
+  {
+    "grup": "gejala:laher-roda-oblak",
+    "triggers": [
+      "roda oblak",
+      "bearing roda oblak"
+    ],
+    "keywords": [
+      "wheel hub bearing"
+    ]
+  },
+  {
+    "grup": "gejala:turbo-bocor-oli",
+    "triggers": [
+      "turbo bocor oli",
+      "turbo keluar oli"
+    ],
+    "keywords": [
+      "turbocharger"
+    ]
+  },
+  {
+    "grup": "gejala:radiator-luber",
+    "triggers": [
+      "radiator luber",
+      "air radiator luber"
+    ],
+    "keywords": [
+      "expansion tank",
+      "water pump"
+    ]
+  },
+  {
+    "grup": "gejala:ban-makan-sebelah",
+    "triggers": [
+      "ban makan sebelah",
+      "ban habis sebelah"
+    ],
+    "keywords": [
+      "wheel hub bearing",
+      "wheel rim"
+    ]
   }
 ]
