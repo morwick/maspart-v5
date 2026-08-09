@@ -201,6 +201,12 @@ def search(
         sims_results = _sims_fallback(q)
         if sims_results:
             results = results + sims_results
+    if not results:
+        # Kotak PN sering diisi NAMA part. Bukti log Pencarian Nihil: 'fuel
+        # filter' tercatat GAGAL 5× di sini, padahal pencarian NAMA memberi 571
+        # hasil — user tak punya cara tahu ia salah kotak. Fallback ini dijalankan
+        # PALING AKHIR supaya pencarian PN tetap presisi.
+        results = part_index.search_part_name(q)
     saran: list[dict] = []
     if not results:
         # "Mungkin maksud Anda" — PN katalog selisih 1-2 karakter + nama mirip
@@ -208,6 +214,15 @@ def search(
         saran = (part_index.suggest_pns(q) + part_index.suggest_names(q, limit=6))[:6]
         if page == 1:
             search_log.record_miss(q, "pn", "search")
+    elif page == 1:
+        # Query ini KETEMU sekarang → cabut dari daftar Pencarian Nihil bila
+        # pernah tercatat. Tanpa ini daftar bukti admin makin lama makin basi:
+        # 13% entri (38 kejadian) ternyata sudah bisa ditemukan hari ini, dan
+        # miss basi itu menyesatkan saat dipakai memprioritaskan pekerjaan.
+        try:
+            search_log.resolve_miss(q)
+        except Exception:
+            pass
     return _paginate(q, _gate_kolom(_overlay_accurate(_scope_gudang(results, user)), user),
                      page, page_size, saran=saran)
 
@@ -244,6 +259,11 @@ def search_name(
         saran = part_index.suggest_names(q, limit=6)
         if page == 1:
             search_log.record_miss(q, "name", "search")
+    elif page == 1:
+        try:
+            search_log.resolve_miss(q)      # lihat catatan di endpoint /search
+        except Exception:
+            pass
     return _paginate(q, _gate_kolom(_overlay_accurate(_scope_gudang(results, user)), user),
                      page, page_size, saran=saran)
 
