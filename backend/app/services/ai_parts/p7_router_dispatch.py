@@ -164,6 +164,7 @@ _DISPATCH = {
     "kategori_massal_part": _t_kategori_massal_part,
     "spek_mesin": _t_spek_mesin,
     "part_aus_katalog": _t_part_aus_katalog,
+    "jadwal_servis_truk": _t_jadwal_servis_truk,
     "daftar_transmisi_assy": _t_daftar_transmisi_assy,
     "cek_populasi": _t_cek_populasi,
     "banding_part_armada": _t_banding_part_armada,

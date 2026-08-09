@@ -802,6 +802,37 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "jadwal_servis_truk",
+                "description": (
+                    "⭐ JADWAL SERVIS berbasis KILOMETER + KAPASITAS CAIRAN resmi pabrik "
+                    "(CNHTC) untuk TRUK Sinotruk. Menjawab: 'servis 40.000 km apa saja', "
+                    "'berapa liter oli mesin/coolant/oli gardan/oli transmisi', 'minyak "
+                    "kopling berapa', 'oli power steering apa', 'kapan ganti oli gardan'. "
+                    "Isi terverifikasi: oli mesin CH-4 15W/40 23 L; COOLANT 40-45 L "
+                    "(ASTM D3306, konsentrasi 40-60%); oli transmisi GL-5 85W/90 12-12,5 L "
+                    "ganti 60.000 km; gardan MCY13 18 L (poros tengah) & 14,5 L (belakang); "
+                    "power steering ATF III 5 L; minyak kopling DOT-3/4 0,5 L. "
+                    "Isi 'km' untuk daftar pekerjaan pada jarak tempuh itu, dan/atau "
+                    "'cairan' untuk kapasitas saja (terima istilah Indonesia: 'oli gardan', "
+                    "'air radiator', 'kopling'). "
+                    "⛔ CAKUPAN TERBATAS pada HOWO 371HP (gardan MCY13) — JANGAN "
+                    "digeneralisasi ke NX/SITRAK/V7X/HOMAN; sebutkan batas ini saat "
+                    "menjawab. ⛔ Untuk ALAT BERAT Shantui pakai jadwal_perawatan "
+                    "(berbasis JAM), bukan tool ini. ⛔ Kapasitas oli MESIN per unit "
+                    "bermesin Weichai lebih presisi lewat spek_mesin (per nomor mesin)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "km": {"type": "integer", "description": "Jarak tempuh (mis. 40000). Kosong = hanya kapasitas cairan."},
+                        "cairan": {"type": "string", "description": "Opsional: 'coolant', 'oli gardan', 'transmisi', 'kopling', 'steering'. Kosong = semua."},
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "part_aus_katalog",
                 "description": (
                     "⭐ DAFTAR PART RAWAN RUSAK / habis pakai / perawatan sebuah UNIT atau "

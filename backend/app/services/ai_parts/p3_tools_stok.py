@@ -2947,6 +2947,51 @@ def _t_sheet_pilih_sheet(args: dict, user: dict) -> dict:
                                  user, (args.get("nama_sheet") or "").strip())
 
 
+# ── Jadwal servis KM truk Sinotruk (2026-08-09) ─────────────────────────────
+# Menutup pertanyaan lapangan yang berbulan-bulan dijawab taksiran: "berapa liter
+# oli untuk service 40.000 km", kapasitas COOLANT, oli transmisi & gardan.
+# Sumber: PDF RESMI cnhtcgroup.com (bukan unggahan pihak ketiga).
+def _t_jadwal_servis_truk(args: dict, user: dict) -> dict:
+    """Jadwal servis berbasis KM + kapasitas cairan resmi (HOWO 371HP)."""
+    if not jadwal_servis_truk.available():
+        return {"error": "Data jadwal servis truk belum tersedia di server — ini "
+                         "kegagalan pengecekan, BUKAN bukti jadwalnya tak ada.",
+                "_cek_tak_lengkap": True}
+    m = jadwal_servis_truk.meta()
+    cairan_q = (args.get("cairan") or "").strip()
+    km_raw = args.get("km")
+
+    out: dict = {"cakupan": m.get("cakupan"), "sumber": m.get("sumber"),
+                 "url_sumber": m.get("url"), "interval_km": m.get("interval_km")}
+    if cairan_q or km_raw in (None, ""):
+        c = jadwal_servis_truk.cairan(cairan_q)
+        out["cairan"] = c
+        if cairan_q and not c:
+            out["cairan_tak_ketemu"] = cairan_q
+    if km_raw not in (None, ""):
+        j = jadwal_servis_truk.pada_km(km_raw)
+        out["servis"] = j
+        if not j.get("found"):
+            out["_cek_tak_lengkap"] = j.get("alasan") == "no_data"
+    out["catatan"] = (
+        "Jadwal & kapasitas RESMI pabrik (CNHTC) berbasis KILOMETER. "
+        f"⛔ CAKUPAN TERBATAS: {m.get('cakupan')} — JANGAN disodorkan sebagai "
+        "spesifikasi NX/SITRAK/V7X/HOMAN atau unit bergardan lain; dokumen OEM "
+        "lain memberi angka gardan BERBEDA untuk varian lain. Sebutkan batas ini "
+        "saat menjawab. "
+        "Kapasitas bisa BERTINGKAT: 'liter_min/liter_maks' = rentang (coolant "
+        "40-45 L) atau varian (transmisi 12/12,5 L dgn PTO), dan satu item bisa "
+        "punya BEBERAPA angka ber-'konteks' (gardan: 18 L tengah, 14,5 L belakang) "
+        "— ⛔ sebutkan konteksnya, jangan ambil satu angka saja. "
+        "Bila 'interval_persis' false, KM yang diminta user BUKAN interval resmi: "
+        "katakan Anda memakai interval terdekat, jangan mengarang jadwal khusus. "
+        "'pekerjaan' hanya memuat kerja SELAIN periksa rutin; jumlah item periksa "
+        "rutin ada di 'jumlah_item_periksa_rutin'. "
+        "⛔ Untuk ALAT BERAT Shantui pakai jadwal_perawatan (berbasis JAM), bukan ini."
+    )
+    return out
+
+
 # ── Part AUS resmi katalog (2026-08-08) ─────────────────────────────────────
 # Kolom KETERANGAN sheet katalog EPC memuat klasifikasi pemakaian dari pabrik dan
 # tak pernah dipakai siapa pun (26.181 baris terisi). Sebelum ini satu-satunya
