@@ -1326,6 +1326,36 @@ def _t_cek_massal_part(args: dict, user: dict) -> dict:
     return out
 
 
+def _t_permintaan_tak_terlayani(args: dict, user: dict) -> dict:
+    """Pencarian NIHIL → sinyal PEMBELIAN, sesudah dibersihkan.
+
+    Daftar Pencarian Nihil mentah tak bisa dipakai memutuskan pembelian: audit
+    2026-08-09 atas 207 entri produksi menemukan hanya 45% yang benar-benar
+    permintaan tak terlayani — 35% salah ketik (ada PN mirip), 13% sudah ketemu
+    hari ini, 6% cuma salah kotak pencarian. Modul layanannya memisahkan itu.
+
+    ADMIN-ONLY: memperlihatkan apa yang dicari pelanggan & apa yang tak kita
+    punya — bahan pengadaan, bukan konsumsi pembeli.
+    """
+    if not _is_admin(user):
+        return {"denied": True,
+                "error": "Daftar permintaan tak terlayani hanya untuk admin."}
+    try:
+        limit = max(1, min(int(args.get("limit") or 40), 100))
+    except (TypeError, ValueError):
+        limit = 40
+    try:
+        minim = max(1, int(args.get("min_kejadian") or 1))
+    except (TypeError, ValueError):
+        minim = 1
+    try:
+        umur = max(1, min(int(args.get("maks_umur_hari") or 60), 365))
+    except (TypeError, ValueError):
+        umur = 60
+    return permintaan_tak_terlayani.analisa(limit=limit, min_kejadian=minim,
+                                            maks_umur_hari=umur)
+
+
 _MAX_TERTAHAN_ROWS = 40
 
 

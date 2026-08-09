@@ -6,6 +6,75 @@
 # Urutan muat & pembagian: lihat _PARTS di ai_assistant.py.
 from __future__ import annotations
 
+# ── Gerbang konteks RANGKA (2026-08-09) ─────────────────────────────────
+# Ukuran produksi: blok TETAP tiap panggilan API = 77 spec tool (24.691 tok) +
+# system prompt (17.569 tok) ≈ 44.400 token, dan itu dibayar SETIAP RONDE tool.
+# Giliran 8 ronde di log nyata memakai 480.084 token masuk — mayoritas beban
+# tetap ini, bukan isi percakapan. 67% waktu giliran Agustus habis di MODEL
+# (3.829 dtk) vs tool (1.854 dtk), jadi memangkas prompt = memangkas latensi.
+#
+# Yang disembunyikan HANYA tool yang parameter WAJIB-nya 'rangka' — mustahil
+# dipanggil tanpa nomor rangka, jadi menawarkannya di percakapan tanpa rangka
+# adalah token murni terbuang. Daftarnya DITURUNKAN dari spec (bukan ditulis
+# tangan) supaya tool per-VIN baru ikut otomatis dan tak ada daftar basi.
+_RANGKA_KATA_RE = re.compile(
+    r"(rangka|\bvin\b|\bframe\b|chassis|no\.?\s*unit|unitnya|unit\s+(ini|itu|saya)"
+    r"|truk\s*(ini|saya)|mobil\s*(ini|saya))", re.I)
+_VIN_LONGGAR_RE = re.compile(r"\bL[A-HJ-NPR-Z0-9]{16}\b|\b[A-Z]{2}\d{6}\b")
+
+
+def _konteks_rangka(messages: list[dict] | None) -> bool:
+    """Apakah percakapan ini punya konteks NOMOR RANGKA?
+
+    ⚠️ SENGAJA PEMURAH. Salah-TAMPIL cuma memboroskan token; salah-SEMBUNYI
+    menyembunyikan alat yang dibutuhkan — kerusakan yang jauh lebih mahal. Maka
+    dipakai regex VIN/frame TANPA penyaringan PN (beda dari _rangka_candidates
+    yang membuang PN katalog), kata kunci rangka/VIN/unit, dan jejak tool
+    per-VIN yang sudah pernah dipanggil di percakapan ini. SEMUA peran pesan
+    dibaca — rangka kerap hanya ada di hasil tool / jawaban asisten sebelumnya.
+
+    ⛔ Ini TIDAK mengubah izin eksekusi: _allowed_tool_names sengaja memanggil
+    _tool_specs TANPA history, jadi bila model tetap memanggil tool per-VIN
+    (mis. mengingat dari giliran sebelumnya) panggilan itu TETAP dijalankan.
+    """
+    if messages is None:
+        return True                      # tanpa konteks → jangan gerbangi apa pun
+    for m in messages or []:
+        isi = (m or {}).get("content")
+        if not isinstance(isi, str) or not isi:
+            continue
+        if _VIN_LONGGAR_RE.search(isi.upper()) or _RANGKA_KATA_RE.search(isi):
+            return True
+    return False
+
+
+def _saring_pervin(specs: list[dict], history: list[dict] | None) -> list[dict]:
+    """Buang tool yang parameter WAJIB-nya 'rangka' bila percakapan tak
+    menyinggung rangka sama sekali.
+
+    Sengaja LANGKAH TERPISAH, bukan parameter _tool_specs: puluhan tes (dan
+    jalur _allowed_tool_names) memakai _tool_specs dengan 2 argumen, dan
+    menambah parameter di sana memutus semuanya sekaligus — tanda bahwa
+    tanda tangan itu memang antarmuka yang dipakai luas. Di sini penyaringan
+    jadi keputusan pemanggil, bukan sifat tersembunyi dari daftar spec.
+    """
+    if _konteks_rangka(history):
+        return specs
+
+    def _wajib_rangka(s: dict) -> bool:
+        # Bentuk spec TIDAK diasumsikan rapi: penyaring ini berdiri di jalur
+        # panas chat() — spec cacat harus lolos apa adanya, bukan menjatuhkan
+        # giliran user. (Tanpa ini, satu spec tanpa kunci 'function' = KeyError
+        # di tengah percakapan.)
+        try:
+            fn = (s or {}).get("function") or {}
+            return "rangka" in ((fn.get("parameters") or {}).get("required") or [])
+        except Exception:
+            return False
+
+    return [s for s in specs if not _wajib_rangka(s)]
+
+
 def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
     role = (user.get("role") or "").lower()
     specs = [
@@ -1792,6 +1861,37 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
     # Telematics / GPS armada (Sinotruk Fleet Service) — ADMIN-ONLY (bukan key
     # Menu Control): pelacakan real-time + operasi tulis ganti nama.
     if _is_admin(user):
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "permintaan_tak_terlayani",
+                "description": (
+                    "ADMIN. PERMINTAAN YANG TIDAK BISA DILAYANI — part yang DICARI user "
+                    "di aplikasi tapi tidak ada di katalog maupun stok lokal, dan sampai "
+                    "sekarang masih tidak ada. Bahan keputusan PEMBELIAN/pengadaan. "
+                    "Panggil untuk: 'part apa yang sering dicari tapi tidak kita punya', "
+                    "'apa yang perlu kita stok', 'permintaan yang tidak terlayani', "
+                    "'pencarian nihil', 'barang apa yang dicari pelanggan tapi kosong'. "
+                    "Hasilnya SUDAH dipisah: 'permintaan_tak_terlayani' (tak ada apa pun "
+                    "yang mirip = permintaan sungguhan) vs 'kemungkinan_salah_ketik' (ada "
+                    "PN mirip di katalog). ⛔ JANGAN usulkan membeli yang di kelompok "
+                    "salah ketik. ⛔ 'berapa_kali' = jumlah PENCARIAN, bukan jumlah order "
+                    "— jangan menyebutnya permintaan barang/PO. Query yang ternyata kini "
+                    "sudah ketemu otomatis dibuang (jumlahnya dilaporkan)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "limit": {"type": "integer",
+                                  "description": "Berapa baris teratas (default 40)."},
+                        "min_kejadian": {"type": "integer",
+                                         "description": "Abaikan yang dicari lebih jarang dari ini (default 1)."},
+                        "maks_umur_hari": {"type": "integer",
+                                           "description": "Abaikan permintaan lebih tua dari ini (default 60 hari)."},
+                    },
+                },
+            },
+        })
         specs.append({
             "type": "function",
             "function": {

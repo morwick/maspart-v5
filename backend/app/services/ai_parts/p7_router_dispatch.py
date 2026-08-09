@@ -175,6 +175,7 @@ _DISPATCH = {
     "info_aplikasi": _t_info_aplikasi,
     "stok_gudang": _t_stok_gudang,
     "stok_tertahan": _t_stok_tertahan,
+    "permintaan_tak_terlayani": _t_permintaan_tak_terlayani,
     "pesanan_bermasalah": _t_pesanan_bermasalah,
     "alternatif_ready": _t_alternatif_ready,
     "daftar_unit": _t_daftar_unit,

@@ -38,7 +38,7 @@ from . import (abs_scr_codes, accurate, ai_belajar, ai_chat_log, ai_export, ai_k
                knowledge_links,
                maintenance_ref, maksud, manual_media,
                manual_teks, orders, part_index, part_taxonomy, pengetahuan,
-               pengetahuan_index, pin_ecu, populasi,
+               pengetahuan_index, permintaan_tak_terlayani, pin_ecu, populasi,
                rak, repairkit, reservations, search_log, sims, sims_eol, sims_warranty, sinonim,
                skema_ref, telematics, weichai_replace, wiring_ref)
 
@@ -318,6 +318,43 @@ def _domain_block() -> str:
         return _DOMAIN_CACHE["text"]
     except Exception:
         logger.exception("gagal memuat ai_domain.md")
+        return ""
+
+
+# ── Blok ROUTING PER-VIN, dinamis (2026-08-09) ──────────────────────
+# Dulu bagian dari ai_domain.md → ikut SETIAP panggilan API, padahal aturannya
+# (part_aus_dari_rangka vs bom_dari_rangka vs uraikan_assembly, filter_unit,
+# banding_rangka, katalog_kategori) tak berguna tanpa nomor rangka. Diukur di
+# produksi: beban TETAP 44.400 token per panggilan × sampai 8 ronde = 480.084
+# token dalam satu giliran; 67% waktu giliran habis di model, bukan tool.
+# Sekarang: prompt statik tetap byte-identik (prompt-cache utuh) dan blok ini
+# disuntik sbg pesan system di EKOR — zona dinamis, sama spt kamus & rute.
+_PERVIN_CACHE: dict = {"mtime": None, "text": ""}
+_PERVIN_FILE = Path(__file__).parent / "ai_domain_pervin.md"
+
+
+def _pervin_block(messages: list[dict] | None = None) -> str:
+    """[ROUTING EPC PER-VIN] — hanya bila percakapan menyinggung nomor rangka.
+
+    Gerbangnya SATU fungsi dengan gerbang spec tool (_konteks_rangka) supaya
+    aturan & alat tak pernah timpang: mustahil aturan per-VIN muncul tanpa
+    tool-nya, atau sebaliknya. Pemurah — lihat catatan di _konteks_rangka.
+    """
+    if not _konteks_rangka(messages):
+        return ""
+    try:
+        p = _PERVIN_FILE
+        mt = p.stat().st_mtime if p.exists() else None
+        if mt is None:
+            logger.error("ai_domain_pervin.md tidak ada — blok per-VIN kosong")
+            return ""
+        if _PERVIN_CACHE["mtime"] != mt:
+            _PERVIN_CACHE["text"] = (p.read_text(encoding="utf-8")
+                                     .replace("\r\n", "\n").strip())
+            _PERVIN_CACHE["mtime"] = mt
+        return _PERVIN_CACHE["text"]
+    except Exception:
+        logger.exception("gagal memuat ai_domain_pervin.md")
         return ""
 
 

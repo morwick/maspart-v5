@@ -13,22 +13,44 @@ ADMIN = {"username": "admin", "role": "admin"}
 # Fase 3b: isi ai_domain.md DIPANGKAS dgn sengaja (28.510 → ±11rb chars) —
 # snapshot byte-identik 3a (sha f4b631cd…) pensiun; kini yang dijaga: aturan
 # keras inti tetap ada & ukuran terkendali.
-_PENANDA_WAJIB = (
+# 2026-08-09: sebagian aturan pindah ke ai_domain_pervin.md (blok DINAMIS,
+# hanya saat percakapan menyinggung rangka — lihat test_prompt_diet_pervin.py).
+# Invariannya karena itu digeser: yang dijaga bukan "ada di SATU berkas" tapi
+# "ada di prompt yang BENAR-BENAR dikirim" saat aturan itu relevan.
+_PENANDA_STATIK = (
     "PENGETAHUAN DOMAIN — TRANSMISI / GEARBOX",
     "LARANGAN MUTLAK MENGARANG PART NUMBER",
-    "ATURAN PALING KERAS",
+    "AKURASI PER-UNIT",
+)
+_PENANDA_PERVIN = (
+    "ATURAN KERAS",
     "DEPAN ≠ BELAKANG",
     "part_aus_dari_rangka",
     "sumber='mesin'",  # Fase 4: uraikan_mesin dilebur → uraikan_assembly(sumber='mesin')
-    "AKURASI PER-UNIT",
 )
+_ADA_RANGKA = [{"role": "user", "content": "kampas rem SJ346500"}]
 
 
 def test_domain_block_terpangkas_tapi_aturan_inti_utuh():
     blok = A._domain_block()
-    assert 8_000 < len(blok) < 16_000  # terpangkas dari 28.510, tak menciut ekstrem
-    for p in _PENANDA_WAJIB:
+    assert 5_000 < len(blok) < 16_000  # terpangkas 28.510 → 9.456, tak menciut ekstrem
+    for p in _PENANDA_STATIK:
         assert p in blok, p
+
+
+def test_aturan_pervin_utuh_di_blok_dinamis():
+    """Dipindah ≠ hilang — saat rangka disebut, aturannya WAJIB ikut terkirim."""
+    blok = A._pervin_block(_ADA_RANGKA)
+    for p in _PENANDA_PERVIN:
+        assert p in blok, p
+
+
+def test_semua_aturan_inti_sampai_ke_model_saat_rangka_disebut():
+    """Uji gabungan: prompt yang benar-benar dikirim (statik + dinamis) tetap
+    memuat SELURUH aturan keras yang dulu dijamin satu berkas."""
+    terkirim = A._system_prompt(ADMIN) + "\n" + A._pervin_block(_ADA_RANGKA)
+    for p in _PENANDA_STATIK + _PENANDA_PERVIN:
+        assert p in terkirim, p
 
 
 def test_domain_block_stabil_antar_panggilan():
