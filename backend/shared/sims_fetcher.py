@@ -164,19 +164,22 @@ def _login_direct() -> str:
         files=form_data,
         timeout=30,
     )
-    print(f"[sims_fetcher] Login response: {resp.status_code} | {resp.text[:300]}")
+    # ⛔ JANGAN cetak resp.text: badan respons login BERISI TOKEN utuh, dan
+    # print() di sini masuk ke stdout container → tersimpan di log docker dan
+    # ikut ke mana pun log dikirim. Cukup status code.
+    print(f"[sims_fetcher] Login response: {resp.status_code}")
     resp.raise_for_status()
 
     data = resp.json()
     token = data.get("token", "")
     if not token:
-        raise RuntimeError(f"Token tidak ada di response: {resp.text[:200]}")
+        raise RuntimeError("Token tidak ada di response login SIMS "
+                           f"(status {resp.status_code}, {len(resp.text)} char)")
 
     if not token.startswith("Bearer "):
         token = f"Bearer {token}"
 
     print(f"[sims_fetcher] Login berhasil via direct API.")
-    print(f"[sims_fetcher] Token: {token[:60]}...")
     return token
 
 

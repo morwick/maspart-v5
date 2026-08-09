@@ -55,9 +55,20 @@ def _wc_headers(token: str) -> dict:
             "tenant-id": "1", "language": "en_US", "Referer": "https://epc-cloud.weichai.com/", **_UA}
 
 
-def _sino_getparam(frame: str) -> str:
-    """parms Weichai dari EPC Sinotruk (token Sinotruk; auto-refresh bila kedaluwarsa).
-    '' bila unit tak punya link Weichai / gagal."""
+def _sino_getparam(frame: str) -> tuple[str, str]:
+    """parms Weichai dari EPC Sinotruk → (param, sebab_gagal).
+
+    ⚠️ Dulu fungsi ini mengembalikan '' untuk TIGA hal yang sama sekali berbeda:
+    (a) unit memang bukan Weichai, (b) EPC Sinotruk tak menjawab, (c) token
+    bermasalah. Pemanggil lalu melaporkan semuanya sebagai 'unit ini tidak punya
+    link EPC Weichai' — klaim PALSU saat yang benar adalah 'kami GAGAL memERIKSA'.
+    Terbukti saat gangguan EPC 9 Agu 2026: user disuruh 'cek unit bermesin
+    Weichai dulu agar token aktif', saran yang mustahil ia jalankan karena
+    penyebabnya host Sinotruk macet.
+
+    sebab_gagal: '' (tak ada masalah) | 'network' | 'no_token' | 'api'.
+    Param kosong TANPA sebab = unit ini memang tak punya link Weichai.
+    """
     def _call() -> dict:
         tok = epc_bom._token()
         if not tok:
@@ -74,7 +85,8 @@ def _sino_getparam(frame: str) -> str:
     # getParam balas param kosong / error token → refresh token Sinotruk, coba lagi.
     if not res.get("param") and epc_bom.refresh_token():
         res = _call()
-    return (res.get("param") or "").strip()
+    param = (res.get("param") or "").strip()
+    return param, ("" if param else str(res.get("_err") or ""))
 
 
 # ── SPESIFIKASI MESIN dari respons getOrderNumber (2026-08-08) ──────────────
@@ -201,7 +213,21 @@ def _bridge(frame: str) -> dict:
         if c and (time.monotonic() - c["at"] < _CACHE_TTL):
             return c["val"]
 
-    param = _sino_getparam(frame)
+    param, sebab = _sino_getparam(frame)
+    if sebab:
+        # GAGAL MEMERIKSA — jangan pernah dilaporkan sbg 'bukan mesin Weichai'.
+        # Jembatan ke Weichai menumpang EPC Sinotruk (epc.sinotruk.com:18080),
+        # jadi saat Sinotruk macet jalur mesin ikut mati — dan itu yang harus
+        # dikatakan apa adanya, bukan menyalahkan unitnya.
+        return {"found": False, "reason": "sino_down", "gagal_dicek": True,
+                "message": ("Tidak bisa memeriksa mesin Weichai: server EPC Sinotruk "
+                            "(jembatan ke EPC Weichai) sedang tidak menjawab. Ini "
+                            "gangguan di pabrik, BUKAN berarti unit ini tanpa mesin "
+                            "Weichai — statusnya belum diketahui. Coba lagi nanti."
+                            if sebab == "network" else
+                            "Tidak bisa memeriksa mesin Weichai: token EPC Sinotruk "
+                            "bermasalah (minta admin me-refresh token EPC). Status "
+                            "mesin unit ini BELUM diketahui.")}
     if not param:
         return {"found": False, "reason": "no_link",
                 "message": "Unit ini tidak punya link EPC Weichai (mesin non-Weichai / rangka salah)."}
@@ -260,7 +286,7 @@ def _bridge(frame: str) -> dict:
 # svgFileId part assembly — yang itu 非法访问). Lihat memori weichai-katalog-gambar.
 _DEPREVIEW_URL = "https://epc-cloud.weichai.com/Api/common-api/common/file-storage/dePreview"
 
-_tok_cache: dict = {"token": "", "at": 0.0, "seed": ""}
+_tok_cache: dict = {"token": "", "at": 0.0, "seed": "", "sebab": ""}
 
 
 def fetch_svg(file_id: str, token: str) -> bytes | None:
@@ -290,18 +316,50 @@ _DEFAULT_SEED_FRAME = "RT108966"
 
 def _ensure_token(rangka: str = "") -> str:
     """Token Weichai valid: dari cache (fresh) atau mint via bridge (rangka bila ada,
-    lalu seed terakhir, lalu seed default). '' hanya bila mint pun gagal."""
+    lalu seed terakhir, lalu seed default). '' hanya bila mint pun gagal.
+
+    Sebab kegagalan TERAKHIR disimpan di _tok_cache['sebab'] agar pemanggil bisa
+    membedakan 'sesi belum aktif' dari 'EPC Sinotruk macet' — lihat _mint_gagal().
+    """
     with _lock:
         if _tok_cache["token"] and (time.monotonic() - _tok_cache["at"] < _CACHE_TTL):
             return _tok_cache["token"]
         seed = rangka or _tok_cache.get("seed") or ""
+    sebab = ""
     for s in (seed, _DEFAULT_SEED_FRAME):
         if not s:
             continue
         br = _bridge(epc_bom._frame(s))
         if br.get("found"):
+            with _lock:
+                _tok_cache["sebab"] = ""
             return br["token"]
+        if br.get("reason") == "sino_down":
+            sebab = "sino_down"
+    with _lock:
+        _tok_cache["sebab"] = sebab
     return ""
+
+
+def _mint_gagal() -> dict:
+    """Jawaban JUJUR saat token Weichai tak bisa didapat.
+
+    ⚠️ Dulu SELALU berbunyi 'Sesi EPC Weichai belum aktif — cek satu unit
+    bermesin Weichai dulu agar token aktif'. Saat gangguan EPC 9 Agu 2026 itu
+    menyuruh user melakukan hal yang MUSTAHIL: penyebabnya host Sinotruk macet,
+    dan 'cek satu unit' justru menempuh jalur yang sama-sama mati.
+    """
+    with _lock:
+        sebab = _tok_cache.get("sebab") or ""
+    if sebab == "sino_down":
+        return {"found": False, "reason": "sino_down", "gagal_dicek": True,
+                "message": ("Tidak bisa memeriksa data mesin: server EPC Sinotruk "
+                            "(jembatan ke EPC Weichai) sedang tidak menjawab — "
+                            "gangguan di pabrik. ⛔ Ini BUKAN berarti datanya tak "
+                            "ada; statusnya belum diketahui. Coba lagi nanti.")}
+    return {"found": False, "reason": "no_session",
+            "message": ("Sesi EPC Weichai belum aktif. Cek satu unit bermesin Weichai "
+                        "dulu (mis. 'cek piston unit <rangka>') agar token aktif, lalu ulangi.")}
 
 
 def _get(url: str, params: dict, token: str) -> dict:
@@ -426,9 +484,7 @@ def resolve_engine_order(no_mesin: str) -> dict:
         return {"found": False, "reason": "input", "message": "Nomor mesin kosong."}
     token = _ensure_token()
     if not token:
-        return {"found": False, "reason": "no_session",
-                "message": ("Sesi EPC Weichai belum aktif. Cek satu unit bermesin Weichai "
-                            "dulu (mis. 'cek piston unit <rangka>') agar token aktif, lalu ulangi.")}
+        return _mint_gagal()
     go = _get(_ORDER_URL, {"serialNumber": serial}, token)
     if "_err" in go:
         return {"found": False, "reason": go["_err"], "message": "Gagal ambil order mesin dari Weichai."}
@@ -848,9 +904,7 @@ def replace_part(part_number: str, rangka: str = "") -> dict:
         return {"found": False, "reason": "input", "message": "Sebutkan Part Number-nya."}
     token = _ensure_token(rangka)
     if not token:
-        return {"found": False, "reason": "no_session",
-                "message": "Sesi EPC Weichai belum aktif. Cek satu unit bermesin Weichai dulu "
-                           "(mis. 'cek piston unit <rangka>') agar token aktif, lalu ulangi."}
+        return _mint_gagal()
 
     records: list[dict] = []
     err_api = ""      # error jaringan/API yang menghentikan paginasi

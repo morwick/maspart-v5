@@ -21,6 +21,7 @@ nama Inggris / istilah Indonesia & stok/harga dilakukan di lapis pemanggil
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sys
 import threading
@@ -32,6 +33,8 @@ import requests
 import urllib3
 
 from ..core.config import get_settings
+
+logger = logging.getLogger("maspart.epc")
 
 # Sertifikat tidak relevan (HTTP), tapi redam warning bila nanti pindah ke HTTPS.
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -128,10 +131,20 @@ def refresh_token() -> str:
       3. Tulis token (hex, tanpa 'Bearer ') ke data/epc_token.txt.
     Kembalikan token hex, atau '' bila gagal (mis. SIMS down) → pemanggil jatuh ke
     pesan 'token kedaluwarsa' agar admin bisa isi manual sebagai cadangan."""
+    # Penukaran SSO ini menembak host EPC yang SAMA (/api/integrate/…) dan
+    # didahului login SIMS penuh. Saat EPC macet, keduanya pasti sia-sia: 30 dtk
+    # terbuang PLUS satu login SIMS percuma. Ikut pemutus arus.
+    if not _cb_boleh_jalan():
+        return ""
+    # ⚠️ Sesudah _cb_boleh_jalan() mengizinkan, kita MUNGKIN memegang jatah
+    # penjajakan (half-open). Jatah itu WAJIB dikembalikan lewat _cb_lapor di
+    # SEMUA jalur keluar — kalau tidak, bendera 'menjajaki' tersangkut True dan
+    # memblokir seluruh panggilan EPC selamanya.
     try:
         sf = _sims_fetcher()
         jwt = (sf._get_token() or "").replace("Bearer ", "").strip()
         if not jwt:
+            _cb_lapor(False)          # SIMS yang bermasalah, bukan EPC
             return ""
         r = requests.get(
             _SSO_EXCHANGE_URL,
@@ -139,17 +152,82 @@ def refresh_token() -> str:
             timeout=30, verify=False,
         )
         j = r.json()
+        _cb_lapor(False)              # EPC menjawab → sehat
         tok = ((j.get("data") or {}).get("token") or "").replace("Bearer ", "").strip()
         if not j.get("success") or not tok:
             return ""
         get_settings().data_path.joinpath("epc_token.txt").write_text(tok, encoding="utf-8")
         return tok
     except Exception:
+        _cb_lapor(True)               # tak ada balasan → hitung sbg gagal jaringan
         return ""
 
 
 def available() -> bool:
     return bool(_token())
+
+
+# ── PEMUTUS ARUS (circuit breaker) EPC ──────────────────────────────────
+# Gangguan 9 Agu 2026: nginx EPC sehat (menjawab '/' dalam 0,5 dtk) tapi SEMUA
+# jalur /api/rest/* diteruskan ke aplikasi yang macet — dan nginx TIDAK
+# mengembalikan 504, ia hanya menahan sambungan. Artinya satu-satunya yang
+# menghentikan kita adalah timeout kita sendiri: 3 percobaan × 30 dtk + jeda
+# ≈ 93 dtk PER PANGGILAN. Satu giliran user nyata membakar 338 detik untuk
+# jawaban yang takkan pernah datang.
+#
+# Maka: sesudah beberapa kegagalan JARINGAN beruntun, jalur EPC gagal CEPAT
+# selama beberapa menit, lalu satu permintaan dipakai sbg penjajakan
+# (half-open). Kegagalan 'api'/'token_expired' TIDAK menghitung — itu artinya
+# aplikasi EPC menjawab, cuma isinya menolak.
+_CB_AMBANG = 3          # kegagalan jaringan beruntun sebelum arus diputus
+_CB_JEDA = 120.0        # detik arus terbuka sebelum satu penjajakan diizinkan
+_cb_lock = threading.Lock()
+_cb: dict = {"gagal": 0, "buka_sampai": 0.0, "menjajaki": False}
+
+
+def circuit_reset() -> None:
+    """Kembalikan pemutus ke keadaan tertutup (dipakai tes & admin)."""
+    with _cb_lock:
+        _cb.update({"gagal": 0, "buka_sampai": 0.0, "menjajaki": False})
+
+
+def circuit_state() -> dict:
+    """Keadaan pemutus untuk diagnosa — jangan dipakai mengambil keputusan."""
+    with _cb_lock:
+        sisa = max(0.0, _cb["buka_sampai"] - time.monotonic())
+        return {"terbuka": sisa > 0, "sisa_detik": round(sisa, 1),
+                "gagal_beruntun": _cb["gagal"]}
+
+
+def _cb_boleh_jalan() -> bool:
+    """False = arus terbuka, jangan buang waktu menembak server yang diam."""
+    with _cb_lock:
+        if _cb["buka_sampai"] <= 0:
+            return True
+        if time.monotonic() < _cb["buka_sampai"]:
+            return False
+        # Jeda habis → izinkan SATU penjajakan; yang lain tetap ditahan sampai
+        # hasilnya diketahui (kalau tidak, badai permintaan menembak bersamaan).
+        if _cb["menjajaki"]:
+            return False
+        _cb["menjajaki"] = True
+        return True
+
+
+def _cb_lapor(gagal_jaringan: bool) -> None:
+    with _cb_lock:
+        _cb["menjajaki"] = False
+        if not gagal_jaringan:
+            if _cb["gagal"] or _cb["buka_sampai"]:
+                logger.info("EPC pulih — pemutus arus ditutup kembali")
+            _cb.update({"gagal": 0, "buka_sampai": 0.0})
+            return
+        _cb["gagal"] += 1
+        if _cb["gagal"] >= _CB_AMBANG:
+            _cb["buka_sampai"] = time.monotonic() + _CB_JEDA
+            logger.warning("EPC gagal %d× beruntun — arus diputus %.0f dtk "
+                           "(gagal cepat, tak menunggu server yang diam)",
+                           _cb["gagal"], _CB_JEDA)
 
 
 def _get(url: str, params: dict, timeout: int = 30, retries: int = 3) -> dict:
@@ -159,6 +237,12 @@ def _get(url: str, params: dict, timeout: int = 30, retries: int = 3) -> dict:
     `timeout`/`retries` bisa dinaikkan untuk endpoint yang memang RAKSASA
     (lihat _TIMEOUT_GLOBAL) — 30 dtk cukup untuk hampir semua panggilan Atlas,
     tapi jadi vonis 'network' palsu pada respons belasan MB."""
+    if not _cb_boleh_jalan():
+        # Sengaja memakai kode _err yang SAMA ('network'): seluruh pemanggil
+        # sudah menanganinya dengan jujur ("gagal menghubungi server EPC"), dan
+        # sebabnya memang sama — server pabrik tak menjawab. Penanda _circuit
+        # hanya untuk diagnosa.
+        return {"_err": "network", "_circuit": True}
     tok = _token()
     if not tok:
         return {"_err": "no_token"}
@@ -182,8 +266,11 @@ def _get(url: str, params: dict, timeout: int = 30, retries: int = 3) -> dict:
             break
         except Exception:
             if attempt == n - 1:
+                _cb_lapor(True)
                 return {"_err": "network"}
             time.sleep(1.0 + attempt)
+    # Sampai sini server MENJAWAB (apa pun isinya) → EPC hidup, tutup pemutus.
+    _cb_lapor(False)
     # EPC/proxy kadang balas JSON non-objek (null/array/string) → jangan crash di .get.
     if not isinstance(j, dict):
         return {"_err": "api", "message": "bad_json"}

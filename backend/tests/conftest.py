@@ -195,3 +195,18 @@ def _indeks_accurate_segar(monkeypatch):
         monkeypatch.setitem(accurate._index_cache, "ts", time.time())
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _pemutus_arus_epc_bersih():
+    """Keadaan pemutus arus EPC adalah state MODUL — kalau satu test membuatnya
+    terputus (mis. mensimulasi jaringan mati), test berikutnya akan menerima
+    {'_err':'network'} tanpa menyentuh stub-nya sama sekali dan gagal dengan
+    sebab yang sama sekali tak berhubungan. Bersihkan sebelum & sesudah."""
+    try:
+        from app.services import epc_bom
+        epc_bom.circuit_reset()
+        yield
+        epc_bom.circuit_reset()
+    except Exception:
+        yield
