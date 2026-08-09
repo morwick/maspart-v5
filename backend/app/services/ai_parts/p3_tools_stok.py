@@ -2973,6 +2973,25 @@ def _t_jadwal_servis_truk(args: dict, user: dict) -> dict:
         out["servis"] = j
         if not j.get("found"):
             out["_cek_tak_lengkap"] = j.get("alasan") == "no_data"
+
+    # Kapasitas gardan PER MODEL + torsi mur roda (dokumen resmi en.sinotruk.com).
+    # Menghapus batas "hanya MCY13" pada dataset jadwal: unit bergardan lain kini
+    # dapat angkanya sendiri, bukan angka MCY13 yang dipakai ulang diam-diam.
+    gardan_q = (args.get("gardan") or "").strip()
+    try:
+        if kapasitas_gardan.available():
+            if gardan_q or not (cairan_q or km_raw not in (None, "")):
+                g = kapasitas_gardan.cari_gardan(gardan_q)
+                out["gardan"] = g
+                if gardan_q and not g:
+                    out["gardan_tak_dikenal"] = gardan_q
+                    out["gardan_tersedia"] = [x["model"] for x in
+                                              kapasitas_gardan.cari_gardan()]
+            if args.get("torsi") or gardan_q:
+                out["torsi"] = kapasitas_gardan.torsi()
+            out["sumber_gardan"] = kapasitas_gardan.meta().get("sumber")
+    except Exception:
+        logger.exception("kapasitas gardan gagal dibaca (dilewati)")
     out["catatan"] = (
         "Jadwal & kapasitas RESMI pabrik (CNHTC) berbasis KILOMETER. "
         f"⛔ CAKUPAN TERBATAS: {m.get('cakupan')} — JANGAN disodorkan sebagai "
@@ -2987,6 +3006,13 @@ def _t_jadwal_servis_truk(args: dict, user: dict) -> dict:
         "katakan Anda memakai interval terdekat, jangan mengarang jadwal khusus. "
         "'pekerjaan' hanya memuat kerja SELAIN periksa rutin; jumlah item periksa "
         "rutin ada di 'jumlah_item_periksa_rutin'. "
+        "'gardan' = kapasitas oli PER MODEL GARDAN (MCY11/MCY13/AC16/AC26/HW16) dari "
+        "dokumen resmi Sinotruk — COCOKKAN dengan model gardan unit (cek_kendaraan "
+        "menyebutnya); 'liter' SUDAH total, 'rumus' seperti 17+2×2=21L artinya gardan "
+        "+ 2 hub. Bila model gardan user TIDAK ada di daftar ('gardan_tak_dikenal'), "
+        "⛔ JANGAN memakai angka model lain — katakan belum tercatat & sebut "
+        "'gardan_tersedia'. 'torsi' = torsi mur roda resmi (550-600 Nm; kencangkan "
+        "ULANG setelah ±50 km) — sampaikan angka & pengencangan ulangnya sekaligus. "
         "⛔ Untuk ALAT BERAT Shantui pakai jadwal_perawatan (berbasis JAM), bukan ini."
     )
     return out

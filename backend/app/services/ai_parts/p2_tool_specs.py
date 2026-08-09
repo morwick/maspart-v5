@@ -826,6 +826,8 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "properties": {
                         "km": {"type": "integer", "description": "Jarak tempuh (mis. 40000). Kosong = hanya kapasitas cairan."},
                         "cairan": {"type": "string", "description": "Opsional: 'coolant', 'oli gardan', 'transmisi', 'kopling', 'steering'. Kosong = semua."},
+                        "gardan": {"type": "string", "description": "Opsional: MODEL gardan unit (MCY11/MCY13/AC16/AC26/HW16) untuk kapasitas oli gardan yang TEPAT. Model gardan ada di hasil cek_kendaraan."},
+                        "torsi": {"type": "boolean", "description": "true → sertakan torsi mur roda resmi."},
                     },
                 },
             },
