@@ -3539,6 +3539,44 @@ def _status_jual_map(pns) -> dict:
     return out
 
 
+_CATATAN_AFTERMARKET = (
+    " 'padanan_aftermarket' (bila ada) = saran merek NON-OEM dari basis data PIHAK "
+    "KETIGA — ⛔ BUKAN supersession resmi pabrik dan ⛔ JANGAN dicampur ke "
+    "'digantikan_oleh'. Sampaikan sebagai REFERENSI + minta user mencocokkan "
+    "spesifikasi/fisik, dan sebut sumbernya pihak ketiga. Bila 'generik': true, "
+    "sebut sebagai petunjuk kasar saja — ⛔ jangan direkomendasikan. Field ini "
+    "TIDAK ADA untuk sebagian besar PN (cakupan sumbernya rendah): itu BUKAN "
+    "bukti tak ada padanan aftermarket."
+)
+
+
+def _sisip_aftermarket(out: dict, pn: str) -> None:
+    """Sisipkan PADANAN AFTERMARKET (pihak ketiga) ke hasil pengganti_part.
+
+    Dipisah TEGAS dari supersession resmi (SIMS/Weichai): sumbernya situs pihak
+    ketiga anonim tanpa lisensi data, cakupannya rendah (~8-17% PN filter), dan
+    sebagian entri generik. Mencampurnya ke 'digantikan_oleh' akan membuat saran
+    pihak ketiga tampak setara keputusan pabrik — persis yang tak boleh terjadi
+    pada pertanyaan interchange."""
+    try:
+        if not filter_crossref.available():
+            return
+        res = filter_crossref.cari(pn)
+    except Exception:
+        logger.exception("pengganti_part: padanan aftermarket gagal dibaca")
+        return
+    if not res.get("found"):
+        return
+    out["padanan_aftermarket"] = {
+        "jumlah": res.get("jumlah"),
+        "padanan": res.get("padanan"),
+        "generik": res.get("generik", False),
+        "sumber": res.get("sumber"),
+        "peringatan": res.get("peringatan"),
+        **({"terpotong": res["terpotong"]} if res.get("terpotong") else {}),
+    }
+
+
 def _t_pengganti_part(args: dict, user: dict) -> dict:
     """PERSAMAAN/PENGGANTI (supersession) part — 'PN lama X diganti PN baru Y'. DUA
     sumber resmi digabung: SIMS partEquivalentQuery (Sinotruk/HOWO SASIS, tabel 17k
@@ -3679,6 +3717,7 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
                    "error": "Tidak ada data persamaan/pengganti untuk PN ini "
                             "(sudah dicek SIMS Sinotruk & EPC Weichai)."}
         out["sumber_dicek"] = sumber_dicek
+        _sisip_aftermarket(out, pn)
         # Status jual RESMI portal SIMS untuk PN yang ditanya. Ini jawaban yang
         # SAH untuk "part ini masih dijual/discontinued?" — ⛔ bukan marketability
         # EPC (tafsirnya terbukti terbalik, lihat epc_bom._pasok_of). Absen =
@@ -3780,7 +3819,7 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
                              "keterbatasan itu bila menyampaikan hasilnya.")}
         if _gagal_ok else {}
     )
-    return {
+    hasil_akhir = {
         "found": True, "part_number": pn,
         **({"status_jual_sims": _sj_map[pn.upper()]} if _sj_map.get(pn.upper()) else {}),
         "digantikan_oleh": [_row(x) for x in diganti],
@@ -3788,7 +3827,10 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
         "sumber": sorted({x.get("sumber") for x in (diganti + lama) if x.get("sumber")}),
         "sumber_dicek": sumber_dicek,
         **_peringatan,
-        "catatan": ("'digantikan_oleh' = PN PENGGANTI (part baru) — sarankan ini bila PN yang "
+    }
+    _sisip_aftermarket(hasil_akhir, pn)
+    hasil_akhir["catatan"] = (
+                   ("'digantikan_oleh' = PN PENGGANTI (part baru) — sarankan ini bila PN yang "
                     "ditanya diskontinu/kosong stok; cek 'stok_total' mana yang ready. "
                     "'menggantikan' = PN LAMA yang digantikan part ini. 'sumber' SIMS = data "
                     "resmi Sinotruk/HOWO (sasis); Weichai = part mesin. ⛔ JANGAN mengarang PN — "
@@ -3797,8 +3839,9 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
                     "dasar sah untuk bilang part masih dijual / tidak) — bila field itu TIDAK "
                     "ADA, statusnya TAK DIKETAHUI: ⛔ JANGAN menyimpulkan 'discontinued'/"
                     "'stop produksi' dari mana pun. 'stok_dicek': false = stok belum bisa "
-                    "diperiksa, ⛔ jangan dibaca sebagai 'stok kosong'."),
-    }
+                    "diperiksa, ⛔ jangan dibaca sebagai 'stok kosong'.")
+                   + _CATATAN_AFTERMARKET)
+    return hasil_akhir
 
 
 def _repair_kit_mesin_impl(args: dict, user: dict) -> dict:

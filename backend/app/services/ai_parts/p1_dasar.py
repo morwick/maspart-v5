@@ -33,7 +33,7 @@ from . import (abs_scr_codes, accurate, ai_belajar, ai_chat_log, ai_export, ai_k
                ai_session, ai_sheet,
                catalog_bom, dtc_codes,
                dtc_diagnosa, eol_dtc, epc, epc_bom, epc_weichai, exploded_view,
-               fault_codes, fault_pdf, filter_ref,
+               fault_codes, fault_pdf, filter_crossref, filter_ref,
                gudang, gudang_config, harga, knowledge_links, maintenance_ref, maksud, manual_media,
                manual_teks, orders, part_index, part_taxonomy, pengetahuan,
                pengetahuan_index, pin_ecu, populasi,
