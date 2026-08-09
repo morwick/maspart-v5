@@ -1,7 +1,17 @@
 """Store DTC KANONIK — satu sumber untuk SEMUA kode kesalahan (union bertanda
 `sumber`): bosch (mesin Bosch MC, SPN/FMI, kini ber-deskripsi Indonesia dari
 kamus statik), eol (EOL CNHTC 52 unit ECU), abs (ABS WABCO SPN/FMI+Blink),
-scr (SCR gas 国V kode P).
+scr (SCR gas 国V kode P), kartu (lembar diagnosa PDF), eolcsv (arsip CSV EOL),
+sitrak (dataset KOMUNITAS — lihat di bawah).
+
+⚠️ sumber="sitrak" (2026-08-08, +3.316 pasangan SPN/FMI yang TAK ada di sumber
+resmi mana pun): dataset komunitas github.com/STAS63-bit/sitrak-error-codes,
+CC BY 4.0, atribusi WAJIB ke megadata.pro. Deskripsinya ~95% BAHASA RUSIA →
+kolom `deskripsi_ru` (pola sama dgn `deskripsi_cn` milik bosch); diterjemahkan
+saat MENJAWAB, bukan di builder. Ia hanya memuat ARTI kode — TANPA penyebab/
+langkah perbaikan. ⛔ Jangan disajikan setara lembar diagnosa resmi pabrik;
+build_dtc_store hanya memasukkan pasangan yang BELUM ada di sumber resmi
+(sumber resmi selalu menang). Regenerasi: tools/build_sitrak_dtc.py.
 
 Data: `dtc_codes.json.gz` — di-generate `tools/build_dtc_store.py` dari 3 tabel
 per-sumber (fault_codes.json, eol_dtc.json.gz, abs_scr_codes.json.gz) + kamus

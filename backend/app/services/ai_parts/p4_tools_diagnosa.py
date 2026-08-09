@@ -188,6 +188,10 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
             "fmi": r.get("fmi"),
             "deskripsi": r.get("deskripsi") or "",
             "deskripsi_cn": r.get("deskripsi_cn") or "",
+            # Teks asli Rusia dataset komunitas SITRAK (~95% baris sitrak hanya
+            # punya ini). Dibawa APA ADANYA — penerjemahan dilakukan saat menjawab,
+            # bukan di builder (⛔ tak ada panggilan model di jalur data).
+            "deskripsi_ru": r.get("deskripsi_ru") or "",
             "penyebab": r.get("penyebab") or "",
             "perbaikan": r.get("perbaikan") or "",
             "part_terkait": r.get("part") or "",
@@ -215,6 +219,13 @@ def _t_cari_kode_kesalahan(args: dict, user: dict) -> dict:
         "'hasil' = tabel mesin Bosch. Pakai kolom 'deskripsi' (SUDAH Bahasa "
         "Indonesia); 'deskripsi_cn' hanya fallback bila 'deskripsi' kosong — "
         "baru terjemahkan sendiri. MIL=lampu check engine, SVS=lampu servis. "
+        "⚠️ BARIS ber-sumber='sitrak' = dataset KOMUNITAS (bukan resmi pabrik): "
+        "artinya ada di 'deskripsi_ru' (BAHASA RUSIA) — TERJEMAHKAN ke Indonesia "
+        "saat menjawab, dan WAJIB sebutkan bahwa sumbernya basis data komunitas "
+        "SITRAK (megadata.pro, CC BY 4.0), BUKAN lembar diagnosa resmi Sinotruk. "
+        "⛔ JANGAN menyajikan langkah perbaikan seolah resmi untuk baris ini — ia "
+        "hanya memuat ARTI kode, tanpa penyebab/langkah. Bila kode yang sama juga "
+        "ada di sumber resmi (bosch/eol/abs/scr/kartu), DAHULUKAN yang resmi. "
         "'hasil_eol' & 'perbaikan_eol' = database EOL CNHTC resmi SEMUA unit "
         "kontrol (mesin, ABS/ESP, transmisi, BMS/VCU EV, BCM, airbag, radar, "
         "SCR) — SUDAH Bahasa Indonesia, berisi penyebab + LANGKAH PERBAIKAN + "

@@ -66,8 +66,10 @@ def test_union_jumlah_per_sumber():
 
 
 def test_semua_baris_punya_sumber_dan_unit():
+    # "sitrak" = dataset komunitas CC BY 4.0 (2026-08-08) yang menambal 3.316
+    # pasangan SPN/FMI di luar sumber resmi — lihat test_dtc_sitrak.py.
     for r in dtc_codes.rows():
-        assert r["sumber"] in ("bosch", "eol", "abs", "scr", "kartu", "eolcsv")
+        assert r["sumber"] in ("bosch", "eol", "abs", "scr", "kartu", "eolcsv", "sitrak")
         assert r["unit"]
 
 

@@ -60,7 +60,10 @@ def _baris(**kw) -> dict:
     b = {
         "sumber": "", "unit": "", "kode": "",
         "spn": None, "fmi": None,
-        "label": "", "deskripsi": "", "deskripsi_cn": "",
+        # deskripsi_ru: HANYA sumber "sitrak" (dataset komunitas berbahasa Rusia).
+        # Pola sama dgn deskripsi_cn milik bosch: teks ASLI disimpan apa adanya,
+        # `deskripsi` diisi hanya bila sumbernya memang menyediakan versi Inggris.
+        "label": "", "deskripsi": "", "deskripsi_cn": "", "deskripsi_ru": "",
         "penyebab": "", "perbaikan": "", "part": "",
         "reaksi": "", "lampu": "", "mil": "", "svs": "",
         "blink": "", "sid": None, "kartu": False,
@@ -235,7 +238,37 @@ def main() -> int:
         print(f"   arsip CSV: {len(tambahan)} pasangan dibaca; BARU (belum ada di "
               f"sumber lain): {len(csv_rows)} (ber-deskripsi Indonesia: {ber_id})")
 
-    rows = sorted(bosch + eol + abs_scr + kartu_rows + csv_rows, key=_sort_key)
+    # ── Dataset komunitas SITRAK (build_sitrak_dtc.py) — sumber KEENAM ──
+    # CC BY 4.0, atribusi megadata.pro. HANYA pasangan (spn,fmi) yang BELUM
+    # terwakili sumber resmi: sumber pabrik selalu menang, dataset komunitas
+    # hanya menambal lubang. Deskripsi ~95% Rusia → masuk `deskripsi_ru`, dan
+    # diterjemahkan saat MENJAWAB (bukan di builder — tak ada panggilan model).
+    # Fail-soft: tabelnya opsional, build tetap sukses tanpanya.
+    sitrak_rows: list[dict] = []
+    sp = SVC / "sitrak_dtc.json.gz"
+    if sp.exists():
+        payload = _read_json(sp)
+        src = payload.get("rows") if isinstance(payload, dict) else (payload or [])
+        sudah = {(r["spn"], r["fmi"]) for r in bosch + eol + abs_scr + kartu_rows + csv_rows
+                 if r["spn"] is not None and r["fmi"] is not None}
+        for r in src:
+            pair = (r.get("spn"), r.get("fmi"))
+            if pair[1] is None or pair in sudah:
+                continue
+            sudah.add(pair)
+            sitrak_rows.append(_baris(
+                sumber="sitrak", unit=r.get("sistem") or "SITRAK",
+                kode=(r.get("kode") or "").upper(),
+                spn=r["spn"], fmi=r["fmi"],
+                deskripsi=r.get("deskripsi_en") or "",
+                deskripsi_ru=r.get("deskripsi_ru") or "",
+            ))
+        ber_en = sum(1 for r in sitrak_rows if r["deskripsi"])
+        print(f"   SITRAK (komunitas, {payload.get('lisensi') if isinstance(payload, dict) else '?'}): "
+              f"{len(src)} baris dibaca; BARU: {len(sitrak_rows)} "
+              f"(ber-Inggris {ber_en}, sisanya Rusia → deskripsi_ru)")
+
+    rows = sorted(bosch + eol + abs_scr + kartu_rows + csv_rows + sitrak_rows, key=_sort_key)
 
     # ── validasi ──
     if len(bosch) != len(bosch_src) or len(eol) != len(eol_src) \
