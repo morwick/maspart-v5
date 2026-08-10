@@ -5218,6 +5218,7 @@ def _t_gambar_exploded_shantui(args: dict, user: dict) -> dict:
             ext="png")
         gambar.append({"image_id": image_id, "filename": filename, "balon": hl,
                        "nama_figure": f.get("assembly"),
+                       "kategori": f.get("subsistem_label"),   # dibaca _capture_meta (kanal inline)
                        "subsistem": f.get("subsistem_label"),
                        "kode_figure": f.get("kode"),
                        "ada_3d": bool(f.get("pvz_3d")),

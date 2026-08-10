@@ -212,3 +212,16 @@ def test_tool_token_expired_diteruskan(monkeypatch):
     sh._tree_cache.clear()
     r = ai._DISPATCH["tipe_unit_shantui"]({"model": "SE75"}, U)
     assert r.get("reason") == "token_expired"
+
+
+def test_exploded_shantui_di_whitelist_inline():
+    """⚠️ regresi: gambar exploded Shantui HARUS masuk _TOOLS_GAMBAR_INLINE, kalau
+    tidak PNG di-render tapi TAK PERNAH tampil di chat (bug 'mana gambarnya')."""
+    assert "gambar_exploded_shantui" in ai._TOOLS_GAMBAR_INLINE
+
+
+def test_exploded_shantui_gambar_punya_image_id_dan_kategori():
+    r = ai._DISPATCH["gambar_exploded_shantui"]({"tipe": "SE75-9W1", "subsistem": "engine"}, U)
+    g = r["gambar"][0]
+    # _capture_meta memakai image_id + kategori → keduanya wajib ada
+    assert g.get("image_id") and g.get("kategori")
