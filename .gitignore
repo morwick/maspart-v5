@@ -27,6 +27,11 @@ data/manual_media/*.png
 # Token sesi EPC Sinotruk (kredensial, kedaluwarsa berkala — JANGAN di-commit)
 data/epc_token.txt
 
+# Token & kredensial EPC Shantui (rahasia — JANGAN di-commit)
+data/shantui_token.txt
+data/shantui_cred.json
+data/shantui_captcha.png
+
 # Output rekonsiliasi katalog↔EPC (laporan, regeneratable)
 reconcile_*.csv
 

@@ -5082,3 +5082,164 @@ def _t_part_fast_moving(args: dict, user: dict) -> dict:
     }
 
 
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TOOL EPC SHANTUI (alat berat: excavator/bulldozer/loader/roller/grader) — katalog
+# part & exploded view resmi dari epc.shantui.com. Beda dari cari_filter_shantui
+# (filter statis) & jadwal_perawatan (servis): ini KATALOG PART PENUH per TIPE unit.
+# ══════════════════════════════════════════════════════════════════════════
+
+def _t_tipe_unit_shantui(args: dict, user: dict) -> dict:
+    """Daftar TIPE/varian unit Shantui untuk sebuah kode model (mis. 'SE75' → 8 tipe
+    SE75-9/-9B/-9W1/...). Basis: pohon model resmi EPC Shantui."""
+    model = (args.get("model") or args.get("query") or "").strip()
+    if not model:
+        return {"error": "Sebutkan kode model Shantui, mis. 'SE75', 'SD22', 'L36'."}
+    res = epc_shantui.variants(model)
+    if res.get("reason") in ("token_expired", "shantui_down"):
+        return res
+    if not res.get("found"):
+        return {"found": False, "model": model,
+                "message": res.get("message") or f"Tak ada tipe unit Shantui untuk '{model}'.",
+                "catatan": "Coba kode model lain atau tanya 'daftar excavator Shantui'."}
+    ekor = ""
+    if res.get("catatan"):
+        ekor = (" ⚠️ " + res["catatan"] + " JANGAN gabungkan tipe 'serupa beda model' "
+                "ke hitungan varian tanpa memberi tahu user.")
+    return {
+        "found": True, "model": model, "jumlah_tipe": res.get("jumlah"),
+        "tipe": res.get("tipe"),
+        "tipe_serupa_beda_model": res.get("tipe_serupa_beda_model"),
+        "catatan": (
+            f"{res.get('jumlah')} tipe/varian '{model}' di katalog Shantui. Tiap 'rootCode' "
+            "= identitas model utk lookup part lebih lanjut. Untuk lihat part/beda antar "
+            "tipe pakai part_shantui(tipe); untuk cari PN pakai cari_part_shantui." + ekor),
+    }
+
+
+def _t_part_shantui(args: dict, user: dict) -> dict:
+    """Daftar PART satu TIPE unit Shantui (mis. 'SE75-9W1'), boleh difilter subsistem
+    (mis. 'engine', 'track', '45', 'hydraulic')."""
+    tipe = (args.get("tipe") or args.get("model") or "").strip()
+    if not tipe:
+        return {"error": "Sebutkan TIPE unit Shantui yang spesifik, mis. 'SE75-9W1' "
+                         "(pakai tipe_unit_shantui dulu bila hanya tahu 'SE75')."}
+    subsistem = (args.get("subsistem") or args.get("query") or "").strip()
+    if not subsistem:
+        # tanpa subsistem: kembalikan DAFTAR assembly (ringkas) — hindari ratusan part.
+        res = epc_shantui.top_assemblies(tipe)
+        if res.get("reason") in ("token_expired", "shantui_down"):
+            return res
+        if not res.get("found"):
+            return {"found": False, "tipe": tipe,
+                    "message": res.get("message") or f"Assembly '{tipe}' tak terbaca."}
+        return {
+            "found": True, "tipe": res["tipe"], "rootCode": res.get("rootCode"),
+            "kategori": res.get("kategori"), "jumlah_assembly": res["jumlah"],
+            "assembly": [{"kode": a["kode"], "nama": a["nama"],
+                          "subsistem": a["subsistem_label"] or a["subsistem"]}
+                         for a in res["assembly"]],
+            "catatan": (
+                f"{res['jumlah']} assembly utama pada {res['tipe']}. Nama assembly aslinya "
+                "Mandarin (subsistem = label EN dari kode). Untuk ISI part satu subsistem, "
+                "panggil lagi part_shantui(tipe, subsistem='engine'/'track'/'hydraulic'/kode "
+                "YY). Untuk gambar exploded, pakai gambar_exploded_shantui."),
+        }
+    res = epc_shantui.part_list(tipe, subsistem)
+    if res.get("reason") in ("token_expired", "shantui_down"):
+        return res
+    if not res.get("found"):
+        return {"found": False, "tipe": tipe, "subsistem": subsistem,
+                "message": res.get("message")}
+    return {
+        "found": True, "tipe": res["tipe"], "rootCode": res.get("rootCode"),
+        "subsistem": res["subsistem"], "jumlah_figure": res["jumlah_figure"],
+        "figures": res["figures"],
+        "catatan": (
+            "Daftar part per figure (assembly). 'balon' = nomor pada gambar exploded; "
+            "'pn' = Nomor Part Shantui; nama part Mandarin. Untuk gambar exploded-nya, "
+            "pakai gambar_exploded_shantui(tipe, subsistem). ⛔ JANGAN mengarang PN di "
+            "luar daftar; berat/harga/stok TIDAK ada di sumber ini."),
+    }
+
+
+def _t_cari_part_shantui(args: dict, user: dict) -> dict:
+    """Cari NOMOR PART Shantui (global lintas semua alat berat, atau dalam satu tipe)."""
+    pn = (args.get("pn") or args.get("part") or args.get("query") or "").strip()
+    if not pn:
+        return {"error": "Sebutkan nomor part Shantui yang dicari."}
+    tipe = (args.get("tipe") or "").strip()
+    res = epc_shantui.find_part(pn, tipe)
+    if res.get("reason") in ("token_expired", "shantui_down"):
+        return res
+    if not res.get("found"):
+        return {"found": False, "pn": pn, "lingkup": tipe or "global",
+                "message": f"PN '{pn}' tidak ditemukan di katalog Shantui"
+                           + (f" untuk tipe {tipe}." if tipe else " (global).")}
+    return {
+        "found": True, "pn": pn, "lingkup": res["lingkup"], "jumlah": res["jumlah"],
+        "hasil": res["hasil"],
+        "catatan": ("Hasil dari indeks part resmi Shantui. 'berat'/'lwh' bila tersedia. "
+                    "⛔ harga/stok lokal TIDAK di sumber ini — untuk itu pakai tool stok/harga."),
+    }
+
+
+def _t_gambar_exploded_shantui(args: dict, user: dict) -> dict:
+    """GAMBAR EXPLODED VIEW alat berat SHANTUI (inline di chat) — untuk satu TIPE unit
+    (mis. 'SE75-9W1'), disaring subsistem (mis. 'engine'/'hydraulic'/'track') dan/atau
+    PN. Reuse epc_shantui.exploded_figures (d2s '.EN.svg') + render resvg."""
+    tipe = (args.get("tipe") or args.get("model") or "").strip()
+    if not tipe:
+        return {"error": "Sebutkan TIPE unit Shantui spesifik, mis. 'SE75-9W1' "
+                         "(pakai tipe_unit_shantui bila hanya tahu 'SE75')."}
+    pn = (args.get("pn") or args.get("part_number") or "").strip().upper()
+    subsistem = (args.get("subsistem") or args.get("kategori") or "").strip()
+    try:
+        balon_req = int(args.get("balon")) if str(args.get("balon") or "").strip() else None
+    except (TypeError, ValueError):
+        balon_req = None
+
+    d = epc_shantui.exploded_figures(tipe, pn, subsistem)
+    if d.get("reason") in ("token_expired", "shantui_down"):
+        return d
+    if not d.get("found"):
+        return {"found": False, "tipe": tipe,
+                "error": d.get("message") or "Figure exploded tak ditemukan.",
+                "saran": ("Sebut subsistem (engine/hydraulic/track/cab/boom) atau PN yang "
+                          "memang ada pada tipe ini. Lihat dulu part_shantui(tipe).")}
+
+    gambar: list[dict] = []
+    for f in d["figures"][:_MAX_EXPLODED_FIGURES]:
+        hl = balon_req if balon_req is not None else f.get("balon")
+        judul = f"Exploded Shantui {tipe} - {f.get('subsistem_label') or f.get('assembly') or ''}".strip()
+        image_id, filename = ai_export.stash_builder(
+            judul, {"kind": "exploded", "source": "shantui", "svg": f["svg"], "balon": hl},
+            ext="png")
+        gambar.append({"image_id": image_id, "filename": filename, "balon": hl,
+                       "nama_figure": f.get("assembly"),
+                       "subsistem": f.get("subsistem_label"),
+                       "kode_figure": f.get("kode"),
+                       "ada_3d": bool(f.get("pvz_3d")),
+                       "jumlah_item": f.get("jumlah_item")})
+    fig0 = d["figures"][0]
+    daftar_balon = [{"balon": it.get("balon"), "pn": it.get("pn"), "nama": it.get("nama")}
+                    for it in (fig0.get("items_ringkas") or [])][:40]
+    if pn:
+        inti = (f"PN {pn} = NOMOR BALON '{fig0.get('balon')}' di figure "
+                f"'{fig0.get('subsistem_label') or fig0.get('assembly')}'. ")
+    elif balon_req is not None:
+        inti = f"Balon {balon_req} DISOROT (kuning). "
+    else:
+        inti = f"Figure '{fig0.get('subsistem_label') or fig0.get('assembly')}'. "
+    return {
+        "found": True, "tipe": d.get("tipe"), "rootCode": d.get("rootCode"), "pn": pn,
+        "balon_disorot": balon_req, "jumlah_gambar": len(gambar), "gambar": gambar,
+        "daftar_balon_gambar": daftar_balon,
+        "catatan": (
+            "Gambar exploded view Shantui SIAP — tampil INLINE otomatis (label Inggris). "
+            + inti + "Nama part Mandarin; 'balon'=nomor pada gambar, 'pn'=Nomor Part "
+            "Shantui. Ada juga file 3D (.pvz) bila 'ada_3d'=true — tak bisa ditampilkan "
+            "sebagai gambar diam. Jawab SINGKAT; ⛔ JANGAN membuat link/gambar/URL sendiri "
+            "atau mengarang PN di luar daftar."),
+    }

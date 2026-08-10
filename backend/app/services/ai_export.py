@@ -594,6 +594,8 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
         if b.get("kind") == "exploded":
             if b.get("source") == "weichai":
                 data = exploded_png_weichai(b.get("svg", ""), b.get("rangka", ""), b.get("balon"))
+            elif b.get("source") == "shantui":
+                data = exploded_png_shantui(b.get("svg", ""), b.get("balon"))
             else:
                 data = exploded_png(b.get("svg", ""), b.get("balon"))
             if data is None:
@@ -1029,6 +1031,22 @@ def exploded_png_weichai(svg_file_id: str, rangka: str, ball=None) -> bytes | No
         if not tok:
             return None
         svg = _wc.fetch_svg(svg_file_id, tok)
+    except Exception:
+        return None
+    if not svg:
+        return None
+    return _svg_to_png(_highlight_ball(svg, ball))
+
+
+def exploded_png_shantui(svg_name: str, ball=None) -> bytes | None:
+    """Versi ALAT BERAT Shantui: unduh SVG exploded-view (nama file d2s '.EN.svg')
+    via epc_shantui.fetch_file (butuh token Shantui), highlight nomor balon, render
+    PNG. None bila token kedaluwarsa / file tak ada / resvg gagal."""
+    if not svg_name:
+        return None
+    try:
+        from . import epc_shantui as _sh
+        svg = _sh.fetch_file(svg_name)
     except Exception:
         return None
     if not svg:

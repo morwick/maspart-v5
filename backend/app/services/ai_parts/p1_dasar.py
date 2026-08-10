@@ -32,7 +32,7 @@ from ..core.config import get_settings
 from . import (abs_scr_codes, accurate, ai_belajar, ai_chat_log, ai_export, ai_knowledge,
                ai_session, ai_sheet,
                catalog_bom, dtc_codes,
-               dtc_diagnosa, eol_dtc, epc, epc_bom, epc_weichai, exploded_view,
+               dtc_diagnosa, eol_dtc, epc, epc_bom, epc_shantui, epc_weichai, exploded_view,
                fault_codes, fault_pdf, filter_crossref, filter_ref,
                gudang, gudang_config, harga, jadwal_servis_truk, kapasitas_gardan,
                knowledge_links,

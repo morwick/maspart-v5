@@ -474,6 +474,123 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "tipe_unit_shantui",
+                "description": (
+                    "KATALOG RESMI EPC SHANTUI (alat berat: excavator, bulldozer, "
+                    "loader, roller, grader, dll) — daftar semua TIPE/VARIAN untuk "
+                    "sebuah kode model. Contoh: 'SE75' → 8 tipe (SE75-9, SE75-9B, "
+                    "SE75-9W1, SE75-9W3, SE75-9W4, SE75-10, SE75-10W, SE75-G). Pakai "
+                    "untuk 'ada berapa tipe SE75', 'varian SD22 apa saja', 'tipe "
+                    "excavator SE215'. Membedakan varian sebenarnya dari model lain yg "
+                    "kebetulan berawalan sama (SE75 vs SE750). Tiap tipe punya 'rootCode' "
+                    "= identitas untuk lookup part (part_shantui). ⛔ Ini KATALOG PART "
+                    "asli, BEDA dari cari_filter_shantui (filter) & jadwal_perawatan "
+                    "(servis)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "model": {
+                            "type": "string",
+                            "description": "Kode model Shantui, mis. 'SE75', 'SD22', 'L36', 'SR26'. Boleh sebagian.",
+                        },
+                    },
+                    "required": ["model"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "part_shantui",
+                "description": (
+                    "DAFTAR PART satu TIPE unit Shantui dari katalog EPC resmi. Tanpa "
+                    "'subsistem' → daftar ASSEMBLY utama tipe itu (mis. 83 assembly); "
+                    "dengan 'subsistem' → ISI PART figure (nomor balon, Part Number, "
+                    "nama, qty). Pakai untuk 'part mesin SE75-9W1', 'apa saja assembly "
+                    "SE215W', 'bedanya SE75-9W1 vs SE75-9W3' (bandingkan per subsistem). "
+                    "Sebut TIPE yang spesifik (pakai tipe_unit_shantui dulu bila hanya "
+                    "tahu kode dasar). ⛔ JANGAN mengarang PN; harga/stok tidak di sini."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "tipe": {
+                            "type": "string",
+                            "description": "Tipe unit SPESIFIK, mis. 'SE75-9W1', 'SD22-C5', 'SE215W'. Bukan sekadar 'SE75'.",
+                        },
+                        "subsistem": {
+                            "type": "string",
+                            "description": "Opsional. Subsistem untuk melihat ISI part: kata kunci EN ('engine', 'main pump', 'main valve', 'hydraulic', 'track', 'cab', 'boom', 'arm', 'bucket', 'swing motor', 'travel motor', 'fuel', 'cooling', 'counterweight') atau kode YY ('03','24','45','61'). Kosong = daftar assembly saja.",
+                        },
+                    },
+                    "required": ["tipe"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "cari_part_shantui",
+                "description": (
+                    "Cari NOMOR PART Shantui di katalog EPC resmi — global (semua alat "
+                    "berat) atau dalam satu tipe. Balikkan nama part + berat/dimensi bila "
+                    "ada. Pakai untuk 'part apa nomor 60070-03-00084', 'cek PN ... di "
+                    "Shantui'. ⛔ harga/stok LOKAL tidak di sini (pakai tool stok/harga)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pn": {"type": "string", "description": "Nomor part Shantui yang dicari."},
+                        "tipe": {
+                            "type": "string",
+                            "description": "Opsional. Batasi ke satu tipe unit (mis. 'SE75-9W1'). Kosong = cari global.",
+                        },
+                    },
+                    "required": ["pn"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "gambar_exploded_shantui",
+                "description": (
+                    "Tampilkan GAMBAR EXPLODED VIEW alat berat SHANTUI (inline di chat, "
+                    "label INGGRIS) untuk satu TIPE unit — disaring per subsistem "
+                    "('engine'/'hydraulic'/'track'/'cab'/'boom'/kode YY) dan/atau PN "
+                    "tertentu. Bisa menyorot nomor balon. Pakai untuk 'gambar exploded "
+                    "mesin SE75-9W1', 'tampilkan diagram hidrolik SE215W', 'exploded "
+                    "view part 60070-03-00084'. Gambar muncul sendiri; ⛔ jangan buat "
+                    "link/gambar sendiri."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "tipe": {
+                            "type": "string",
+                            "description": "Tipe unit SPESIFIK, mis. 'SE75-9W1', 'SE215W'.",
+                        },
+                        "subsistem": {
+                            "type": "string",
+                            "description": "Opsional. Subsistem figure (kata kunci EN atau kode YY). Kosong = beberapa figure pertama tipe itu.",
+                        },
+                        "pn": {
+                            "type": "string",
+                            "description": "Opsional. Hanya figure yang MEMUAT PN ini (balonnya ikut disorot).",
+                        },
+                        "balon": {
+                            "type": "integer",
+                            "description": "Opsional. Nomor balon yang mau DISOROT kuning di gambar.",
+                        },
+                    },
+                    "required": ["tipe"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "part_fast_moving",
                 "description": (
                     "PART FAST MOVING / part aus rutin per MODEL unit Sinotruk "

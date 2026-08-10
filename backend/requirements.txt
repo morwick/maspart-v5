@@ -29,3 +29,8 @@ reportlab>=4.0
 # RAM: container backend dibatasi 2500m & torch/DINOv2 sudah memakan ~1 GB.
 pypdfium2>=4.30
 python-docx>=1.1
+
+# Auto-login EPC Shantui: pecahkan CAPTCHA 4-huruf saat refresh token (lazy import —
+# model onnx dimuat SEKALI hanya saat refresh_token dipanggil, RSS idle tak naik).
+# Menarik onnxruntime + opencv-python + Pillow. onnxruntime CPU cukup (bukan GPU).
+ddddocr>=1.6
