@@ -20,6 +20,14 @@ KEDUA di bawah ini:
      terbukti cocok di 1.332 dari 1.335 unit armada, 99,8%) + bentuk ekor
      `[A-Z]{2}\\d{6}` (100% unit armada).
 
+Dua bentuk foto yang dipakai di lapangan sama-sama didukung:
+  • nomor DIPAHAT di chassis — satu baris, kontras rendah, berdebu;
+  • NAMEPLATE pabrik (CNHTC) — penuh teks lain (MODEL, ENGINE OUTPUT, RAW,
+    GCW/GVW, MADE YEAR). Di sini label "CHASSIS NO." dipakai sebagai petunjuk
+    (`_kandidat_label`) dan potongan tanpa cukup angka dibuang sebelum diadu
+    (`_cukup_angka`) — tanpa itu satu plat menghasilkan 137 kandidat dan
+    pencocokannya sendiri makan 21 detik.
+
 Hasil ukur (foto asli + 7 versi dirusak: 600px, blur, gelap, miring 8°, JPEG
 mutu 25, crop ketat) = 8/8 benar, 0,6–2,3 detik. Kalibrasi ambang snap
 (simulasi 900 VIN dirusak 1–3 huruf + 300 versi rusak berat) = 0 kasus
@@ -50,7 +58,8 @@ MAX_BYTES = 12 * 1024 * 1024
 # menambah akurasi — versi 600 px dari foto uji pun terbaca benar.
 _MAKS_SISI = 1600
 # Anggaran waktu: varian berikutnya tak dimulai lagi setelah lewat batas ini.
-_BATAS_DETIK = 12.0
+# (Bukan batas keras — varian yang sudah berjalan diselesaikan.)
+_BATAS_DETIK = 9.0
 
 # Ambang snap-ke-armada (lihat kalibrasi di docstring modul).
 _SNAP_BATAS = 2.0      # jarak berbobot maksimum agar dianggap unit yang sama
@@ -263,6 +272,40 @@ def _kandidat(teks: str) -> list[str]:
     return out
 
 
+# Label pada NAMEPLATE pabrik (CNHTC/Sinotruk) & dokumen: nomor rangka berdiri
+# tepat sesudahnya. Di plat, OCR kadang menyatukannya ("CHASSISNOLZZ1…") dan
+# kadang memisah jadi dua kotak ("CHASSISNO" lalu "LZZ1…") — dua-duanya ditangani.
+_LABEL_RANGKA = ("CHASSISNO", "CHASSIS", "CHASIS", "VINNO", "FRAMENO",
+                 "NORANGKA", "NOMORRANGKA", "RANGKA", "VIN")
+
+
+def _kandidat_label(baris: list[str]) -> list[str]:
+    """Kandidat yang BERLABEL — jauh lebih tepercaya daripada potongan acak.
+
+    Penting di foto nameplate: di sana ada MODEL, GCW, MADE YEAR, dan sederet
+    angka lain, sehingga tanpa label kandidat bisa berjumlah ratusan."""
+    out: list[str] = []
+    for i, s in enumerate(baris):
+        for lab in _LABEL_RANGKA:
+            p = s.find(lab)
+            if p < 0:
+                continue
+            ekor = s[p + len(lab):]
+            if len(ekor) >= 12:                       # nilainya menempel di label
+                out.append(ekor[:17])
+            elif i + 1 < len(baris) and len(baris[i + 1]) >= 12:
+                out.append(baris[i + 1][:17])         # nilainya di kotak berikutnya
+            break
+    return out
+
+
+def _cukup_angka(c: str) -> bool:
+    """Ekor nomor rangka = 2 huruf + 6 ANGKA (100% armada). Bahkan dengan dua
+    huruf salah baca, minimal 4 angka tersisa — saringan murah yang membuang
+    potongan teks biasa ('CHINANATIONALHEAV') sebelum dibandingkan satu-satu."""
+    return sum(ch.isdigit() for ch in c[-8:]) >= 4
+
+
 def _perbaiki_ejaan(c: str) -> str:
     """Huruf yang TIDAK pernah ada di VIN → angka pasangannya."""
     return c.replace("I", "1").replace("O", "0").replace("Q", "0")
@@ -289,20 +332,61 @@ def _perbaiki_cd(c: str) -> list[str]:
     return out
 
 
+# Indeks armada untuk MEMPERSEMPIT pembanding. Tanpa ini, foto NAMEPLATE (penuh
+# teks: MODEL, GCW, MADE YEAR…) menghasilkan 137 kandidat × 1.335 VIN = 183 ribu
+# perbandingan Levenshtein → 21 DETIK hanya untuk mencocokkan (diukur 2026-08-11).
+#
+# Kuncinya: 6 char terakhir tiap VIN armada SELALU angka. Kita indeks setiap
+# PASANGAN angka bersebelahan di 6 angka itu. Dua kesalahan baca pun pasti masih
+# menyisakan satu pasangan utuh (2 kesalahan memecah 6 posisi jadi maksimal 3
+# penggal berisi 4 angka bersih — mustahil semuanya tunggal), jadi saringan ini
+# tidak membuang kandidat yang sebetulnya masih terjangkau ambang snap.
+_IDX: dict = {"kunci": None, "peta": {}}
+
+
+def _indeks(rows: list[tuple[str, dict]]) -> dict[str, list[int]]:
+    kunci = (len(rows), rows[0][0] if rows else "", rows[-1][0] if rows else "")
+    if _IDX["kunci"] == kunci:
+        return _IDX["peta"]
+    peta: dict[str, list[int]] = {}
+    for i, (vin, _info) in enumerate(rows):
+        ekor = vin[-6:]
+        for j in range(len(ekor) - 1):
+            peta.setdefault(ekor[j:j + 2], []).append(i)
+    _IDX["kunci"], _IDX["peta"] = kunci, peta
+    return peta
+
+
+def _baris_kandidat(c: str, rows, peta) -> list[int]:
+    """Nomor baris armada yang layak dibandingkan dengan kandidat `c`."""
+    ekor = c[-6:]
+    kena: set[int] = set()
+    for j in range(len(ekor) - 1):
+        kena.update(peta.get(ekor[j:j + 2], ()))
+    return sorted(kena) if kena else []
+
+
+def _urut_kandidat(kand: dict[str, int]) -> list[str]:
+    """Kandidat yang layak diadu, terpenting dulu (berlabel > panjang > sering)."""
+    layak = [c for c in kand if len(c) >= 8 and _cukup_angka(c)]
+    layak.sort(key=lambda c: (-kand[c], -len(c), c))
+    return layak[:16]
+
+
 def _snap(kand: dict[str, int], rows: list[tuple[str, dict]]) -> dict | None:
     """Kandidat OCR → unit armada terdekat. None bila tak ada yang cukup dekat."""
     if not kand or not rows:
         return None
+    peta = _indeks(rows)
     terbaik: tuple[float, float, str, str] | None = None   # (jarak, kedua, vin, kandidat)
-    for c in kand:
-        if len(c) < 8:
-            continue
+    for c in _urut_kandidat(kand):
         # Potongan pendek (frame 8 char) membawa bukti jauh lebih sedikit daripada
         # VIN penuh — ekor unit satu pengiriman cuma beda 1 digit. Jadi untuk itu
         # ambangnya diperketat: praktis harus PERSIS (atau satu huruf sekelas).
         batas = _SNAP_BATAS if len(c) >= 12 else 1.0
         best, best_vin, kedua = 99.0, "", 99.0
-        for vin, _info in rows:
+        for i in _baris_kandidat(c, rows, peta):
+            vin = rows[i][0]
             target = vin if len(c) >= 12 else vin[-len(c):]
             d = jarak(c, target, batas=batas + 1.0)
             if d < best:
@@ -388,15 +472,23 @@ def _baca_lokal(data: bytes, rows: list[tuple[str, dict]]) -> dict:
     terbaca: list[str] = []
     pilihan: dict | None = None
 
+    kotak = 0
     for nama, im in _varian(bgr):
         if kand and (time.monotonic() - t0) > _BATAS_DETIK:
             logger.info("vin_ocr: anggaran waktu habis, berhenti di varian %s", nama)
             break
+        # Perbesar 2× menolong pahatan tipis pada foto yang RENGGANG (satu baris
+        # nomor), tapi pada NAMEPLATE penuh teks ia cuma melipatgandakan kerja
+        # pengenalan: 18,9 dtk vs 4,7 dtk untuk hasil yang sama (diukur).
+        if nama.endswith("2x") and kotak >= 6:
+            logger.info("vin_ocr: foto padat teks (%d kotak) — varian 2x dilewati", kotak)
+            continue
         try:
             baris = _baris_ocr(im)
         except Exception as e:               # satu varian gagal ≠ seluruhnya gagal
             logger.warning("vin_ocr: varian %s gagal: %s", nama, e)
             continue
+        kotak = max(kotak, len(baris))
         bersih_baris = [bersih(b) for b in baris]
         for b in baris:
             if b and b not in terbaca:
@@ -406,6 +498,11 @@ def _baca_lokal(data: bytes, rows: list[tuple[str, dict]]) -> dict:
         for s in bersih_baris + ["".join(bersih_baris)]:
             for c in _kandidat(s):
                 kand[c] = kand.get(c, 0) + 1
+        # Yang berdiri di belakang label "CHASSIS NO." diberi bobot lebih: di foto
+        # NAMEPLATE, potongan acak berjumlah ratusan dan beberapa di antaranya
+        # (MODEL, GCW, MADE YEAR) juga berbentuk huruf+angka.
+        for c in _kandidat_label(bersih_baris):
+            kand[c] = kand.get(c, 0) + 3
         pilihan = _snap(kand, rows)
         if pilihan:                          # cocok satu unit armada → sudah cukup
             break

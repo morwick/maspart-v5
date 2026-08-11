@@ -23,7 +23,10 @@ from app.services import vin_ocr
 # (satu pengiriman, ekor beda 1–2 digit) supaya uji ambigu berarti.
 VIN_A = "LZZ1BLMJ4TJ465057"
 VIN_B = "LZZ1BLMJ5TJ465052"
+VIN_C = "LZZ1BLMJ4SJ476834"          # unit di foto NAMEPLATE
 ARMADA = [
+    (VIN_C, {"model": "ZZ1257V584JF1", "jenis": "HOWO-NX 6X4", "tahun": "2026",
+             "customer": "PT UJI"}),
     (VIN_A, {"model": "ZZ1257V584JF1", "jenis": "HOWO-NX 6X4", "tahun": "2026",
              "customer": "PT UJI"}),
     (VIN_B, {"model": "ZZ1257V584JF1", "jenis": "HOWO-NX 6X4", "tahun": "2026",
@@ -104,6 +107,44 @@ def test_frame_8_char_harus_persis(armada):
     diterima bila praktis persis."""
     assert vin_ocr._snap({"TJ465057": 1}, armada)["rangka"] == VIN_A
     assert vin_ocr._snap({"TJ465099": 1}, armada) is None
+
+
+# ── NAMEPLATE pabrik (plat CNHTC penuh teks) ──────────────────────────
+def test_label_chassis_diambil_walau_menempel():
+    """OCR kadang menyatukan label & nilainya jadi satu kotak."""
+    assert _pnp(["CHASSISNOLZZ1BLMJ4SJ476834"]) == ["LZZ1BLMJ4SJ476834"]
+
+
+def test_label_chassis_diambil_dari_kotak_berikutnya():
+    """…dan kadang memisah keduanya (persis foto nameplate pemilik)."""
+    baris = ["MODEL", "ZZ1257V584JF1", "CHASSISNO", "LZZ1BLMJ4SJ476834",
+             "ENGINEOUTPUT280"]
+    assert "LZZ1BLMJ4SJ476834" in _pnp(baris)
+
+
+def _pnp(baris):
+    return vin_ocr._kandidat_label(baris)
+
+
+def test_teks_plat_lain_tak_ikut_jadi_kandidat():
+    """Angka lain di plat (GCW 33000, MADE YEAR 2026-01, RAW 26000) tak boleh
+    diadu ke armada — itu yang dulu membuat 137 kandidat & 21 detik."""
+    kand = {"GCWGVW33000KG26000": 1, "CHINANATIONALHEAV": 1,
+            "MADEYEAR202601RAW": 1, "LZZ1BLMJ4SJ476834": 4}
+    layak = vin_ocr._urut_kandidat(kand)
+    assert layak[0] == "LZZ1BLMJ4SJ476834"          # berlabel → diadu duluan
+    assert "CHINANATIONALHEAV" not in layak         # tanpa angka → tak perlu diadu
+
+
+def test_indeks_armada_mempersempit_pembanding():
+    """Indeks pasangan angka ekor: yang diadu tinggal sebagian kecil armada,
+    dan unit yang benar WAJIB tetap masuk."""
+    rows = ARMADA
+    peta = vin_ocr._indeks(rows)
+    kena = vin_ocr._baris_kandidat("L7Z1BLMJ4TJ465057", rows, peta)
+    i_a = next(i for i, (v, _) in enumerate(rows) if v == VIN_A)
+    assert i_a in kena                   # unit yang benar WAJIB tetap diadu
+    assert len(kena) <= len(rows)
 
 
 # ── unit di luar populasi ─────────────────────────────────────────────
@@ -250,7 +291,9 @@ def test_endpoint_foto_rusak_jadi_400(klien):
 
 
 # ── regresi foto NYATA (butuh paket OCR) ──────────────────────────────
-FOTO_UJI = __import__("pathlib").Path(__file__).parent / "data" / "rangka_chassis.jpg"
+_DATA = __import__("pathlib").Path(__file__).parent / "data"
+FOTO_UJI = _DATA / "rangka_chassis.jpg"          # nomor dipahat di chassis
+FOTO_PLAT = _DATA / "rangka_nameplate.jpg"       # nameplate pabrik CNHTC
 
 
 @pytest.mark.skipif(not FOTO_UJI.exists(), reason="foto uji tidak ada")
@@ -261,6 +304,17 @@ def test_foto_lapangan_nyata_terbaca(armada):
     pytest.importorskip("rapidocr_onnxruntime")
     hasil = vin_ocr.baca_rangka(FOTO_UJI.read_bytes())
     assert hasil["rangka"] == VIN_A, hasil["teks_terbaca"]
+    assert hasil["keyakinan"] == "pasti"
+
+
+@pytest.mark.skipif(not FOTO_PLAT.exists(), reason="foto plat tidak ada")
+def test_nameplate_pabrik_terbaca(armada):
+    """Foto NAMEPLATE CNHTC: MODEL/CHASSIS NO/ENGINE OUTPUT/RAW/GCW/MADE YEAR
+    semuanya terbaca OCR, jadi yang diuji di sini = nomor rangka-lah yang
+    dipilih, bukan salah satu angka lain di plat itu."""
+    pytest.importorskip("rapidocr_onnxruntime")
+    hasil = vin_ocr.baca_rangka(FOTO_PLAT.read_bytes())
+    assert hasil["rangka"] == VIN_C, hasil["teks_terbaca"]
     assert hasil["keyakinan"] == "pasti"
 
 
