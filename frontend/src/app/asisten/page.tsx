@@ -11,6 +11,7 @@ import {
   aiChatSheet,
   aiChatSheetStream,
   aiChatStream,
+  aiOcrRangka,
   downloadBlob,
   exportAiExcel,
   exportBandingRangka,
@@ -180,6 +181,8 @@ const IC = {
     "M21.4 11.05 12.25 20.2a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48",
   x: "M18 6 6 18 M6 6l12 12",
   arrowDown: "M12 5v14 M19 12l-7 7-7-7",
+  camera:
+    "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
 };
 
 function Avatar({ size = 30 }: { size?: number }) {
@@ -252,9 +255,15 @@ export default function AsistenPage() {
   // di tiap anak elemen — hitung kedalaman agar overlay tidak kedip.
   const [dragOver, setDragOver] = useState(false);
   const dragDepth = useRef(0);
+  // FOTO nomor rangka: dibaca server (OCR) lalu nomornya dikirim sebagai pesan
+  // biasa. `ocrNote` = baris tipis di atas kotak ketik — sengaja BUKAN bubble
+  // chat, karena bacaan yang belum yakin harus bisa dikoreksi user dulu.
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrNote, setOcrNote] = useState<{ teks: string; ragu: boolean } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const sheetRef = useRef<HTMLInputElement>(null);
+  const fotoRef = useRef<HTMLInputElement>(null);
   const firstSave = useRef(true);
   // Menempel di bawah atau tidak. Jawaban asisten butuh 14-46 dtk dan status
   // langkahnya masuk lewat SSE, jadi `msgs` berubah BERKALI-KALI selama menunggu.
@@ -372,6 +381,47 @@ export default function AsistenPage() {
     if (!ta) return;
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
+  }
+
+  // ── Foto nomor rangka → nomor rangka ────────────────────────────────────────
+  // Alurnya sengaja BERBEDA dari lampiran Excel: fotonya tidak ikut ke asisten
+  // sama sekali. Server membacanya (OCR + cocokkan ke populasi) dan hanya
+  // NOMOR-nya yang dikirim sebagai pesan. Bacaan yang belum yakin TIDAK
+  // dikirim otomatis — ia dituliskan ke kotak ketik supaya user mengoreksi,
+  // sebab satu huruf salah = unit yang salah di seluruh jawaban berikutnya.
+  async function kirimFotoRangka(f: File) {
+    const token = getToken();
+    if (!token) return router.replace("/login");
+    if (!/^image\//i.test(f.type) && !/\.(jpe?g|png|webp|bmp)$/i.test(f.name)) {
+      setError("Foto harus JPG/PNG.");
+      return;
+    }
+    setError(null);
+    setOcrBusy(true);
+    setOcrNote({ teks: "Membaca nomor rangka dari foto…", ragu: false });
+    try {
+      const hasil = await aiOcrRangka(token, f);
+      if (hasil.keyakinan === "pasti" || hasil.keyakinan === "tinggi") {
+        setOcrNote({ teks: hasil.pesan, ragu: hasil.keyakinan !== "pasti" });
+        await send(`Nomor rangka: ${hasil.rangka}`);
+      } else {
+        // 'rendah' (bacaan ragu) & 'gagal' (tak terbaca) — user yang menentukan.
+        setOcrNote({ teks: hasil.pesan, ragu: true });
+        if (hasil.rangka) {
+          setInput(hasil.rangka);
+          setTimeout(() => {
+            taRef.current?.focus();
+            autoGrow();
+          }, 0);
+        }
+      }
+    } catch (e) {
+      setOcrNote(null);
+      setError(e instanceof ApiError ? e.message : "Gagal membaca foto nomor rangka.");
+    } finally {
+      setOcrBusy(false);
+      if (fotoRef.current) fotoRef.current.value = "";
+    }
   }
 
   async function send(text: string) {
@@ -802,7 +852,13 @@ export default function AsistenPage() {
       taRef.current?.focus();
       return;
     }
-    setError("File tidak didukung — seret file Excel .xlsx atau .xlsm.");
+    // Foto nomor rangka: langsung dibaca (bukan dilampirkan) — hasilnya nomor,
+    // bukan file, jadi tak ada yang perlu "menunggu Kirim".
+    if (/^image\//i.test(f.type) || /\.(jpe?g|png|webp|bmp)$/i.test(f.name)) {
+      void kirimFotoRangka(f);
+      return;
+    }
+    setError("File tidak didukung — seret Excel (.xlsx/.xlsm) atau foto nomor rangka.");
   }
 
   return (
@@ -896,6 +952,8 @@ export default function AsistenPage() {
                 </div>
                 <div style={{ fontSize: 12, color: "var(--ink-500)", lineHeight: 1.5 }}>
                   Excel .xlsx/.xlsm terlampir dulu, kirim setelah mengetik perintah
+                  <br />
+                  Foto nomor rangka langsung dibaca jadi nomornya
                 </div>
               </div>
             </div>
@@ -1240,7 +1298,60 @@ export default function AsistenPage() {
                 </button>
               </div>
             )}
+            {/* Hasil baca foto nomor rangka (bukan bubble chat: yang ragu masih
+                boleh dikoreksi user sebelum dikirim). */}
+            {ocrNote && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
+                  fontSize: 11.5,
+                  marginBottom: 8,
+                  padding: "5px 10px",
+                  borderRadius: 8,
+                  color: ocrNote.ragu ? "var(--warn-700, #92400e)" : "var(--brand-700)",
+                  background: ocrNote.ragu ? "var(--warn-50, #fffbeb)" : "var(--brand-50)",
+                  border: `1px solid ${ocrNote.ragu ? "var(--warn-100, #fde68a)" : "var(--brand-100)"}`,
+                }}
+              >
+                <Icon d={IC.camera} size={13} />
+                <span style={{ flex: 1 }}>{ocrNote.teks}</span>
+                <button
+                  onClick={() => setOcrNote(null)}
+                  title="Tutup"
+                  aria-label="Tutup catatan foto"
+                  style={{
+                    border: "none", background: "transparent", cursor: "pointer",
+                    color: "inherit", display: "inline-flex", padding: 2,
+                  }}
+                >
+                  <Icon d={IC.x} size={12} />
+                </button>
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+              <input
+                ref={fotoRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void kirimFotoRangka(f);
+                }}
+              />
+              <button
+                className="btn btn-ghost"
+                title="Foto nomor rangka — nomornya dibaca otomatis lalu dikirim"
+                aria-label="Kirim foto nomor rangka"
+                onClick={() => fotoRef.current?.click()}
+                disabled={available === false || ocrBusy || busy}
+                style={{ padding: "0 10px", color: "var(--ink-600)" }}
+              >
+                <Icon d={IC.camera} size={18} />
+              </button>
               <input
                 ref={sheetRef}
                 type="file"
@@ -1355,7 +1466,7 @@ export default function AsistenPage() {
                 <span className="kbd">Enter</span> kirim · <span className="kbd">Shift+Enter</span> baris baru
               </span>
               <span>Seret file Excel ke area chat untuk melampirkan.</span>
-              <span>Jawaban part paling akurat bila menyertakan nomor rangka (VIN).</span>
+              <span>Nomor rangka bisa dikirim lewat FOTO — tekan ikon kamera.</span>
             </div>
           </div>
         </div>

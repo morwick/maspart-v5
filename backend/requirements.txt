@@ -34,3 +34,14 @@ python-docx>=1.1
 # model onnx dimuat SEKALI hanya saat refresh_token dipanggil, RSS idle tak naik).
 # Menarik onnxruntime + opencv-python + Pillow. onnxruntime CPU cukup (bukan GPU).
 ddddocr>=1.6
+
+# OCR NOMOR RANGKA dari foto lapangan (services/vin_ocr.py — user membalas
+# permintaan VIN asisten dengan FOTO). PP-OCRv3 versi ONNX: model 13 MB ikut
+# di dalam wheel (tak ada unduhan saat runtime), CPU, lazy import (+160 MB RSS
+# hanya setelah foto pertama dibaca).
+# ⛔ Jangan diganti paddleocr/easyocr: keduanya menarik framework baru ratusan MB
+# ke container yang sudah memuat torch/DINOv2 (batas 2500m).
+# ⚠️ Paket ini meminta `opencv-python` (bukan -headless seperti ddddocr di linux),
+# jadi kedua varian cv2 ikut terpasang — jalan berdampingan, DAN `libgl1` di
+# Dockerfile memang sudah ada sejak auto-login Shantui. Jangan dihapus dari sana.
+rapidocr-onnxruntime>=1.2

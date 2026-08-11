@@ -2571,6 +2571,35 @@ export async function getPartExplodedFigure(
   return res.json();
 }
 
+export type AiOcrRangka = {
+  ok: boolean;
+  rangka: string;
+  frame: string;
+  keyakinan: "pasti" | "tinggi" | "rendah" | "gagal";
+  unit: { model?: string; jenis?: string; tahun?: string; customer?: string } | null;
+  alternatif: string[];
+  teks_terbaca: string[];
+  pesan: string;
+  detik: number;
+};
+
+// FOTO nomor rangka → TEKS nomor rangka (OCR di server; asisten tetap tak
+// pernah melihat gambar). Dipakai saat asisten meminta VIN: user di lapangan
+// cukup memotret nomor yang dipahat di chassis.
+// ⚠️ `keyakinan: "rendah"` WAJIB ditawarkan ke user untuk dikoreksi dulu —
+// satu huruf salah = unit yang salah, dan itu menjalar ke seluruh jawaban.
+export async function aiOcrRangka(token: string, file: File): Promise<AiOcrRangka> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/api/ai/ocr-rangka`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 // Chat dengan LAMPIRAN EXCEL: server membaca kolomnya, asisten bisa mengisi
 // stok/nama/harga lalu mengeluarkan Excel baru. Balasan memuat `sheet_id` yang
 // harus dikirim ulang di giliran berikutnya agar file tetap terlampir.

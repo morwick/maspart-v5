@@ -6,13 +6,14 @@ import queue
 import threading
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..core.config import get_settings
 from ..core.ratelimit import limit
 from ..deps import get_current_user, require_admin, require_menu
-from ..services import ai_assistant, ai_export, ai_feedback, ai_sheet, app_config
+from ..services import ai_assistant, ai_export, ai_feedback, ai_sheet, app_config, vin_ocr
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -302,6 +303,45 @@ def export_ai_excel(export_id: str, _user: dict = Depends(require_ai)):
         media_type=_XLSX_MIME,
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+@router.post("/ocr-rangka", dependencies=[Depends(limit("ai_ocr", 20, 60))])
+async def ai_ocr_rangka(
+    file: UploadFile = File(..., description="Foto nomor rangka (JPG/PNG)."),
+    user: dict = Depends(require_ai),
+):
+    """FOTO nomor rangka → TEKS nomor rangka (OCR di server, tanpa model bahasa).
+
+    Dipakai saat asisten meminta nomor rangka: user di lapangan memotret nomor
+    yang dipahat di chassis, klien mengunggahnya ke sini, lalu MENGIRIM hasil
+    bacanya sebagai pesan chat biasa. Asisten sendiri tetap tak pernah melihat
+    gambar — yang sampai padanya hanya teks.
+
+    Klien memutuskan lewat `keyakinan`: 'pasti'/'tinggi' boleh langsung dikirim,
+    'rendah' WAJIB ditawarkan ke user untuk dikoreksi dulu (satu huruf salah =
+    unit yang salah), 'gagal' → minta foto ulang."""
+    _tolak_bila_perbaikan(user)
+    buf = bytearray()
+    while chunk := await file.read(512 * 1024):
+        buf.extend(chunk)
+        if len(buf) > vin_ocr.MAX_BYTES:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                f"Foto maksimal {vin_ocr.MAX_BYTES // 1024 // 1024} MB.")
+    if not buf:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Foto kosong.")
+    try:
+        # OCR memakan 1–5 detik CPU → threadpool, jangan menahan event loop
+        # (satu unggahan foto tak boleh membekukan chat user lain).
+        return await run_in_threadpool(vin_ocr.baca_rangka, bytes(buf))
+    except ValueError as e:                       # format foto tak didukung
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    except ImportError:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Pembaca nomor rangka belum terpasang di server (paket OCR absen).")
+    except Exception as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Gagal membaca foto: {e}")
 
 
 @router.post("/chat-sheet", dependencies=[Depends(limit("ai_sheet", 10, 60))])
