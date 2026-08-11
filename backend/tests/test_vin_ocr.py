@@ -1,8 +1,12 @@
 """Baca NOMOR RANGKA dari foto (services/vin_ocr.py).
 
-Semua test OFFLINE: mesin OCR & populasi di-stub, kecuali satu test regresi
-foto NYATA yang otomatis di-skip bila paket `rapidocr_onnxruntime` belum
-terpasang (mis. laptop dev tanpa dependensi penuh).
+Semua test OFFLINE: mesin OCR & populasi di-stub, kecuali dua test regresi foto
+NYATA yang otomatis di-skip bila paket `rapidocr_onnxruntime` belum terpasang
+(mis. laptop dev tanpa dependensi penuh).
+
+⚠️ Test ber-stub memakai `isolasi=False`: produksi menjalankan OCR di PROSES
+ANAK (hemat ±150 MB RSS di container yang sudah 94% penuh), dan stub monkeypatch
+jelas tak ikut menyeberang ke proses lain.
 
 ⚠️ Yang dijaga di sini bukan "OCR-nya pintar", melainkan LAPISAN KEDUA: hasil
 baca yang meleset satu huruf tetap mendarat di unit yang benar, dan yang
@@ -161,7 +165,7 @@ def ocr_palsu(monkeypatch):
 
 def test_alur_penuh_foto_jadi_nomor_rangka(armada, ocr_palsu):
     ocr_palsu("★L7Z1BLMJ4TJ465057")
-    hasil = vin_ocr.baca_rangka(_foto_kosong())
+    hasil = vin_ocr.baca_rangka(_foto_kosong(), isolasi=False)
     assert hasil["ok"] and hasil["rangka"] == VIN_A
     assert hasil["frame"] == "TJ465057"
     assert hasil["keyakinan"] == "pasti"
@@ -172,13 +176,13 @@ def test_alur_penuh_foto_jadi_nomor_rangka(armada, ocr_palsu):
 def test_alur_penuh_nomor_terpecah_dua_kotak(armada, ocr_palsu):
     """Pahatan renggang / ada bintang di tengah → OCR memecah jadi 2 kotak."""
     ocr_palsu("LZZ1BLMJ4", "TJ465057")
-    hasil = vin_ocr.baca_rangka(_foto_kosong())
+    hasil = vin_ocr.baca_rangka(_foto_kosong(), isolasi=False)
     assert hasil["rangka"] == VIN_A
 
 
 def test_alur_penuh_foto_tanpa_nomor(armada, ocr_palsu):
     ocr_palsu("MADE IN CHINA", "SINOTRUK")
-    hasil = vin_ocr.baca_rangka(_foto_kosong())
+    hasil = vin_ocr.baca_rangka(_foto_kosong(), isolasi=False)
     assert not hasil["ok"] and hasil["keyakinan"] == "gagal"
     assert "tidak terbaca" in hasil["pesan"].lower()
 
@@ -187,7 +191,7 @@ def test_alur_penuh_ocr_error_tak_menjatuhkan_permintaan(armada, monkeypatch):
     def _meledak(im):
         raise RuntimeError("onnx rusak")
     monkeypatch.setattr(vin_ocr, "_baris_ocr", _meledak)
-    hasil = vin_ocr.baca_rangka(_foto_kosong())
+    hasil = vin_ocr.baca_rangka(_foto_kosong(), isolasi=False)
     assert hasil["keyakinan"] == "gagal" and hasil["ok"] is False
 
 
@@ -200,7 +204,7 @@ def test_populasi_mati_fitur_tetap_jalan(monkeypatch, ocr_palsu):
     """Populasi (Supabase) mati → kehilangan keyakinan 'pasti', bukan mati total."""
     monkeypatch.setattr(vin_ocr, "armada", lambda: [])
     ocr_palsu(_vin_baru())
-    hasil = vin_ocr.baca_rangka(_foto_kosong())
+    hasil = vin_ocr.baca_rangka(_foto_kosong(), isolasi=False)
     assert hasil["ok"] and hasil["keyakinan"] == "tinggi" and hasil["unit"] is None
 
 
@@ -251,9 +255,29 @@ FOTO_UJI = __import__("pathlib").Path(__file__).parent / "data" / "rangka_chassi
 
 @pytest.mark.skipif(not FOTO_UJI.exists(), reason="foto uji tidak ada")
 def test_foto_lapangan_nyata_terbaca(armada):
-    """Foto lapangan asli (nomor dipahat di chassis, berdebu, kontras rendah).
-    Di-skip otomatis bila paket OCR belum terpasang."""
+    """Foto lapangan asli (nomor dipahat di chassis, berdebu, kontras rendah),
+    lewat JALUR PRODUKSI penuh — termasuk proses anak. Di-skip otomatis bila
+    paket OCR belum terpasang."""
     pytest.importorskip("rapidocr_onnxruntime")
     hasil = vin_ocr.baca_rangka(FOTO_UJI.read_bytes())
     assert hasil["rangka"] == VIN_A, hasil["teks_terbaca"]
     assert hasil["keyakinan"] == "pasti"
+
+
+@pytest.mark.skipif(not FOTO_UJI.exists(), reason="foto uji tidak ada")
+def test_proses_anak_tak_menyentuh_populasi(armada, monkeypatch):
+    """Armada dikirim lewat stdin ke proses anak — anak TIDAK boleh memanggil
+    populasi (Supabase) sendiri, kalau tidak tiap foto berarti satu unduhan."""
+    pytest.importorskip("rapidocr_onnxruntime")
+    hasil = vin_ocr._jalankan_anak(FOTO_UJI.read_bytes(), ARMADA)
+    assert hasil is not None and hasil["rangka"] == VIN_A
+    assert hasil["unit"]["customer"] == "PT UJI"   # info datang dari stdin induk
+
+
+def test_proses_anak_gagal_tetap_dapat_jawaban(armada, ocr_palsu, monkeypatch):
+    """Anak tak bisa dijalankan (mis. python terkunci) → jangan gagal total,
+    baca saja di dalam proses server."""
+    monkeypatch.setattr(vin_ocr, "_jalankan_anak", lambda data, rows: None)
+    ocr_palsu("★L7Z1BLMJ4TJ465057")
+    hasil = vin_ocr.baca_rangka(_foto_kosong())
+    assert hasil["rangka"] == VIN_A and hasil["keyakinan"] == "pasti"

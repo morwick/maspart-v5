@@ -350,18 +350,32 @@ def _tanpa_armada(kand: dict[str, int]) -> dict | None:
     return None
 
 
-def baca_rangka(data: bytes) -> dict:
+def baca_rangka(data: bytes, *, isolasi: bool = True) -> dict:
     """Foto → nomor rangka. TIDAK melempar untuk foto yang sekadar tak terbaca.
 
     → {ok, rangka, frame, keyakinan: pasti|tinggi|rendah|gagal, unit, alternatif,
        teks_terbaca, pesan, detik}
+
+    `isolasi=True` (default) menjalankan OCR-nya di PROSES ANAK — lihat
+    `_jalankan_anak`. Foto yang tak terbaca sebagai gambar tetap melempar
+    ValueError seperti biasa (divalidasi di proses induk sebelum menyalakan anak).
     """
+    _decode(data)                        # format rusak → ValueError, sebelum spawn
+    if isolasi:
+        hasil = _jalankan_anak(data, armada())
+        if hasil is not None:
+            return hasil
+        logger.warning("vin_ocr: proses anak gagal — jatuh ke OCR dalam-proses")
+    return _baca_lokal(data, armada())
+
+
+def _baca_lokal(data: bytes, rows: list[tuple[str, dict]]) -> dict:
+    """Pipeline sesungguhnya (dipakai proses anak, atau langsung bila isolasi mati)."""
     t0 = time.monotonic()
     hasil: dict = {"ok": False, "rangka": "", "frame": "", "keyakinan": "gagal",
                    "unit": None, "alternatif": [], "teks_terbaca": [],
                    "pesan": "", "detik": 0.0}
     bgr = _decode(data)                      # ValueError → 400 di router
-    rows = armada()
     kand: dict[str, int] = {}
     terbaca: list[str] = []
     pilihan: dict | None = None
@@ -405,6 +419,63 @@ def baca_rangka(data: bytes) -> dict:
     hasil["ok"] = bool(hasil["rangka"])
     hasil["pesan"] = pesan(hasil)
     return hasil
+
+
+# ── Isolasi proses ────────────────────────────────────────────────────
+# Diukur di container produksi 2026-08-11: puncak pemakaian backend 2,31 GB dari
+# batas 2,44 GB (94,6%) SEBELUM fitur ini ada. Memuat cv2+onnxruntime+model di
+# proses server menambah ±120–160 MB yang TIDAK bisa dilepas lagi (mencoba
+# membuang objek modelnya cuma mengembalikan 23 MB — sisanya adalah pustaka yang
+# terlanjur di-import). Itu praktis menjamin OOM-kill suatu saat, dan OOM =
+# asisten mati untuk semua orang.
+#
+# Maka OCR dijalankan di PROSES ANAK yang mati setelah selesai: memorinya kembali
+# ke OS seutuhnya, dan puncaknya hanya ada selama 2–5 detik pembacaan. Ongkosnya
+# ±1 detik (model dimuat ulang tiap foto) — murah untuk aksi yang sesekali.
+# Armada dikirim lewat stdin, JADI anak TIDAK perlu menyentuh Supabase/populasi.
+_BATAS_ANAK = 45.0
+
+
+def _jalankan_anak(data: bytes, rows: list[tuple[str, dict]]) -> dict | None:
+    """OCR di proses terpisah. None = gagal (pemanggil jatuh ke dalam-proses)."""
+    import base64
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    akar = str(Path(__file__).resolve().parents[2])      # …/backend (induk paket `app`)
+    payload = json.dumps({"gambar": base64.b64encode(data).decode(),
+                          "armada": [[v, i] for v, i in rows]})
+    try:
+        p = subprocess.run(
+            [sys.executable, "-c", "from app.services.vin_ocr import _cli; _cli()"],
+            input=payload.encode("utf-8"), capture_output=True,
+            cwd=akar, timeout=_BATAS_ANAK)
+    except Exception as e:                               # spawn/timeout gagal
+        logger.warning("vin_ocr: proses anak tak jalan: %s", e)
+        return None
+    if p.returncode != 0:
+        logger.warning("vin_ocr: proses anak keluar %s: %s", p.returncode,
+                       (p.stderr or b"")[-400:].decode("utf-8", "replace"))
+        return None
+    try:
+        return json.loads((p.stdout or b"").decode("utf-8") or "{}") or None
+    except Exception:
+        logger.warning("vin_ocr: keluaran proses anak tak terbaca")
+        return None
+
+
+def _cli() -> None:
+    """Titik masuk proses anak: stdin JSON {gambar(base64), armada} → stdout JSON."""
+    import base64
+    import json
+    import sys
+
+    req = json.loads(sys.stdin.read() or "{}")
+    rows = [(str(v), dict(i or {})) for v, i in (req.get("armada") or [])]
+    hasil = _baca_lokal(base64.b64decode(req.get("gambar") or ""), rows)
+    sys.stdout.write(json.dumps(hasil, ensure_ascii=False))
 
 
 def pesan(hasil: dict) -> str:
