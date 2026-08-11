@@ -362,6 +362,14 @@ def baca_rangka(data: bytes, *, isolasi: bool = True) -> dict:
     """
     _decode(data)                        # format rusak → ValueError, sebelum spawn
     if isolasi:
+        sisa = _sisa_memori_mb()
+        if sisa is not None and sisa < _SISA_MIN_MB:
+            logger.warning("vin_ocr: jatah memori container tinggal %.0f MB — "
+                           "pembacaan foto ditunda", sisa)
+            return {"ok": False, "rangka": "", "frame": "", "keyakinan": "gagal",
+                    "unit": None, "alternatif": [], "teks_terbaca": [], "detik": 0.0,
+                    "pesan": "Server sedang penuh sesaat — coba kirim fotonya lagi "
+                             "beberapa saat lagi, atau ketik nomor rangkanya."}
         hasil = _jalankan_anak(data, armada())
         if hasil is not None:
             return hasil
@@ -434,6 +442,45 @@ def _baca_lokal(data: bytes, rows: list[tuple[str, dict]]) -> dict:
 # ±1 detik (model dimuat ulang tiap foto) — murah untuk aksi yang sesekali.
 # Armada dikirim lewat stdin, JADI anak TIDAK perlu menyentuh Supabase/populasi.
 _BATAS_ANAK = 45.0
+# Proses anak memuncak ±266 MB (diukur di image produksi, VPS 1 vCPU). Bila jatah
+# container tinggal segitu, MEMBACA FOTO = mempertaruhkan seluruh asisten:
+# OOM-killer cgroup akan memilih proses terbesar, yaitu server itu sendiri. Lebih
+# jujur menolak sebentar daripada menjatuhkan semua orang.
+_SISA_MIN_MB = 420.0
+
+
+def _sisa_memori_mb() -> float | None:
+    """Sisa jatah memori container (MB). None = tak diketahui (mis. laptop dev).
+
+    Page cache (`file`) dipotong dari pemakaian karena bisa dilepas kernel kapan
+    saja — menghitungnya sebagai 'terpakai' akan menolak foto tanpa alasan."""
+    try:                                             # cgroup v2
+        with open("/sys/fs/cgroup/memory.max") as f:
+            teks = f.read().strip()
+        if teks == "max":
+            return None
+        batas = float(teks)
+        with open("/sys/fs/cgroup/memory.current") as f:
+            dipakai = float(f.read().strip())
+        cache = 0.0
+        with open("/sys/fs/cgroup/memory.stat") as f:
+            for baris in f:
+                if baris.startswith("file "):
+                    cache = float(baris.split()[1])
+                    break
+        return (batas - max(0.0, dipakai - cache)) / 1024 / 1024
+    except Exception:
+        pass
+    try:                                             # cgroup v1
+        with open("/sys/fs/cgroup/memory/memory.limit_in_bytes") as f:
+            batas = float(f.read().strip())
+        if batas > 1 << 50:                          # 'tanpa batas' → bukan container
+            return None
+        with open("/sys/fs/cgroup/memory/memory.usage_in_bytes") as f:
+            dipakai = float(f.read().strip())
+        return (batas - dipakai) / 1024 / 1024
+    except Exception:
+        return None
 
 
 def _jalankan_anak(data: bytes, rows: list[tuple[str, dict]]) -> dict | None:

@@ -274,6 +274,26 @@ def test_proses_anak_tak_menyentuh_populasi(armada, monkeypatch):
     assert hasil["unit"]["customer"] == "PT UJI"   # info datang dari stdin induk
 
 
+def test_memori_container_menipis_foto_ditolak_sopan(armada, monkeypatch):
+    """Jatah container tinggal sedikit → JANGAN baca foto: OOM-killer cgroup akan
+    memilih proses terbesar (server itu sendiri) dan asisten mati untuk semua
+    orang. Menolak sesaat jauh lebih murah."""
+    monkeypatch.setattr(vin_ocr, "_sisa_memori_mb", lambda: 120.0)
+    monkeypatch.setattr(vin_ocr, "_jalankan_anak",
+                        lambda *a: pytest.fail("anak tak boleh dijalankan"))
+    hasil = vin_ocr.baca_rangka(_foto_kosong())
+    assert hasil["keyakinan"] == "gagal" and not hasil["ok"]
+    assert "penuh" in hasil["pesan"].lower()
+
+
+def test_memori_tak_diketahui_tetap_jalan(armada, ocr_palsu, monkeypatch):
+    """Di luar container (laptop dev) tak ada angka cgroup → jangan menghalangi."""
+    monkeypatch.setattr(vin_ocr, "_sisa_memori_mb", lambda: None)
+    monkeypatch.setattr(vin_ocr, "_jalankan_anak", lambda data, rows: None)
+    ocr_palsu("★L7Z1BLMJ4TJ465057")
+    assert vin_ocr.baca_rangka(_foto_kosong())["rangka"] == VIN_A
+
+
 def test_proses_anak_gagal_tetap_dapat_jawaban(armada, ocr_palsu, monkeypatch):
     """Anak tak bisa dijalankan (mis. python terkunci) → jangan gagal total,
     baca saja di dalam proses server."""
