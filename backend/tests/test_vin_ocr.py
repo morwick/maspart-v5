@@ -24,8 +24,14 @@ from app.services import vin_ocr
 VIN_A = "LZZ1BLMJ4TJ465057"
 VIN_B = "LZZ1BLMJ5TJ465052"
 VIN_C = "LZZ1BLMJ4SJ476834"          # unit di foto NAMEPLATE
+VIN_D = "LZZXMVWL9PS000434"          # unit di foto PLAT ETSA (label Mandarin)
+VIN_E = "LZZ5BXVH2RT113872"          # unit di foto PLAT DUA PANEL
 ARMADA = [
     (VIN_C, {"model": "ZZ1257V584JF1", "jenis": "HOWO-NX 6X4", "tahun": "2026",
+             "customer": "PT UJI"}),
+    (VIN_D, {"model": "TAZ5466TYT", "jenis": "SITRAK 6X6", "tahun": "2023",
+             "customer": "PT UJI"}),
+    (VIN_E, {"model": "ZZ1312V5967F1", "jenis": "HOWO", "tahun": "2024",
              "customer": "PT UJI"}),
     (VIN_A, {"model": "ZZ1257V584JF1", "jenis": "HOWO-NX 6X4", "tahun": "2026",
              "customer": "PT UJI"}),
@@ -136,6 +142,29 @@ def test_teks_plat_lain_tak_ikut_jadi_kandidat():
     assert "CHINANATIONALHEAV" not in layak         # tanpa angka → tak perlu diadu
 
 
+def test_nomor_utuh_tak_terdesak_potongan_sampah(armada):
+    """Regresi plat dua panel: nomor rangka terbaca UTUH (muncul 2×) sementara
+    sambungan antar-kotak muncul lebih sering. Urutan lama (jumlah kemunculan
+    dulu) menendangnya keluar dari 16 besar, jadi unitnya tak pernah dikenali."""
+    kand = {VIN_E: 2}
+    for i in range(20):                          # sampah yang lebih sering muncul
+        kand[f"LZ5BYV96718MADB{i:02d}"] = 5
+    layak = vin_ocr._urut_kandidat(kand)
+    assert VIN_E in layak
+    assert vin_ocr._snap(kand, ARMADA)["rangka"] == VIN_E
+
+
+def test_bacaan_penuh_huruf_O_tetap_diadu():
+    """Plat beretsa membuat angka 0 terbaca huruf O. Ejaan dibetulkan di tingkat
+    KANDIDAT (I/O/Q tak pernah ada di VIN), kalau tidak potongan itu gugur di
+    `_cukup_angka` sebelum sempat dibandingkan."""
+    kand, berlabel = {}, set()
+    vin_ocr._kumpulkan(["LZZXMVWL9PSOOOZBA"], kand, berlabel)
+    assert "LZZXMVWL9PS000ZBA" in kand
+    assert vin_ocr._cukup_angka("LZZXMVWL9PS000ZBA")
+    assert not vin_ocr._cukup_angka("CHINANATIONALHEAV")
+
+
 def test_indeks_armada_mempersempit_pembanding():
     """Indeks pasangan angka ekor: yang diadu tinggal sebagian kecil armada,
     dan unit yang benar WAJIB tetap masuk."""
@@ -184,6 +213,99 @@ def test_teks_asing_tidak_jadi_nomor_rangka():
     assert vin_ocr._tanpa_armada({}) is None
 
 
+def test_check_digit_menang_atas_kandidat_berbentuk_sah():
+    """Regresi nyata: 'MANUFACTURE DATE 2024' terbaca 'FACTUREDATB900020' —
+    ekornya pun 2 huruf + 6 angka. Versi lama pulang di kandidat PERTAMA yang
+    bentuknya sah, jadi satu potongan sampah sudah cukup untuk mengalahkan nomor
+    rangka yang check digit-nya benar."""
+    sampah = "LACTUREDATB900020"                  # bentuk sah, check digit salah
+    assert vin_ocr.bentuk_vin_wajar(sampah) and not vin_ocr.cd_cocok(sampah)
+    hasil = vin_ocr._tanpa_armada({sampah: 5, VIN_E: 1})
+    assert hasil["rangka"] == VIN_E and hasil["keyakinan"] == "tinggi"
+
+
+def test_kalimat_plat_yang_lolos_check_digit_tetap_ditolak():
+    """Foto terbalik: 'Permissible axle load,axle 4 16000' terbaca
+    'XLEL0ADAXLE416000' — 17 char, ekor 2 huruf + 6 angka, DAN check digit-nya
+    cocok (peluang 1/11). Yang menahannya tinggal awalan 'L' (kode negara
+    Tiongkok), sebab tanpa itu ia disodorkan dengan keyakinan TINGGI."""
+    palsu = "XLEL0ADAXLE416000"
+    assert vin_ocr.cd_cocok(palsu)               # check digit saja tak cukup
+    assert not vin_ocr.bentuk_vin_wajar(palsu)
+    assert vin_ocr._cd_pasti({palsu: 9}) is None
+
+
+def test_angka_ekor_terbaca_huruf_dibetulkan_check_digit():
+    """'…PS0004B4': huruf B berdiri di posisi yang standar VIN wajibkan ANGKA,
+    jadi letak kesalahannya pasti; check digit lalu menunjuk satu-satunya angka
+    yang mungkin. Hanya untuk kandidat BERLABEL — teks acak lolos 1/11."""
+    rusak = "LZZXMVWL9PS0004B4"
+    assert vin_ocr._perbaiki_bentuk(rusak) == [VIN_D]
+    assert vin_ocr._tanpa_armada({rusak: 3}) is None            # tanpa label: tidak
+    hasil = vin_ocr._tanpa_armada({rusak: 3}, {rusak})          # berlabel: ya
+    assert hasil["rangka"] == VIN_D and hasil["keyakinan"] == "tinggi"
+
+
+def test_dua_angka_ekor_rusak_tak_ditebak():
+    """Dua posisi rusak = 100 kemungkinan, ±9 di antaranya lolos check digit →
+    bukan bukti. Lebih baik mengaku tak tahu."""
+    assert vin_ocr._perbaiki_bentuk("LZZXMVWL9PS0004BA") == []
+
+
+def test_berlabel_didahulukan_saat_check_digit_sama_sama_cocok():
+    palsu = "LZZ5ELSD0RT109988"
+    palsu = palsu[:8] + vin_ocr.check_digit(palsu) + palsu[9:]
+    assert vin_ocr.cd_cocok(palsu) and vin_ocr.cd_cocok(VIN_D)
+    hasil = vin_ocr._cd_pasti({palsu: 9, VIN_D: 1}, {VIN_D})
+    assert hasil["rangka"] == VIN_D
+
+
+# ── jalur di samping label (plat yang nilainya tak terdeteksi) ────────
+def _plat(tegak: bool = False):
+    """Plat tiruan: sebaris 'huruf' gelap di atas latar terang, dengan ruang
+    kosong di kiri untuk labelnya. `tegak=True` = fotonya rebah 90°."""
+    import numpy as np
+    im = np.full((200, 600, 3), 215, dtype=np.uint8)
+    for i in range(17):                          # 17 'karakter' 10×16 px
+        x = 200 + i * 16
+        im[92:108, x:x + 10] = 25
+    return np.rot90(im).copy() if tegak else im
+
+
+def test_jalur_di_kanan_label_dibaca_ulang(monkeypatch):
+    """Label mendatar → nilainya di kanan label, pada ketinggian yang sama."""
+    dipanggil = []
+    monkeypatch.setattr(vin_ocr, "_baca_jalur",
+                        lambda g, ringkas=False: dipanggil.append(g.shape) or [])
+    vin_ocr._jalur_label(_plat(), [(20.0, 88.0, 120.0, 112.0, "CHASSIS NO")])
+    assert dipanggil, "jalur di samping label tidak dibaca ulang"
+
+
+def test_jalur_foto_rebah_diputar_jadi_mendatar(monkeypatch):
+    """Foto rebah 90°: kotak label jadi TEGAK dan nilainya berdiri di atas/bawah,
+    bukan di samping. Kolomnya harus diputar dulu — pengenal hanya bisa membaca
+    baris mendatar, dan memutar SELURUH foto jauh lebih mahal."""
+    dipanggil = []
+    monkeypatch.setattr(vin_ocr, "_baca_jalur",
+                        lambda g, ringkas=False: dipanggil.append(g.shape) or [])
+    # plat rebah: label yang tadinya (20,88)-(120,112) ikut berputar
+    vin_ocr._jalur_label(_plat(tegak=True), [(88.0, 480.0, 112.0, 580.0, "VIN")])
+    assert dipanggil, "kolom di atas/bawah label tidak dibaca"
+    for tinggi, lebar in dipanggil:
+        assert lebar > tinggi, "jalur harus sudah mendatar saat sampai ke pengenal"
+
+
+def test_label_yang_nilainya_menempel_tak_dibaca_ulang(monkeypatch):
+    """Kalau nilainya sudah ikut terbaca di kotak label, tak ada yang perlu
+    diselamatkan — jangan buang waktu."""
+    dipanggil = []
+    monkeypatch.setattr(vin_ocr, "_baca_jalur",
+                        lambda g, ringkas=False: dipanggil.append(g.shape) or [])
+    vin_ocr._jalur_label(_plat(), [(20.0, 88.0, 400.0, 112.0,
+                                    f"CHASSIS NO {VIN_A}")])
+    assert not dipanggil
+
+
 # ── alur penuh (mesin OCR di-stub) ────────────────────────────────────
 def _foto_kosong() -> bytes:
     from PIL import Image
@@ -194,13 +316,17 @@ def _foto_kosong() -> bytes:
 
 @pytest.fixture
 def ocr_palsu(monkeypatch):
-    """Ganti mesin OCR-nya saja; pra-proses & pemilihan kandidat tetap asli."""
+    """Ganti mesin OCR-nya saja; pra-proses & pemilihan kandidat tetap asli.
+
+    Yang di-stub `_kotak_ocr` (teks + LETAK kotak) karena letak itulah yang
+    dipakai `_jalur_label` untuk menemukan jalur nilai di samping label."""
     kotak: dict = {"baris": []}
 
     def _set(*baris):
         kotak["baris"] = list(baris)
 
-    monkeypatch.setattr(vin_ocr, "_baris_ocr", lambda im: kotak["baris"])
+    monkeypatch.setattr(vin_ocr, "_kotak_ocr",
+                        lambda im: vin_ocr.kotak_datar(*kotak["baris"]))
     return _set
 
 
@@ -221,6 +347,31 @@ def test_alur_penuh_nomor_terpecah_dua_kotak(armada, ocr_palsu):
     assert hasil["rangka"] == VIN_A
 
 
+def test_orientasi_kedua_dicoba_saat_tegak_gagal(armada, monkeypatch):
+    """Foto plat sering diambil sambil berdiri di samping unit → rebah 90°. Bila
+    orientasi tegak tak menghasilkan apa pun, fotonya diputar dan dicoba lagi.
+    ⚠️ Hanya saat gagal: foto normal tak boleh ikut membayar ongkosnya."""
+    def _kotak(im):
+        tinggi, lebar = im.shape[:2]
+        return vin_ocr.kotak_datar(VIN_A) if tinggi > lebar else []
+
+    monkeypatch.setattr(vin_ocr, "_kotak_ocr", _kotak)
+    hasil = vin_ocr.baca_rangka(_foto_kosong(), isolasi=False)   # 64×48 (mendatar)
+    assert hasil["rangka"] == VIN_A and hasil["keyakinan"] == "pasti"
+
+
+def test_orientasi_kedua_tak_dijalankan_bila_sudah_ketemu(armada, monkeypatch):
+    putaran = {"n": 0}
+
+    def _kotak(im):
+        putaran["n"] += 1
+        return vin_ocr.kotak_datar(VIN_A)
+
+    monkeypatch.setattr(vin_ocr, "_kotak_ocr", _kotak)
+    vin_ocr.baca_rangka(_foto_kosong(), isolasi=False)
+    assert putaran["n"] == 1, "varian/orientasi lanjutan tak boleh dijalankan lagi"
+
+
 def test_alur_penuh_foto_tanpa_nomor(armada, ocr_palsu):
     ocr_palsu("MADE IN CHINA", "SINOTRUK")
     hasil = vin_ocr.baca_rangka(_foto_kosong(), isolasi=False)
@@ -231,7 +382,7 @@ def test_alur_penuh_foto_tanpa_nomor(armada, ocr_palsu):
 def test_alur_penuh_ocr_error_tak_menjatuhkan_permintaan(armada, monkeypatch):
     def _meledak(im):
         raise RuntimeError("onnx rusak")
-    monkeypatch.setattr(vin_ocr, "_baris_ocr", _meledak)
+    monkeypatch.setattr(vin_ocr, "_kotak_ocr", _meledak)
     hasil = vin_ocr.baca_rangka(_foto_kosong(), isolasi=False)
     assert hasil["keyakinan"] == "gagal" and hasil["ok"] is False
 
@@ -294,6 +445,8 @@ def test_endpoint_foto_rusak_jadi_400(klien):
 _DATA = __import__("pathlib").Path(__file__).parent / "data"
 FOTO_UJI = _DATA / "rangka_chassis.jpg"          # nomor dipahat di chassis
 FOTO_PLAT = _DATA / "rangka_nameplate.jpg"       # nameplate pabrik CNHTC
+FOTO_ETSA = _DATA / "rangka_plat_etsa.jpg"       # plat beretsa, label Mandarin, rebah
+FOTO_PANEL = _DATA / "rangka_plat_dua_panel.jpg"  # plat CNHTC panel Inggris+Mandarin
 
 
 @pytest.mark.skipif(not FOTO_UJI.exists(), reason="foto uji tidak ada")
@@ -315,6 +468,30 @@ def test_nameplate_pabrik_terbaca(armada):
     pytest.importorskip("rapidocr_onnxruntime")
     hasil = vin_ocr.baca_rangka(FOTO_PLAT.read_bytes())
     assert hasil["rangka"] == VIN_C, hasil["teks_terbaca"]
+    assert hasil["keyakinan"] == "pasti"
+
+
+@pytest.mark.skipif(not FOTO_ETSA.exists(), reason="foto plat etsa tidak ada")
+def test_plat_etsa_rebah_terbaca(armada):
+    """Plat BERETSA (huruf abu-abu di atas pelat perak) yang dipotret REBAH 90°,
+    berlabel Mandarin. Foto ini yang menuntut tiga lapis sekaligus: label 'VIN'
+    terbaca padahal nilainya tidak terdeteksi sama sekali, kolom di bawah label
+    dibaca ulang sebagai satu baris, dan hasilnya ('…PS0004B4', meleset satu
+    huruf) baru mendarat di unit yang benar lewat snap armada."""
+    pytest.importorskip("rapidocr_onnxruntime")
+    hasil = vin_ocr.baca_rangka(FOTO_ETSA.read_bytes())
+    assert hasil["rangka"] == VIN_D, hasil["teks_terbaca"]
+    assert hasil["keyakinan"] == "pasti"
+
+
+@pytest.mark.skipif(not FOTO_PANEL.exists(), reason="foto plat dua panel tidak ada")
+def test_plat_dua_panel_terbaca(armada):
+    """Plat dengan panel Inggris DAN Mandarin berdampingan: 462 potongan teks,
+    dan nomor rangkanya terbaca UTUH sejak awal — yang diuji di sini adalah ia
+    tidak terdesak keluar dari daftar yang diadu oleh potongan sampah."""
+    pytest.importorskip("rapidocr_onnxruntime")
+    hasil = vin_ocr.baca_rangka(FOTO_PANEL.read_bytes())
+    assert hasil["rangka"] == VIN_E, hasil["teks_terbaca"]
     assert hasil["keyakinan"] == "pasti"
 
 

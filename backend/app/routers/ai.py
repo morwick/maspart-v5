@@ -331,8 +331,10 @@ async def ai_ocr_rangka(
     if not buf:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Foto kosong.")
     try:
-        # OCR memakan 1–5 detik CPU → threadpool, jangan menahan event loop
-        # (satu unggahan foto tak boleh membekukan chat user lain).
+        # OCR memakan 0,4–3 detik CPU untuk foto wajar, dan sampai ±20 detik untuk
+        # foto sulit yang harus menempuh semua jalan (plat beretsa, foto rebah) →
+        # threadpool, jangan menahan event loop: satu unggahan foto tak boleh
+        # membekukan chat user lain.
         return await run_in_threadpool(vin_ocr.baca_rangka, bytes(buf))
     except ValueError as e:                       # format foto tak didukung
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
