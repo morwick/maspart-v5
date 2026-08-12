@@ -79,3 +79,21 @@ data/epc_unit_items/
 # kerja yang bisa berukuran puluhan MB & separuh jalan. Hasil JADI-nya
 # (data/weichai_replace.json.gz) memang ikut, checkpoint-nya TIDAK.
 data/weichai_replace.json.part
+
+# Bobot model DINOv2 (torch hub) — 335 MB, cache MESIN yang diunduh sendiri saat
+# warmup. Tak pernah masuk git: sekali ter-commit ia menetap di RIWAYAT selamanya.
+data/torch/
+
+# PDF sumber fault code (34 MB) — BAHAN builder, bukan keluarannya. Pola sama
+# dengan data/manuals & data/manual_media: aset scp-only, yang di-track hanya
+# hasil jadinya (dataset JSON kode kesalahan).
+data/Fault/
+
+# Gambar wiring — aset scp-only (lihat komentar data/manual_media di atas);
+# hanya index/metadata yang di-track git.
+data/wiring/*.jpg
+
+# Excel hasil kerja di ROOT repo (mis. Part_Kolong_<frame>.xlsx) — keluaran
+# sekali pakai untuk dibaca manusia, bukan kode. Sengaja DI-ANCHOR ke root:
+# katalog data/Shantui/*.xlsx memang di-track dan tak boleh ikut tersaring.
+/*.xlsx
