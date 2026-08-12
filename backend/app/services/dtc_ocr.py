@@ -54,14 +54,16 @@ dan '12' terbaca '2' — TIDAK muncul sama sekali di laptop (9/10 benar di sana)
 dan baru ketahuan saat dijalankan di produksi. Bangku ujinya ada di scratchpad
 sesi; salin ke container lalu `docker exec … python3 bench.py`.
 
-Ukur DI CONTAINER pada foto lapangan pemilik (2026-08-12, panel SITRAK, tabel 1
-baris) × 10 kondisi (asli, 600 px, blur, gelap, silau, miring 8°, JPEG q25,
-diputar 90°/180°/270°): **7 terkirim otomatis & semuanya benar, 0 terkirim
-salah**, 2 minta konfirmasi user (silau — angka yang benar ikut disodorkan
-sebagai kemungkinan lain; miring 8°), 1 gagal. 0,8–3,0 detik. Kodenya mendarat
-tepat di store (SPN 4203 FMI 12 → P0335 · EMS · "Tidak terdeteksi crankshaft
-sinyal"). Yang dihitung BUKAN "berapa yang terbaca benar" melainkan "berapa yang
-TERKIRIM SENDIRI padahal salah" — itu satu-satunya angka yang merugikan user.
+Ukur DI CONTAINER pada DUA foto lapangan pemilik (2026-08-12, panel SITRAK —
+satu bertabel 1 baris, satu 2 baris & layarnya berdebu/memantul) × 10 kondisi
+(asli, 600 px, blur, gelap, silau, miring 8°, JPEG q25, diputar 90°/180°/270°):
+masing-masing **8 terkirim otomatis & semuanya benar, 0 terkirim salah**, 1
+minta konfirmasi user, 1 gagal. 0,8–7,4 detik. Kodenya mendarat tepat di store
+(SPN 4203 FMI 12 → P0335 · EMS · "Tidak terdeteksi crankshaft sinyal").
+Yang dihitung BUKAN "berapa yang terbaca benar" melainkan "berapa yang TERKIRIM
+SENDIRI padahal salah" — itu satu-satunya angka yang merugikan user; dan sejak
+keluhan 2026-08-12, "berapa BARIS yang hilang tanpa suara" ikut dihitung sama
+beratnya (lihat `_ulang_baris` & `tak_lengkap`).
 
 ⚠️ Satu yang gagal: foto rebah 270° TANPA data EXIF. Di situ varian pertama
 tak menemukan kata 'SPN' sama sekali sehingga modul mengalah lebih awal, dan
@@ -209,8 +211,18 @@ def _kolom(kotak) -> dict | None:
     return kol
 
 
+# Jeda vertikal (kelipatan tinggi baris) yang dianggap "tabel sudah habis".
+# ⚠️ Tanpa batas ini, SELURUH isi foto di bawah tabel ikut dihitung baris: pada
+# foto 2 baris pemilik, angka speedometer/voltmeter di bagian bawah panel ('32',
+# '20', '16') berdiri cukup dekat ke kolom SPN sehingga tampak seperti baris data
+# yang tak lengkap — hasilnya bacaan yang sudah benar ikut diturunkan jadi ragu,
+# dan jatah baca-ulang habis untuk angka yang bukan kode.
+_JEDA_TABEL = 3.0
+
+
 def _baris(kotak, y_min: float) -> list[list]:
-    """Kotak di BAWAH header dikelompokkan jadi baris (pita y yang berdekatan)."""
+    """Kotak di BAWAH header dikelompokkan jadi baris (pita y yang berdekatan),
+    berhenti begitu ada jeda kosong selebar beberapa baris."""
     ks = sorted((k for k in kotak if _cy(k) > y_min), key=_cy)
     out: list[list] = []
     for k in ks:
@@ -219,7 +231,15 @@ def _baris(kotak, y_min: float) -> list[list]:
             out[-1].append(k)
         else:
             out.append([k])
-    return out
+    hasil: list[list] = []
+    bawah = y_min
+    for grup in out:
+        tinggi = max(max(k[3] - k[1] for k in grup), 12.0)
+        if min(k[1] for k in grup) - bawah > tinggi * _JEDA_TABEL:
+            break
+        hasil.append(grup)
+        bawah = max(k[3] for k in grup)
+    return hasil
 
 
 def _pecah_menyatu(baris: list, kol: dict) -> tuple[str, str] | None:
@@ -282,6 +302,72 @@ def _baca_baris(baris: list, kol: dict) -> tuple[str, str] | None:
     if hit_spn and hit_fmi:
         return hit_spn[0], hit_fmi[0]
     return _pecah_menyatu(baris, kol)
+
+
+def _separuh(baris: list, kol: dict) -> bool:
+    """Baris ini TAMPAK baris data (ada angka berdiri di kolom SPN/FMI) tapi tak
+    menghasilkan pasangan lengkap. Dibedakan dari baris kosong/derau supaya
+    hanya yang benar-benar kehilangan angka yang dibaca ulang — dan supaya
+    kehilangan itu bisa DILAPORKAN, bukan hilang tanpa suara."""
+    tol = abs(kol["fmi"] - kol["spn"]) * _TOL_KOLOM
+    for k in baris:
+        if _angka(k[4]) is None:
+            continue
+        cx = _cx(k)
+        if kol.get("no") is not None and abs(cx - kol["no"]) < abs(cx - kol["spn"]):
+            continue
+        if min(abs(cx - kol["spn"]), abs(cx - kol["fmi"])) <= tol:
+            return True
+    return False
+
+
+# Rasio lebar/tinggi pita saat dibaca ulang. ⛔ JANGAN diturunkan ke bawah 8:
+# di situlah RapidOCR berhenti memperlakukan potongan sebagai gambar biasa, dan
+# justru itu yang membuat angka tunggal ikut terbaca. Terukur di container pada
+# foto 2 baris pemilik: rasio 7,8 → hanya '3597'; rasio 8,7/9,0/9,3 → '3597' DAN
+# '4'. Selisihnya setipis itu, jadi pita dilebarkan sampai 9,0 dengan sengaja.
+_RASIO_ULANG = 9.0
+_MAKS_ULANG = 3           # baris yang boleh dibaca ulang per pembacaan
+
+
+def _ulang_baris(im, kol: dict, baris: list) -> tuple[str, str] | None:
+    """Baris yang cuma terbaca separuh → potong PITA-nya lalu baca ulang lebar.
+
+    ⚠️ Ini menambal kegagalan DETEKSI, bukan pengenalan: angka FMI satu digit
+    ('4') pada layar panel sering tak terdeteksi sama sekali — di foto 2 baris
+    pemilik ia hilang di KEDUA varian pra-proses, sehingga seluruh barisnya
+    lenyap dan asisten hanya menerima 1 dari 2 kode. Yang dibaca ulang cukup
+    pita setinggi barisnya; kotak hasilnya dikembalikan ke koordinat ASLI supaya
+    pencocokan kolom yang sama bisa dipakai lagi tanpa aturan baru."""
+    import cv2
+    tinggi_im, lebar_im = im.shape[:2]
+    y0 = max(0, int(min(b[1] for b in baris)) - 10)
+    y1 = min(tinggi_im, int(max(b[3] for b in baris)) + 10)
+    tinggi = y1 - y0
+    if tinggi < 10:
+        return None
+    lebar = int(tinggi * _RASIO_ULANG)
+    kiri = min(kol["spn"], kol.get("no") if kol.get("no") is not None else kol["spn"])
+    pusat = (kiri + kol["fmi"]) / 2
+    xa = int(pusat - lebar / 2)
+    xb = xa + lebar
+    if xa < 0:
+        xa, xb = 0, min(lebar_im, lebar)
+    if xb > lebar_im:
+        xb, xa = lebar_im, max(0, lebar_im - lebar)
+    if (xb - xa) < tinggi * 8:          # foto terlalu sempit → tak ada gunanya
+        return None
+    try:
+        kotak = vin_ocr._kotak_ocr(cv2.cvtColor(
+            cv2.cvtColor(im[y0:y1, xa:xb], cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR))
+    except Exception as e:
+        logger.warning("dtc_ocr: baca ulang pita gagal: %s", e)
+        return None
+    if not kotak:
+        return None
+    asli = [(x0 + xa, yy0 + y0, x1 + xa, yy1 + y0, t)
+            for x0, yy0, x1, yy1, t in kotak]
+    return _baca_baris(asli, kol)
 
 
 # "SPN 4203 FMI 12", "SPN4203/FMI12", "SPN:4203 FMI:12" — dipakai bila tabel
@@ -401,14 +487,17 @@ def _keyakinan(kode: list[dict], berkolom: bool) -> str:
 
 def _kosong() -> dict:
     return {"ok": False, "jenis": "dtc", "kode": [], "jenis_pesan": "", "ecu": "",
-            "keyakinan": "gagal", "teks_terbaca": [], "pesan": "", "detik": 0.0}
+            "keyakinan": "gagal", "tak_lengkap": False, "teks_terbaca": [],
+            "pesan": "", "detik": 0.0}
 
 
-def _dari_kotak(kotak) -> dict | None:
+def _dari_kotak(kotak, im=None) -> dict | None:
     """Kotak OCR → hasil kode kesalahan. None = foto ini bukan layar kesalahan.
 
     Dipisah dari pembacaan gambar supaya bisa diuji dengan `vin_ocr.kotak_datar`
-    tanpa perlu gambar sungguhan (pola yang sama dipakai test `vin_ocr`)."""
+    tanpa perlu gambar sungguhan (pola yang sama dipakai test `vin_ocr`). `im`
+    opsional: bila diberikan, baris yang cuma terbaca separuh dibaca ULANG dari
+    gambarnya (`_ulang_baris`) — tanpa itu perilakunya persis seperti dulu."""
     if not ada_bukti(kotak):
         return None
     hasil = _kosong()
@@ -416,10 +505,22 @@ def _dari_kotak(kotak) -> dict | None:
     hasil["ecu"] = label
     kol = _kolom(kotak)
     pasangan: list[tuple[str, str]] = []
+    tak_lengkap = False
     if kol:
         hasil["jenis_pesan"] = kol["jenis"]
+        ulang = 0
         for baris in _baris(kotak, kol["bawah"]):
             hit = _baca_baris(baris, kol)
+            if not hit and _separuh(baris, kol):
+                if im is not None and ulang < _MAKS_ULANG:
+                    ulang += 1
+                    hit = _ulang_baris(im, kol, baris)
+                # ⚠️ Baris data yang tetap tak lengkap TIDAK boleh lenyap tanpa
+                # suara: keluhan pemilik 2026-08-12 — layar memuat 2 kode, yang
+                # sampai ke asisten cuma 1, dan tak ada apa pun yang menandakan
+                # ada yang hilang. Lebih baik user diminta melihat sendiri.
+                if not hit:
+                    tak_lengkap = True
             if hit:
                 pasangan.append(hit)
     if not pasangan:                     # tabel tak berkolom → coba bentuk sebaris
@@ -432,7 +533,10 @@ def _dari_kotak(kotak) -> dict | None:
                            for e in kode):
             kode.append(ent)
     hasil["kode"] = kode
+    hasil["tak_lengkap"] = tak_lengkap
     hasil["keyakinan"] = _keyakinan(kode, bool(kol))
+    if tak_lengkap and hasil["keyakinan"] != "gagal":
+        hasil["keyakinan"] = "rendah"
     hasil["ok"] = bool(kode)
     return hasil
 
@@ -485,9 +589,26 @@ def _sepakat(bacaan: list[dict]) -> dict | None:
     terbaik: dict | None = None
     for h in bacaan:
         terbaik = _pilih(terbaik, h)
-    if terbaik is None or len(bacaan) < 2:
+    if terbaik is None:
+        return None
+    # Label ECU & jenis pesan sering hanya tertangkap di SALAH SATU varian
+    # ('Engine' terbaca di varian mentah tapi tidak di CLAHE, foto 2 baris
+    # pemilik). Itu keterangan tambahan, bukan angka — tak ada gunanya dibuang
+    # hanya karena varian pemenangnya kebetulan tak melihatnya.
+    for kunci in ("ecu", "jenis_pesan"):
+        if not terbaik.get(kunci):
+            terbaik[kunci] = next((h[kunci] for h in bacaan if h.get(kunci)), "")
+    if len(bacaan) < 2:
         return terbaik
-    beda = [h for h in bacaan if _daftar(h) != _daftar(terbaik)]
+    # ⚠️ Varian yang membaca LEBIH SEDIKIT baris bukan penyanggah — ia tak
+    # membantah satu angka pun, cuma kehilangan satu baris (lazim: angka FMI
+    # satu digit gampang tak terdeteksi). Yang menurunkan keyakinan hanyalah
+    # PERTENTANGAN: pasangan yang tak ada sama sekali di bacaan terbaik. Tanpa
+    # pembedaan ini, foto 2 baris yang terbaca sempurna pun diminta konfirmasi
+    # hanya karena varian pembandingnya melihat satu baris saja (terukur: 2 dari
+    # 10 kondisi).
+    utama = set(_daftar(terbaik))
+    beda = [h for h in bacaan if not set(_daftar(h)) <= utama]
     if not beda:
         return terbaik
     out = dict(terbaik)
@@ -497,7 +618,8 @@ def _sepakat(bacaan: list[dict]) -> dict | None:
     # lain hanya pasangan yang benar-benar terdaftar — menawarkan angka sampah
     # sebagai pilihan cuma membuat user ragu pada bacaan yang sudah benar.
     usul = {f"SPN {k['spn']} FMI {k['fmi']}"
-            for h in beda for k in h["kode"] if k["dikenal"]}
+            for h in beda for k in h["kode"]
+            if k["dikenal"] and (k["spn"], k["fmi"]) not in utama}
     for k in out["kode"]:
         sendiri = f"SPN {k['spn']} FMI {k['fmi']}"
         k["alternatif"] = sorted(usul - {sendiri})
@@ -546,7 +668,7 @@ def _baca_lokal(data: bytes) -> dict:
         if not ada_bukti(kotak):
             continue
         bukti = True
-        h = _dari_kotak(kotak)
+        h = _dari_kotak(kotak, im)
         if not _cukup(h):                        # foto terbalik → tata letak saja
             h = _pilih(h, _dari_kotak(_balik(kotak, im.shape)))
         if h and h.get("ok"):
@@ -586,7 +708,7 @@ def _pulihkan_putar(bgr, t0: float) -> dict | None:
             break
         im = cv2.rotate(bgr, rot)
         kotak = vin_ocr._kotak_ocr(im)
-        hasil = _pilih(hasil, _dari_kotak(kotak))
+        hasil = _pilih(hasil, _dari_kotak(kotak, im))
         if not _cukup(hasil):
             hasil = _pilih(hasil, _dari_kotak(_balik(kotak, im.shape)))
         if _cukup(hasil):
@@ -687,7 +809,10 @@ def pesan(hasil: dict) -> str:
         return f"{awal}{ekor}: {daftar}{tanya}"
     # Sebabnya disebut apa adanya: user perlu tahu APA yang harus ia periksa di
     # layar — angka yang tak dikenal, atau angka yang terbaca mendua.
-    if hasil.get("beda_varian"):
+    if hasil.get("tak_lengkap"):
+        sebab = ("ada baris lain di layar yang tak terbaca lengkap — periksa "
+                 "apakah masih ada kode selain ini")
+    elif hasil.get("beda_varian"):
         sebab = "dua kali pembacaan foto ini memberi angka berbeda"
     elif any(not k["dikenal"] for k in kode):
         sebab = "kode ini tidak ada di database kami"

@@ -240,6 +240,34 @@ def test_pesan_siap_kirim_tanpa_arti_kode():
     assert "crankshaft" not in teks.lower()
 
 
+# ── baris yang tak terbaca lengkap ────────────────────────────────────
+def test_baris_tak_lengkap_tidak_hilang_diam_diam():
+    """KELUHAN PEMILIK 2026-08-12: layar memuat 2 kode, yang sampai ke asisten
+    cuma 1 — angka FMI satu digit ('4') tak terdeteksi OCR, jadi SELURUH
+    barisnya lenyap tanpa tanda apa pun, dan sisanya dikirim dengan keyakinan
+    'pasti'. Kehilangan itu sekarang WAJIB terdengar."""
+    kotak = [_kotak(258, 438, 342, 488, "SPN"), _kotak(416, 441, 496, 482, "FMI"),
+             _kotak(155, 451, 204, 486, "No."),
+             _kotak(160, 505, 200, 538, "1"), _kotak(268, 505, 336, 538, "3597"),
+             _kotak(160, 565, 200, 598, "2"), _kotak(268, 565, 336, 598, str(SPN)),
+             _kotak(422, 565, 461, 598, str(FMI))]
+    h = dtc_ocr._dari_kotak(kotak)                 # tanpa gambar → tak bisa baca ulang
+    assert h["tak_lengkap"] is True
+    assert h["keyakinan"] == "rendah"
+    assert "tak terbaca lengkap" in dtc_ocr.pesan(h)
+    assert [(k["spn"], k["fmi"]) for k in h["kode"]] == [(SPN, FMI)]
+
+
+def test_angka_jauh_di_bawah_tabel_bukan_baris_data():
+    """Angka speedometer/voltmeter di bagian bawah panel berdiri dekat kolom SPN
+    dan sempat dianggap 'baris data yang tak lengkap' — bacaan yang sudah benar
+    ikut diturunkan jadi ragu. Tabel berhenti di jeda kosong pertama."""
+    kotak = _tabel() + [_kotak(271, 1183, 303, 1216, "32")]
+    h = dtc_ocr._dari_kotak(kotak)
+    assert h["tak_lengkap"] is False and h["keyakinan"] == "pasti"
+    assert [(k["spn"], k["fmi"]) for k in h["kode"]] == [(SPN, FMI)]
+
+
 # ── kesepakatan antar-varian ──────────────────────────────────────────
 def _ocr_beruntun(monkeypatch, *jawaban):
     """Ganti mesin OCR: panggilan ke-n mengembalikan `jawaban[n]` — meniru dua
@@ -278,6 +306,17 @@ def test_dua_varian_sepakat_tetap_pasti(monkeypatch):
     h = dtc_ocr._baca_lokal(_foto_kosong())
     assert h["keyakinan"] == "pasti"
     assert [(k["spn"], k["fmi"]) for k in h["kode"]] == [(SPN, FMI)]
+
+
+def test_varian_yang_membaca_lebih_sedikit_bukan_penyanggah(monkeypatch):
+    """Varian pembanding yang melihat 1 dari 2 baris tidak MEMBANTAH angka mana
+    pun — ia cuma kehilangan satu baris (angka FMI satu digit gampang tak
+    terdeteksi). Menurunkan keyakinan di situ berarti meminta konfirmasi untuk
+    bacaan yang justru sempurna."""
+    _ocr_beruntun(monkeypatch, _tabel(((SPN, FMI), (4203, 2))), _tabel(((SPN, FMI),)))
+    h = dtc_ocr._baca_lokal(_foto_kosong())
+    assert h["keyakinan"] == "pasti"
+    assert [(k["spn"], k["fmi"]) for k in h["kode"]] == [(SPN, FMI), (4203, 2)]
 
 
 def test_varian_kosong_bukan_penyanggah(monkeypatch):
@@ -379,6 +418,29 @@ def test_endpoint_foto_rusak_jadi_400(klien):
 
 # ── regresi FOTO NYATA (butuh paket OCR) ──────────────────────────────
 FOTO_PANEL = __import__("pathlib").Path(__file__).parent / "data" / "dtc_dashboard.jpg"
+
+
+FOTO_2BARIS = __import__("pathlib").Path(__file__).parent / "data" / "dtc_dashboard_2baris.jpg"
+
+
+@pytest.mark.skipif(not FOTO_2BARIS.exists(), reason="foto panel 2 baris tidak ada")
+def test_foto_panel_dua_baris_utuh_atau_mengaku():
+    """Foto lapangan asli dengan DUA kode (3597/4 dan 4815/10), layar berdebu &
+    memantul. Yang dikunci di sini adalah SIFAT, bukan satu hasil tunggal:
+
+    OCR di image produksi lebih tajam daripada di laptop — di container kedua
+    baris terbaca utuh ('pasti'), di laptop angka '4' tetap tak terdeteksi.
+    Yang TIDAK boleh terjadi di mana pun: satu baris hilang diam-diam sementara
+    sisanya dikirim seolah lengkap. Jadi: kalau dua-duanya terbaca → 'pasti';
+    kalau tidak → WAJIB mengaku lewat `tak_lengkap` + keyakinan 'rendah'."""
+    pytest.importorskip("rapidocr_onnxruntime")
+    h = dtc_ocr.baca_dtc(FOTO_2BARIS.read_bytes())
+    kode = [(k["spn"], k["fmi"]) for k in h["kode"]]
+    assert (3597, 4) in kode or (4815, 10) in kode, h["teks_terbaca"]
+    if kode == [(3597, 4), (4815, 10)]:
+        assert h["keyakinan"] == "pasti"
+    else:
+        assert h["tak_lengkap"] is True and h["keyakinan"] == "rendah", kode
 
 
 @pytest.mark.skipif(not FOTO_PANEL.exists(), reason="foto panel tidak ada")
