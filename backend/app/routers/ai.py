@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 from ..core.config import get_settings
 from ..core.ratelimit import limit
 from ..deps import get_current_user, require_admin, require_menu
-from ..services import ai_assistant, ai_export, ai_feedback, ai_sheet, app_config, vin_ocr
+from ..services import (ai_assistant, ai_export, ai_feedback, ai_sheet, app_config,
+                        dtc_ocr, vin_ocr)
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -321,6 +322,25 @@ async def ai_ocr_rangka(
     'rendah' WAJIB ditawarkan ke user untuk dikoreksi dulu (satu huruf salah =
     unit yang salah), 'gagal' → minta foto ulang."""
     _tolak_bila_perbaikan(user)
+    buf = await _foto_bytes(file)
+    try:
+        # OCR memakan 0,4–3 detik CPU untuk foto wajar, dan sampai ±20 detik untuk
+        # foto sulit yang harus menempuh semua jalan (plat beretsa, foto rebah) →
+        # threadpool, jangan menahan event loop: satu unggahan foto tak boleh
+        # membekukan chat user lain.
+        return await run_in_threadpool(vin_ocr.baca_rangka, buf)
+    except ValueError as e:                       # format foto tak didukung
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    except ImportError:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Pembaca nomor rangka belum terpasang di server (paket OCR absen).")
+    except Exception as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Gagal membaca foto: {e}")
+
+
+async def _foto_bytes(file: UploadFile) -> bytes:
+    """Baca unggahan foto dengan batas ukuran (dipakai semua endpoint OCR)."""
     buf = bytearray()
     while chunk := await file.read(512 * 1024):
         buf.extend(chunk)
@@ -330,18 +350,39 @@ async def ai_ocr_rangka(
                 f"Foto maksimal {vin_ocr.MAX_BYTES // 1024 // 1024} MB.")
     if not buf:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Foto kosong.")
+    return bytes(buf)
+
+
+@router.post("/ocr-foto", dependencies=[Depends(limit("ai_ocr", 20, 60))])
+async def ai_ocr_foto(
+    file: UploadFile = File(..., description="Foto layar panel kode kesalahan ATAU nomor rangka (JPG/PNG)."),
+    user: dict = Depends(require_ai),
+):
+    """FOTO lapangan → TEKS. Satu tombol kamera, dua macam foto:
+
+    * layar panel yang menampilkan kode kesalahan → `jenis: "dtc"` beserta
+      daftar `kode` (SPN/FMI) yang sudah diadu ke store DTC;
+    * nomor rangka (pahatan chassis / nameplate / plat) → `jenis: "rangka"`,
+      isinya persis seperti `/ocr-rangka`.
+
+    User tak perlu memilih lebih dulu: yang membedakan adalah isi fotonya
+    sendiri (kata 'SPN'/'FMI'/'DM1' di layar), dan itu ketahuan pada pembacaan
+    pertama. Asisten sendiri tetap tak pernah melihat gambar — klien MENGIRIM
+    `pesan` sebagai pesan chat biasa.
+
+    Klien memutuskan lewat `keyakinan`: 'pasti'/'tinggi' boleh langsung dikirim,
+    'rendah' WAJIB ditawarkan ke user untuk dikoreksi dulu, 'gagal' → minta foto
+    ulang. ⛔ `/ocr-rangka` TIDAK dihapus: APK lama masih memakainya."""
+    _tolak_bila_perbaikan(user)
+    buf = await _foto_bytes(file)
     try:
-        # OCR memakan 0,4–3 detik CPU untuk foto wajar, dan sampai ±20 detik untuk
-        # foto sulit yang harus menempuh semua jalan (plat beretsa, foto rebah) →
-        # threadpool, jangan menahan event loop: satu unggahan foto tak boleh
-        # membekukan chat user lain.
-        return await run_in_threadpool(vin_ocr.baca_rangka, bytes(buf))
+        return await run_in_threadpool(dtc_ocr.baca_foto, buf)
     except ValueError as e:                       # format foto tak didukung
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
     except ImportError:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Pembaca nomor rangka belum terpasang di server (paket OCR absen).")
+            "Pembaca foto belum terpasang di server (paket OCR absen).")
     except Exception as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Gagal membaca foto: {e}")
 

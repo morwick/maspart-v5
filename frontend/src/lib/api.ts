@@ -2600,6 +2600,52 @@ export async function aiOcrRangka(token: string, file: File): Promise<AiOcrRangk
   return res.json();
 }
 
+export type AiOcrKode = {
+  spn: number;
+  fmi: number;
+  dikenal: boolean;      // pasangan SPN+FMI ini terdaftar di database kode kesalahan
+  kode: string;          // kode pabrik bila ada (mis. "P0335")
+  arti: string;
+  unit: string;          // ECU sumber menurut database (mis. "EMS")
+  sumber: string;
+  fmi_terdaftar: number[];
+  alternatif: string[];  // usul koreksi bila kode tak dikenal (hanya bila TUNGGAL)
+};
+
+// Satu foto, dua kemungkinan — server yang memutuskan lewat `jenis`.
+export type AiOcrFoto =
+  | (AiOcrRangka & { jenis: "rangka" })
+  | {
+      jenis: "dtc";
+      ok: boolean;
+      kode: AiOcrKode[];
+      jenis_pesan: string;   // "DM1" (aktif) / "DM2" (tersimpan)
+      ecu: string;           // label sumber di layar, mis. "Engine"
+      keyakinan: "pasti" | "tinggi" | "rendah" | "gagal";
+      teks_terbaca: string[];
+      pesan: string;
+      detik: number;
+    };
+
+// FOTO lapangan → TEKS (OCR di server; asisten tetap tak pernah melihat gambar).
+// Satu tombol kamera untuk dua macam foto: layar panel berisi kode kesalahan
+// (SPN/FMI) ATAU nomor rangka. User tak perlu memilih lebih dulu — yang
+// membedakan adalah isi fotonya, dan server mengembalikannya lewat `jenis`.
+// ⚠️ `keyakinan: "rendah"` WAJIB ditawarkan ke user untuk dikoreksi dulu: satu
+// angka salah = kode kesalahan lain (mekanik membongkar komponen yang salah),
+// dan satu huruf salah = unit yang salah.
+export async function aiOcrFoto(token: string, file: File): Promise<AiOcrFoto> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/api/ai/ocr-foto`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 // Chat dengan LAMPIRAN EXCEL: server membaca kolomnya, asisten bisa mengisi
 // stok/nama/harga lalu mengeluarkan Excel baru. Balasan memuat `sheet_id` yang
 // harus dikirim ulang di giliran berikutnya agar file tetap terlampir.

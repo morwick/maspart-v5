@@ -78,7 +78,8 @@ def test_semua_jalur_pemakaian_dijaga_perbaikan():
     """Endpoint pemakaian asisten WAJIB memanggil _tolak_bila_perbaikan —
     dicek dari sumbernya supaya endpoint baru tak lolos diam-diam."""
     import inspect
-    for nama in ("ai_chat", "ai_chat_stream", "ai_chat_sheet", "ai_ocr_rangka"):
+    for nama in ("ai_chat", "ai_chat_stream", "ai_chat_sheet", "ai_ocr_rangka",
+                 "ai_ocr_foto"):
         fn = getattr(ai_router, nama, None)
         assert fn is not None, f"endpoint {nama} tidak ditemukan"
         assert "_tolak_bila_perbaikan" in inspect.getsource(fn), nama

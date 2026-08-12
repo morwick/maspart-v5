@@ -11,7 +11,7 @@ import {
   aiChatSheet,
   aiChatSheetStream,
   aiChatStream,
-  aiOcrRangka,
+  aiOcrFoto,
   downloadBlob,
   exportAiExcel,
   exportBandingRangka,
@@ -255,9 +255,10 @@ export default function AsistenPage() {
   // di tiap anak elemen — hitung kedalaman agar overlay tidak kedip.
   const [dragOver, setDragOver] = useState(false);
   const dragDepth = useRef(0);
-  // FOTO nomor rangka: dibaca server (OCR) lalu nomornya dikirim sebagai pesan
-  // biasa. `ocrNote` = baris tipis di atas kotak ketik — sengaja BUKAN bubble
-  // chat, karena bacaan yang belum yakin harus bisa dikoreksi user dulu.
+  // FOTO lapangan (nomor rangka / layar kode kesalahan): dibaca server (OCR)
+  // lalu teksnya dikirim sebagai pesan biasa. `ocrNote` = baris tipis di atas
+  // kotak ketik — sengaja BUKAN bubble chat, karena bacaan yang belum yakin
+  // harus bisa dikoreksi user dulu.
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrNote, setOcrNote] = useState<{ teks: string; ragu: boolean } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -383,13 +384,17 @@ export default function AsistenPage() {
     ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
   }
 
-  // ── Foto nomor rangka → nomor rangka ────────────────────────────────────────
+  // ── Foto lapangan → teks (nomor rangka ATAU kode kesalahan) ────────────────
   // Alurnya sengaja BERBEDA dari lampiran Excel: fotonya tidak ikut ke asisten
-  // sama sekali. Server membacanya (OCR + cocokkan ke populasi) dan hanya
-  // NOMOR-nya yang dikirim sebagai pesan. Bacaan yang belum yakin TIDAK
-  // dikirim otomatis — ia dituliskan ke kotak ketik supaya user mengoreksi,
-  // sebab satu huruf salah = unit yang salah di seluruh jawaban berikutnya.
-  async function kirimFotoRangka(f: File) {
+  // sama sekali. Server membacanya (OCR + cocokkan ke populasi/database kode)
+  // dan hanya TEKSnya yang dikirim sebagai pesan. Bacaan yang belum yakin TIDAK
+  // dikirim otomatis — ia dituliskan ke kotak ketik supaya user mengoreksi:
+  // satu huruf salah = unit yang salah, satu angka salah = kode kesalahan lain.
+  //
+  // Satu tombol untuk dua macam foto: user tak perlu memilih "ini foto apa"
+  // lebih dulu (di lapangan, sambil memegang HP di kabin, pilihan itu cuma
+  // penghalang) — server yang mengenali isinya lalu mengembalikan `jenis`.
+  async function kirimFoto(f: File) {
     const token = getToken();
     if (!token) return router.replace("/login");
     if (!/^image\//i.test(f.type) && !/\.(jpe?g|png|webp|bmp)$/i.test(f.name)) {
@@ -398,17 +403,22 @@ export default function AsistenPage() {
     }
     setError(null);
     setOcrBusy(true);
-    setOcrNote({ teks: "Membaca nomor rangka dari foto…", ragu: false });
+    setOcrNote({ teks: "Membaca foto…", ragu: false });
     try {
-      const hasil = await aiOcrRangka(token, f);
-      if (hasil.keyakinan === "pasti" || hasil.keyakinan === "tinggi") {
+      const hasil = await aiOcrFoto(token, f);
+      const yakin = hasil.keyakinan === "pasti" || hasil.keyakinan === "tinggi";
+      // Teks yang ditaruh di kotak ketik saat bacaan belum yakin: untuk nomor
+      // rangka cukup nomornya (user membetulkan 1 huruf), untuk kode kesalahan
+      // kalimat utuhnya (angkanya ada di dalam kalimat itu).
+      const draf = hasil.jenis === "rangka" ? hasil.rangka : hasil.ok ? hasil.pesan : "";
+      if (yakin) {
         setOcrNote({ teks: hasil.pesan, ragu: hasil.keyakinan !== "pasti" });
-        await send(`Nomor rangka: ${hasil.rangka}`);
+        await send(hasil.jenis === "rangka" ? `Nomor rangka: ${hasil.rangka}` : hasil.pesan);
       } else {
         // 'rendah' (bacaan ragu) & 'gagal' (tak terbaca) — user yang menentukan.
         setOcrNote({ teks: hasil.pesan, ragu: true });
-        if (hasil.rangka) {
-          setInput(hasil.rangka);
+        if (draf) {
+          setInput(draf);
           setTimeout(() => {
             taRef.current?.focus();
             autoGrow();
@@ -417,7 +427,7 @@ export default function AsistenPage() {
       }
     } catch (e) {
       setOcrNote(null);
-      setError(e instanceof ApiError ? e.message : "Gagal membaca foto nomor rangka.");
+      setError(e instanceof ApiError ? e.message : "Gagal membaca foto.");
     } finally {
       setOcrBusy(false);
       if (fotoRef.current) fotoRef.current.value = "";
@@ -852,13 +862,13 @@ export default function AsistenPage() {
       taRef.current?.focus();
       return;
     }
-    // Foto nomor rangka: langsung dibaca (bukan dilampirkan) — hasilnya nomor,
+    // Foto lapangan: langsung dibaca (bukan dilampirkan) — hasilnya teks,
     // bukan file, jadi tak ada yang perlu "menunggu Kirim".
     if (/^image\//i.test(f.type) || /\.(jpe?g|png|webp|bmp)$/i.test(f.name)) {
-      void kirimFotoRangka(f);
+      void kirimFoto(f);
       return;
     }
-    setError("File tidak didukung — seret Excel (.xlsx/.xlsm) atau foto nomor rangka.");
+    setError("File tidak didukung — seret Excel (.xlsx/.xlsm) atau foto nomor rangka/layar panel.");
   }
 
   return (
@@ -953,7 +963,7 @@ export default function AsistenPage() {
                 <div style={{ fontSize: 12, color: "var(--ink-500)", lineHeight: 1.5 }}>
                   Excel .xlsx/.xlsm terlampir dulu, kirim setelah mengetik perintah
                   <br />
-                  Foto nomor rangka langsung dibaca jadi nomornya
+                  Foto nomor rangka / layar kode kesalahan langsung dibaca jadi teksnya
                 </div>
               </div>
             </div>
@@ -1298,7 +1308,7 @@ export default function AsistenPage() {
                 </button>
               </div>
             )}
-            {/* Hasil baca foto nomor rangka (bukan bubble chat: yang ragu masih
+            {/* Hasil baca foto (bukan bubble chat: yang ragu masih
                 boleh dikoreksi user sebelum dikirim). */}
             {ocrNote && (
               <div
@@ -1339,13 +1349,13 @@ export default function AsistenPage() {
                 style={{ display: "none" }}
                 onChange={(e) => {
                   const f = e.target.files?.[0];
-                  if (f) void kirimFotoRangka(f);
+                  if (f) void kirimFoto(f);
                 }}
               />
               <button
                 className="btn btn-ghost"
-                title="Foto nomor rangka — nomornya dibaca otomatis lalu dikirim"
-                aria-label="Kirim foto nomor rangka"
+                title="Foto nomor rangka atau layar kode kesalahan — dibaca otomatis lalu dikirim"
+                aria-label="Kirim foto nomor rangka atau layar kode kesalahan"
                 onClick={() => fotoRef.current?.click()}
                 disabled={available === false || ocrBusy || busy}
                 style={{ padding: "0 10px", color: "var(--ink-600)" }}
@@ -1466,7 +1476,7 @@ export default function AsistenPage() {
                 <span className="kbd">Enter</span> kirim · <span className="kbd">Shift+Enter</span> baris baru
               </span>
               <span>Seret file Excel ke area chat untuk melampirkan.</span>
-              <span>Nomor rangka bisa dikirim lewat FOTO — tekan ikon kamera.</span>
+              <span>Nomor rangka & kode kesalahan di panel bisa dikirim lewat FOTO — tekan ikon kamera.</span>
             </div>
           </div>
         </div>

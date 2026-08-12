@@ -248,6 +248,8 @@ def armada() -> list[tuple[str, dict]]:
 _mesin_box: dict = {"ocr": None}
 _mesin_lock = threading.Lock()      # pemuatan model (sekali)
 _pakai_lock = threading.Lock()      # pemakaian model (satu foto pada satu waktu)
+_memo_lock = threading.Lock()       # ingatan hasil baca (lihat `_kotak_ocr`)
+_memo: list[tuple[bytes, list]] = []
 
 
 def _mesin():
@@ -269,7 +271,23 @@ def _kotak_ocr(bgr) -> list[tuple[float, float, float, float, str]]:
     Dipagari satu lock: pipeline RapidOCR menyimpan state per-instance, dan dua
     unggahan foto bersamaan (endpoint berjalan di threadpool) tak boleh saling
     menimpa. Antre 1–2 detik jauh lebih murah daripada bacaan tercampur — dan
-    lebih murah pula daripada memuat model kedua di container 2500m."""
+    lebih murah pula daripada memuat model kedua di container 2500m.
+
+    Hasilnya di-INGAT untuk dua gambar terakhir (kunci = isi piksel). Satu foto
+    kini dibaca dua pembaca berurutan — `dtc_ocr` menguji dulu apakah ini layar
+    kode kesalahan, lalu jalur nomor rangka melanjutkan — dan varian pra-proses
+    pertama keduanya sama persis (`_varian` deterministik). Tanpa ingatan ini,
+    setiap foto nomor rangka membayar satu pembacaan penuh (2–5 detik terukur)
+    hanya untuk pertanyaan yang sudah dijawab. Menghitung kuncinya 11 ms."""
+    import hashlib
+
+    import numpy as np
+    kunci = hashlib.blake2b(np.ascontiguousarray(bgr).tobytes(),
+                            digest_size=16).digest()
+    with _memo_lock:
+        for k, v in _memo:
+            if k == kunci:
+                return list(v)
     with _pakai_lock:
         res, _ = _mesin()(bgr)
     out = []
@@ -277,6 +295,9 @@ def _kotak_ocr(bgr) -> list[tuple[float, float, float, float, str]]:
         xs = [float(p[0]) for p in box]
         ys = [float(p[1]) for p in box]
         out.append((min(xs), min(ys), max(xs), max(ys), str(teks)))
+    with _memo_lock:
+        _memo.append((kunci, list(out)))
+        del _memo[:-2]                 # dua terakhir saja — ini ingatan, bukan cache
     return out
 
 
@@ -970,8 +991,17 @@ def _sisa_memori_mb() -> float | None:
         return None
 
 
-def _jalankan_anak(data: bytes, rows: list[tuple[str, dict]]) -> dict | None:
-    """OCR di proses terpisah. None = gagal (pemanggil jatuh ke dalam-proses)."""
+_ENTRY_RANGKA = "from app.services.vin_ocr import _cli; _cli()"
+
+
+def _jalankan_anak(data: bytes, rows: list[tuple[str, dict]],
+                   entry: str = _ENTRY_RANGKA) -> dict | None:
+    """OCR di proses terpisah. None = gagal (pemanggil jatuh ke dalam-proses).
+
+    `entry` = baris kode yang dijalankan anak. Bisa diganti supaya pembaca foto
+    LAIN ikut menumpang mekanisme yang sama (mis. `dtc_ocr`, foto panel kode
+    kesalahan) — yang mahal di sini adalah memuat model OCR, dan tak ada
+    gunanya menduplikasi seluruh urusan spawn/timeout/pemulihan untuk itu."""
     import base64
     import json
     import subprocess
@@ -983,7 +1013,7 @@ def _jalankan_anak(data: bytes, rows: list[tuple[str, dict]]) -> dict | None:
                           "armada": [[v, i] for v, i in rows]})
     try:
         p = subprocess.run(
-            [sys.executable, "-c", "from app.services.vin_ocr import _cli; _cli()"],
+            [sys.executable, "-c", entry],
             input=payload.encode("utf-8"), capture_output=True,
             cwd=akar, timeout=_BATAS_ANAK)
     except Exception as e:                               # spawn/timeout gagal
@@ -1009,7 +1039,12 @@ def _cli() -> None:
     req = json.loads(sys.stdin.read() or "{}")
     rows = [(str(v), dict(i or {})) for v, i in (req.get("armada") or [])]
     hasil = _baca_lokal(base64.b64decode(req.get("gambar") or ""), rows)
-    sys.stdout.write(json.dumps(hasil, ensure_ascii=False))
+    # UTF-8 EKSPLISIT: induk mendekode UTF-8, sedang `sys.stdout` memakai
+    # encoding bawaan sistem. Di Linux keduanya kebetulan sama, tapi di laptop
+    # Windows (cp1252) tanda '—'/'·' pada pesan keluar sebagai byte yang bukan
+    # UTF-8 → seluruh hasil baca gagal di-parse dan pembacaan foto diam-diam
+    # jatuh ke jalur cadangan dalam-proses.
+    sys.stdout.buffer.write(json.dumps(hasil, ensure_ascii=False).encode("utf-8"))
 
 
 def pesan(hasil: dict) -> str:
