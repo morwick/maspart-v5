@@ -328,6 +328,13 @@ def _separuh(baris: list, kol: dict) -> bool:
 # '4'. Selisihnya setipis itu, jadi pita dilebarkan sampai 9,0 dengan sengaja.
 _RASIO_ULANG = 9.0
 _MAKS_ULANG = 3           # baris yang boleh dibaca ulang per pembacaan
+# Tinggi pita saat dibaca ulang. Pengenal RapidOCR menormalkan tiap baris ke 48
+# px, jadi mengirim pita beresolusi penuh hanya menambah kerja: terukur di
+# container, pita 702×78 memakan 3,0 detik (pernah 8,6 detik saat mesin sibuk)
+# sedangkan versi 432×48 hanya 1,2 detik dengan bacaan yang SAMA.
+# ⛔ Jangan pakai nilai di antaranya tanpa mengukur ulang: pada 96 px angka '4'
+# justru hilang lagi — perilakunya tidak menaik rapi mengikuti resolusi.
+_TINGGI_ULANG = 48
 
 
 def _ulang_baris(im, kol: dict, baris: list) -> tuple[str, str] | None:
@@ -357,15 +364,20 @@ def _ulang_baris(im, kol: dict, baris: list) -> tuple[str, str] | None:
         xb, xa = lebar_im, max(0, lebar_im - lebar)
     if (xb - xa) < tinggi * 8:          # foto terlalu sempit → tak ada gunanya
         return None
+    pita = cv2.cvtColor(im[y0:y1, xa:xb], cv2.COLOR_BGR2GRAY)
+    skala = 1.0
+    if pita.shape[0] > _TINGGI_ULANG:
+        skala = _TINGGI_ULANG / pita.shape[0]
+        pita = cv2.resize(pita, (max(1, int(pita.shape[1] * skala)), _TINGGI_ULANG),
+                          interpolation=cv2.INTER_AREA)
     try:
-        kotak = vin_ocr._kotak_ocr(cv2.cvtColor(
-            cv2.cvtColor(im[y0:y1, xa:xb], cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR))
+        kotak = vin_ocr._kotak_ocr(cv2.cvtColor(pita, cv2.COLOR_GRAY2BGR))
     except Exception as e:
         logger.warning("dtc_ocr: baca ulang pita gagal: %s", e)
         return None
     if not kotak:
         return None
-    asli = [(x0 + xa, yy0 + y0, x1 + xa, yy1 + y0, t)
+    asli = [(x0 / skala + xa, yy0 / skala + y0, x1 / skala + xa, yy1 / skala + y0, t)
             for x0, yy0, x1, yy1, t in kotak]
     return _baca_baris(asli, kol)
 
