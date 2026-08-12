@@ -2068,6 +2068,243 @@ def _t_filter_unit(args: dict, user: dict) -> dict:
     return out
 
 
+_KOLONG_CHAT_MAX_SISTEM = 40    # baris ditampilkan per sistem di chat
+_KOLONG_CHAT_MAX_TOTAL = 220    # plafon total baris chat (sisanya lewat excel=true)
+_KOLONG_EXCEL_MAX = 4000
+
+_KOLONG_CAT_BELI = ("Assembly beli-jadi — isi dalamnya tidak diurai EPC Sinotruk")
+_KOLONG_CAT_VIRTUAL = ("Nomor VIRTUAL EPC — penanda struktur, BUKAN part yang bisa dipesan")
+
+
+def _t_part_kolong(args: dict, user: dict) -> dict:
+    """DAFTAR PART KOLONG (undercarriage) satu unit dari NOMOR RANGKA, terkelompok
+    per sistem: rem, setir, transmisi/transfer case, gardan, kopel, suspensi, roda,
+    rangka, tangki BBM & knalpot, dudukan mesin.
+
+    Kenapa tool sendiri (kasus nyata PF115691, 2026-08-12): 'cek part kolong
+    <rangka>' tak terjawab jalur lama — bom_dari_rangka memberi 618 baris DATAR
+    tanpa pengelompokan (dan PN struktural di Loading List kerap assembly usang),
+    sedangkan cari_part_di_unit hanya melayani SATU istilah. Di sini sumbernya
+    KATEGORI TINGKAT-ATAS pohon unit: nama kategori itu milik EPC sendiri
+    (前悬架/底盘制动装置/外购驱动桥总成), jadi pengelompokan tidak menebak dari
+    nama part, dan hanya kategori yang cocok yang dibuka (bukan walk seluruh pohon).
+
+    Dua penanda kejujuran yang WAJIB ikut keluar:
+      • kategori '外购…' (beli-jadi) → isi dalam gardan/transmisi TIDAK ADA di EPC
+        per-VIN mana pun. Di unit uji: kampas rem, tromol, hub, bearing roda, seal,
+        as roda, brake chamber = NOL baris di seluruh BOM 618 part.
+      • nomor '虚拟号'/virtual number → penanda struktur, bukan PN yang bisa dipesan.
+    """
+    rangka = (args.get("rangka") or "").strip()
+    if not rangka:
+        return {"error": "Sebutkan nomor rangka (VIN atau frame number)."}
+
+    sis_raw = args.get("sistem") or []
+    if isinstance(sis_raw, str):
+        sis_raw = [s for s in re.split(r"[;,]", sis_raw) if s.strip()]
+    sistem = [str(s).strip().lower() for s in sis_raw if str(s).strip()]
+    tak_dikenal = [s for s in sistem if s not in epc_bom.SISTEM_KOLONG_LABEL]
+    if tak_dikenal:
+        return {"error": "Sistem tak dikenal: " + ", ".join(tak_dikenal)
+                         + ". Pilihan: " + ", ".join(epc_bom.SISTEM_KOLONG_LABEL)
+                         + " (atau kosongkan untuk SEMUA sistem kolong)."}
+
+    d = epc_bom.sistem_kolong(rangka, sistem or None)
+    err = d.get("_err")
+    if err in ("token_expired", "no_token"):
+        return {"found": False, "error": _EPC_TOKEN_MSG, "_token_issue": True}
+    if err == "network":
+        return {"found": False, "error": "Gagal menghubungi server EPC (jaringan). Coba lagi."}
+    if err in ("not_found", "input"):
+        return {"found": False, "error": "Nomor rangka tak ditemukan di EPC "
+                                         "(cek VIN; hanya Sinotruk/HOWO/SITRAK)."}
+    frame = d.get("frame_number") or rangka
+    grup = d.get("sistem") or {}
+    gagal = d.get("kategori_gagal") or []
+    peringatan = None
+    if gagal:
+        peringatan = ("Kategori yang GAGAL dibuka: " + ", ".join(gagal[:8])
+                      + (f" (+{len(gagal) - 8} lagi)" if len(gagal) > 8 else "")
+                      + ". Part di kategori itu BELUM TENTU tidak ada — jangan divonis.")
+
+    if not d.get("found") or not grup:
+        out = {"found": False, "frame_number": frame}
+        if peringatan:
+            out["peringatan"] = peringatan
+        out["jawaban_wajib"] = (
+            "Tidak ada kategori kolong yang bisa dipastikan dari EPC untuk unit ini. "
+            "Sampaikan JUJUR" + (" — sebagian kategori gagal dibuka, jadi ini BUKAN "
+                                 "vonis 'tidak ada'" if gagal else "")
+            + ". ⛔ JANGAN mengarang PN.")
+        return out
+
+    sertakan_baut = bool(args.get("sertakan_baut"))
+    boleh_harga = _boleh_harga(user)
+    pembeli = _is_pembeli(user)
+
+    # Silang inventori SEKALI untuk seluruh PN (rows_for_pns pemaaf suffix varian
+    # EPC '…/2' — tanpa itu part tampil 'stok —' padahal ada). Nomor virtual
+    # sengaja tak dicari: ia bukan barang.
+    semua_pn = [r["pn"] for g in grup.values() for r in g["parts"] if not r.get("virtual")]
+    local = part_index.rows_for_pns(semua_pn)
+
+    def _hias(r: dict) -> dict:
+        row = {"part_number": r["pn"],
+               "nama": r.get("nama") or r.get("nama_cn") or "",
+               "qty": r.get("qty"),
+               "dari_kategori": r.get("dari_kategori")}
+        if r.get("dari_sub"):
+            row["di_dalam_assembly"] = r["dari_sub"]
+        if r.get("beli_jadi"):
+            row["assembly_beli_jadi"] = True
+        if r.get("virtual"):
+            row["virtual_bukan_part"] = True
+            return row
+        lr = local.get(r["pn"], {})
+        if lr.get("part_name"):
+            row["nama"] = " ".join(lr["part_name"].split())
+        row["ada_di_inventori"] = bool(lr)
+        if lr:
+            row["stok_total"] = lr.get("stok")
+            if not pembeli:
+                row["stok_per_gudang"] = lr.get("gudang") or {}
+            if boleh_harga:
+                row["harga_lokal"] = lr.get("harga")
+        return row
+
+    isi: dict = {}
+    jml_part = jml_baut = 0
+    for key, g in grup.items():
+        inti = [r for r in g["parts"] if not r.get("pengencang")]
+        baut = [r for r in g["parts"] if r.get("pengencang")]
+        jml_part += len(inti)
+        jml_baut += len(baut)
+        tampil = (inti + baut) if sertakan_baut else inti
+        if tampil:
+            isi[key] = (g, inti, baut, tampil)
+
+    # PLAFON BARIS CHAT DIBAGI ADIL, bukan siapa-duluan. Pembagian berurutan
+    # (versi pertama, ketahuan saat uji PF115691 nyata) menghabiskan jatah di
+    # sistem besar — 'dudukan' yang cuma 4 part tampil KOSONG, dan daftar kosong
+    # terbaca seperti 'tidak ada'. Maka: tiap sistem dapat jatah DASAR dulu,
+    # sisanya baru dibagikan ke sistem yang masih terpotong.
+    sisa_plafon = _KOLONG_CHAT_MAX_TOTAL
+    dasar = max(6, _KOLONG_CHAT_MAX_TOTAL // max(1, len(isi)))
+    jatah: dict = {}
+    for key, (_g, _i, _b, tampil) in isi.items():
+        j = min(len(tampil), dasar, _KOLONG_CHAT_MAX_SISTEM, max(0, sisa_plafon))
+        jatah[key] = j
+        sisa_plafon -= j
+    for key, (_g, _i, _b, tampil) in isi.items():
+        if sisa_plafon <= 0:
+            break
+        tambah = min(_KOLONG_CHAT_MAX_SISTEM - jatah[key],
+                     len(tampil) - jatah[key], sisa_plafon)
+        if tambah > 0:
+            jatah[key] += tambah
+            sisa_plafon -= tambah
+
+    per_sistem: dict = {}
+    for key, (g, inti, baut, tampil) in isi.items():
+        batas = jatah[key]
+        potong = max(0, len(tampil) - batas)
+        blok = {"label": g["label"], "kategori_epc": g["kategori"],
+                "jumlah_part": len(inti), "jumlah_pengencang": len(baut),
+                "parts": [_hias(r) for r in tampil[:batas]]}
+        if g.get("kategori_beli_jadi"):
+            blok["kategori_beli_jadi"] = g["kategori_beli_jadi"]
+        if potong:
+            blok["dipotong"] = potong
+        per_sistem[key] = blok
+
+    out = {
+        "found": True, "frame_number": frame,
+        "order_no": d.get("order_no"),
+        "jumlah_kategori_unit": d.get("jumlah_kategori_unit"),
+        "jumlah_kategori_kolong": d.get("jumlah_kategori_kolong"),
+        "jumlah_part_kolong": jml_part,
+        "jumlah_pengencang": jml_baut,
+        "part_per_sistem": per_sistem,
+    }
+    if not sertakan_baut and jml_baut:
+        out["catatan_pengencang"] = (
+            f"{jml_baut} baris baut/mur/ring/paku keling DISEMBUNYIKAN dari daftar ini "
+            "(bukan 'tidak ada' — panggil lagi dengan sertakan_baut=true bila perlu).")
+
+    if args.get("excel"):
+        dengan_stok = (not pembeli) and _boleh_stok(user)
+        dengan_harga = (not pembeli) and boleh_harga
+        kolom = ["No", "Sistem", "Kategori EPC", "Part Number", "Nama Part",
+                 "Nama (CN)", "Qty", "Jenis", "Di dalam assembly"]
+        if dengan_stok:
+            kolom += ["Stok Total"]
+        if dengan_harga:
+            kolom += ["Harga"]
+        kolom += ["Catatan"]
+        baris: list[list] = []
+        for key, g in grup.items():
+            for r in g["parts"]:
+                if len(baris) >= _KOLONG_EXCEL_MAX:
+                    break
+                lr = {} if r.get("virtual") else local.get(r["pn"], {})
+                nama = " ".join((lr.get("part_name") or r.get("nama")
+                                 or r.get("nama_cn") or "").split())
+                row = [str(len(baris) + 1), g["label"], r.get("dari_kategori") or "",
+                       r["pn"], nama, r.get("nama_cn") or "",
+                       ai_export.ke_angka(r.get("qty") or ""),
+                       "Pengencang" if r.get("pengencang") else "Part",
+                       r.get("dari_sub") or ""]
+                if dengan_stok:
+                    row += [ai_export.ke_angka(lr.get("stok") or 0)]
+                if dengan_harga:
+                    # ⚠️ rows_for_pns memberi harga TERFORMAT ('Rp 2.500.000') —
+                    # beda dari accurate.snapshot() yang angka, dan int() di sini
+                    # meledak (ketahuan test excel). ke_angka(uang=True) yang
+                    # menormalkan, sekaligus menjaga sel tetap ANGKA untuk rumus.
+                    hg = lr.get("harga")
+                    row += [ai_export.ke_angka(hg, uang=True) if hg else "—"]
+                row += [_KOLONG_CAT_VIRTUAL if r.get("virtual")
+                        else (_KOLONG_CAT_BELI if r.get("beli_jadi") else "")]
+                baris.append(row)
+        judul = f"Part kolong {frame}"
+        export_id, filename = ai_export.stash_export(judul, kolom, baris)
+        out["export_id"] = export_id
+        out["filename"] = filename
+        out["judul"] = judul
+        out["jumlah_baris"] = len(baris)
+        out["kolom_stok"] = dengan_stok
+        out["kolom_harga"] = dengan_harga
+
+    beli = sorted({k for g in grup.values() for k in (g.get("kategori_beli_jadi") or [])})
+    if beli:
+        out["catatan_assembly_beli_jadi"] = (
+            "Kategori beli-jadi di unit ini: " + ", ".join(beli)
+            + ". Di jalur kategori, EPC Sinotruk hanya memberi NOMOR ASSEMBLY-nya — isi "
+            "dalam (kampas rem, tromol, hub, bearing roda, seal, as roda, brake chamber) "
+            "TIDAK muncul di daftar ini. ⛔ Itu BUKAN vonis 'tidak ada': sebelum menjawab, "
+            "coba part_aus_dari_rangka(rangka, query=<part aus yg ditanya>) yang menyisir "
+            "modul poros. Bila di sana pun kosong, barulah katakan part itu tak terurai di "
+            "EPC per-VIN dan harus lewat katalog PEMASOK gardan/transmisi.")
+    if peringatan:
+        out["peringatan"] = peringatan
+    # 'catatan' WAJIB kunci TERAKHIR — _cap_tool_content memotong bagian TENGAH.
+    out["catatan"] = (
+        "Sajikan TERKELOMPOK per sistem (rem, setir, transmisi, gardan, kopel, suspensi, "
+        "roda, rangka, tangki/knalpot, dudukan) — jangan satu daftar panjang. PN di sini "
+        "PERSIS untuk unit ini (EPC per-VIN) → pakai ini, bukan katalog per-model. Baris "
+        "ber-'virtual_bukan_part' JANGAN pernah disodorkan sebagai PN yang bisa dipesan. "
+        "Sistem yang tidak muncul = tidak terdata di EPC unit ini"
+        + (" — dan sebagian kategori gagal dibuka, jadi jangan divonis pasti tidak ada"
+           if gagal else "")
+        + ". ⛔ JANGAN mengarang PN di luar daftar ini. ⛔ JANGAN menyatakan part "
+        "discontinued dari hasil ini — status jual RESMI hanya dari SIMS "
+        "(pengganti_part → 'status_jual_sims')."
+        + (" File Excel siap — kartu unduh muncul OTOMATIS di bawah jawaban; jawab SINGKAT "
+           "(judul + jumlah baris), ⛔ JANGAN tulis ulang isi tabel & jangan buat link sendiri."
+           if args.get("excel") else ""))
+    return out
+
+
 def _balon_cakupan(daftar_balon: list, gambar: list, nama_figure: str) -> tuple[str, dict]:
     """(kalimat cakupan jujur, dict cakupan) untuk 'daftar_balon_gambar'.
 

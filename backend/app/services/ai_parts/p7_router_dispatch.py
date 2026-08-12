@@ -151,6 +151,7 @@ _DISPATCH = {
     "bom_dari_rangka": _t_bom_dari_rangka,
     "cari_part_di_unit": _t_cari_part_di_unit,
     "filter_unit": _t_filter_unit,
+    "part_kolong": _t_part_kolong,
     "banding_rangka": _t_banding_rangka,
     "banding_rangka_massal": _t_banding_rangka_massal,
     "part_aus_dari_rangka": _t_part_aus_dari_rangka,

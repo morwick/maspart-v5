@@ -1178,6 +1178,44 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "part_kolong",
+                "description": (
+                    "⭐ DAFTAR PART KOLONG (undercarriage/bagian bawah) satu unit dari "
+                    "NOMOR RANGKA — terkelompok per SISTEM: rem, setir, transmisi/"
+                    "transfer case/kopling, gardan, kopel, suspensi & shock absorber, "
+                    "roda & ban, rangka/chassis, tangki BBM & knalpot, dudukan mesin — "
+                    "plus stok/harga. Pengelompokan memakai KATEGORI RESMI pohon unit di "
+                    "EPC (bukan tebakan dari nama part). Pakai untuk: 'cek part kolong "
+                    "<rangka>', 'part bawah/sasis unit ini', 'daftar part suspensi & rem "
+                    "unit ini', dan permintaan Excel-nya (excel=true). Bisa dipersempit "
+                    "lewat 'sistem'. ⛔ Pertanyaan kolong MENYELURUH jangan dijawab dari "
+                    "bom_dari_rangka (list DATAR tanpa kelompok; PN struktural di Loading "
+                    "List kerap assembly usang) maupun cari_part_di_unit (itu untuk SATU "
+                    "istilah spesifik). ⚠️ Isi dalam gardan/transmisi (kampas rem, tromol, "
+                    "hub, bearing roda, seal, as roda, brake chamber) TIDAK ADA di EPC "
+                    "per-VIN — tool menandainya 'assembly beli-jadi'; sampaikan batas itu "
+                    "apa adanya, JANGAN dikarang."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {"type": "string", "description": "Nomor rangka/VIN unit."},
+                        "sistem": {
+                            "type": ["string", "array"], "items": {"type": "string"},
+                            "description": "Opsional. Persempit ke sistem tertentu: rem, setir, transmisi, gardan, kopel, suspensi, roda, rangka, bbm_knalpot, dudukan. KOSONGKAN untuk semua sistem kolong.",
+                        },
+                        "sertakan_baut": {"type": "boolean", "description": "true = ikutkan baut/mur/ring/paku keling. Default disembunyikan dari daftar (jumlahnya tetap dilaporkan) supaya daftar belanja terbaca."},
+                        "excel": {"type": "boolean", "description": "true = buat file Excel (kartu unduh) berisi SELURUH baris termasuk pengencang."},
+                    },
+                    "required": ["rangka"],
+                },
+            },
+        },
+
+
+        {
+            "type": "function",
+            "function": {
                 "name": "bom_dari_rangka",
                 "description": (
                     "Daftar PART (BOM pabrik/Loading List) SATU unit dari NOMOR RANGKA/VIN "

@@ -2455,3 +2455,253 @@ def exploded_figures(rangka: str, pn: str, kategori: str) -> dict:
                             "message": f"PN {pnu} tak muncul di figure kategori '{kategori}' "
                                        "untuk unit ini — coba kategori lain."}),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  PART KOLONG (undercarriage) per-VIN — daftar part terkelompok per SISTEM
+#  ---------------------------------------------------------------------
+#  "Part kolong" = yang ada DI BAWAH truk: suspensi, gardan, kopel, rem,
+#  setir, roda, rangka, tangki/knalpot, dudukan. Pertanyaan lapangan ("cek
+#  part kolong <rangka>") tak terjawab oleh jalur yang sudah ada:
+#  loading_list DATAR (618 baris tanpa pengelompokan, dan part strukturalnya
+#  kerap PN assembly usang) maupun cari_part_di_unit (SATU istilah).
+#
+#  Yang dipakai di sini: KATEGORI TINGKAT-ATAS pohon unit (category_top) —
+#  nama kategori itu MILIK EPC sendiri (前悬架 / 底盘制动装置 / 外购驱动桥
+#  总成 …), jadi pemetaan ke "sistem" cukup kata kunci CN dan tidak perlu
+#  menebak dari nama part. Hanya kategori yang cocok yang dibuka → biaya
+#  jaringan sebanding jumlah sistem, BUKAN walk seluruh pohon (_all_items
+#  ±1 mnt).
+#
+#  Divalidasi 2026-08-12 pada PF115691 (HOWO H3 4x4, 95 kategori unit):
+#  31 kategori kolong terpilih → 410 baris part, 0 kategori gagal.
+# ═══════════════════════════════════════════════════════════════════════
+
+# Urutan dict = urutan periksa; kategori jatuh ke sistem PERTAMA yang cocok.
+# Urutannya penting: '前桥制动装置' harus jadi REM (bukan gardan), '分动器悬置'
+# jadi TRANSMISI (bukan dudukan).
+_SISTEM_KOLONG: dict = {
+    "rem": {
+        "label": "Rem",
+        "cn": ("制动", "刹车", "气室"),
+        "en": ("brake", "braking"),
+    },
+    "setir": {
+        "label": "Setir / kemudi",
+        "cn": ("转向",),
+        "en": ("steering",),
+    },
+    "transmisi": {
+        "label": "Transmisi, transfer case & kopling",
+        "cn": ("变速器", "变速箱", "分动器", "分动箱", "离合", "全驱", "取力器"),
+        "en": ("gearbox", "transmission", "transfer case", "clutch"),
+    },
+    "gardan": {
+        "label": "Gardan / drive axle",
+        "cn": ("驱动桥", "驱桥", "车桥", "桥壳", "轮边", "前桥", "后桥"),
+        "en": ("drive axle", "axle assembly"),
+    },
+    "kopel": {
+        "label": "Kopel / poros penggerak",
+        "cn": ("传动轴",),
+        "en": ("propeller shaft", "drive shaft", "powertrain"),
+    },
+    "suspensi": {
+        "label": "Suspensi & shock absorber",
+        "cn": ("悬架", "钢板弹簧", "板簧", "减振", "减震", "稳定杆", "推力杆"),
+        "en": ("suspension", "shock absorber", "leaf spring", "stabilizer"),
+    },
+    "roda": {
+        "label": "Roda, ban & ban serep",
+        "cn": ("车轮", "轮胎", "备胎"),
+        "en": ("wheel", "tire", "tyre"),
+    },
+    "rangka": {
+        "label": "Rangka / chassis",
+        "cn": ("车架", "牵引装置", "托钩", "挡泥板"),
+        "en": ("frame assembly", "towing"),
+    },
+    "bbm_knalpot": {
+        "label": "Tangki BBM & knalpot",
+        "cn": ("燃油箱", "油箱", "排气", "消声"),
+        "en": ("fuel tank", "exhaust", "silencer", "muffler"),
+    },
+    "dudukan": {
+        "label": "Dudukan mesin & transmisi",
+        "cn": ("悬置",),
+        "en": ("engine mounting", "engine suspension"),
+        # 驾驶室前/后悬置 = dudukan KABIN (di atas rangka) — bukan part kolong.
+        "kecuali_cn": ("驾驶室",),
+    },
+}
+_SISTEM_URUT = tuple(_SISTEM_KOLONG)
+SISTEM_KOLONG_LABEL = {k: v["label"] for k, v in _SISTEM_KOLONG.items()}
+
+_KOLONG_MAX_KATEGORI = 45     # plafon kategori dibuka (unit tipikal 25-35)
+_KOLONG_MAX_SUB = 12          # plafon sub-kategori yang didrill per kategori
+_KOLONG_WORKERS = 6
+_KOLONG_SUB_WORKERS = 4
+
+# PENGENCANG = baut/mur/ring/paku keling/klem plastik. Bukan "bukan part" —
+# tapi daftar belanja kolong yang berguna harus bisa menyembunyikannya (unit
+# uji: 410 baris → 244 baris inti). CN diperiksa lebih dulu (nama pabrik),
+# lalu EN, lalu awalan PN seri standar Sinotruk (ZQ…/QD…/Q<digit>…).
+_PENGENCANG_CN_RX = re.compile(r"螺栓|螺母|垫圈|铆钉|螺钉|开口销|紧固带|扎带|销轴")
+_PENGENCANG_EN_RX = re.compile(
+    r"\b(bolt|nut|washer|screw|rivet|circlip|stud)\b|cotter pin|split pin|"
+    r"fastening belt|strapping tape|axis pin")
+_PENGENCANG_PN_RX = re.compile(r"^(ZQ|QD|Q\d)")
+
+# Nomor "virtual" EPC (…_1_3 '3 左、右中间轴总成_虚拟号') = PENANDA STRUKTUR di
+# dalam assembly beli-jadi, BUKAN part yang bisa dipesan. Wajib ditandai supaya
+# tak pernah disodorkan sebagai PN yang bisa dibeli.
+_VIRTUAL_RX = re.compile(r"virtual number|虚拟号", re.I)
+
+
+def is_pengencang(pn: str, nama: str = "", nama_cn: str = "") -> bool:
+    """True bila baris ini baut/mur/ring/paku keling/pengikat standar."""
+    if _PENGENCANG_CN_RX.search(nama_cn or ""):
+        return True
+    if _PENGENCANG_EN_RX.search((nama or "").lower()):
+        return True
+    return bool(_PENGENCANG_PN_RX.match((pn or "").upper()))
+
+
+def klasifikasi_sistem(nama: str, nama_cn: str = "") -> str | None:
+    """Sistem kolong sebuah KATEGORI EPC dari namanya; None = bukan kolong.
+
+    CN diperiksa lebih dulu dan MENANG: nama CN kategori dibuat pabrik & stabil,
+    sedangkan nama EN hasil terjemahan EPC kerap menyesatkan — di unit uji
+    kategori '驾驶室前悬置' (dudukan KABIN) bernama EN 'Throttle control system',
+    dan 'ECU支架' bernama EN 'ECU mounting bracket' (bukan dudukan mesin). EN
+    hanya dipakai bila kategori memang tak punya nama CN."""
+    cn = (nama_cn or "").strip()
+    en = (nama or "").strip().lower()
+    for key in _SISTEM_URUT:
+        s = _SISTEM_KOLONG[key]
+        if cn:
+            if any(k in cn for k in s["cn"]) and not any(x in cn for x in s.get("kecuali_cn", ())):
+                return key
+        elif en and any(k in en for k in s["en"]):
+            return key
+    return None
+
+
+def _kolong_baris(p: dict, kat: str, sub: str, beli_jadi: bool) -> dict:
+    pn = (p.get("pn") or "").strip().upper()
+    nama = " ".join((p.get("nama") or "").split())
+    nama_cn = " ".join((p.get("nama_cn") or "").split())
+    row = {"pn": pn, "nama": nama, "nama_cn": nama_cn, "qty": p.get("qty"),
+           "dari_kategori": kat, "dari_sub": sub or None,
+           "pengencang": is_pengencang(pn, nama, nama_cn)}
+    if beli_jadi:
+        row["beli_jadi"] = True
+    if _VIRTUAL_RX.search(f"{nama} {nama_cn}"):
+        row["virtual"] = True
+    return row
+
+
+def sistem_kolong(rangka: str, sistem=None) -> dict:
+    """DAFTAR PART KOLONG satu unit dari NOMOR RANGKA, terkelompok per sistem.
+
+    `sistem` opsional = daftar kunci (_SISTEM_KOLONG) untuk mempersempit.
+
+    Sukses → {found, frame_number, order_no, jumlah_kategori_unit,
+              jumlah_kategori_kolong, sistem:{key:{label, kategori:[…],
+              kategori_beli_jadi:[…], parts:[…]}}, kategori_gagal, incomplete}
+    Gagal  → {found:False, frame_number, _err}
+
+    'kategori_gagal' TIDAK BOLEH disembunyikan: kategori yang gagal dibuka
+    artinya part-nya BELUM TENTU tidak ada di unit — beda dengan "tidak ada"."""
+    top = category_top(rangka)
+    if not top.get("found"):
+        return {"found": False, "frame_number": _frame(rangka),
+                "_err": top.get("_err") or "not_found"}
+    frame = top.get("frame_number") or _frame(rangka)
+
+    pilih = {str(s).strip().lower() for s in (sistem or []) if str(s).strip()} or None
+    terpilih = []
+    for c in top.get("kategori") or []:
+        key = klasifikasi_sistem(c.get("nama") or "", c.get("nama_cn") or "")
+        if not key or (pilih and key not in pilih):
+            continue
+        terpilih.append((key, c))
+    dipotong = max(0, len(terpilih) - _KOLONG_MAX_KATEGORI)
+    terpilih = terpilih[:_KOLONG_MAX_KATEGORI]
+
+    gagal: list[str] = []
+    glock = threading.Lock()
+
+    def _lapor_gagal(nama: str) -> None:
+        with glock:
+            if nama not in gagal:
+                gagal.append(nama)
+
+    def _buka(item: tuple) -> tuple:
+        key, c = item
+        kat = c.get("nama") or c.get("nama_cn") or str(c.get("id"))
+        r = category_open(frame, c.get("id"), c.get("part_list_id"), c.get("code"))
+        if r.get("_err"):
+            _lapor_gagal(kat)
+            return key, c, []
+        rows = [(p, "") for p in (r.get("parts") or [])]
+        subs = (r.get("sub_kategori") or [])[:_KOLONG_MAX_SUB]
+        if subs:
+            def _sub(s: dict) -> tuple:
+                return s, category_open(frame, s.get("id"), s.get("part_list_id"), s.get("code"))
+            with ThreadPoolExecutor(max_workers=_KOLONG_SUB_WORKERS) as ex:
+                for s, rs in ex.map(_sub, subs):
+                    if rs.get("_err"):
+                        _lapor_gagal(s.get("nama") or s.get("nama_cn") or kat)
+                        continue
+                    nama_sub = s.get("nama") or s.get("nama_cn") or ""
+                    rows += [(p, nama_sub) for p in (rs.get("parts") or [])]
+        return key, c, rows
+
+    if terpilih:
+        with ThreadPoolExecutor(max_workers=_KOLONG_WORKERS) as ex:
+            hasil_buka = list(ex.map(_buka, terpilih))
+    else:
+        hasil_buka = []
+
+    out: dict = {}
+    for key, c, rows in hasil_buka:
+        kat = c.get("nama") or c.get("nama_cn") or str(c.get("id"))
+        # '外购…总成' = assembly BELI-JADI (gardan/transmisi/transfer case): EPC
+        # Sinotruk hanya menjual nomor assembly-nya, isi dalamnya (kampas, hub,
+        # bearing, seal, as roda) TIDAK ada di pohon per-VIN mana pun.
+        beli_jadi = "外购" in (c.get("nama_cn") or "")
+        g = out.setdefault(key, {"label": _SISTEM_KOLONG[key]["label"],
+                                 "kategori": [], "kategori_beli_jadi": [], "parts": []})
+        if kat not in g["kategori"]:
+            g["kategori"].append(kat)
+        if beli_jadi and kat not in g["kategori_beli_jadi"]:
+            g["kategori_beli_jadi"].append(kat)
+        seen = {(r["pn"], r["dari_kategori"], r.get("dari_sub")) for r in g["parts"]}
+        for p, sub in rows:
+            if not (p.get("pn") or "").strip():
+                continue
+            row = _kolong_baris(p, kat, sub, beli_jadi)
+            k = (row["pn"], row["dari_kategori"], row.get("dari_sub"))
+            if k in seen:
+                continue
+            seen.add(k)
+            g["parts"].append(row)
+
+    for g in out.values():
+        if not g["kategori_beli_jadi"]:
+            del g["kategori_beli_jadi"]
+
+    res = {
+        "found": any(g["parts"] for g in out.values()),
+        "frame_number": frame,
+        "order_no": top.get("order_no"),
+        "jumlah_kategori_unit": top.get("jumlah"),
+        "jumlah_kategori_kolong": len(terpilih),
+        "sistem": {k: out[k] for k in _SISTEM_URUT if out.get(k) and out[k]["parts"]},
+        "kategori_gagal": gagal,
+        "incomplete": bool(gagal or dipotong),
+    }
+    if dipotong:
+        res["kategori_dipotong"] = dipotong
+    return res
