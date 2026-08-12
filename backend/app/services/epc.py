@@ -18,6 +18,8 @@ import time
 import requests
 import urllib3
 
+from .cache_util import CacheTTL
+
 # EPC pakai sertifikat yang tak terverifikasi requests → kita verify=False;
 # redam warning-nya agar tak membanjiri log tiap panggilan.
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -25,7 +27,11 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 EPC_BASE = "https://epc.sinotruk.com:18080"
 _CONFIG_URL = f"{EPC_BASE}/api/rest/serviceVehicle/getVehicleConfig"
 
-_cache: dict[str, dict] = {}
+# TANPA TTL — disengaja (alasannya di get_config: hanya hit ASLI yang di-cache,
+# jadi tak ada risiko blip jaringan jadi permanen). Yang ditambahkan cuma PAGAR
+# JUMLAH: kuncinya frame dari input user, dan dulu dict ini hanya tumbuh selama
+# proses hidup. 2000 > populasi armada (1.335) → praktis tak pernah membuang.
+_cache = CacheTTL("epc.config_vin", None, 2000)
 _lock = threading.Lock()
 
 # Terjemahan ringan enum China yang sering muncul (sisanya biar AI terjemahkan).

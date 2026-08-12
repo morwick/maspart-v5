@@ -34,6 +34,7 @@ import requests
 import urllib3
 
 from ..core.config import get_settings
+from .cache_util import CacheTTL
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -46,8 +47,10 @@ _TREE_TTL = 3600.0        # pohon model per-kategori statis; cache ringan
 _ASM_TTL = 1800.0
 _WORKERS = 8
 _lock = threading.Lock()
-_tree_cache: dict[str, dict] = {}     # kategori-code -> {at, models:[...]}
-_asm_cache: dict[int, dict] = {}      # rootId -> {at, assemblies:[...]}
+# _tree_cache praktis berkunci tunggal ('__all__'), tapi tetap diberi pagar agar
+# kunci baru di kemudian hari tak diam-diam jadi kebocoran (lihat cache_util).
+_tree_cache = CacheTTL("shantui.tree", _TREE_TTL, 32)   # kategori-code -> {at, models}
+_asm_cache = CacheTTL("shantui.asm", _ASM_TTL, 256)     # rootId -> {at, assemblies}
 
 # Kode error Shantui yang menandakan TOKEN/SESI kedaluwarsa vs tak berhak.
 _ERR_EXPIRED = {"110003"}             # 登录失效 (login expired)

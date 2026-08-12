@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 import requests
 
 from . import sims  # menyiapkan sys.path ke backend/shared (jangan dibuang)
+from .cache_util import CacheTTL
 
 logger = logging.getLogger("maspart.sims_warranty")
 
@@ -97,9 +98,12 @@ def _data(d) -> dict | list | None:
 
 # ── cache ringan in-memory (pola per-TTL sederhana) ──────────────────
 _cache_lock = threading.Lock()
-_CACHE: dict[str, tuple[float, object]] = {}
 _TTL_UNIT = 3600.0     # spek & garansi unit jarang berubah
 _TTL_KLAIM = 300.0     # daftar/isi klaim bisa bergerak sepanjang hari
+# Satu dict untuk dua TTL — yang pendek tetap diperiksa pemanggil di `_cached`,
+# jadi plafon di sini memakai TTL terpanjang. Dulu tanpa plafon: tiap frame/WO
+# yang pernah dibuka menetap selamanya (lihat cache_util).
+_CACHE = CacheTTL("sims_warranty", _TTL_UNIT, 512)
 
 
 def _cached(key: str, ttl: float, fn):

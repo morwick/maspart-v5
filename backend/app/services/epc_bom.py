@@ -33,6 +33,7 @@ import requests
 import urllib3
 
 from ..core.config import get_settings
+from .cache_util import CacheTTL
 
 logger = logging.getLogger("maspart.epc")
 
@@ -78,12 +79,17 @@ _TOKEN_ERR_RE = re.compile(
 )
 
 _CACHE_TTL = 3600.0  # detik — BOM per-VIN statis; cache ringan agar hemat panggilan.
-_cache: dict[str, dict] = {}  # frame -> {"at": monotonic, "val": dict}
+# Plafon entri: sebelumnya dict polos yang HANYA tumbuh (TTL diperiksa saat baca,
+# entri kedaluwarsa tak pernah dibuang) — lihat alasan lengkapnya di cache_util.
+_cache = CacheTTL("epc_bom.bom_vin", _CACHE_TTL, 64)  # frame -> {"at", "val"}
 _lock = threading.Lock()
 # Dedup fetch KONKUREN per-frame: prefetch latar (ai_assistant) + panggilan tool
 # untuk frame yang sama tak boleh menembak server EPC dua kali berbarengan —
 # yang datang belakangan menunggu, lalu terlayani dari cache.
-_fetch_locks: dict[str, threading.Lock] = {}
+# Plafon longgar & TTL panjang: kunci yang dibuang saat fetch masih berjalan cuma
+# melemahkan dedup (dua panggilan dobel), tak merusak hasil — dan dgn 512 entri /
+# 1 jam itu praktis mustahil terjadi (fetch hitungan detik).
+_fetch_locks = CacheTTL("epc_bom.fetch_locks", 3600.0, 512)
 
 
 def _frame_fetch_lock(frame: str) -> threading.Lock:
@@ -412,15 +418,17 @@ def _loading_list_fetch(frame: str) -> dict:
     return val
 
 
-_rev_cache: dict[str, dict] = {}  # pn -> {"at", "val"} (reverse lookup, statis)
+_rev_cache = CacheTTL("epc_bom.rev_pn", _CACHE_TTL, 2000)  # pn -> {"at", "val"}
 
 # Nama Inggris RESMI EPC per-PN (home/match/part). PN→nama statis global → cache panjang.
 # Dipakai utk MENERJEMAHKAN part Loading List yg namanya cuma China (tak ada di katalog
 # lokal). Sumber: EPC sendiri (bukan terjemahan karangan). Ekspor kamus penuh (trans/export)
 # terkunci utk akun ini, tapi lookup per-PN ini tidak.
 _EN_TTL = 86400.0
-_en_cache: dict[str, str | None] = {}  # pn -> en_name (None bila tak ada)
-_en_at: dict[str, float] = {}
+# Isinya cuma satu string per PN → plafon boleh besar. Dulu dua dict paralel
+# (`_en_cache` + `_en_at`); stempel waktunya kini dipegang CacheTTL sendiri.
+_en_cache = CacheTTL("epc_bom.nama_en", _EN_TTL, 20000)  # pn -> en_name|None
+_TAK_DICARI = object()   # bedakan "belum pernah dicari" dari nilai sah None
 
 
 def _english_one(pn: str) -> str | None:
@@ -439,22 +447,19 @@ def english_names(pns) -> dict[str, str]:
     want = list(dict.fromkeys((str(p).strip().upper() for p in pns if p)))
     out: dict[str, str] = {}
     need: list[str] = []
-    now = time.monotonic()
     with _lock:
         for pn in want:
-            if pn in _en_cache and (now - _en_at.get(pn, 0) < _EN_TTL):
-                if _en_cache[pn]:
-                    out[pn] = _en_cache[pn]
-            else:
+            en = _en_cache.get(pn, _TAK_DICARI)
+            if en is _TAK_DICARI:
                 need.append(pn)
+            elif en:
+                out[pn] = en
     if need:
         with ThreadPoolExecutor(max_workers=_ATLAS_WORKERS) as ex:
             results = list(ex.map(lambda p: (p, _english_one(p)), need))
         with _lock:
-            t = time.monotonic()
             for pn, en in results:
                 _en_cache[pn] = en
-                _en_at[pn] = t
                 if en:
                     out[pn] = en
     return out
@@ -565,7 +570,9 @@ ATLAS_POSISI = {"CDQ": "depan", "QDQ": "belakang"}
 # Cache walk MENTAH per (frame, modul) — LEPAS dari kata kunci. Walk EPC identik
 # apa pun kata kuncinya (filter kata kunci hanya di akhir, in-memory), jadi query
 # ke-2 dst utk unit yg sama → instan tanpa walk ulang.
-_atlas_raw_cache: dict[str, dict] = {}  # "frame|MOD1,MOD2" -> {"at", "val"}
+# ⚠️ Kuncinya KOMBINATORIAL ("frame|MOD1,MOD2") — satu frame bisa menghasilkan
+# banyak entri, dan isinya baris Atlas mentah (besar). Plafon paling ketat di modul ini.
+_atlas_raw_cache = CacheTTL("epc_bom.atlas_raw", _CACHE_TTL, 32)
 _ATLAS_MAX_NODES = 600              # plafon node per panggilan (jaga2 walk liar)
 # Walk = puluhan HTTP call ke server China lambat (~1.5-1.8s/call) → JALANKAN
 # PARALEL per level (node sibling independen). Pool kecil agar tak dianggap abuse.
@@ -856,7 +863,7 @@ def atlas_find(rangka: str, keywords: list[str],
             "incomplete": coll.get("incomplete", False)}
 
 
-_asm_list_cache: dict[str, dict] = {}   # frame -> {"at", "val"}
+_asm_list_cache = CacheTTL("epc_bom.asm_list", _CACHE_TTL, 128)  # frame -> {"at", "val"}
 
 
 def assembly_list(rangka: str) -> dict:
@@ -918,9 +925,12 @@ def assembly_list(rangka: str) -> dict:
 #  agar user bisa menyebut kategori mana pun dg NAMA (lintas kedalaman & lintas turn).
 # ═══════════════════════════════════════════════════════════════════════
 _CAT_TTL = 3600.0
-_cat_top_cache: dict[str, dict] = {}    # frame -> {at, val}
-_cat_open_cache: dict[str, dict] = {}   # "frame|nodeId" -> {at, val}
-_cat_index: dict[str, dict] = {}        # frame -> {norm_name: node}
+_cat_top_cache = CacheTTL("epc_bom.cat_top", _CAT_TTL, 128)    # frame -> {at, val}
+# kunci "frame|nodeId": satu VIN bisa membuka puluhan node → plafon lebih lega.
+_cat_open_cache = CacheTTL("epc_bom.cat_open", _CAT_TTL, 512)  # -> {at, val}
+# ⚠️ Dulu tanpa TTL sama sekali (menumpuk selama proses hidup). Diberi _CAT_TTL
+# sama dgn cache yang MENGISINYA; kedaluwarsa paling banter = satu drill ulang.
+_cat_index = CacheTTL("epc_bom.cat_index", _CAT_TTL, 128)      # frame -> {norm_name: node}
 _cat_lock = threading.Lock()
 _CAT_CODE_RE = re.compile(r"^([A-Z0-9][A-Z0-9\-.]+)\s+(.*)$")
 
@@ -980,7 +990,8 @@ def kw_layak(k: str) -> bool:
     if len(s) >= 3:
         return True
     return len(s) >= 2 and any(ord(c) > 0x2E80 for c in s)
-_root_cache: dict[str, dict] = {}   # frame -> {"at", "val"} (rootId+orderNo, ringan)
+# Isinya cuma rootId+orderNo (ringan) → plafon boleh lega.
+_root_cache = CacheTTL("epc_bom.root", _CAT_TTL, 512)   # frame -> {"at", "val"}
 
 
 def _atlas_root_cached(frame: str) -> dict:
@@ -1434,7 +1445,7 @@ def resolve_category(rangka: str, terms: list[str]) -> list[dict]:
 _ASM_TTL = 3600.0
 _ASM_BUDGET = 700          # plafon node walk (unit tipikal ~70-300 node)
 _ASM_WORKERS = 10
-_asm_nodes_cache: dict[str, dict] = {}   # frame -> {at, root_id, nodes:[norm_cat...]}
+_asm_nodes_cache = CacheTTL("epc_bom.asm_nodes", _ASM_TTL, 128)  # frame -> {at, root_id, nodes}
 _asm_lock = threading.Lock()
 
 
@@ -1782,14 +1793,17 @@ def atlas_find_in_tree(rangka: str, keywords: list[str], max_nodes: int = 12) ->
 # menemukannya karena mencari di POHON unit. Jalur ini meniru itu: buka SEMUA part
 # list unit (ratusan; ~30-60 dtk pertama kali) lalu cari di barisnya — hasilnya
 # di-cache per frame supaya pencarian berikutnya instan.
-_items_all_cache: dict[str, dict] = {}   # frame -> {ts, rows, incomplete}
+# ⚠️ Entri TERBESAR di modul ini (SELURUH baris BOM satu unit). Plafon sengaja
+# ketat: ada cache DISK 7 hari di bawah, jadi entri yang dibuang dibaca ulang dari
+# file — bukan dibangun ulang lewat ratusan panggilan EPC.
+_items_all_cache = CacheTTL("epc_bom.items_all", None, 16)  # frame -> {ts, rows, incomplete}
 _items_all_lock = threading.Lock()
 _ITEMS_ALL_TTL = 3600                    # cache RAM
 _ITEMS_DISK_TTL = 7 * 86400              # cache DISK build LENGKAP — tahan restart/redeploy
 _ITEMS_PARTIAL_TTL = 3600                # cache DISK build PARSIAL — pendek, dibangun ulang
 # Lock pembangunan per-frame: prefetch latar & tool bisa minta bersamaan — yang
 # kedua MENUNGGU build yang sama, bukan menembak 388 panggilan EPC dobel.
-_items_build_locks: dict[str, threading.Lock] = {}
+_items_build_locks = CacheTTL("epc_bom.items_build_locks", 3600.0, 512)
 _items_build_guard = threading.Lock()
 
 
@@ -2170,7 +2184,9 @@ _KATALOG_TERM_KEYWORDS = {
 _KATALOG_MAX_NODES = 600        # plafon node walk per kategori
 _KATALOG_MAX_NODES_ALL = 2000   # plafon utk katalog LENGKAP (seluruh unit)
 _KATALOG_TTL = 3600.0
-_katalog_cache: dict[str, dict] = {}
+# kunci "frame|kategori" → kombinatorial, dan katalog LENGKAP satu unit bisa
+# ratusan node (_KATALOG_MAX_NODES_ALL) → plafon ketat.
+_katalog_cache = CacheTTL("epc_bom.katalog", _KATALOG_TTL, 48)
 _katalog_lock = threading.Lock()
 
 # Istilah yang berarti SEMUA kategori (katalog lengkap satu unit).

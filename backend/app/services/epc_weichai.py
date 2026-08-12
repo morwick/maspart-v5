@@ -32,6 +32,7 @@ import urllib3
 
 from ..core.config import get_settings
 from . import epc_bom
+from .cache_util import CacheTTL
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -44,9 +45,10 @@ _LIST_URL = "https://epc-cloud.weichai.com/Api/business-api/business/part/findBo
 _CACHE_TTL = 3000.0     # < masa token (~ jam); di-mint ulang saat kedaluwarsa
 _WORKERS = 16
 _lock = threading.Lock()
-_bridge_cache: dict[str, dict] = {}   # frame -> {at, bridge}
-_bom_cache: dict[str, dict] = {}      # frame -> {at, val}
-_bom_no_cache: dict[str, dict] = {}   # nomor mesin -> {at, val} (jalur by-engine-no)
+# Plafon entri (dulu dict polos yang hanya tumbuh — lihat cache_util).
+_bridge_cache = CacheTTL("weichai.bridge", _CACHE_TTL, 256)   # frame -> {at, bridge}
+_bom_cache = CacheTTL("weichai.bom", _CACHE_TTL, 32)          # frame -> {at, val}
+_bom_no_cache = CacheTTL("weichai.bom_no", _CACHE_TTL, 32)    # nomor mesin -> {at, val}
 _UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/149 Safari/537.36"}
 
 
@@ -532,7 +534,7 @@ def engine_bom_by_no(no_mesin: str) -> dict:
 # ai_export dipakai ulang penuh. Beda: 'svg' = svgFileId (bukan nama file); ambil
 # gambar via fetch_svg(svgFileId, token).
 _KATALOG_TTL = 3000.0
-_katalog_cache: dict[str, dict] = {}
+_katalog_cache = CacheTTL("weichai.katalog", _KATALOG_TTL, 48)
 _katalog_lock = threading.Lock()
 _MESIN_ALL_TERMS = {"lengkap", "semua", "all", "mesin", "mesin lengkap", "engine",
                     "komplit", "komplet", "full", "seluruhnya", "semua kategori"}

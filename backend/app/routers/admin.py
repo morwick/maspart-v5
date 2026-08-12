@@ -12,7 +12,11 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import accurate, ai_chat_log, ai_sinonim_learn, app_config, catalog_bom, customer_map, gudang, gudang_config, harga, image_search, login_history, maksud, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, rak, reservations, search_log, session_policy, sinonim
+from ..services import accurate, ai_chat_log, ai_sinonim_learn, app_config, cache_util, catalog_bom, customer_map, gudang, gudang_config, harga, image_search, login_history, maksud, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, rak, reservations, search_log, session_policy, sinonim
+# vin_ocr hanya menarik stdlib di tingkat modul (cv2/rapidocr di-impor MALAS di
+# dalam fungsi) — aman diimpor di sini, tak menambah RSS server. ⛔ Jangan
+# memindahkan impor cv2/onnxruntime ke tingkat modul: +120-160 MB permanen.
+from ..services import vin_ocr
 from ..services import supabase_client as sb
 from ..services.supabase_client import upload_storage_object
 
@@ -362,6 +366,33 @@ def monitoring_login_history(
 def monitoring_sql(_admin: dict = Depends(require_admin)):
     """DDL tabel login_history — ditampilkan admin bila tabel belum dibuat."""
     return {"sql": login_history.create_table_sql()}
+
+
+@router.get("/monitoring/memori")
+def monitoring_memori(_admin: dict = Depends(require_admin)):
+    """Jatah memori container + isi tiap cache in-memory.
+
+    Ada karena pelajaran yang sudah dua kali mahal: kondisi memori HANYA bisa
+    dinilai di dalam container, bukan di laptop. Sebelum ini satu-satunya cara
+    melihatnya adalah `ssh` + `docker stats`, jadi pembengkakan 2,31 GB (94,6%)
+    baru ketahuan setelah dicari-cari manual.
+
+    `sisa_mb` memakai pembacaan yang sama dengan gerbang OCR foto
+    (`vin_ocr._SISA_MIN_MB`): begitu angkanya turun di bawah ambang itu, foto
+    nomor rangka & kode kesalahan MULAI DITOLAK. Jadi halaman ini juga menjawab
+    "kenapa kirim foto tiba-tiba gagal sore ini".
+
+    `cache[].dibuang` = berapa entri yang pernah dibuang karena plafon. Terus
+    naik = plafonnya kesempitan untuk beban nyata (bukan kebocoran)."""
+    sisa = vin_ocr._sisa_memori_mb()
+    caches = cache_util.ringkasan()
+    return {
+        "sisa_mb": round(sisa, 1) if sisa is not None else None,
+        "ambang_tolak_foto_mb": vin_ocr._SISA_MIN_MB,
+        "foto_ditolak": (sisa is not None and sisa < vin_ocr._SISA_MIN_MB),
+        "cache_total_entri": sum(c["entri"] for c in caches),
+        "cache": caches,
+    }
 
 
 @router.post("/users")

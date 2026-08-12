@@ -14,6 +14,7 @@ import time
 import requests
 
 from ..core.config import get_settings
+from .cache_util import CacheTTL
 
 COURIERS = "jne:sicepat:jnt:pos"  # kurir yang diminta (dipisah ':')
 _BASE = "https://rajaongkir.komerce.id/api/v1"
@@ -152,7 +153,9 @@ def get_rates(username: str, weight_grams: int, item_value: int = 0, dest_postal
 # pemesanan pengiriman: resi tetap dibuat gerai ekspedisi & diketik admin.
 _TRACK_URL = f"{_BASE}/track/waybill"
 _TRACK_TTL = 600.0          # 10 mnt — paket tak berpindah lebih cepat dari ini
-_track_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+# Berkunci (resi, kurir) → tiap kiriman baru menambah satu entri PERMANEN sebelum
+# ini diberi plafon; TTL-nya sendiri sudah diperiksa pemanggil (lihat cache_util).
+_track_cache = CacheTTL("shipping.track", _TRACK_TTL, 512)
 
 
 def _teks(v) -> str:
