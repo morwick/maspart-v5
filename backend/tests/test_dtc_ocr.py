@@ -169,13 +169,36 @@ def test_usul_koreksi_hanya_bila_tunggal():
     assert f"SPN {SPN} FMI {FMI}" in dtc_ocr.pesan(h)
 
 
-def test_fmi_asing_pada_spn_dikenal_jadi_tinggi():
-    """SPN terdaftar tapi FMI-nya tidak: mungkin ECU varian lain — sebutkan FMI
-    yang memang terdaftar supaya user bisa membandingkan dengan layarnya."""
+def test_fmi_asing_pada_spn_dikenal_tak_dikirim_otomatis():
+    """SPN terdaftar tapi FMI-nya tidak = bukti SEPARUH → 'rendah' (user melihat
+    dulu). Sebut FMI yang memang terdaftar supaya ia bisa membandingkan layar.
+
+    ⛔ Jangan dinaikkan jadi 'tinggi': insiden produksi 2026-08-12 — nomor urut
+    baris terbaca 'SPN 1', dan SPN 1 kebetulan ada di store dengan FMI lain,
+    sehingga bacaan yang sepenuhnya salah terkirim sendiri ke asisten."""
     h = dtc_ocr._dari_kotak(_tabel(((SPN, 31),)))
-    assert h["keyakinan"] == "tinggi"
+    assert h["keyakinan"] == "rendah"
     assert h["kode"][0]["dikenal"] is False
     assert FMI in h["kode"][0]["fmi_terdaftar"]
+
+
+def test_nomor_urut_baris_tak_pernah_jadi_spn():
+    """REGRESI PRODUKSI 2026-08-12 (foto asli, OCR di container): kepala 'No.'
+    dan 'SPN' terbaca MENYATU jadi satu kotak → taksiran kolom SPN bergeser ke
+    kiri, dan nomor urut baris ikut masuk toleransi. Dulu angka PERTAMA yang
+    menang, jadi hasilnya 'SPN 1 FMI 12'. Koordinat di bawah = hasil OCR
+    container apa adanya."""
+    kotak = [_kotak(150, 436, 347, 495, "No.SPN"),
+             _kotak(423, 443, 490, 481, "FMI"),
+             _kotak(542, 444, 619, 490, "DM1"),
+             _kotak(795, 450, 846, 492, "20"),      # jarum speedometer
+             _kotak(167, 507, 244, 539, "日1"),     # kotak centang + nomor urut
+             _kotak(266, 504, 339, 540, "4203"),
+             _kotak(432, 506, 458, 533, "12"),
+             _kotak(196, 714, 291, 749, "Engine")]
+    h = dtc_ocr._dari_kotak(kotak)
+    assert [(k["spn"], k["fmi"]) for k in h["kode"]] == [(SPN, FMI)]
+    assert h["keyakinan"] == "pasti"
 
 
 def test_satu_kode_meragukan_menurunkan_seluruhnya():
@@ -215,6 +238,54 @@ def test_pesan_siap_kirim_tanpa_arti_kode():
     teks = dtc_ocr.pesan(dtc_ocr._dari_kotak(_tabel()))
     assert f"SPN {SPN} FMI {FMI}" in teks and "DM1" in teks and "Engine" in teks
     assert "crankshaft" not in teks.lower()
+
+
+# ── kesepakatan antar-varian ──────────────────────────────────────────
+def _ocr_beruntun(monkeypatch, *jawaban):
+    """Ganti mesin OCR: panggilan ke-n mengembalikan `jawaban[n]` — meniru dua
+    varian pra-proses yang membaca angka BERBEDA dari foto yang sama."""
+    sisa = list(jawaban)
+    monkeypatch.setattr(vin_ocr, "_kotak_ocr",
+                        lambda im: sisa.pop(0) if sisa else jawaban[-1])
+
+
+def test_dua_varian_beda_angka_tak_dikirim_otomatis(monkeypatch):
+    """REGRESI PRODUKSI 2026-08-12 (foto disilaukan cahaya): '12' terbaca '2',
+    dan SPN 4203 FMI 2 KEBETULAN juga kode sah — store justru ikut
+    membenarkannya, jadi hasil yang salah keluar 'pasti'. Satu-satunya yang
+    membedakan: varian 'clahe' membaca 2, varian 'raw' membaca 12."""
+    _ocr_beruntun(monkeypatch, _tabel(((SPN, 2),)), _tabel(((SPN, FMI),)))
+    h = dtc_ocr._baca_lokal(_foto_kosong())
+    assert h["keyakinan"] == "rendah"
+    assert h["kode"][0]["alternatif"], "bacaan varian lain harus ikut disodorkan"
+    assert "berbeda" in h["pesan"]
+
+
+def test_kemungkinan_lain_hanya_yang_terdaftar(monkeypatch):
+    """Varian pembanding kadang menghasilkan angka SAMPAH (di produksi: 'SPN 1
+    FMI 2' dari kolom nomor urut). Keyakinan tetap turun — bacaan yang goyah
+    tetap goyah — tapi sampahnya JANGAN disodorkan sebagai pilihan: itu hanya
+    membuat user meragukan bacaan yang sudah benar."""
+    _ocr_beruntun(monkeypatch, _tabel(), _tabel(((1, 2),)))
+    h = dtc_ocr._baca_lokal(_foto_kosong())
+    assert h["keyakinan"] == "rendah"
+    assert h["kode"][0]["alternatif"] == []
+    assert "Kemungkinan lain" not in h["pesan"]
+
+
+def test_dua_varian_sepakat_tetap_pasti(monkeypatch):
+    _ocr_beruntun(monkeypatch, _tabel(), _tabel())
+    h = dtc_ocr._baca_lokal(_foto_kosong())
+    assert h["keyakinan"] == "pasti"
+    assert [(k["spn"], k["fmi"]) for k in h["kode"]] == [(SPN, FMI)]
+
+
+def test_varian_kosong_bukan_penyanggah(monkeypatch):
+    """Varian yang tak membaca apa pun TIDAK mengklaim apa pun — ia tak boleh
+    menurunkan keyakinan, kalau tidak hampir tak ada foto yang lolos 'pasti'."""
+    _ocr_beruntun(monkeypatch, _tabel(), [_kotak(0, 0, 60, 20, "SPN")])
+    h = dtc_ocr._baca_lokal(_foto_kosong())
+    assert h["keyakinan"] == "pasti"
 
 
 # ── jalur gabungan (satu foto, dua kemungkinan) ───────────────────────

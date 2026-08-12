@@ -23,13 +23,19 @@ SPN+FMI):
   2. pasangan yang TERDAFTAR di store → keyakinan 'pasti' (bukti berdiri
      sendiri: hanya 6,6% dari kombinasi SPN×FMI yang mungkin itu benar-benar
      ada, jadi kecocokan bukan kebetulan);
-  3. SPN dikenal tapi FMI-nya tidak → 'tinggi', dan FMI yang memang terdaftar
+  3. SPN dikenal tapi FMI-nya tidak → 'rendah', dan FMI yang memang terdaftar
      ikut disebut supaya user bisa membandingkan dengan layar;
   4. SPN sama sekali tak dikenal → 'rendah'. Di situ satu substitusi angka yang
      memang sering tertukar OCR dicoba (`_usul_koreksi`), TAPI hanya ditawarkan
      sebagai alternatif bila HANYA ADA SATU yang mendarat di store — tak pernah
      dipakai diam-diam menggantikan bacaan. Menukar kode kesalahan tanpa suara
      = mekanik membongkar komponen yang salah.
+
+⚠️ Store TIDAK bisa menangkap satu kelas kesalahan: bacaan salah yang KEBETULAN
+juga kode sah (foto silau → '12' terbaca '2', dan SPN 4203 FMI 2 memang ada).
+Penjaganya cuma satu: foto panel dibaca DUA varian pra-proses dan angkanya harus
+SEPAKAT sebelum boleh 'pasti' — kesalahan OCR antar-varian tidak berkorelasi.
+Lihat `_sepakat`.
 
 ⛔ Jangan melonggarkan `_TOL_KOLOM`: pencocokan kolom itulah yang membuang angka
 speedometer/odometer yang kebetulan ikut terbaca di foto yang sama (pada foto
@@ -40,10 +46,22 @@ untuk sebuah FMI, dan hanya letak-nya yang membedakannya dari data tabel).
 merah, dst). Itu klasifikasi gambar, bukan OCR — di luar cakupan, dan menebaknya
 dari warna/bentuk akan salah lebih sering daripada benar.
 
-Ukur pada foto lapangan pemilik (2026-08-12, panel SITRAK, tabel 1 baris) × 10
-kondisi (asli, 600 px, blur, gelap, silau, miring 8°, JPEG q25, diputar
-90°/180°/270°): 9 benar, 0 SALAH, 1,2–4,1 detik. Kodenya mendarat tepat di
-store (SPN 4203 FMI 12 → P0335 · EMS · "Tidak terdeteksi crankshaft sinyal").
+⛔ UKUR DI DALAM CONTAINER, JANGAN DI LAPTOP. OCR di image produksi membaca
+BEDA dari laptop pada foto yang sama (sudah tercatat di `vin_ocr`, dan terbukti
+lagi di sini): di container kepala 'No.' & 'SPN' menyatu jadi satu kotak. Dua
+bug yang paling berbahaya di modul ini — nomor urut baris terbaca sebagai SPN,
+dan '12' terbaca '2' — TIDAK muncul sama sekali di laptop (9/10 benar di sana),
+dan baru ketahuan saat dijalankan di produksi. Bangku ujinya ada di scratchpad
+sesi; salin ke container lalu `docker exec … python3 bench.py`.
+
+Ukur DI CONTAINER pada foto lapangan pemilik (2026-08-12, panel SITRAK, tabel 1
+baris) × 10 kondisi (asli, 600 px, blur, gelap, silau, miring 8°, JPEG q25,
+diputar 90°/180°/270°): **7 terkirim otomatis & semuanya benar, 0 terkirim
+salah**, 2 minta konfirmasi user (silau — angka yang benar ikut disodorkan
+sebagai kemungkinan lain; miring 8°), 1 gagal. 0,8–3,0 detik. Kodenya mendarat
+tepat di store (SPN 4203 FMI 12 → P0335 · EMS · "Tidak terdeteksi crankshaft
+sinyal"). Yang dihitung BUKAN "berapa yang terbaca benar" melainkan "berapa yang
+TERKIRIM SENDIRI padahal salah" — itu satu-satunya angka yang merugikan user.
 
 ⚠️ Satu yang gagal: foto rebah 270° TANPA data EXIF. Di situ varian pertama
 tak menemukan kata 'SPN' sama sekali sehingga modul mengalah lebih awal, dan
@@ -167,7 +185,7 @@ def _kolom(kotak) -> dict | None:
     menyatu ('No.SPNFMIDM1') — untuk yang menyatu, letak kolom ditaksir dari
     posisi HURUFnya di dalam kotak. Taksiran itu kasar, tapi cukup: yang
     dibutuhkan hanya 'kolom mana yang lebih dekat', bukan koordinat tepat."""
-    kol: dict = {"spn": None, "fmi": None, "bawah": 0.0, "jenis": ""}
+    kol: dict = {"spn": None, "fmi": None, "no": None, "bawah": 0.0, "jenis": ""}
     for x0, y0, x1, y1, t in kotak:
         c = _bersih(t)
         if not c:
@@ -175,12 +193,15 @@ def _kolom(kotak) -> dict | None:
         for lab in ("DM1", "DM2"):
             if lab in c and not kol["jenis"]:
                 kol["jenis"] = lab
-        for lab, kunci in (("SPN", "spn"), ("FMI", "fmi")):
+        # Kolom "No." ikut dicatat: isinya nomor URUT baris, dan angka itu wajib
+        # dibuang. Di produksi pernah terbaca sebagai SPN — lihat `_baca_baris`.
+        for lab, kunci in (("SPN", "spn"), ("FMI", "fmi"), ("NO", "no")):
             i = c.find(lab)
             if i < 0 or kol[kunci] is not None:
                 continue
             kol[kunci] = x0 + (x1 - x0) * ((i + len(lab) / 2) / len(c))
-            kol["bawah"] = max(kol["bawah"], y1)
+            if kunci != "no":
+                kol["bawah"] = max(kol["bawah"], y1)
     if kol["spn"] is None or kol["fmi"] is None:
         return None
     if abs(kol["fmi"] - kol["spn"]) < 1.0:      # dua label di kotak yang sama persis
@@ -221,20 +242,45 @@ def _pecah_menyatu(baris: list, kol: dict) -> tuple[str, str] | None:
 
 
 def _baca_baris(baris: list, kol: dict) -> tuple[str, str] | None:
-    """Satu baris tabel → (spn, fmi) menurut kolom terdekat."""
+    """Satu baris tabel → (spn, fmi): tiap kolom mengambil angka TERDEKAT.
+
+    ⚠️ Regresi produksi 2026-08-12 — dulu di sini diambil angka PERTAMA yang
+    masuk toleransi, dan itu salah. Di container, OCR menyatukan kepala 'No.'
+    dengan 'SPN' jadi satu kotak, sehingga taksiran letak kolom SPN bergeser
+    ±12 px ke kiri; nomor URUT baris ('1', di kolom No.) lalu ikut masuk
+    toleransi dan — karena berdiri lebih kiri — terambil duluan sebagai SPN.
+    Hasilnya 'SPN 1 FMI 12' disodorkan dengan keyakinan tinggi. Angka '4203'
+    yang benar cuma berjarak 14 px dari kolomnya, jadi memilih yang TERDEKAT
+    (bukan yang pertama) menyelesaikannya, dan kolom 'No.' kini dibuang tegas.
+
+    Dua penjaga sekaligus, sebab tata letak panel lain belum tentu sama:
+    angka yang lebih dekat ke kolom 'No.' daripada ke 'SPN' dibuang, dan satu
+    kotak tak boleh dipakai untuk dua kolom."""
     tol = abs(kol["fmi"] - kol["spn"]) * _TOL_KOLOM
-    spn = fmi = None
-    for k in sorted(baris, key=_cx):
+    kand: list[tuple[float, str, int]] = []
+    for i, k in enumerate(baris):
         a = _angka(k[4])
         if a is None:
             continue
-        d_spn, d_fmi = abs(_cx(k) - kol["spn"]), abs(_cx(k) - kol["fmi"])
-        if d_spn <= d_fmi and d_spn <= tol and spn is None:
-            spn = a
-        elif d_fmi < d_spn and d_fmi <= tol and fmi is None:
-            fmi = a
-    if spn and fmi:
-        return spn, fmi
+        cx = _cx(k)
+        if kol.get("no") is not None and abs(cx - kol["no"]) < abs(cx - kol["spn"]):
+            continue                       # itu nomor urut baris, bukan SPN
+        kand.append((cx, a, i))
+
+    def _ambil(pusat: float, dipakai: set[int]) -> tuple[str, int] | None:
+        sisa = [(abs(cx - pusat), a, i) for cx, a, i in kand if i not in dipakai]
+        if not sisa:
+            return None
+        jarak, a, i = min(sisa)
+        return (a, i) if jarak <= tol else None
+
+    dipakai: set[int] = set()
+    hit_spn = _ambil(kol["spn"], dipakai)
+    if hit_spn:
+        dipakai.add(hit_spn[1])
+    hit_fmi = _ambil(kol["fmi"], dipakai)
+    if hit_spn and hit_fmi:
+        return hit_spn[0], hit_fmi[0]
     return _pecah_menyatu(baris, kol)
 
 
@@ -336,14 +382,21 @@ def _keyakinan(kode: list[dict], berkolom: bool) -> str:
     padahal justru yang ketiga itulah yang paling mungkin salah baca.
 
     'pasti' juga menuntut tabel BERKOLOM: pada bentuk sebaris tak ada bukti
-    tata letak yang menguatkan, hanya kecocokan angka."""
+    tata letak yang menguatkan, hanya kecocokan angka.
+
+    ⚠️ 'SPN terdaftar tapi FMI-nya tidak' sengaja TIDAK lagi cukup untuk
+    dikirim otomatis (dulu 'tinggi'). Insiden produksi 2026-08-12: nomor urut
+    baris terbaca sebagai SPN 1 — dan SPN 1 KEBETULAN ada di store dengan FMI
+    lain — sehingga bacaan yang sepenuhnya salah naik kelas jadi 'tinggi' dan
+    terkirim sendiri. Bukti separuh (SPN cocok, FMI tidak) memang lemah: yang
+    boleh terkirim tanpa dilihat user hanya pasangan UTUH yang terdaftar."""
     if not kode:
         return "gagal"
     tingkat = min(3 if k["dikenal"] else (2 if k["fmi_terdaftar"] else 1)
                   for k in kode)
     if tingkat == 3:
         return "pasti" if berkolom else "tinggi"
-    return "tinggi" if tingkat == 2 else "rendah"
+    return "rendah"
 
 
 def _kosong() -> dict:
@@ -405,6 +458,54 @@ def _cukup(h: dict | None) -> bool:
     return bool(h and h.get("ok") and h["keyakinan"] in ("pasti", "tinggi"))
 
 
+def _daftar(h: dict) -> list[tuple[int, int]]:
+    return [(k["spn"], k["fmi"]) for k in h["kode"]]
+
+
+def _sepakat(bacaan: list[dict]) -> dict | None:
+    """Gabungkan bacaan antar-varian: BEDA angka = tak boleh terkirim sendiri.
+
+    ⚠️ Ini satu-satunya penjaga untuk kesalahan yang TAK BISA ditangkap store:
+    insiden produksi 2026-08-12 — pada foto yang disilaukan cahaya, angka '12'
+    terbaca '2', dan SPN 4203 FMI 2 KEBETULAN juga kode sah ('Crankshaft sinyal
+    terganggu', P0336). Store justru ikut membenarkannya, jadi hasil yang salah
+    keluar dengan keyakinan 'pasti'. Yang membedakannya cuma ini: varian 'clahe'
+    membaca FMI 2, varian 'raw' membaca FMI 12 — kesalahan OCR antar-varian
+    memang tidak berkorelasi (pelajaran yang sama sudah terpakai di `vin_ocr`).
+
+    Karena itu foto panel SELALU dibaca dua varian; yang cocok baru boleh
+    'pasti'. Ongkosnya satu pembacaan tambahan (±1–2 detik) dan HANYA dibayar
+    foto yang memang layar kode kesalahan. Bacaan yang berbeda tidak dibuang —
+    ia disodorkan sebagai `alternatif` supaya user tinggal memilih.
+
+    Varian yang pulang KOSONG bukan penyanggah (ia tak mengklaim apa pun),
+    jadi tidak menurunkan keyakinan."""
+    if not bacaan:
+        return None
+    terbaik: dict | None = None
+    for h in bacaan:
+        terbaik = _pilih(terbaik, h)
+    if terbaik is None or len(bacaan) < 2:
+        return terbaik
+    beda = [h for h in bacaan if _daftar(h) != _daftar(terbaik)]
+    if not beda:
+        return terbaik
+    out = dict(terbaik)
+    out["kode"] = [dict(k) for k in terbaik["kode"]]
+    # Penurunan keyakinan tetap berlaku untuk SEMUA perbedaan (bacaan yang
+    # goyah tetap bacaan yang goyah), tapi yang DITAMPILKAN sebagai kemungkinan
+    # lain hanya pasangan yang benar-benar terdaftar — menawarkan angka sampah
+    # sebagai pilihan cuma membuat user ragu pada bacaan yang sudah benar.
+    usul = {f"SPN {k['spn']} FMI {k['fmi']}"
+            for h in beda for k in h["kode"] if k["dikenal"]}
+    for k in out["kode"]:
+        sendiri = f"SPN {k['spn']} FMI {k['fmi']}"
+        k["alternatif"] = sorted(usul - {sendiri})
+    out["keyakinan"] = "rendah"
+    out["beda_varian"] = True
+    return out
+
+
 def _balik(kotak, bentuk) -> list:
     """Kotak yang SAMA, dilihat sebagai foto terbalik 180°.
 
@@ -435,7 +536,7 @@ def _baca_lokal(data: bytes) -> dict:
     t0 = time.monotonic()
     bgr = vin_ocr._decode(data)                 # format rusak → ValueError
     terbaca: list[str] = []
-    hasil: dict | None = None
+    bacaan: list[dict] = []
     bukti = False
     for urut, (nama, im) in enumerate(vin_ocr._varian(bgr)):
         if urut >= 2 or (urut and not bukti):
@@ -445,14 +546,19 @@ def _baca_lokal(data: bytes) -> dict:
         if not ada_bukti(kotak):
             continue
         bukti = True
-        hasil = _pilih(hasil, _dari_kotak(kotak))
-        if not _cukup(hasil):                    # foto terbalik → tata letak saja
-            hasil = _pilih(hasil, _dari_kotak(_balik(kotak, im.shape)))
-        if _cukup(hasil):
-            break
+        h = _dari_kotak(kotak)
+        if not _cukup(h):                        # foto terbalik → tata letak saja
+            h = _pilih(h, _dari_kotak(_balik(kotak, im.shape)))
+        if h and h.get("ok"):
+            bacaan.append(h)
     if not bukti:
         return {}                                # bukan layar kesalahan → jalur rangka
-    if not _cukup(hasil):
+    hasil = _sepakat(bacaan)
+    # Pemulihan putar hanya untuk foto yang BELUM terurai sama sekali. ⛔ Jangan
+    # dijalankan pada bacaan yang sudah ada tapi ragu: bacaan ketiga dari gambar
+    # yang sama akan menimpa keyakinan 'rendah' hasil `_sepakat` (ketahuan lewat
+    # test kesepakatan varian) — persis pagar yang baru saja dipasang.
+    if not (hasil and hasil.get("ok")):
         hasil = _pilih(hasil, _pulihkan_putar(bgr, t0))
     if hasil is None:
         hasil = _kosong()
@@ -579,8 +685,15 @@ def pesan(hasil: dict) -> str:
         awal = "Kode kesalahan dari panel"
         tanya = " — tolong jelaskan penyebab dan langkah perbaikannya."
         return f"{awal}{ekor}: {daftar}{tanya}"
-    tak_kenal = [k for k in kode if not k["dikenal"]]
-    usul = [u for k in tak_kenal for u in k.get("alternatif") or []]
-    saran = f" Mungkin maksudnya {usul[0]}." if len(usul) == 1 else ""
-    return (f"Saya baca dari panel{ekor}: {daftar} — BELUM yakin, kode ini tidak "
-            f"ada di database kami.{saran} Perbaiki bila keliru, lalu kirim.")
+    # Sebabnya disebut apa adanya: user perlu tahu APA yang harus ia periksa di
+    # layar — angka yang tak dikenal, atau angka yang terbaca mendua.
+    if hasil.get("beda_varian"):
+        sebab = "dua kali pembacaan foto ini memberi angka berbeda"
+    elif any(not k["dikenal"] for k in kode):
+        sebab = "kode ini tidak ada di database kami"
+    else:
+        sebab = "bacaannya belum cukup meyakinkan"
+    usul = [u for k in kode for u in k.get("alternatif") or []]
+    saran = f" Kemungkinan lain: {usul[0]}." if len(usul) == 1 else ""
+    return (f"Saya baca dari panel{ekor}: {daftar} — BELUM yakin, {sebab}.{saran} "
+            "Perbaiki bila keliru, lalu kirim.")
