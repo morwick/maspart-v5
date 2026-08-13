@@ -80,6 +80,10 @@ data/epc_unit_items/
 # (data/weichai_replace.json.gz) memang ikut, checkpoint-nya TIDAK.
 data/weichai_replace.json.part
 
+# Checkpoint panen klaim garansi (build_warranty_dataset.py) — sama polanya:
+# hasil jadi (data/warranty/warranty_klaim.json.gz) ikut, checkpoint-nya TIDAK.
+data/warranty/_checkpoint_wo.json
+
 # Bobot model DINOv2 (torch hub) — 335 MB, cache MESIN yang diunduh sendiri saat
 # warmup. Tak pernah masuk git: sekali ter-commit ia menetap di RIWAYAT selamanya.
 data/torch/

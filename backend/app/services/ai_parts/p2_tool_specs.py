@@ -1893,6 +1893,36 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             },
         })
 
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "kasus_serupa",
+                "description": (
+                    "⭐ KELUHAN → PART yang NYATA-NYATA dipasang, dari 1.785 klaim "
+                    "garansi armada sendiri (klaim dibatalkan sudah dibuang). PANGGIL "
+                    "saat user menyebut GEJALA/KERUSAKAN dan ingin tahu part apa yang "
+                    "biasanya diganti: 'dudukan karet suspensi patah ganti apa', 'aki "
+                    "soak', 'rem blong', 'stabilizer patah'. Balasan: part_disarankan "
+                    "(PN, berapa KALI dipasang, KM saat rusak biasanya, mode kegagalan, "
+                    "harga CNY), mode gagal tersering, biaya median, dan contoh WO nyata. "
+                    "Ini BUKTI LAPANGAN, bukan katalog — beda dari cari_part (katalog) "
+                    "dan part_fast_moving (laris jualan per model). Bisa juga diisi PN "
+                    "langsung untuk melihat riwayat kerusakan part itu. ⚠️ Tetap cocokkan "
+                    "ke unit/VIN sebelum memesan."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "gejala": {
+                            "type": "string",
+                            "description": "Keluhan/gejala apa adanya dari user (Bahasa Indonesia boleh), atau satu PN.",
+                        },
+                    },
+                    "required": ["gejala"],
+                },
+            },
+        })
+
     # Mengajari pengetahuan lewat chat — gerbang Menu Control 'ai_mengajar':
     # admin selalu; staf bila dicentang; pembeli tidak pernah (fail-closed).
     if _can_mengajar(user):

@@ -1749,6 +1749,10 @@ _KLAIM_TOOLS = frozenset({
     "cek_garansi", "riwayat_klaim", "detail_klaim",
     "sheet_garansi_massal", "excel_riwayat_klaim", "rekap_klaim",
 })
+# ⛔ `kasus_serupa` SENGAJA TIDAK di sini. PN dari tool itu berasal dari klaim
+# unit LAIN ("dulu yang dipasang begini"), belum terikat ke unit si penanya —
+# justru wajib lewat verifikasi EPC-FIRST sebelum dipesan. Yang dikecualikan di
+# atas hanya tool yang PN-nya sudah terikat ke frame yang sedang dibicarakan.
 
 
 # ── Rem panggilan tool identik per-giliran (2026-07-23) ──
@@ -1921,6 +1925,7 @@ _TOOL_LABEL = {
     "sheet_garansi_massal": "Mengecek garansi massal",
     "excel_riwayat_klaim": "Menyiapkan Excel riwayat klaim",
     "rekap_klaim": "Merekap klaim garansi",
+    "kasus_serupa": "Mencari kasus perbaikan serupa",
     "lihat_unit_armada": "Melacak posisi armada",
     "terakhir_online": "Mengecek unit terakhir online",
     "ganti_nama_unit": "Mengganti nama unit",

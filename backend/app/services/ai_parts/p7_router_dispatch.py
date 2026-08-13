@@ -197,6 +197,7 @@ _DISPATCH = {
     "sheet_garansi_massal": _t_sheet_garansi_massal,
     "excel_riwayat_klaim": _t_excel_riwayat_klaim,
     "rekap_klaim": _t_rekap_klaim,
+    "kasus_serupa": _t_kasus_serupa,
     "lihat_unit_armada": _t_lihat_unit_armada,
     "terakhir_online": _t_terakhir_online,
     "ganti_nama_unit": _t_ganti_nama_unit,

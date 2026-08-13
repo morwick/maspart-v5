@@ -2679,3 +2679,23 @@ def _t_rekap_klaim(args: dict, user: dict) -> dict:
     return out
 
 
+def _t_kasus_serupa(args: dict, user: dict) -> dict:
+    """Keluhan → part yang nyata-nyata dipasang, dari dataset klaim OFFLINE.
+
+    Beda dari tetangganya yang memanggil SIMS langsung: sumbernya berkas
+    `data/warranty/warranty_klaim.json.gz`, jadi tak butuh `sims_warranty.
+    available()` dan tetap hidup saat SIMS sedang mati. Konsekuensinya data =
+    SNAPSHOT (bangun ulang lewat backend/tools/build_warranty_dataset.py)."""
+    if not _can_garansi(user):
+        return dict(_GARANSI_DENIED)
+    gejala = (args.get("gejala") or args.get("keluhan") or "").strip()
+    if not gejala:
+        return {"found": False, "catatan": "Sebutkan keluhan/gejalanya dulu."}
+    try:
+        return warranty_kasus.cari(gejala)
+    except Exception:                       # dataset rusak ≠ asisten mati
+        logger.exception("kasus_serupa gagal")
+        return {"found": False,
+                "catatan": "Dataset kasus klaim tak terbaca di server."}
+
+
