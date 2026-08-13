@@ -255,9 +255,14 @@ def info_terbaru(sbh_list: list[str]) -> list[dict]:
     """queryVehicleNewestInfo — telemetri TERBARU per SERIAL GPS (`sbh`, BUKAN
     cjh): status, canTime/gpsTime/revdatetime (kapan terakhir kirim data),
     posisi + `lastlocation` (alamat), speed/rpm/suhu air, jam mesin, km & BBM
-    hari ini, sinyal GSM. Portal mengirim SATU sbh per panggilan (`sbhList[0]`);
-    kita coba sekaligus, lalu susul satu-satu bila server hanya melayani
-    sebagian — jadi benar untuk kedua perilaku server."""
+    hari ini, sinyal GSM. Portal mengirim SATU sbh per panggilan (`sbhList[0]`),
+    tapi server MENERIMA banyak — diukur live di container 2026-08-13: 2 sbh →
+    2 record. Susulan satu-satu tetap dipasang sebagai jaring bila suatu saat
+    server hanya melayani sebagian.
+
+    `revdatetime` di sini SAMA PERSIS dengan yang dari queryAllLocationStatus
+    (dibanding pada 3 unit terlama, 2026-08-13) — jadi ringkasan se-armada cukup
+    1 panggilan status massal, tak perlu N panggilan ke sini."""
     sbh = [str(s).strip() for s in (sbh_list or []) if str(s or "").strip()]
     if not sbh:
         return []
