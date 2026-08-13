@@ -84,6 +84,25 @@ export function partImageUrl(url: string): string {
   return url;
 }
 
+/** Ping GET /health (endpoint publik, tanpa token) untuk indikator status di
+ *  halaman login. Sengaja tidak melempar: gagal apa pun = "tidak terjangkau". */
+export async function checkHealth(timeoutMs = 4000): Promise<boolean> {
+  try {
+    // AbortSignal.timeout belum ada di browser lama — tanpa signal masih aman,
+    // hanya tidak punya batas waktu sendiri.
+    const signal =
+      typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
+        ? AbortSignal.timeout(timeoutMs)
+        : undefined;
+    const res = await fetch(`${API_BASE}/health`, { signal, cache: "no-store" });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data?.status === "ok";
+  } catch {
+    return false;
+  }
+}
+
 export async function login(username: string, password: string): Promise<TokenResponse> {
   const res = await fetch(`${API_BASE}/api/auth/login`, {
     method: "POST",
