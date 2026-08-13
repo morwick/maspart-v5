@@ -4221,6 +4221,126 @@ def _t_lihat_unit_armada(args: dict, user: dict) -> dict:
     return out
 
 
+def _t_terakhir_online(args: dict, user: dict) -> dict:
+    """KAPAN TERAKHIR ONLINE unit. Satu unit → telemetri terbaru dari perangkat
+    GPS-nya (queryVehicleNewestInfo); tanpa unit → armada diurut dari yang
+    PALING LAMA tak mengirim data."""
+    if not _is_admin(user):
+        return dict(_TELE_DENIED)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    target = (args.get("unit") or args.get("frame") or args.get("cjh")
+              or args.get("vin") or "").strip()
+
+    if target:
+        rec = telematics.cari_unit(target)
+        if not rec:
+            return {"found": False, "dicari": target,
+                    "catatan": (f"Unit '{target}' tidak ada di telematics. Sampaikan "
+                                "jujur; jangan mengarang waktu online.")}
+        cjh = rec.get("cjh")
+        sbh = telematics.sbh_dari_rec(rec)
+        info = telematics.info_terbaru([sbh])[:1] if sbh else []
+        if not info:
+            # Perangkat tanpa serial / endpoint diam → pakai status massal.
+            loc = telematics.lokasi_semua().get(cjh)
+            if not loc:
+                return {"found": False, "unit": cjh,
+                        "catatan": (f"Unit {cjh} terdaftar tapi BELUM PERNAH mengirim data "
+                                    "GPS (tidak ada di status armada). Bisa jadi perangkat "
+                                    "belum terpasang/aktif. Sampaikan apa adanya.")}
+            info = [loc]
+        d = info[0]
+        ts = d.get("revdatetime") or d.get("gpsTime") or d.get("canTime")
+        jam = telematics.umur_jam(ts)
+        return {
+            "found": True,
+            "unit": cjh,
+            "nama": (rec.get("carNumber") or "").strip() or "(belum diberi nama)",
+            "model": rec.get("model"),
+            "fleet": telematics._fleet_names(rec),
+            "serial_gps": sbh or None,
+            "status": telematics.STATUS_LABEL.get(d.get("status"), d.get("status")),
+            "terakhir_online": ts,
+            "terakhir_online_lalu": telematics.label_umur(jam),
+            "waktu_can": d.get("canTime"),
+            "waktu_gps": d.get("gpsTime"),
+            "lokasi_terakhir": d.get("lastlocation"),
+            "posisi": ({"lat": d.get("lat"), "lng": d.get("lng")}
+                       if d.get("lat") not in (None, 0) else None),
+            "kecepatan_kmh": d.get("speed"),
+            "rpm": d.get("rpm"),
+            "suhu_air": d.get("waterTemperature"),
+            "jam_mesin": d.get("engineTime"),
+            "km_total": d.get("totalMileage"),
+            "km_hari_ini": d.get("todayMileage"),
+            "bbm_persen": d.get("fuelLevel"),
+            "sinyal_gsm": d.get("gsmSignalStrength"),
+            "satelit": d.get("satelliteNum"),
+            "catatan": ("'terakhir_online' = kiriman data TERAKHIR dari perangkat GPS "
+                        "(jam WIB). Sebut waktunya APA ADANYA beserta jedanya; bila "
+                        "'tidak diketahui' katakan tak terbaca, JANGAN dikira-kira. "
+                        "Field kosong = tak dikirim perangkat, bukan nol."),
+        }
+
+    # ── Mode armada: urut dari yang PALING LAMA tak mengirim data ──
+    fleet = (args.get("fleet") or "").strip()
+    try:
+        batas_hari = float(args.get("lebih_dari_hari") or 0)
+    except (TypeError, ValueError):
+        batas_hari = 0.0
+    d = telematics.semua_unit(fleet=fleet)
+    if d is None:
+        return {"error": "Telematics tidak merespons — coba lagi sebentar lagi."}
+    recs = d.get("records") or []
+    if not recs:
+        return {"found": False,
+                "catatan": (f"Tidak ada unit untuk fleet '{fleet}'." if fleet
+                            else "Tidak ada unit terdaftar di telematics.")}
+    loc = telematics.lokasi_semua()
+
+    baris, tanpa_data = [], []
+    for r in recs:
+        cjh = r.get("cjh")
+        l = loc.get(cjh) or {}
+        ts = l.get("revdatetime")
+        jam = telematics.umur_jam(ts) if ts else None
+        if jam is None:
+            tanpa_data.append(telematics._nama_unit(r))
+            continue
+        baris.append({
+            "unit": cjh, "nama": (r.get("carNumber") or "").strip() or None,
+            "fleet": telematics._fleet_names(r),
+            "status": telematics.STATUS_LABEL.get(l.get("status"), l.get("status")),
+            "terakhir_online": ts, "lalu": telematics.label_umur(jam),
+            "_jam": jam,
+        })
+    if batas_hari > 0:
+        baris = [b for b in baris if b["_jam"] >= batas_hari * 24]
+    baris.sort(key=lambda b: -b["_jam"])          # terlama di atas
+    for b in baris:
+        b.pop("_jam", None)
+    dipotong = len(baris) > _TELE_MAX_TABEL
+    return {
+        "found": True,
+        "total_armada": d.get("total"),
+        "fleet_filter": fleet or None,
+        "saring_lebih_dari_hari": batas_hari or None,
+        "total_cocok": len(baris),
+        "unit": baris[:_TELE_MAX_TABEL],
+        "dipotong": dipotong,
+        "tanpa_stempel_waktu": len(tanpa_data),
+        "contoh_tanpa_stempel": tanpa_data[:10],
+        "catatan": ("Diurut dari unit yang PALING LAMA tidak mengirim data GPS. "
+                    + (f"Ditampilkan {_TELE_MAX_TABEL} teratas dari {len(baris)} — "
+                       "sebutkan bahwa daftarnya dipotong. " if dipotong else "")
+                    + (f"{len(tanpa_data)} unit TANPA stempel waktu — itu berarti "
+                       "TIDAK TERBACA (perangkat belum pernah kirim/tak terpasang), "
+                       "BUKAN 'baru saja online'. " if tanpa_data else "")
+                    + "Untuk detail satu unit panggil lagi dengan 'unit'."),
+    }
+
+
 def _t_ganti_nama_unit(args: dict, user: dict) -> dict:
     """⚠️ WRITE (2 langkah): ubah nama/label unit di server Sinotruk."""
     if not _is_admin(user):
@@ -4560,6 +4680,43 @@ def _t_sheet_daftar_unit(args: dict, user: dict) -> dict:
 
 def _org_ids(rec: dict) -> list[int]:
     return [o["id"] for o in (rec.get("organizations") or []) if o.get("id")]
+
+
+def _t_daftar_fleet(args: dict, user: dict) -> dict:
+    """Daftar FLEET/organisasi yang tersedia di telematics (pohon resmi
+    queryOrganization) — termasuk fleet yang BELUM berisi unit."""
+    if not _is_admin(user):
+        return dict(_TELE_DENIED)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    fleets = telematics.daftar_fleet()
+    if not fleets:
+        return {"error": "Telematics tidak merespons — coba lagi sebentar lagi."}
+    nama_per_id = {f["id"]: f.get("nama") for f in fleets}
+    akar = fleets[0]                       # pre-order: node akar = org login
+    cari = (args.get("cari") or args.get("nama") or "").strip().lower()
+
+    baris = [{"fleet": f.get("nama"), "id": f.get("id"),
+              "induk": nama_per_id.get(f.get("parent_id")) or "(akar)",
+              "jumlah_unit": f.get("jumlah_unit")}
+             for f in fleets]
+    if cari:
+        baris = [b for b in baris if cari in (b["fleet"] or "").lower()]
+        if not baris:
+            return {"found": False, "dicari": cari,
+                    "catatan": (f"Tidak ada fleet bernama mirip '{cari}'. Sebutkan "
+                                "daftar lengkap dengan memanggil tanpa 'cari'.")}
+    return {
+        "found": True,
+        "total_fleet": len(baris),
+        "organisasi_utama": akar.get("nama"),
+        "fleet": baris,
+        "catatan": ("Daftar fleet/organisasi di telematics Sinotruk (pohon resmi — "
+                    "termasuk yang jumlah_unit 0). 'induk' menunjukkan sarangnya. "
+                    "Sebutkan APA ADANYA, jangan menambah nama yang tak ada di daftar. "
+                    "Nama fleet ini yang dipakai untuk masukkan_unit_fleet / "
+                    "sheet_masukkan_fleet / lihat_unit_armada(fleet=…)."),
+    }
 
 
 def _t_buat_fleet(args: dict, user: dict) -> dict:

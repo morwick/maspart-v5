@@ -22,6 +22,9 @@ import base64
 import logging
 import threading
 import time
+from datetime import datetime as _dt
+from datetime import timedelta as _td
+from datetime import timezone as _tz
 
 import requests
 
@@ -32,6 +35,12 @@ logger = logging.getLogger("maspart.telematics")
 _BASE = "http://www.sg.sinotruksfs.com"
 _TIMEOUT = 25
 _DUMMY_VIN = "SLGV0123456789888"
+
+# Portal MENGIRIM header `time-zone` di setiap request (HAR) — server memakainya
+# untuk memformat canTime/gpsTime/revdatetime. Tanpa header ini stempel waktu
+# ikut zona default server, jadi "terakhir online" bisa meleset berjam-jam.
+_TZ_NAMA = "Asia/Jakarta"
+WIB = _tz(_td(hours=7))
 
 # statusCode unit → label Indonesia (dari portal: running/stop/offline/online).
 STATUS_LABEL = {
@@ -104,7 +113,8 @@ def _post(path: str, data: dict) -> dict | list | None:
     """POST form-urlencoded + retry sekali saat token basi (code≠200/HTTP≥400)."""
     def _once() -> requests.Response:
         return requests.post(f"{_BASE}{path}", data=data,
-                             headers={"Authorization": _get_token()},
+                             headers={"Authorization": _get_token(),
+                                      "time-zone": _TZ_NAMA},
                              timeout=_TIMEOUT)
     def _basi(resp, body) -> bool:
         return (resp.status_code in (401, 403)
@@ -135,7 +145,8 @@ def _post_json(path: str, obj) -> dict | None:
     field `data`. None bila gagal/HTTP≥400. Retry sekali saat token basi."""
     def _once() -> requests.Response:
         return requests.post(f"{_BASE}{path}", json=obj,
-                             headers={"Authorization": _get_token()},
+                             headers={"Authorization": _get_token(),
+                                      "time-zone": _TZ_NAMA},
                              timeout=_TIMEOUT)
     try:
         r = _once()
@@ -227,6 +238,74 @@ def lokasi_semua(organization_id=None) -> dict[str, dict]:
         if cjh:
             out[cjh] = c
     return out
+
+
+_MAKS_NEWEST = 12          # pagar panggilan queryVehicleNewestInfo per giliran
+
+
+def sbh_dari_rec(rec: dict) -> str:
+    """Serial perangkat GPS terpasang (kunci endpoint running-data)."""
+    for s in (rec.get("sbhList") or []):
+        if str(s or "").strip():
+            return str(s).strip()
+    return ""
+
+
+def info_terbaru(sbh_list: list[str]) -> list[dict]:
+    """queryVehicleNewestInfo — telemetri TERBARU per SERIAL GPS (`sbh`, BUKAN
+    cjh): status, canTime/gpsTime/revdatetime (kapan terakhir kirim data),
+    posisi + `lastlocation` (alamat), speed/rpm/suhu air, jam mesin, km & BBM
+    hari ini, sinyal GSM. Portal mengirim SATU sbh per panggilan (`sbhList[0]`);
+    kita coba sekaligus, lalu susul satu-satu bila server hanya melayani
+    sebagian — jadi benar untuk kedua perilaku server."""
+    sbh = [str(s).strip() for s in (sbh_list or []) if str(s or "").strip()]
+    if not sbh:
+        return []
+    sbh = sbh[:_MAKS_NEWEST]
+    d = _post("/api/running-data/queryVehicleNewestInfo",
+              {f"sbhList[{i}]": s for i, s in enumerate(sbh)})
+    out = {str(r.get("sbh")): r for r in (d or []) if isinstance(r, dict)}
+    for s in sbh:                       # susulan: server hanya layani index 0
+        if s in out:
+            continue
+        d1 = _post("/api/running-data/queryVehicleNewestInfo", {"sbhList[0]": s})
+        for r in (d1 or []):
+            if isinstance(r, dict):
+                out[str(r.get("sbh"))] = r
+    return [out[s] for s in sbh if s in out]
+
+
+def waktu_wib(stempel: str):
+    """'2026-08-13 09:26:21' (jam portal, WIB) → datetime ber-zona. None bila
+    kosong/tak terbaca — pemanggil WAJIB bedakan None dari 'lama offline'."""
+    t = (stempel or "").strip()
+    for pola in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return _dt.strptime(t, pola).replace(tzinfo=WIB)
+        except ValueError:
+            continue
+    return None
+
+
+def umur_jam(stempel: str) -> float | None:
+    """Berapa JAM lalu stempel itu, relatif sekarang WIB. None bila tak terbaca."""
+    w = waktu_wib(stempel)
+    if w is None:
+        return None
+    return (_dt.now(WIB) - w).total_seconds() / 3600.0
+
+
+def label_umur(jam: float | None) -> str:
+    """Jam → frasa Indonesia ('baru saja', '3 jam lalu', '5 hari lalu')."""
+    if jam is None:
+        return "tidak diketahui"
+    if jam < 0:
+        return "baru saja"          # jam server sedikit mendahului kita
+    if jam < 1:
+        return f"{int(jam * 60)} menit lalu" if jam >= 1 / 60 else "baru saja"
+    if jam < 24:
+        return f"{int(jam)} jam lalu"
+    return f"{int(jam // 24)} hari lalu"
 
 
 def fleet_breakdown(recs: list[dict]) -> list[dict]:
@@ -400,13 +479,19 @@ def rangkum_unit(rec: dict, loc: dict | None = None) -> dict:
         "km": rec.get("mileage"),
     }
     if loc:
+        # `revdatetime` = kiriman data TERAKHIR. Disajikan SELALU (bukan hanya
+        # saat posisi ada) — justru untuk unit offline inilah "kapan terakhir
+        # online" yang dicari.
+        ts = loc.get("revdatetime")
         out.update({
             "status_gps": STATUS_LABEL.get(loc.get("status"), loc.get("status")),
             "km_gps": loc.get("totalMileage"),
             "bbm_persen": loc.get("fuelLevel"),
             "rusak": loc.get("isFaulty"),
+            "terakhir_online": ts or None,
+            "terakhir_online_lalu": label_umur(umur_jam(ts)) if ts else None,
             "posisi": ({"lat": loc.get("lat"), "lng": loc.get("lng"),
-                        "waktu": loc.get("revdatetime")}
+                        "waktu": ts}
                        if loc.get("lat") not in (None, 0) else None),
         })
     return out

@@ -620,3 +620,225 @@ def test_spec_buat_fleet_admin_only():
     na = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "")}
     ns = {s["function"]["name"] for s in ai._tool_specs(STAF, "")}
     assert "buat_fleet" in na and "buat_fleet" not in ns
+
+
+# ── DAFTAR fleet yang tersedia (queryOrganization) ───────────────────
+@pytest.fixture
+def fleets_on(monkeypatch):
+    """Pohon rata ala server: akar MAS(623) → JNT(625) → BANDUNG(2305),
+    plus PT MAS(1525) dan RMT(2175) yang KOSONG (jumlah_unit 0)."""
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.telematics, "daftar_fleet", lambda: [
+        {"id": 623, "nama": "MAS", "parent_id": 1687, "jumlah_unit": 362},
+        {"id": 625, "nama": "JNT", "parent_id": 623, "jumlah_unit": 54},
+        {"id": 2305, "nama": "BANDUNG", "parent_id": 625, "jumlah_unit": 2},
+        {"id": 1525, "nama": "PT MAS", "parent_id": 623, "jumlah_unit": 8},
+        {"id": 2175, "nama": "RMT", "parent_id": 623, "jumlah_unit": 0},
+    ])
+
+
+def test_daftar_fleet_sebut_induk_dan_fleet_kosong(fleets_on):
+    r = ai._t_daftar_fleet({}, ADMIN)
+    assert r["found"] is True and r["total_fleet"] == 5
+    assert r["organisasi_utama"] == "MAS"
+    per_nama = {f["fleet"]: f for f in r["fleet"]}
+    assert per_nama["MAS"]["induk"] == "(akar)"      # parent 1687 di luar pohon
+    assert per_nama["JNT"]["induk"] == "MAS"
+    assert per_nama["BANDUNG"]["induk"] == "JNT"     # fleet bersarang 2 tingkat
+    # fleet TANPA unit tetap muncul — inilah beda dgn breakdown lihat_unit_armada
+    assert per_nama["RMT"]["jumlah_unit"] == 0
+
+
+def test_daftar_fleet_saring_nama(fleets_on):
+    r = ai._t_daftar_fleet({"cari": "mas"}, ADMIN)
+    assert {f["fleet"] for f in r["fleet"]} == {"MAS", "PT MAS"}
+    kosong = ai._t_daftar_fleet({"cari": "tidakada"}, ADMIN)
+    assert kosong["found"] is False
+
+
+def test_daftar_fleet_telematics_diam(monkeypatch):
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.telematics, "daftar_fleet", lambda: [])
+    r = ai._t_daftar_fleet({}, ADMIN)
+    assert "error" in r and "found" not in r     # gagal-cek ≠ tidak ada fleet
+
+
+def test_daftar_fleet_admin_only(fleets_on):
+    assert "error" in ai._t_daftar_fleet({}, STAF)
+
+
+def test_spec_daftar_fleet_admin_only():
+    na = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "")}
+    ns = {s["function"]["name"] for s in ai._tool_specs(STAF, "")}
+    assert "daftar_fleet" in na and "daftar_fleet" not in ns
+
+
+# ── TERAKHIR ONLINE (queryVehicleNewestInfo + revdatetime) ───────────
+def _stamp(jam_lalu: float) -> str:
+    """Stempel gaya portal (WIB) sekian jam yang lalu."""
+    return (t._dt.now(t.WIB) - t._td(hours=jam_lalu)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def test_post_kirim_header_zona_waktu(cfg_on, monkeypatch):
+    """Portal mengirim `time-zone` tiap request — tanpa itu stempel waktu ikut
+    zona server dan 'terakhir online' meleset berjam-jam."""
+    monkeypatch.setattr(t, "_rsa_encrypt", lambda pk, pw: "ENC")
+    dilihat = {}
+
+    class R:
+        status_code = 200
+        def __init__(self, p):
+            self._p = p
+        def json(self):
+            return self._p
+
+    def fake_post(url, data=None, headers=None, timeout=None):
+        if url.endswith("/getPublicKey"):
+            return R({"data": {"id": 1, "publicKey": "K"}})
+        if url.endswith("/auth/login"):
+            return R({"code": 200, "data": {"tokenKey": "TOK"}})
+        dilihat.update(headers or {})
+        return R({"code": 200, "data": []})
+    monkeypatch.setattr(t.requests, "post", fake_post)
+    t._post("/api/z", {})
+    assert dilihat.get("time-zone") == "Asia/Jakarta"
+
+
+def test_info_terbaru_bentuk_form_sbhlist(cfg_on, monkeypatch):
+    kirim = []
+    monkeypatch.setattr(t, "_post", lambda p, d: (kirim.append((p, d)) or
+                                                  [{"sbh": "80741646", "status": "running"}]))
+    r = t.info_terbaru(["80741646"])
+    assert r[0]["sbh"] == "80741646"
+    path, data = kirim[0]
+    assert path.endswith("queryVehicleNewestInfo")
+    assert data == {"sbhList[0]": "80741646"}      # persis bentuk portal
+
+
+def test_info_terbaru_susulan_bila_batch_hanya_layani_satu(cfg_on, monkeypatch):
+    """Server portal cuma dikenal melayani sbhList[0]. Bila batch balas
+    sebagian, sisanya WAJIB disusul satu-satu — bukan diam-diam hilang."""
+    panggil = []
+
+    def fake_post(path, data):
+        panggil.append(data)
+        if len(data) > 1:                       # batch → hanya index 0 dilayani
+            return [{"sbh": data["sbhList[0]"]}]
+        return [{"sbh": data["sbhList[0]"]}]
+    monkeypatch.setattr(t, "_post", fake_post)
+    r = t.info_terbaru(["A1", "B2", "C3"])
+    assert [x["sbh"] for x in r] == ["A1", "B2", "C3"]
+    assert len(panggil) == 3                    # 1 batch + 2 susulan
+
+
+def test_info_terbaru_dipagari(cfg_on, monkeypatch):
+    monkeypatch.setattr(t, "_post", lambda p, d: [{"sbh": s} for s in d.values()])
+    r = t.info_terbaru([str(i) for i in range(50)])
+    assert len(r) == t._MAKS_NEWEST
+
+
+def test_umur_dan_label():
+    assert t.waktu_wib("2026-08-13 09:26:21").utcoffset() == t._td(hours=7)
+    assert t.waktu_wib("bukan tanggal") is None
+    assert t.umur_jam("") is None
+    assert 2.9 < t.umur_jam(_stamp(3)) < 3.1
+    assert t.label_umur(None) == "tidak diketahui"      # ⛔ bukan "baru saja"
+    assert t.label_umur(0.2) == "12 menit lalu"
+    assert t.label_umur(5) == "5 jam lalu"
+    assert t.label_umur(50) == "2 hari lalu"
+
+
+def test_rangkum_unit_sebut_terakhir_online_walau_offline():
+    """Unit OFFLINE (tanpa koordinat) justru yang paling perlu 'kapan terakhir
+    online' — dulu stempelnya ikut terbuang bersama posisi."""
+    mati = {"cjh": "PC531850", "status": "offline", "lat": 0, "lng": 0,
+            "revdatetime": _stamp(72)}
+    u = t.rangkum_unit(_UNIT, mati)
+    assert u["posisi"] is None
+    assert u["terakhir_online"] == mati["revdatetime"]
+    assert u["terakhir_online_lalu"] == "3 hari lalu"
+
+
+@pytest.fixture
+def online_on(monkeypatch):
+    unit_sbh = {**_UNIT, "sbhList": ["80741646"]}
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.telematics, "cari_unit",
+                        lambda q: unit_sbh if "531850" in str(q) else None)
+    monkeypatch.setattr(ai.telematics, "info_terbaru", lambda s: [{
+        "sbh": "80741646", "status": "running", "speed": 27.0, "rpm": 1235.0,
+        "waterTemperature": 85.0, "engineTime": 4506.9, "totalMileage": 141032.3,
+        "todayMileage": 245.0, "fuelLevel": 35.0, "gsmSignalStrength": 15,
+        "satelliteNum": 30, "lat": -1.29, "lng": 101.75,
+        "lastlocation": "Kabupaten Bungo, ",
+        "canTime": _stamp(2), "gpsTime": _stamp(2), "revdatetime": _stamp(2),
+    }])
+    return unit_sbh
+
+
+def test_terakhir_online_satu_unit(online_on):
+    r = ai._t_terakhir_online({"unit": "PC531850"}, ADMIN)
+    assert r["found"] is True and r["serial_gps"] == "80741646"
+    assert r["status"] == "Jalan"
+    assert r["terakhir_online_lalu"] == "2 jam lalu"
+    assert r["lokasi_terakhir"].startswith("Kabupaten Bungo")
+    assert r["jam_mesin"] == 4506.9 and r["satelit"] == 30
+
+
+def test_terakhir_online_jatuh_ke_status_massal(online_on, monkeypatch):
+    """Endpoint newestInfo diam → masih menjawab dari status armada, bukan
+    menyerah."""
+    monkeypatch.setattr(ai.telematics, "info_terbaru", lambda s: [])
+    monkeypatch.setattr(ai.telematics, "lokasi_semua", lambda *a, **k: {
+        "PC531850": {"status": "offline", "revdatetime": _stamp(30), "lat": 0}})
+    r = ai._t_terakhir_online({"unit": "PC531850"}, ADMIN)
+    assert r["found"] is True and r["terakhir_online_lalu"] == "1 hari lalu"
+
+
+def test_terakhir_online_belum_pernah_kirim(online_on, monkeypatch):
+    monkeypatch.setattr(ai.telematics, "info_terbaru", lambda s: [])
+    monkeypatch.setattr(ai.telematics, "lokasi_semua", lambda *a, **k: {})
+    r = ai._t_terakhir_online({"unit": "PC531850"}, ADMIN)
+    assert r["found"] is False and "BELUM PERNAH" in r["catatan"]
+
+
+@pytest.fixture
+def armada_online(monkeypatch):
+    u1 = {**_UNIT, "cjh": "AA111111", "carNumber": "Truk Lama"}
+    u2 = {**_UNIT, "cjh": "BB222222", "carNumber": "Truk Baru"}
+    u3 = {**_UNIT, "cjh": "CC333333", "carNumber": "Truk Sunyi"}
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.telematics, "semua_unit",
+                        lambda fleet="": {"total": 3, "records": [u2, u1, u3]})
+    monkeypatch.setattr(ai.telematics, "lokasi_semua", lambda *a, **k: {
+        "AA111111": {"status": "offline", "revdatetime": _stamp(24 * 9)},
+        "BB222222": {"status": "running", "revdatetime": _stamp(1)},
+        # CC333333 sengaja TIDAK ada → tanpa stempel waktu
+    })
+
+
+def test_terakhir_online_armada_urut_terlama_dulu(armada_online):
+    r = ai._t_terakhir_online({}, ADMIN)
+    assert [u["unit"] for u in r["unit"]] == ["AA111111", "BB222222"]
+    assert r["unit"][0]["lalu"] == "9 hari lalu"
+    # unit tanpa stempel TIDAK boleh menyelinap jadi "baru saja"
+    assert r["tanpa_stempel_waktu"] == 1
+    assert r["contoh_tanpa_stempel"] == ["Truk Sunyi"]
+    assert "TIDAK TERBACA" in r["catatan"]
+
+
+def test_terakhir_online_saring_lebih_dari_hari(armada_online):
+    r = ai._t_terakhir_online({"lebih_dari_hari": 7}, ADMIN)
+    assert [u["unit"] for u in r["unit"]] == ["AA111111"]
+    assert r["total_cocok"] == 1
+
+
+def test_terakhir_online_admin_only(armada_online):
+    assert "error" in ai._t_terakhir_online({}, STAF)
+    assert "error" in ai._t_terakhir_online({"unit": "PC531850"}, PEMBELI)
+
+
+def test_spec_terakhir_online_admin_only():
+    na = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "")}
+    ns = {s["function"]["name"] for s in ai._tool_specs(STAF, "")}
+    assert "terakhir_online" in na and "terakhir_online" not in ns

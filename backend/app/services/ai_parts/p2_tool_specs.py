@@ -2093,6 +2093,31 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         specs.append({
             "type": "function",
             "function": {
+                "name": "terakhir_online",
+                "description": (
+                    "⭐ KAPAN UNIT TERAKHIR ONLINE / kirim data GPS. Dua mode: (1) param "
+                    "'unit' (frame/VIN) = SATU unit → jam terakhir kirim data + jedanya "
+                    "('3 jam lalu'), status, alamat lokasi terakhir, kecepatan/rpm/suhu "
+                    "air, jam mesin, km & BBM, kekuatan sinyal GSM + jumlah satelit; "
+                    "(2) TANPA 'unit' = seluruh armada DIURUT dari yang PALING LAMA tak "
+                    "mengirim data — untuk 'unit mana yang GPS-nya mati', 'unit yang "
+                    "lama tidak online'. Saring dengan 'lebih_dari_hari' (mis. 7 = yang "
+                    "sudah >7 hari diam) dan/atau 'fleet'. ⛔ Unit tanpa stempel waktu "
+                    "= TIDAK TERBACA, bukan 'baru online' — sebutkan apa adanya."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "unit": {"type": "string", "description": "Opsional: frame/VIN satu unit. Kosong = seluruh armada."},
+                        "fleet": {"type": "string", "description": "Opsional (mode armada): saring per nama fleet."},
+                        "lebih_dari_hari": {"type": "number", "description": "Opsional (mode armada): hanya unit yang sudah diam lebih dari N hari."},
+                    },
+                },
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
                 "name": "ganti_nama_unit",
                 "description": (
                     "⚠️ UBAH NAMA/LABEL unit di server Sinotruk (OPERASI TULIS, PERMANEN). "
@@ -2157,6 +2182,28 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau."},
                     },
                     "required": ["unit", "fleet"],
+                },
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "daftar_fleet",
+                "description": (
+                    "DAFTAR FLEET/ORGANISASI yang TERSEDIA di telematics Sinotruk — nama, "
+                    "fleet induk (sarang), dan jumlah unit tiap fleet, dari pohon resmi "
+                    "server. Pakai untuk 'fleet apa saja yang ada', 'ada organisasi apa "
+                    "di GPS', 'unit ini mau dimasukkan ke fleet mana saja pilihannya'. "
+                    "⭐ Panggil ini DULU sebelum masukkan_unit_fleet/sheet_masukkan_fleet "
+                    "bila user menyebut nama fleet yang belum pasti ada. ⛔ Beda dari "
+                    "lihat_unit_armada (itu unit + GPS live; fleet kosong tak muncul di "
+                    "sana). ⛔ JANGAN mengarang nama fleet — sebut hanya yang ada di hasil."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cari": {"type": "string", "description": "Opsional: saring nama fleet yang mengandung teks ini. Kosong = semua."},
+                    },
                 },
             },
         })
