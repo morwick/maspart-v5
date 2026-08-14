@@ -856,6 +856,131 @@ def _t_cari_manual(args: dict, user: dict) -> dict:
                           "manual_teks", user)
 
 
+def _manual_unit_kosong(d: dict) -> dict | None:
+    """Terjemahkan kegagalan daftar() jadi hasil tool yang JUJUR.
+
+    ⛔ Tiga keadaan ini dulu sering diratakan jadi 'tidak ada manual' di tool lain:
+    EPC mati, rangka tak dikenal, dan EPC menjawab 'memang kosong'. Hanya yang
+    KETIGA boleh disampaikan sebagai 'tidak ada'."""
+    if d.get("_err"):
+        return {"found": False, "_err": d["_err"], "rangka": d.get("rangka"),
+                "catatan": d.get("catatan") or
+                ("EPC Sinotruk gagal dihubungi — daftar manual BELUM bisa dipastikan. "
+                 "⛔ JANGAN bilang unit ini tidak punya manual.")}
+    if not d.get("found"):
+        return {"found": False, "rangka": d.get("rangka"), "unit": d.get("unit"),
+                "catatan": d.get("catatan") or
+                "EPC menjawab: tidak ada dokumen servis terdaftar untuk unit ini."}
+    return None
+
+
+def _t_manual_unit(args: dict, user: dict) -> dict:
+    """DAFTAR service manual resmi milik satu unit (EPC Sinotruk, per nomor rangka).
+    Hanya mendaftar — berkasnya baru diunduh saat user memintanya (manual_unit_file),
+    karena satu PDF bisa puluhan MB."""
+    rangka = (args.get("rangka") or args.get("vin") or "").strip()
+    if not rangka:
+        return {"error": "Sebutkan nomor rangka unitnya (VIN penuh atau frame number)."}
+    d = epc_manual.daftar(rangka)
+    kosong = _manual_unit_kosong(d)
+    if kosong is not None:
+        logger.info("MISS manual_unit rangka=%r err=%s user=%s", rangka,
+                    d.get("_err"), user.get("username") or "?")
+        return kosong
+
+    # 'file_code' hanya dipakai server saat pengiriman berkas — tak perlu dikirim
+    # ke model (token terbuang & tak ada gunanya untuk menjawab).
+    dokumen = [{k: v for k, v in x.items() if k != "file_code"} for x in d["dokumen"]]
+    out = {
+        "found": True,
+        "rangka": d.get("rangka"),
+        "unit": d.get("unit"),
+        "jumlah": d.get("jumlah"),
+        "dokumen": dokumen,
+    }
+    catatan = (
+        "Daftar SERVICE MANUAL resmi milik unit ini (EPC Sinotruk, dicocokkan ke "
+        "konfigurasi NYATA unit: model transmisi, gardan, kelistrikan). Sajikan "
+        "sebagai daftar bernomor: judul + bagian. ⚠️ Sebagian 'judul'/'nama_berkas' "
+        "berbahasa CHINA — TERJEMAHKAN judulnya ke Indonesia saat menjawab (jangan "
+        "ubah kode model seperti MCP16/ZF16S/MVP09). "
+        "⛔ JANGAN mengarang dokumen yang tak ada di daftar. "
+        "📎 Berkas PDF-nya BELUM dilampirkan — tutup jawabanmu dengan menawarkan: "
+        "user tinggal menyebut nomor atau nama dokumennya, lalu panggil "
+        "manual_unit_file untuk mengirim PDF-nya."
+    )
+    if d.get("sebagian"):
+        catatan += (" ⚠️ Sebagian kanal EPC tak menjawab saat pengambilan — daftar ini "
+                    "BISA BELUM LENGKAP. Katakan apa adanya ke user.")
+    out["catatan"] = catatan
+    return out
+
+
+def _t_manual_unit_file(args: dict, user: dict) -> dict:
+    """KIRIM satu service manual (PDF) sebagai kartu berkas yang bisa dibuka user.
+    Dipanggil HANYA setelah user memilih dokumen dari manual_unit."""
+    rangka = (args.get("rangka") or args.get("vin") or "").strip()
+    if not rangka:
+        return {"error": "Sebutkan nomor rangka unitnya."}
+    d = epc_manual.daftar(rangka)
+    kosong = _manual_unit_kosong(d)
+    if kosong is not None:
+        return kosong
+    dokumen = d.get("dokumen") or []
+
+    pilih: dict | None = None
+    nomor = args.get("nomor")
+    if nomor not in (None, ""):
+        try:
+            n = int(nomor)
+            pilih = next((x for x in dokumen if x["nomor"] == n), None)
+        except (TypeError, ValueError):
+            pilih = None
+    if pilih is None:
+        judul = (args.get("judul") or "").strip().lower()
+        if judul:
+            # Cocokkan longgar: user menyebut 'gardan belakang' / 'ZF' / 'kelistrikan'.
+            for x in dokumen:
+                gabung = " ".join(str(x.get(k) or "") for k in
+                                  ("judul", "bagian", "nama_berkas", "keterangan")).lower()
+                if judul in gabung:
+                    pilih = x
+                    break
+    if pilih is None:
+        return {"found": False, "rangka": d.get("rangka"),
+                "pilihan": [{"nomor": x["nomor"], "judul": x["judul"],
+                             "bagian": x["bagian"]} for x in dokumen],
+                "catatan": ("Dokumen yang diminta tidak cocok dengan daftar unit ini. "
+                            "Tunjukkan 'pilihan' ke user dan minta dia menyebut NOMOR-nya.")}
+
+    data, alasan = epc_manual.unduh(pilih["file_code"])
+    if not data:
+        return {"found": False, "rangka": d.get("rangka"), "judul": pilih["judul"],
+                "catatan": (f"Berkas '{pilih['judul']}' GAGAL diunduh dari EPC: {alasan} "
+                            "⛔ Jangan bilang dokumennya tidak ada — dokumennya TERDAFTAR, "
+                            "hanya pengunduhannya yang gagal. Minta user coba lagi.")}
+
+    # Nama berkas untuk user: pakai judul bersih (nama asli kerap China + tanda
+    # kurung penuh, menyulitkan saat tersimpan di HP/PC).
+    aman = re.sub(r"[^\w\s.-]", "", pilih["judul"]).strip().replace(" ", "_")[:60] or "manual"
+    filename = f"{aman}.pdf"
+    export_id, filename = ai_export.stash_raw(pilih["judul"], data, filename)
+    return {
+        "found": True,
+        "rangka": d.get("rangka"),
+        "judul": pilih["judul"],
+        "bagian": pilih["bagian"],
+        "ukuran_mb": round(len(data) / (1024 * 1024), 1),
+        "pdf_skema": [{"export_id": export_id, "filename": filename,
+                       "judul": pilih["judul"],
+                       "deskripsi": pilih.get("keterangan") or pilih.get("nama_berkas")}],
+        "catatan": ("📎 PDF-nya SUDAH terlampir sebagai KARTU berkas di bawah jawabanmu — "
+                    "user tinggal mengekliknya. ⛔ JANGAN membuat link/URL sendiri dan "
+                    "jangan bilang 'akan dikirim'; berkasnya sudah ada. Sebut singkat "
+                    "judul + bagian + ukurannya, lalu tawarkan dokumen lain bila perlu."),
+    }
+
+
 # Batas gambar tool penemuan. Frontend hanya merender 6 gambar per giliran
 # (akumulasi lintas semua tool), jadi alat penemuan mengambil sedikit saja —
 # yang ingin melihat lengkap memakai buka_pengetahuan.

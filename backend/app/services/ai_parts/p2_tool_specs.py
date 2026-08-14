@@ -340,6 +340,62 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "manual_unit",
+                "description": (
+                    "⭐ DAFTAR SERVICE MANUAL / buku perbaikan resmi milik SATU UNIT dari "
+                    "NOMOR RANGKA (EPC Sinotruk), dicocokkan ke konfigurasi NYATA unit "
+                    "(transmisi, gardan, kelistrikan): manual gearbox (mis. ZF Ecosplit), "
+                    "buku gardan, skema kelistrikan per seri, lembar spesifikasi. Pakai utk "
+                    "'apa saja service manual unit X', 'ada buku perbaikan rangka X', "
+                    "'kirimkan manual servis truk X'. Hanya MENDAFTAR; PDF menyusul lewat "
+                    "manual_unit_file setelah user memilih. Prosedur per GEJALA → cari_manual; "
+                    "diagram pin/konektor → diagram_wiring."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {
+                            "type": "string",
+                            "description": "Nomor rangka: VIN penuh atau frame number — KIRIM APA ADANYA dari user.",
+                        },
+                    },
+                    "required": ["rangka"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "manual_unit_file",
+                "description": (
+                    "KIRIM BERKAS PDF satu service manual unit sbg kartu yang bisa dibuka "
+                    "user. Panggil HANYA sesudah manual_unit DAN user meminta berkasnya "
+                    "('kirim nomor 2', 'minta PDF manual gardan belakang'). ⛔ JANGAN "
+                    "memborong semua dokumen — satu berkas bisa puluhan MB."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rangka": {
+                            "type": "string",
+                            "description": "Nomor rangka unit, sama dengan yang dipakai di manual_unit.",
+                        },
+                        "nomor": {
+                            "type": "integer",
+                            "description": "Nomor urut dokumen dari daftar manual_unit ('nomor 2' → 2).",
+                        },
+                        "judul": {
+                            "type": "string",
+                            "description": "Bila user menyebut nama, bukan nomor — mis. 'gardan belakang', 'ZF', 'kelistrikan'.",
+                        },
+                    },
+                    "required": ["rangka"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "cari_pengetahuan",
                 "description": (
                     "Cari PENGETAHUAN INTERNAL MASPART yang ditulis/diunggah ADMIN: "

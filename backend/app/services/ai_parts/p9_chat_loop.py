@@ -2145,7 +2145,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                         "judul": c.get("judul"), "jumlah_baris": None}
                 if item["id"] and item not in excel_exports:
                     excel_exports.append(item)
-        elif name in ("diagram_wiring", "cari_manual") and result.get("pdf_skema"):
+        elif name in ("diagram_wiring", "cari_manual",
+                      "manual_unit_file") and result.get("pdf_skema"):
             # Kartu skema/manual PDF (skema_ref, 2026-07-18) → kanal kartu file.
             # Gambarnya sudah ditangkap blok _TOOLS_GAMBAR_INLINE di atas.
             for c in result["pdf_skema"]:

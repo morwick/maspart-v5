@@ -211,6 +211,8 @@ _DISPATCH = {
     "buat_fleet": _t_buat_fleet,
     "diagram_wiring": _t_diagram_wiring,
     "cari_manual": _t_cari_manual,
+    "manual_unit": _t_manual_unit,
+    "manual_unit_file": _t_manual_unit_file,
     "cari_pengetahuan": _t_cari_pengetahuan,
     "buka_pengetahuan": _t_buka_pengetahuan,
     "ajarkan_pengetahuan": _t_ajarkan_pengetahuan,
