@@ -101,8 +101,11 @@ def test_kunci_fase_selalu_ada(monkeypatch):
 
 # ── Tangga payload: migrasi 029 belum jalan → log TETAP tercatat ────────────
 def test_log_turn_fallback_tanpa_kolom_fase(monkeypatch):
-    """PostgREST menolak (400) payload yang memuat model_ms → turun satu tingkat;
-    barisnya tetap masuk, LENGKAP dengan kolom lama (guard_kinds dst)."""
+    """PostgREST menolak (400) payload yang memuat model_ms → turun sampai lolos;
+    barisnya tetap masuk, LENGKAP dengan kolom lama (guard_kinds dst).
+
+    Sejak migrations/030 (diulang) tangganya bertambah satu anak, dan DUA tingkat
+    teratas sama-sama membawa model_ms — jadi keduanya ditolak sebelum lolos."""
     payloads = []
 
     class _R:
@@ -123,11 +126,13 @@ def test_log_turn_fallback_tanpa_kolom_fase(monkeypatch):
                         guard_kinds=["dtc"], model_ms=800, tools_ms=200, ttft_ms=0)
 
     assert ok is True
-    assert len(payloads) == 2
+    assert len(payloads) == 3
     assert payloads[0]["model_ms"] == 800 and payloads[0]["tools_ms"] == 200
-    assert "model_ms" not in payloads[1]          # tingkat yang akhirnya lolos
-    assert payloads[1]["guard_kinds"] == "dtc"    # kolom lama TIDAK ikut hilang
-    assert payloads[1]["session_id"] == "c-1"
+    assert "diulang" in payloads[0]               # tingkat terkaya (030)
+    assert "diulang" not in payloads[1] and payloads[1]["model_ms"] == 800
+    assert "model_ms" not in payloads[2]          # tingkat yang akhirnya lolos
+    assert payloads[2]["guard_kinds"] == "dtc"    # kolom lama TIDAK ikut hilang
+    assert payloads[2]["session_id"] == "c-1"
 
 
 def test_log_turn_skema_baru_sekali_kirim(monkeypatch):
@@ -174,7 +179,8 @@ def test_memo_tangga_melompati_tingkat_yang_ditolak(monkeypatch):
                  latency_ms=1, guard_hit=False, tool_failed=False, reply_len=1,
                  outcome="ok", model_ms=5)
     assert _LOG_TURN_ASLI(**dasar) is True
-    assert len(payloads) == 2                     # ditolak → turun satu tingkat
+    # DUA tingkat teratas membawa model_ms (030 di atas 029) → dua-duanya ditolak.
+    assert len(payloads) == 3
     payloads.clear()
     assert _LOG_TURN_ASLI(**dasar) is True
     assert len(payloads) == 1                     # langsung ke tingkat yang jalan

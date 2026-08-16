@@ -1880,6 +1880,9 @@ def _t_cek_populasi(args: dict, user: dict) -> dict:
     # Akses Populasi Unit hanya admin & akun 'mas' (SEE_ALL).
     if not _can_populasi(user):
         return {"denied": True, "error": "Data populasi unit hanya untuk admin & akun 'mas'."}
+    _b = _batch_wrap(_t_cek_populasi, args, user, "query", maks=20, min_len=2)
+    if _b is not None:
+        return _b
     q = (args.get("query") or "").strip()
     try:
         res = populasi.search_summary(q, limit=15)

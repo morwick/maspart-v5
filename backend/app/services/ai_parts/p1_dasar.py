@@ -643,3 +643,222 @@ def _is_gearbox_query(q: str) -> bool:
     return bool(_HW_GEARBOX_RE.match((q or "").upper().replace(" ", "")))
 
 
+# ── BATCH: satu panggilan, banyak item (2026-08-17) ─────────────────────────
+# Audit 1.189 giliran produksi (17 Jul–16 Agu): 44% panggilan tool (1.394/3.196)
+# adalah nama tool yang SAMA diulang dalam SATU giliran. Giliran yang kena butuh
+# 2,80 ronde & 43,9 dtk; yang tidak kena 1,09 ronde & 19,8 dtk. Tiap ronde
+# membayar ulang blok tetap ±43.832 token (system prompt + spec tool), jadi
+# pengulangan itu ongkos terbesar asisten — sekaligus sumber jawaban SALAH:
+# rem anti-loop menolak panggilan ke-N lalu model menyimpulkan "tidak ada".
+#
+# ⛔ Sebab yang TERUKUR, bukan dugaan: tool yang MENDEKLARASIKAN parameter array
+# praktis tak pernah diulang (cek_massal_part 9 ulang/70 pakai, kategori_massal_part
+# 0, spek_massal_rangka 0, banding_rangka_massal 0) sedangkan tool yang hanya
+# MELARANG lewat prosa diulang ratusan kali. Buktinya paling telak: spec
+# detail_part sudah memuat larangan huruf besar ber-⛔ ("HANYA untuk satu PN …
+# akan DITOLAK sistem") dan tetap jadi pelanggar nomor 1 dengan 251 pengulangan.
+# Kesimpulan: larangan PROSA tidak bekerja, SKEMA bekerja. Maka aturannya
+# dipindah ke bentuk parameter, bukan ditulis lebih keras.
+#
+# ⛔ Yang TIDAK boleh berubah: setiap parameter yang kini menerima array WAJIB
+# tetap menerima string tunggal apa adanya — riwayat percakapan lama, model yang
+# memanggil dengan kebiasaan lama, dan seluruh tes lama harus tetap bekerja.
+
+_MAX_BATCH_DEFAULT = 20       # plafon aman item per panggilan tool ringan
+_BATCH_WORKERS = 4            # sejajar dgn ThreadPoolExecutor batch tool di p9
+
+
+def _as_items(v, maks: int = _MAX_BATCH_DEFAULT, *, upper: bool = False,
+              min_len: int = 1) -> list[str]:
+    """`str | list | tuple` → daftar item bersih (unik, urutan asli, dipotong).
+
+    Menerima BENTUK LAMA (satu string) maupun BARU (array) — inilah yang membuat
+    perubahan skema kompatibel mundur mutlak. String ber-pemisah (`;` `,` baris)
+    ikut dipecah karena model kerap menempel daftar user apa adanya; pola ini
+    sudah terbukti di _t_cari_part_di_unit & _parse_daftar_pn.
+
+    ⚠️ Pemisah sengaja TIDAK termasuk spasi: nama part lapangan berisi spasi
+    ('kampas rem depan'). Tool yang itemnya PN memakai _parse_daftar_pn sendiri.
+    """
+    if isinstance(v, (list, tuple)):
+        toks: list[str] = []
+        for x in v:
+            toks += re.split(r"[;\n]+", str(x or ""))
+    else:
+        toks = re.split(r"[;\n]+", str(v or ""))
+    out: list[str] = []
+    for t in toks:
+        s = " ".join(str(t or "").split())
+        if upper:
+            s = s.upper()
+        if len(s) >= min_len and s not in out:
+            out.append(s)
+    return out[:max(1, maks)]
+
+
+def _batch_note(name: str, dipakai: list[str], dibuang: list[str]) -> str:
+    """Nota JUJUR saat daftar dipotong plafon — user harus tahu apa yang belum
+    dicek. Pola sama dengan _rem_tertunda_note: penolakan sistem tidak boleh
+    berhenti sebagai catatan diam di dalam hasil."""
+    if not dibuang:
+        return ""
+    return (f"⚠️ {len(dipakai)} item pertama diproses; {len(dibuang)} SISANYA BELUM "
+            f"dicek karena plafon satu panggilan: {', '.join(dibuang[:12])}"
+            f"{' …' if len(dibuang) > 12 else ''}. ⛔ JANGAN menyatakan apa pun "
+            f"(ada/tidak ada) tentang item yang belum dicek — panggil {name} lagi "
+            f"untuk sisanya, atau beri tahu user item mana yang belum sempat dicek.")
+
+
+def _gabung_hasil(field: str, items: list[str], hasil: list[dict]) -> dict:
+    """Gabungkan hasil per-item jadi SATU hasil tool.
+
+    Bentuknya sengaja MENIRU hasil satu-item supaya SELURUH lapisan hilir tetap
+    bekerja tanpa diubah: `_salvage_rows`/`_fakta_from_tool` mencari list-of-dict
+    di kunci yang dikenal, `_row_count_nums` meng-ground jumlah baris, dan guard
+    angka membaca nilai di dalamnya. Maka:
+
+      • bila tiap hasil punya list-baris dengan NAMA KUNCI yang sama → baris
+        digabung ke satu list dengan kolom penanda item asalnya (lebih banyak
+        baris ter-ground daripada sebelumnya — mutu guard NAIK, bukan turun);
+      • bila tidak (hasil berbentuk objek tunggal, mis. detail_part/cek_kendaraan)
+        → tiap objek diberi penanda item lalu dikumpulkan di kunci 'hasil'
+        (kunci itu dikenal _FAKTA_LIST_KEYS & _SALVAGE_LIST_KEYS).
+
+    Galat satu item TIDAK menjatuhkan sisanya — itu justru inti perbaikannya.
+    """
+    pasang = [(it, r) for it, r in zip(items, hasil) if isinstance(r, dict)]
+    if not pasang:
+        return {"error": "semua item gagal diproses"}
+    if len(pasang) == 1 and len(items) == 1:
+        return pasang[0][1]                     # satu item → bentuk LAMA persis
+
+    # Kunci list yang ADA di SEMUA hasil sukses → itu baris datanya.
+    sukses = [(it, r) for it, r in pasang if not r.get("error")]
+    kunci = ""
+    if sukses:
+        umum = set(k for k, v in sukses[0][1].items() if isinstance(v, list))
+        for _, r in sukses[1:]:
+            umum &= set(k for k, v in r.items() if isinstance(v, list))
+        # Prioritaskan kunci yang memang dikenal lapisan hilir.
+        for k in ("rows", "parts", "part", "hasil", "items", "daftar", "data",
+                  "komponen", "kandidat", "unit", "figures"):
+            if k in umum:
+                kunci = k
+                break
+        if not kunci and umum:
+            kunci = sorted(umum)[0]
+
+    out: dict = {"jumlah_item": len(pasang)}
+    gagal = [it for it, r in pasang if r.get("error")]
+    if kunci:
+        baris: list[dict] = []
+        for it, r in sukses:
+            for b in (r.get(kunci) or []):
+                if isinstance(b, dict):
+                    baris.append({field: it, **b})
+                else:
+                    baris.append({field: it, "nilai": b})
+        out[kunci] = baris
+        # Field non-list yang berbeda per item tetap dibawa sebagai ringkasan,
+        # supaya konteks per item (mis. model/nama unit) tak hilang.
+        ringkas = []
+        for it, r in sukses:
+            sisa = {k: v for k, v in r.items()
+                    if k != kunci and not isinstance(v, (list, dict))}
+            if sisa:
+                ringkas.append({field: it, **sisa})
+        if ringkas:
+            out["ringkasan_per_item"] = ringkas
+    else:
+        out["hasil"] = [{field: it, **r} for it, r in pasang]
+    if gagal:
+        out["item_gagal"] = gagal
+
+    # ⚠️ ANGKAT bendera OPERASI TULIS ke tingkat atas. Tool tulis (2 langkah)
+    # menandai butuh persetujuan lewat `perlu_konfirmasi`; bila benderanya cuma
+    # ada DI DALAM tiap item, model & klien tak melihatnya dan alur konfirmasi
+    # diam-diam terlewat — jenis kegagalan yang sama dengan nota rem yang dulu
+    # terkubur di dalam satu hasil tool.
+    butuh = [it for it, r in pasang if r.get("perlu_konfirmasi")]
+    if butuh:
+        out["perlu_konfirmasi"] = True
+        out["catatan"] = (
+            f"⚠️ KONFIRMASI DULU ke user untuk SELURUH {len(butuh)} item ini "
+            f"({', '.join(butuh[:20])}{' …' if len(butuh) > 20 else ''}). "
+            "Tampilkan pratinjau tiap item lalu minta persetujuan SEKALI untuk "
+            "semuanya. Bila user setuju, panggil tool ini LAGI dengan daftar item "
+            "yang SAMA + konfirmasi=true — ⛔ jangan panggil satu per satu.")
+    return out
+
+
+def _fanout(fn, args: dict, user: dict, field: str, items: list[str],
+            *, paralel: bool = True) -> dict:
+    """Jalankan handler SATU-item untuk tiap item, lalu gabungkan.
+
+    Handler aslinya TIDAK ditulis ulang — dipanggil apa adanya dengan `field`
+    diisi satu item. Itu sengaja: badan handler tool ini adalah bagian paling
+    teruji di sistem, dan menyalinnya untuk versi 'massal' persis kesalahan yang
+    melahirkan 6 kembaran massal yang membelah pilihan model.
+
+    Paralel memakai pola & jumlah worker yang sama dengan eksekusi batch tool di
+    p9 (handler memang sudah dipanggil bersamaan dari sana), jadi banyak item
+    tidak berarti berkali lipat waktu tunggu.
+    """
+    def _satu(it: str) -> dict:
+        a = dict(args)
+        a[field] = it
+        try:
+            r = fn(a, user)
+            return r if isinstance(r, dict) else {"error": "hasil tool tak dikenal"}
+        except Exception:       # satu item rusak tak boleh menjatuhkan sisanya
+            logger.exception("fanout %s gagal untuk item %r", field, it)
+            return {"error": "gagal diproses (gangguan internal)"}
+
+    if len(items) == 1 or not paralel:
+        hasil = [_satu(it) for it in items]
+    else:
+        with ThreadPoolExecutor(max_workers=min(_BATCH_WORKERS, len(items))) as ex:
+            hasil = list(ex.map(_satu, items))
+    return _gabung_hasil(field, items, hasil)
+
+
+def _batch_wrap(fn, args: dict, user: dict, field: str, *, maks: int = _MAX_BATCH_DEFAULT,
+                upper: bool = False, min_len: int = 1, alias: tuple[str, ...] = (),
+                paralel: bool = True) -> dict | None:
+    """Pintu masuk seragam di ATAS handler satu-item.
+
+    Return None bila argumennya memang tunggal → pemanggil lanjut ke jalur lama
+    (nol perubahan perilaku). Return dict bila memang banyak item.
+    """
+    v = args.get(field)
+    if v in (None, "", [], ()):
+        for a in alias:
+            if args.get(a) not in (None, "", [], ()):
+                v = args.get(a)
+                break
+    items = _as_items(v, maks=maks + 50, upper=upper, min_len=min_len)
+    if len(items) <= 1:
+        # ⛔ Jalur lama menerima STRING dan langsung .strip() — bila model kirim
+        # array yang menyusut jadi ≤1 item (mis. satu entri terlalu pendek), array
+        # itu akan sampai ke sana apa adanya dan meledakkan giliran user dengan
+        # AttributeError. Maka dirapikan jadi skalar DI SINI, di satu tempat,
+        # bukan menambah isinstance() di 15 handler.
+        if isinstance(v, (list, tuple)):
+            args[field] = items[0] if items else ""
+            for a in alias:
+                if isinstance(args.get(a), (list, tuple)):
+                    args[a] = args[field]
+        return None                              # jalur LAMA, tak tersentuh
+    dibuang = items[maks:]
+    items = items[:maks]
+    sisa = dict(args)
+    for a in alias:                              # alias dibersihkan agar tak dobel
+        sisa.pop(a, None)
+    out = _fanout(fn, sisa, user, field, items, paralel=paralel)
+    nota = _batch_note(getattr(fn, "__name__", "tool").removeprefix("_t_"),
+                       items, dibuang)
+    if nota:
+        out["catatan_batch"] = nota
+    return out
+
+

@@ -7,6 +7,9 @@
 from __future__ import annotations
 
 def _t_cari_part(args: dict, user: dict) -> dict:
+    _b = _batch_wrap(_t_cari_part, args, user, "query", maks=20, min_len=2)
+    if _b is not None:
+        return _b
     q = (args.get("query") or "").strip()
     if not q:
         return {"error": "query kosong"}
@@ -834,6 +837,13 @@ def _sisip_varian_pemasok(out: dict, pn: str, user: dict, **kw) -> dict:
 
 
 def _t_detail_part(args: dict, user: dict) -> dict:
+    # BANYAK PN → delegasikan ke jalur massal yang SUDAH ada & teruji, bukan
+    # fan-out per-PN: _t_cek_massal_part membaca indeks stok/harga SEKALI untuk
+    # seluruh daftar (rows_for_pns + satu snapshot Accurate), jadi 30 PN tetap
+    # satu kali kerja indeks — fan-out akan mengulangnya 30×.
+    _pns = _parse_daftar_pn(args.get("part_number") or args.get("pn") or "")
+    if len(_pns) > 1:
+        return _t_cek_massal_part({**args, "daftar_pn": _pns}, user)
     pn = (args.get("part_number") or "").strip()
     if not pn:
         return {"error": "part_number kosong"}

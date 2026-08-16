@@ -662,6 +662,9 @@ def _t_assembly_utama_unit(args: dict, user: dict) -> dict:
 
 
 def _t_cek_kendaraan(args: dict, user: dict) -> dict:
+    _b = _batch_wrap(_t_cek_kendaraan, args, user, "rangka", maks=20, upper=True, min_len=4)
+    if _b is not None:
+        return _b
     rangka = (args.get("rangka") or "").strip()
     if not rangka:
         return {"error": "Sebutkan nomor rangka (VIN atau frame number)."}
@@ -751,6 +754,9 @@ _EPC_TOKEN_MSG = ("Token EPC sedang kedaluwarsa/belum diatur, jadi daftar part d
 
 
 def _t_bom_dari_rangka(args: dict, user: dict) -> dict:
+    _b = _batch_wrap(_t_bom_dari_rangka, args, user, "rangka", maks=20, upper=True, min_len=4)
+    if _b is not None:
+        return _b
     rangka = (args.get("rangka") or "").strip()
     if not rangka:
         return {"error": "Sebutkan nomor rangka (VIN atau frame number)."}
@@ -1512,6 +1518,10 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
     EPC hanya paham nama INGGRIS/Mandarin → istilah lapangan diterjemahkan lewat
     kamus sinonim dulu. Tiap PN disilangkan ke inventori lokal (stok/harga) dan
     diberi assembly INDUK (reverse) agar konteks pemasangannya jelas."""
+    _b = _batch_wrap(_t_cari_part_di_unit, args, user, "rangka", maks=20,
+                     upper=True, min_len=4)
+    if _b is not None:
+        return _b
     rangka = (args.get("rangka") or "").strip()
     kata_raw = args.get("kata_kunci") or args.get("query") or ""
     # MULTI-ISTILAH (2026-07-23): log produksi 30 hari — model memanggil tool ini
@@ -2338,6 +2348,10 @@ def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:
     bearing, seal poros. Atlas mengurai assembly sampai komponen + memisah DEPAN (modul
     Driven axle 06) vs BELAKANG (Drive axle 07); PERSIS untuk unit ini (bukan per-model,
     bukan Loading List yg datar tanpa posisi)."""
+    _b = _batch_wrap(_t_part_aus_dari_rangka, args, user, "rangka", maks=12,
+                     upper=True, min_len=4)
+    if _b is not None:
+        return _b
     rangka = (args.get("rangka") or "").strip()
     if not rangka:
         return {"error": "Sebutkan nomor rangka (VIN penuh atau frame number)."}
@@ -2637,6 +2651,10 @@ def _t_part_aus_dari_rangka(args: dict, user: dict) -> dict:
 
 
 def _t_unit_dari_part(args: dict, user: dict) -> dict:
+    _b = _batch_wrap(_t_unit_dari_part, args, user, "part_number", maks=20,
+                     upper=True, min_len=4)
+    if _b is not None:
+        return _b
     pn = (args.get("part_number") or "").strip()
     if not pn:
         return {"error": "Sebutkan Part Number yang mau dicek dipakai di unit apa."}
@@ -3007,6 +3025,10 @@ def _t_part_dari_mesin(args: dict, user: dict) -> dict:
     VIN/rangka. Untuk 'carikan starter untuk no engine 4P24B000713'. Tanpa 'part' →
     daftar GROUP mesin; dengan 'part' → komponen cocok + stok/harga lokal. Order
     di-resolve via getOrderNumber(serialNumber=<no>) memakai token account-level."""
+    _b = _batch_wrap(_t_part_dari_mesin, args, user, "no_mesin", maks=20, upper=True,
+                     min_len=4, alias=("no_engine", "serial", "nomor_mesin"))
+    if _b is not None:
+        return _b
     no_mesin = (args.get("no_mesin") or args.get("no_engine")
                 or args.get("serial") or args.get("nomor_mesin") or "").strip()
     if not no_mesin:
@@ -3819,6 +3841,10 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
     sumber resmi digabung: SIMS partEquivalentQuery (Sinotruk/HOWO SASIS, tabel 17k
     baris, global by PN) + EPC Weichai 替换/ECN (part MESIN). Silang PN pengganti ke
     stok/harga lokal supaya tahu mana yang ready."""
+    _b = _batch_wrap(_t_pengganti_part, args, user, "part_number", maks=30,
+                     upper=True, min_len=4, alias=("pn",))
+    if _b is not None:
+        return _b
     pn = (args.get("part_number") or args.get("pn") or "").strip()
     if not pn:
         return {"error": "Sebutkan Part Number yang mau dicek penggantinya."}
@@ -4155,6 +4181,12 @@ def _t_lihat_unit_armada(args: dict, user: dict) -> dict:
         return dict(_TELE_DENIED)
     if not telematics.available():
         return dict(_TELE_OFF)
+    # ⛔ Gerbang peran & ketersediaan DILEWATI DULU sebelum fan-out: menyebar
+    # penolakan yang sama ke 30 item cuma menggandakan pesan yang sama.
+    _b = _batch_wrap(_t_lihat_unit_armada, args, user, "unit", maks=30,
+                     upper=True, min_len=4)
+    if _b is not None:
+        return _b
 
     # Lookup SATU unit spesifik (frame/cjh/VIN/nama) — jawab "cek nama unit X",
     # "unit X ada di fleet mana". Tanpa ini model menebak dari daftar cap-60.
@@ -4342,11 +4374,34 @@ def _t_terakhir_online(args: dict, user: dict) -> dict:
 
 
 def _t_ganti_nama_unit(args: dict, user: dict) -> dict:
-    """⚠️ WRITE (2 langkah): ubah nama/label unit di server Sinotruk."""
+    """⚠️ WRITE (2 langkah): ubah nama/label unit di server Sinotruk (boleh banyak).
+
+    Beda dari tool batch lain, item di sini BERPASANGAN (unit ↔ nama barunya),
+    jadi tak bisa lewat _batch_wrap yang menyebar SATU field. Bentuknya array of
+    object supaya pasangan tak pernah bisa bergeser — dua array sejajar
+    (cjh[] + nama_baru[]) akan salah-pasang diam-diam bila panjangnya beda."""
     if not _is_admin(user):
         return dict(_TELE_DENIED)
     if not telematics.available():
         return dict(_TELE_OFF)
+    _daftar = args.get("daftar")
+    if isinstance(_daftar, (list, tuple)) and len(_daftar) > 1:
+        pasangan: list[tuple[str, str]] = []
+        for d in _daftar[:50]:
+            if not isinstance(d, dict):
+                continue
+            c = str(d.get("cjh") or d.get("unit") or "").strip().upper()
+            n = str(d.get("nama_baru") or d.get("nama") or "").strip()
+            if c and n and (c, n) not in pasangan:
+                pasangan.append((c, n))
+        if not pasangan:
+            return {"error": "Isi 'daftar' harus [{cjh, nama_baru}, …]."}
+        sisa = {k: v for k, v in args.items() if k not in ("daftar", "cjh", "nama_baru", "unit", "nama")}
+        hasil = [_t_ganti_nama_unit({**sisa, "cjh": c, "nama_baru": n}, user)
+                 for c, n in pasangan]
+        return _gabung_hasil("cjh", [c for c, _ in pasangan], hasil)
+    if isinstance(_daftar, (list, tuple)) and len(_daftar) == 1 and isinstance(_daftar[0], dict):
+        args = {**args, **{k: v for k, v in _daftar[0].items() if k in ("cjh", "nama_baru")}}
     target = (args.get("cjh") or args.get("unit") or "").strip()
     nama_baru = (args.get("nama_baru") or args.get("nama") or "").strip()
     if not target or not nama_baru:
@@ -4769,11 +4824,20 @@ def _t_buat_fleet(args: dict, user: dict) -> dict:
 
 
 def _t_masukkan_unit_fleet(args: dict, user: dict) -> dict:
-    """⚠️ WRITE (2 langkah): masukkan/pindahkan SATU unit ke fleet."""
+    """⚠️ WRITE (2 langkah): masukkan/pindahkan unit ke fleet (boleh banyak unit).
+
+    ⛔ Kasus rusak 2026-08-13: dengan plafon rem 3 panggilan/tool, alur 2 langkah
+    membuat 3 unit = 6 panggilan → asisten melaporkan "ketiga unit BELUM
+    dipindahkan" padahal user sudah setuju. Batching menghapus sebabnya: berapa
+    pun unitnya tetap 2 panggilan (pratinjau + konfirmasi)."""
     if not _is_admin(user):
         return dict(_TELE_DENIED)
     if not telematics.available():
         return dict(_TELE_OFF)
+    _b = _batch_wrap(_t_masukkan_unit_fleet, args, user, "unit", maks=50, upper=True,
+                     min_len=4, alias=("cjh", "vin"), paralel=False)
+    if _b is not None:
+        return _b
     unit = (args.get("unit") or args.get("cjh") or args.get("vin") or "").strip()
     fleet = (args.get("fleet") or args.get("organisasi") or "").strip()
     if not unit or not fleet:

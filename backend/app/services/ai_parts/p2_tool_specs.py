@@ -112,7 +112,8 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         # menyebut 'pn' sebagai default sementara deskripsi tool
                         # bilang "tak perlu menentukan mode": model diberi tuas mati
                         # yang berbunyi seolah bisa mempersempit hasil.
-                        "query": {"type": "string", "description": "Part Number atau kata kunci nama part (mis. 'injector')."},
+                        "query": {"type": ["string", "array"], "items": {"type": "string"},
+                                  "description": "PN atau kata kunci nama part (mis. 'injector'). ARRAY = banyak istilah SEKALIGUS, maks 20 (hasil dilabeli per istilah) — jangan panggil berulang."},
                         "unit": {
                             "type": "string",
                             "description": "Opsional. Filter hasil ke unit/model tertentu (mis. 'NX360', 'HOWO-7', 'SITRAK', 'SG21'). Kosongkan untuk cari di semua unit.",
@@ -127,20 +128,21 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "detail_part",
                 "description": (
-                    "Ambil detail SATU Part Number persis: nama, STOK (utama dari ERP Accurate, "
+                    "Detail Part Number persis: nama, STOK (utama dari ERP Accurate, "
                     "disinkron berkala — total + rincian per gudang; fallback Excel bila Accurate "
                     "tak tersedia; lihat field 'sumber_stok'), harga jual lokal, dan SPESIFIKASI "
                     "fisik resmi (berat kg, dimensi cm, satuan, merek). Ini tool utama untuk "
-                    "pertanyaan stok/berat/dimensi SATU PN. "
-                    "⛔ HANYA untuk satu PN: bila user menyebut 2 PN atau lebih — termasuk untuk "
-                    "berat/dimensi — pakai cek_massal_part (SATU panggilan). Memanggil tool ini "
-                    "berulang untuk banyak PN akan DITOLAK sistem setelah beberapa kali, dan "
-                    "sisanya tidak akan pernah terjawab."
+                    "pertanyaan stok/berat/dimensi per PN. "
+                    "⭐ BANYAK PN sekaligus: isi 'part_number' dengan ARRAY berisi SEMUA PN yang "
+                    "user sebut/tempel — SATU panggilan menjawab semuanya."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "part_number": {"type": "string", "description": "Part Number lengkap/persis."},
+                        "part_number": {"type": ["string", "array"], "items": {"type": "string"},
+                                        "description": "Part Number lengkap/persis. BOLEH ARRAY berisi SEMUA PN yang user sebut (maks 100) — kirim sekaligus, jangan dipecah jadi beberapa panggilan."},
+                        "dimensi": {"type": "boolean", "description": "true → sertakan dimensi P×L×T (cm) dari SIMS. Hanya bila user menanyakan ukuran/dimensi (lambat; dibatasi 40 PN pertama). Berat SELALU disertakan tanpa argumen ini."},
+                        "excel": {"type": "boolean", "description": "true → hasil banyak PN juga dijadikan file Excel unduhan."},
                     },
                     "required": ["part_number"],
                 },
@@ -151,20 +153,14 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "cek_massal_part",
                 "description": (
-                    "⭐ CEK BANYAK Part Number SEKALIGUS dalam SATU panggilan — nama + stok "
-                    "(total & per gudang) + harga + BERAT tertagih (kg) tiap PN. WAJIB pakai "
-                    "ini saat user menyebut/menempel ≥2 PN ('cek PN ini semua', daftar PN, "
-                    "dan JUGA saat user minta BERAT/DIMENSI beberapa part) — ⛔ JANGAN "
-                    "memanggil detail_part berulang: sistem akan MENOLAKnya setelah beberapa "
-                    "kali dan sisa PN tak akan terjawab. PN yang tidak ada ditandai jujur. "
-                    "Set dimensi=true bila user memang menanyakan UKURAN/DIMENSI (agak lambat, "
-                    "dibatasi 40 PN pertama). Set excel=true untuk file Excel unduhan. "
-                    "Hasil bisa langsung dijadikan penawaran (buat_penawaran) bila user mau. "
-                    "⛔ 'MASSAL' di sini = BANYAK PN, SATU pertanyaan stok/harga — BUKAN "
-                    "untuk mengecek satu part di BANYAK RANGKA/UNIT ('injector untuk 5 VIN "
-                    "ini sama tidak?'): itu cek_massal_part_rangka (daftar VIN) atau "
-                    "cek_massal_part_mesin (daftar nomor mesin). Tool ini tidak tahu unit "
-                    "apa pun — ia hanya melihat PN di gudang."
+                    "BANYAK Part Number sekaligus — nama + stok (total & per gudang) + harga "
+                    "+ BERAT tertagih (kg) tiap PN; PN yang tidak ada ditandai jujur. Setara "
+                    "detail_part dengan 'part_number' berbentuk ARRAY. dimensi=true bila user "
+                    "menanyakan UKURAN (lambat, 40 PN pertama); excel=true untuk file unduhan; "
+                    "hasil bisa langsung jadi buat_penawaran. ⛔ 'MASSAL' = banyak PN, SATU "
+                    "pertanyaan stok/harga — BUKAN satu part di BANYAK RANGKA/UNIT ('injector "
+                    "untuk 5 VIN ini sama tidak?' → cek_massal_part_rangka / "
+                    "cek_massal_part_mesin). Tool ini tak tahu unit apa pun."
                 ),
                 "parameters": {
                     "type": "object",
@@ -800,20 +796,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "repair_kit_transmisi",
                 "description": (
-                    "Daftar REPAIR KIT / perpak TRANSMISI (gearbox) per model — komponen "
-                    "yang diganti saat servis/overhaul gearbox. Mengembalikan SEAL KIT "
-                    "(oil seal + gasket + O-ring) dan opsional OVERHAUL (bearing + "
-                    "synchronizer + snap ring). Identifikasi model dari kode (mis. HW19709, "
-                    "HW25712, ZF16S2531TO, 8JS85), dari Part Number gearbox assy, ATAU dari "
-                    "nama UNIT (mis. 'HOWO-371', 'SITRAK 540'). ⭐ Bila user menyebut NOMOR "
-                    "RANGKA/VIN, isi 'rangka' — sistem menanyakan gearbox PERSIS unit itu ke "
-                    "EPC pabrik (lebih akurat daripada menebak dari nama unit; dua unit "
-                    "'sama' bisa beda gearbox). Pakai untuk pertanyaan 'repair kit / perpak "
-                    "/ seal kit / paking transmisi', 'apa saja diganti saat overhaul "
-                    "gearbox', dll. Kosongkan 'transmisi' & 'rangka' untuk daftar model. "
-                    "Utk REPAIR KIT MESIN Weichai ('repair kit mesin unit X', 'paket servis/"
-                    "overhaul mesin'): isi sumber='mesin' + 'rangka' (hanya unit bermesin "
-                    "Weichai; disilang stok/harga lokal)."
+                    "REPAIR KIT / perpak TRANSMISI (gearbox) per model — SEAL KIT (oil seal "
+                    "+ gasket + O-ring) dan opsional OVERHAUL (bearing + synchronizer + snap "
+                    "ring). Model dikenali dari kode (HW19709, ZF16S2531TO, 8JS85), PN "
+                    "gearbox assy, ATAU nama UNIT ('HOWO-371'). ⭐ Ada NOMOR RANGKA → isi "
+                    "'rangka': sistem menanyakan gearbox PERSIS unit itu ke EPC (dua unit "
+                    "'sama' bisa beda gearbox). Untuk 'repair kit/perpak/seal kit/paking "
+                    "transmisi', 'apa saja diganti saat overhaul gearbox'. Kosongkan "
+                    "'transmisi' & 'rangka' = daftar model. REPAIR KIT MESIN Weichai: "
+                    "sumber='mesin' + 'rangka'."
                 ),
                 "parameters": {
                     "type": "object",
@@ -991,9 +982,8 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "Shantui). Hasilnya: kategori per PN + 'ringkasan' berisi daftar PN "
                     "mesin / aksesori_mesin / bukan_mesin / tidak_diketahui, siap dijawab "
                     "langsung. ⛔ WAJIB dipakai untuk pertanyaan kategori/'barang mesin'/"
-                    "'produk Weichai' — JANGAN menebak dari nama part, dan JANGAN memanggil "
-                    "cari_part/detail_part berulang untuk itu (tebakan nama terbukti salah: "
-                    "part bernama 'bushing suspensi' ternyata terdaftar di sheet Kabin). "
+                    "'produk Weichai' — jangan menebak dari nama part (tebakan nama terbukti "
+                    "salah: 'bushing suspensi' ternyata terdaftar di sheet Kabin). "
                     "PN yang tak ada di katalog dikembalikan 'tidak_diketahui' — sampaikan "
                     "apa adanya. Set excel=true bila user minta filenya. "
                     "⛔ Ini TIDAK memberi stok/harga/berat — untuk itu cek_massal_part."
@@ -1088,12 +1078,11 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "Dengan 'rangka' → PALING PRESISI: daftar part yang BENAR-BENAR "
                     "terpasang di unit itu (BOM pabrik EPC) disilang cap katalog, lengkap "
                     "dengan qty per unit. Dengan 'unit' saja → daftar per MODEL. "
-                    "Kelompoknya dipisah tegas & ⛔ JANGAN digabung: RAWAN RUSAK (易损件 — "
-                    "wajar rusak/diganti, termasuk PECAH & MATI seperti kaca depan, saklar, "
-                    "lampu) vs HABIS PAKAI (ban, karet, wiper) vs PERAWATAN vs 'sering "
-                    "dipakai after-sales' (fast moving — ⛔ BUKAN penanda rusak). "
-                    "⚠️ Katalog TIDAK mencap semua part: kampas rem/kopling/filter sering "
-                    "tak muncul di sini — ⛔ jangan menjanjikan daftar ini lengkap, dan "
+                    "Kelompoknya ⛔ JANGAN digabung: RAWAN RUSAK (易损件 — termasuk PECAH & "
+                    "MATI: kaca depan, saklar, lampu) vs HABIS PAKAI (ban, karet, wiper) vs "
+                    "PERAWATAN vs 'sering dipakai after-sales' (fast moving — ⛔ BUKAN "
+                    "penanda rusak). ⚠️ Katalog TIDAK mencap semua part: kampas rem/kopling/"
+                    "filter sering tak muncul — ⛔ jangan menjanjikan daftar ini lengkap; "
                     "untuk part itu pakai part_aus_dari_rangka. "
                     "⛔ BEDA dari part_aus_dari_rangka: yang itu untuk SATU part spesifik "
                     "pada SATU VIN dengan posisi depan/belakang (mis. 'kampas rem depan "
@@ -1141,7 +1130,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh (mis. LZZ5DMSD5RT108966) atau frame number 8 digit (mis. RT108966)."},
+                        "rangka": {"type": ["string", "array"], "items": {"type": "string"}, "description": "VIN penuh (mis. LZZ5DMSD5RT108966) atau frame 8 digit (mis. RT108966). ARRAY = banyak unit SEKALIGUS, maks 20 — jangan panggil berulang."},
                     },
                     "required": ["rangka"],
                 },
@@ -1195,7 +1184,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "rangka": {"type": "string", "description": "Nomor rangka/VIN unit."},
+                        "rangka": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Nomor rangka/VIN unit. ARRAY = banyak unit SEKALIGUS, maks 20 — jangan panggil berulang."},
                         "kata_kunci": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Nama part yang dicari — KIRIM istilah user APA ADANYA (kamus sinonim lapangan diterapkan otomatis di server; ⛔ JANGAN terjemahkan/tebak padanan Inggris sendiri sebelum mencoba mentahnya). Istilah Indonesia/Inggris/PN sama-sama boleh — mis. 'kampas rem', 'filter oli'. BOLEH ARRAY berisi beberapa part/istilah sekaligus (dicari sekali jalan, hasil dilabeli per istilah) — mis. ['handle retarder','tuas retarder'] atau ['filter oli','filter solar']."},
                         "teliti": {"type": "boolean", "description": "true = sisir SEMUA baris part list pohon unit (lambat pencarian pertama, cakupan penuh). Pakai saat hasil mode cepat tidak memuat part yang diminta."},
                     },
@@ -1288,7 +1277,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number 8 digit (mis. SJ346500)."},
+                        "rangka": {"type": ["string", "array"], "items": {"type": "string"}, "description": "VIN penuh atau frame 8 digit (mis. SJ346500). ARRAY = banyak unit SEKALIGUS, maks 20 — jangan panggil berulang."},
                         "kata_kunci": {"type": "string", "description": "Opsional. Saring part berdasar nama/PN (mis. 'injector', 'oil seal', 'WG9')."},
                         "kategori": {"type": "string", "description": "Opsional. Saring ke satu kategori untuk unit ini (mis. 'kabin', 'rem', 'transmisi', 'kelistrikan', 'sasis'). Untuk 'berapa/part apa di <kategori> unit ini'."},
                         "sisi": {"type": "string", "enum": ["kanan", "kiri", "depan", "belakang", "atas", "bawah"],
@@ -1328,17 +1317,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "banding_rangka_massal",
                 "description": (
-                    "BANDINGKAN PART BANYAK UNIT (>=2) SEKALIGUS — untuk 'apakah KABIN semua "
-                    "unit PT X SAMA atau beda?', 'cek 5 nomor rangka ini kabinnya sama semua?', "
-                    "'bandingkan rem unit A, B, C'. Input: DAFTAR nomor rangka (rangka_list) ATAU "
-                    "nama customer/PT (customer — armada dari populasi, admin/'mas' saja). Isi "
-                    "'kategori' (kabin/rem/mesin/transmisi/kopling/kelistrikan/sasis/gardan) untuk "
-                    "SATU kategori, atau 'semua' untuk RINGKASAN semua kategori (mana yang seragam/"
-                    "beda). Membandingkan SET PART NYATA tiap unit (Loading List per-VIN), "
-                    "MENGELOMPOKKAN unit ber-set identik, verdict SERAGAM/BEDA dihitung SISTEM + "
-                    "kartu unduh Excel. ⛔ Beda dari banding_rangka (HANYA 2 unit) & "
-                    "banding_part_armada (SATU part saja). ⛔ JANGAN menyimpulkan sama/beda dari "
-                    "kode model — itu menebak. HANYA Sinotruk/HOWO/SITRAK."
+                    "BANDINGKAN PART BANYAK UNIT (≥2) sekaligus — 'apakah KABIN semua unit PT X "
+                    "SAMA?', 'bandingkan rem unit A, B, C'. Input: daftar rangka (rangka_list) "
+                    "ATAU nama customer/PT (armada dari populasi; admin/'mas' saja). 'kategori' "
+                    "= satu kategori (kabin/rem/mesin/transmisi/kopling/kelistrikan/sasis/"
+                    "gardan) atau 'semua' untuk ringkasan. Membandingkan SET PART NYATA tiap "
+                    "unit (Loading List per-VIN), mengelompokkan unit ber-set identik, verdict "
+                    "SERAGAM/BEDA dihitung SISTEM + kartu Excel. ⛔ Beda dari banding_rangka "
+                    "(2 unit) & banding_part_armada (1 part). ⛔ Jangan menyimpulkan sama/beda "
+                    "dari kode model. HANYA Sinotruk/HOWO/SITRAK."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1380,7 +1367,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number 8 digit."},
+                        "rangka": {"type": ["string", "array"], "items": {"type": "string"}, "description": "VIN penuh atau frame 8 digit. ARRAY = banyak unit SEKALIGUS, maks 12 — jangan panggil berulang."},
                         "query": {"type": "string", "description": "Part poros yang dicari, istilah lapangan Indonesia/Inggris (mis. 'kampas rem', 'brake shoe', 'baut roda', 'mur roda', 'hub', 'bearing poros')."},
                         "posisi": {"type": "string", "enum": ["depan", "belakang"], "description": "Opsional. 'depan' (poros penumpu/driven axle) atau 'belakang' (poros penggerak/drive axle). Kosongkan untuk kedua poros."},
                     },
@@ -1443,7 +1430,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "type": "object",
                     "properties": {
                         "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number 8 digit."},
-                        "assembly": {"type": "string", "description": "Assembly/komponen yang mau diurai — PN assembly (mis. 'AZ000052000229') atau nama/istilah (mis. 'v stay', 'thrust rod'; sumber='mesin': 'piston', 'injector', 'air compressor')."},
+                        "assembly": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Assembly yang diurai — PN (mis. 'AZ000052000229') atau nama/istilah (mis. 'v stay', 'thrust rod'; sumber='mesin': 'piston', 'injector'). ARRAY = banyak assembly SEKALIGUS, maks 8 — jangan panggil berulang."},
                         "sumber": {"type": "string", "enum": ["atlas", "mesin"], "description": "Sisi EPC: 'atlas' (default, sasis/bodi Sinotruk) atau 'mesin' (EPC Weichai, part internal mesin). Kosongkan = atlas + auto-fallback mesin."},
                     },
                     "required": ["rangka", "assembly"],
@@ -1491,7 +1478,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "no_mesin": {"type": "string", "description": "Nomor mesin / serial engine Weichai (mis. '4P24B000713')."},
+                        "no_mesin": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Serial engine Weichai (mis. '4P24B000713'). ARRAY = banyak mesin SEKALIGUS, maks 20 — jangan panggil berulang."},
                         "part": {"type": "string", "description": "Opsional: nama komponen yang dicari (mis. 'starter', 'injector', 'piston', 'filter oli'). Kosong = daftar group mesin."},
                     },
                     "required": ["no_mesin"],
@@ -1503,13 +1490,10 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "cek_massal_part_mesin",
                 "description": (
-                    "CEK SATU PART (mis. 'starter', 'alternator', 'filter oli') di BANYAK NOMOR "
-                    "MESIN Weichai SEKALIGUS — versi massal part_dari_mesin. Pakai saat user "
-                    "memberi DAFTAR nomor engine dan menanyakan satu komponen ('cek starter untuk "
-                    "no engine A, B, C, …'). Efisien: mesin ber-konfigurasi sama diproses sekali. "
-                    "Otomatis mendeteksi PENGGANTI (supersession) → memberi 'pn_order_terkini' "
-                    "(PN resmi terbaru untuk dipesan) + silang stok/harga lokal. Set excel=true "
-                    "untuk kartu unduh Excel. ⛔ JANGAN panggil part_dari_mesin berulang per nomor."
+                    "SATU PART (mis. 'starter', 'alternator', 'filter oli') × BANYAK NOMOR "
+                    "MESIN Weichai sekaligus. Mesin ber-konfigurasi sama diproses sekali; "
+                    "deteksi PENGGANTI otomatis → 'pn_order_terkini' (PN resmi terbaru untuk "
+                    "dipesan) + silang stok/harga lokal; excel=true untuk kartu unduh."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1527,17 +1511,13 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "cek_massal_part_rangka",
                 "description": (
-                    "CEK SATU PART (mis. 'injector', 'kampas rem', 'filter oli') di BANYAK NOMOR "
-                    "RANGKA (VIN) SEKALIGUS — jalur EPC Sinotruk Atlas per-VIN. PASANGAN dari "
-                    "cek_massal_part_mesin: yang itu untuk daftar NOMOR MESIN (Weichai), yang INI "
-                    "untuk daftar NOMOR RANGKA (unit Sinotruk/HOWO/SITRAK — termasuk yang bermesin "
-                    "MC). Pakai saat user memberi DAFTAR VIN dan menanyakan satu komponen ('cek "
-                    "injector untuk rangka A, B, C, …'). Efisien: unit ber-konfigurasi sama "
-                    "diproses sekali. Otomatis deteksi pengganti (supersession) → 'pn_order_terkini' "
-                    "+ silang stok/harga lokal. Set excel=true untuk kartu unduh Excel. Istilah "
-                    "Indonesia diterjemahkan otomatis. ⛔ JANGAN panggil cari_part_di_unit berulang. "
-                    "⛔ JANGAN tertukar dengan cek_massal_part: yang itu BANYAK PN tanpa unit; "
-                    "yang INI SATU komponen × BANYAK unit."
+                    "SATU PART × BANYAK NOMOR RANGKA (VIN) sekaligus — EPC Sinotruk Atlas "
+                    "per-VIN, untuk 'cek injector untuk rangka A, B, C, …'. Unit "
+                    "ber-konfigurasi sama diproses sekali; deteksi pengganti otomatis "
+                    "('pn_order_terkini') + silang stok/harga lokal; excel=true untuk kartu "
+                    "unduh. Istilah Indonesia diterjemahkan otomatis. ⛔ Jangan tertukar: "
+                    "cek_massal_part = banyak PN tanpa unit; cek_massal_part_mesin = daftar "
+                    "NOMOR MESIN Weichai; yang INI = satu komponen × banyak unit."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1555,12 +1535,10 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "spek_massal_rangka",
                 "description": (
-                    "SPESIFIKASI/KONFIGURASI BANYAK UNIT sekaligus dari daftar NOMOR RANGKA — "
-                    "model, seri, gerak (4×2/6×2/6×4), jenis (cargo/tractor/dump), emisi, "
-                    "rem/ABS, mesin, gearbox, gardan (EPC resmi getVehicleConfig). Untuk 'apa "
-                    "spek unit-unit ini' / pendataan armada. Set excel=true utk kartu unduh. "
-                    "⚠️ Ini SPEK, bukan daftar part — utk part per unit pakai "
-                    "cek_massal_part_rangka/bom_dari_rangka."
+                    "SPEK/KONFIGURASI BANYAK UNIT dari daftar NOMOR RANGKA — model, seri, "
+                    "gerak (4×2/6×2/6×4), jenis, emisi, rem/ABS, mesin, gearbox, gardan (EPC "
+                    "getVehicleConfig); excel=true utk kartu unduh. ⚠️ SPEK, bukan daftar "
+                    "part (itu cek_massal_part_rangka/bom_dari_rangka)."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1612,7 +1590,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "part_number": {"type": "string", "description": "Part Number yang mau dicek penggantinya (mis. 'FG7101204246+001/1' atau '1000076563')."},
+                        "part_number": {"type": ["string", "array"], "items": {"type": "string"}, "description": "PN yang dicek penggantinya (mis. 'FG7101204246+001/1', '1000076563'). ARRAY = banyak PN SEKALIGUS, maks 30 — jangan panggil berulang."},
                         "rangka": {"type": "string", "description": "Opsional. Nomor rangka unit (untuk mengaktifkan sesi Weichai bila mengecek part mesin)."},
                     },
                     "required": ["part_number"],
@@ -1633,7 +1611,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "part_number": {"type": "string", "description": "Part Number yang mau dicek dipakai di unit/model apa (mis. AZ1646901003)."},
+                        "part_number": {"type": ["string", "array"], "items": {"type": "string"}, "description": "PN yang dicek dipakai di unit/model apa (mis. AZ1646901003). ARRAY = banyak PN SEKALIGUS, maks 20 — jangan panggil berulang."},
                     },
                     "required": ["part_number"],
                 },
@@ -2150,7 +2128,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "unit": {"type": "string", "description": "Opsional: frame/VIN SATU unit untuk cek detail & namanya (mis. SJ398956)."},
+                        "unit": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Opsional: frame/VIN unit (mis. SJ398956). ARRAY = banyak unit SEKALIGUS, maks 30 — jangan panggil berulang."},
                         "fleet": {"type": "string", "description": "Opsional: nama fleet/organisasi (mis. MAS, JNT). Kosong = semua."},
                         "status": {"type": "string", "description": "Opsional filter status: jalan / berhenti / offline."},
                         "hanya_rusak": {"type": "boolean", "description": "Opsional: hanya unit yang ditandai rusak."},
@@ -2215,11 +2193,16 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "cjh": {"type": "string", "description": "Frame/cjh (atau VIN) unit yang diganti namanya."},
+                        "cjh": {"type": "string", "description": "Frame/cjh (atau VIN) unit yang diganti namanya. Untuk BANYAK unit pakai 'daftar'."},
                         "nama_baru": {"type": "string", "description": "Nama/label baru untuk unit."},
+                        "daftar": {"type": "array",
+                                   "items": {"type": "object",
+                                             "properties": {"cjh": {"type": "string"},
+                                                            "nama_baru": {"type": "string"}},
+                                             "required": ["cjh", "nama_baru"]},
+                                   "description": "BANYAK unit sekaligus (maks 50): [{cjh, nama_baru}, …]. Pratinjau & konfirmasi berlaku untuk SELURUH daftar — jangan panggil berulang."},
                         "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau. Default false = pratinjau."},
                     },
-                    "required": ["cjh", "nama_baru"],
                 },
             },
         })
@@ -2263,7 +2246,7 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "unit": {"type": "string", "description": "Frame/cjh atau VIN unit."},
+                        "unit": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Frame/cjh atau VIN unit. ARRAY = banyak unit ke fleet yang SAMA, maks 50; pratinjau & konfirmasi berlaku untuk seluruh daftar — jangan panggil berulang."},
                         "fleet": {"type": "string", "description": "Nama fleet/organisasi tujuan (mis. JNT, PALEMBANG)."},
                         "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau."},
                     },
@@ -2337,11 +2320,12 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "type": "object",
                     "properties": {
                         "query": {
-                            "type": "string",
+                            "type": ["string", "array"], "items": {"type": "string"},
                             "description": (
                                 "Kata kunci. Boleh beberapa kata — SEMUA harus muncul "
                                 "(mis. 'NX360 2022', 'HOWO Jakarta'). Kosongkan untuk "
-                                "melihat ringkasan seluruh populasi."
+                                "melihat ringkasan seluruh populasi. ARRAY = banyak "
+                                "model/customer SEKALIGUS, maks 20 — jangan panggil berulang."
                             ),
                         },
                     },

@@ -82,6 +82,9 @@ def _t_gambar_exploded_mesin(args: dict, user: dict) -> dict:
 
 
 def _t_uraikan_assembly(args: dict, user: dict) -> dict:
+    _b = _batch_wrap(_t_uraikan_assembly, args, user, "assembly", maks=8, min_len=2)
+    if _b is not None:
+        return _b
     sumber = (args.get("sumber") or "").strip().lower()
     if sumber == "mesin":
         a2 = dict(args)

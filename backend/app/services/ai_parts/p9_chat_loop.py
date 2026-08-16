@@ -390,6 +390,44 @@ _FITMENT_KATA = ("COCOK", "SESUAI", "KOMPATIBEL", "BISA DIPAKAI", "BISA DIPASANG
                  "PAS BUAT", "PAS UNTUK", "PAS GA", "PAS TIDAK")
 
 
+_ULANG_BERSIH_RE = re.compile(r"[^a-z0-9]+")
+_ULANG_MIN_CHAR = 12    # "ok", "lanjut", "iya", "setuju" bukan pengulangan
+
+
+def _pertanyaan_diulang(pertanyaan: str, history: list[dict] | None) -> bool:
+    """Apakah user MENGETIK ULANG pertanyaan yang sama di percakapan ini?
+
+    SINYAL MUTU IMPLISIT (migrations/030). Alasannya diukur, bukan diduga: dalam
+    30 hari produksi tabel `ai_feedback` menerima NOL baris — tombol 👍/👎 ada
+    dan berfungsi, tapi praktis tak pernah diklik. Di periode yang sama, user
+    mengetik ulang pertanyaan yang persis sama 112 kali. Orang tidak mengulang
+    pertanyaan yang sudah terjawab memuaskan, jadi ini sinyal ketidakpuasan yang
+    GRATIS dan tak menunggu kemurahan hati siapa pun.
+
+    ⚠️ Ini menandai giliran yang LAYAK DIPERIKSA, bukan memvonis jawabannya
+    salah — user juga kadang mengulang karena salah kirim. Karena itu ia masuk
+    kolomnya sendiri, ⛔ BUKAN menimpa `outcome` (yang harus tetap melaporkan apa
+    yang sebenarnya terjadi di giliran ini).
+
+    Sengaja KETAT (kecocokan persis sesudah dinormalisasi, minimal 12 karakter):
+    salah-tandai membuat sinyalnya jadi derau, dan derau di kanal yang selama ini
+    kosong lebih buruk daripada melewatkan beberapa kasus.
+
+    ⛔ `history` MEMUAT pertanyaan giliran ini (chat() mengambil `_pertanyaan`
+    dari pesan user TERAKHIR di dalamnya) — jadi pesan terakhir itu WAJIB
+    dikecualikan. Tanpa itu tiap giliran cocok dengan dirinya sendiri dan
+    kolomnya selalu true, yaitu sinyal yang tak bernilai apa-apa.
+    """
+    kunci = _ULANG_BERSIH_RE.sub(" ", (pertanyaan or "").lower()).strip()
+    if len(kunci) < _ULANG_MIN_CHAR:
+        return False
+    sebelumnya = [m for m in (history or [])
+                  if (m or {}).get("role") == "user"
+                  and isinstance((m or {}).get("content"), str)][:-1]
+    return any(_ULANG_BERSIH_RE.sub(" ", m["content"].lower()).strip() == kunci
+               for m in sebelumnya)
+
+
 def _recent_wo(history: list[dict], max_n: int = 3, user_only: bool = False) -> list[str]:
     """No WO/klaim yang PALING BARU disebut — 'klaim aktif' untuk follow-up
     'detail klaim itu'/'statusnya' tanpa user mengulang nomor WO.
@@ -2547,7 +2585,9 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 # Pecahan latensi (migrations/029): tanpa ini `latency_ms` hanya
                 # bilang giliran lambat, bukan lambat DI MANA.
                 model_ms=_tok["model_ms"], tools_ms=_tok["tools_ms"],
-                ttft_ms=_tok["ttft_ms"])
+                ttft_ms=_tok["ttft_ms"],
+                # Sinyal mutu IMPLISIT (migrations/030) — lihat _pertanyaan_diulang.
+                diulang=_pertanyaan_diulang(_pertanyaan, history))
         except Exception:
             pass
         out = {"reply": reply, "tools_used": tools_used,
