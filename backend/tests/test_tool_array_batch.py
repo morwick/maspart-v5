@@ -297,3 +297,82 @@ def test_larangan_prosa_yang_terbukti_gagal_sudah_dibuang():
     d = _spec("detail_part")["description"]
     assert "DITOLAK" not in d
     assert "berulang" not in d.lower()
+
+
+# ── 9. Jalur NAMA MODEL tanpa nomor rangka (celah 26% jawaban negatif) ──────
+# Kelas pertanyaan paling sering muncul di antara 315 jawaban bernada negatif:
+# "Master kopling untuk HOWO 380", "Pin untuk pengunci tail gate Nx 360",
+# "clutch driven disk assembly untuk nx 280". Semua jatuh ke katalog per-model
+# dan berakhir "tidak ditemukan".
+def _fm(monkeypatch, model_map):
+    from app.services import fast_moving
+    monkeypatch.setattr(fast_moving, "data", lambda: {"model": model_map})
+
+
+def test_model_tanpa_rangka_memakai_unit_sampel(monkeypatch):
+    _fm(monkeypatch, {"ZZ3257": {"jenis": "HOWO", "hp": 380, "unit_populasi": 12,
+                                 "unit_sampel": ["SJ346500", "SJ346501"]}})
+    lihat = {}
+
+    def per_vin(args, user):
+        lihat.update(args)
+        return {"found": True, "rows": [{"pn": "AZ1560160011"}]}
+
+    monkeypatch.setattr(A, "_t_cari_part_di_unit", per_vin)
+    out = A._cari_part_lewat_model(
+        {"model": "HOWO 380", "kata_kunci": "master kopling"}, ADMIN)
+    assert lihat["rangka"] == "SJ346500", "harus memakai VIN sampel se-model"
+    assert "model" not in lihat, "param model tak boleh bocor ke jalur per-VIN"
+    assert out["rows"][0]["pn"] == "AZ1560160011"
+
+
+def test_hasil_model_WAJIB_ditandai_sampel(monkeypatch):
+    """⛔ Syarat fitur ini boleh ada: hasilnya BUKAN dari unit user. Dua unit yang
+    tampak sama bisa beda konfigurasi pabrik — menyajikannya seolah pasti
+    terpasang adalah kelas kesalahan yang paling mahal untuk asisten part."""
+    _fm(monkeypatch, {"ZZ3257": {"jenis": "HOWO", "hp": 380, "unit_populasi": 12,
+                                 "unit_sampel": ["SJ346500"]}})
+    monkeypatch.setattr(A, "_t_cari_part_di_unit",
+                        lambda a, u: {"found": True, "rows": [{"pn": "X"}]})
+    out = A._cari_part_lewat_model({"model": "HOWO 380", "kata_kunci": "kopling"}, ADMIN)
+    assert out["dari_unit_sampel"] is True
+    assert out["rangka_sampel"] == "SJ346500"
+    nota = out["catatan_akurasi"]
+    assert "SAMPEL" in nota and "SJ346500" in nota
+    assert "BUKAN" in nota
+
+
+def test_model_ambigu_TIDAK_dipilih_sendiri(monkeypatch):
+    """Dua konfigurasi cocok → tanyakan, jangan menebak: part bisa beda."""
+    _fm(monkeypatch, {
+        "ZZ3257": {"jenis": "HOWO 6X4", "hp": 380, "unit_populasi": 12, "unit_sampel": ["A1"]},
+        "ZZ4257": {"jenis": "HOWO 4X2", "hp": 380, "unit_populasi": 3, "unit_sampel": ["B1"]},
+    })
+    monkeypatch.setattr(A, "_t_cari_part_di_unit",
+                        lambda a, u: pytest.fail("tak boleh memilih model sendiri"))
+    out = A._cari_part_lewat_model({"model": "380", "kata_kunci": "kopling"}, ADMIN)
+    assert out.get("ambigu") is True
+    assert len(out["kandidat"]) == 2
+
+
+def test_model_tak_dikenal_minta_rangka_bukan_mengarang(monkeypatch):
+    _fm(monkeypatch, {"ZZ3257": {"jenis": "HOWO", "hp": 380, "unit_sampel": ["A1"]}})
+    out = A._cari_part_lewat_model({"model": "TRUK ANTARIKSA", "kata_kunci": "x"}, ADMIN)
+    assert out["found"] is False
+    assert "JANGAN mengarang" in out["catatan"]
+
+
+def test_dataset_model_kosong_gagal_JUJUR(monkeypatch):
+    """Laptop/instance tanpa dataset terbangun tak boleh diam-diam menjawab dari
+    katalog per-model — harus minta rangka."""
+    _fm(monkeypatch, {})
+    out = A._cari_part_lewat_model({"model": "HOWO 380", "kata_kunci": "x"}, ADMIN)
+    assert out["found"] is False and "RANGKA" in out["catatan"].upper()
+
+
+def test_rangka_tetap_menang_atas_model(monkeypatch):
+    """Aturan AKURASI PER-UNIT: kalau rangka ADA, jalur per-VIN yang dipakai."""
+    monkeypatch.setattr(A, "_cari_part_lewat_model",
+                        lambda a, u: pytest.fail("rangka ada — jangan ke jalur model"))
+    out = A._t_cari_part_di_unit({"rangka": "", "model": "", "kata_kunci": ""}, ADMIN)
+    assert "rangka" in (out.get("error") or "").lower()

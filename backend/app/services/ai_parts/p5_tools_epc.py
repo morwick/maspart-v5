@@ -1522,6 +1522,9 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
                      upper=True, min_len=4)
     if _b is not None:
         return _b
+    # JALUR NAMA MODEL (tanpa VIN) — lihat _sampel_model_untuk_cari.
+    if not (args.get("rangka") or "").strip() and (args.get("model") or "").strip():
+        return _cari_part_lewat_model(args, user)
     rangka = (args.get("rangka") or "").strip()
     kata_raw = args.get("kata_kunci") or args.get("query") or ""
     # MULTI-ISTILAH (2026-07-23): log produksi 30 hari — model memanggil tool ini
@@ -4978,6 +4981,78 @@ def _t_sheet_masukkan_fleet(args: dict, user: dict) -> dict:
 
 def _fm_norm(s: str) -> str:
     return " ".join(str(s or "").upper().replace("-", " ").replace("×", "X").split())
+
+
+def _cari_part_lewat_model(args: dict, user: dict) -> dict:
+    """CARI PART dari NAMA MODEL saja — tanpa nomor rangka.
+
+    Kelas pertanyaan yang selama ini jatuh ke katalog per-model dan berakhir
+    "tidak ditemukan", padahal ini cara paling alami orang lapangan bertanya.
+    Contoh NYATA dari log produksi 30 hari (semuanya berjawaban negatif):
+    "Master kopling untuk HOWO 380", "Pin untuk pengunci tail gate Nx 360",
+    "clutch driven disk assembly untuk nx 280", "switch untuk menaik turunkan jok".
+
+    Caranya memakai ulang yang SUDAH ada, bukan mesin baru: resolver label pasaran
+    `_fm_match` (menerima 'NX400', 'HOWO NX 6X4', kode 'ZZ…') + `unit_sampel` di
+    dataset fast_moving (frame unit nyata se-model, turunan populasi + EPC), lalu
+    badan pencarian per-VIN `_t_cari_part_di_unit` apa adanya.
+
+    ⛔ KEJUJURAN adalah syarat fitur ini boleh ada: hasilnya berasal dari unit
+    SAMPEL se-model, BUKAN unit milik user. Dua unit yang "sama" di lapangan bisa
+    beda konfigurasi pabrik, jadi tiap hasil wajib membawa VIN sampel yang dipakai
+    + ajakan verifikasi per-VIN. Aturan "AKURASI PER-UNIT" di prompt statik tetap
+    berlaku: kalau user PUNYA nomor rangka, model tetap harus memintanya.
+    """
+    from . import fast_moving
+    q = " ".join(str(args.get("model") or "").split())
+    semua = (fast_moving.data() or {}).get("model") or {}
+    if not semua:
+        return {"found": False, "model_dicari": q,
+                "catatan": ("Dataset model belum terbangun di server, jadi unit sampel "
+                            "se-model tak bisa dipilih. MINTA NOMOR RANGKA unitnya — "
+                            "⛔ jangan mengarang PN dari nama model.")}
+    cocok = {k: m for k, m in semua.items() if _fm_match(q, k, m)}
+    if not cocok:
+        return {"found": False, "model_dicari": q,
+                "catatan": ("Model itu tak dikenal di data populasi+EPC. Minta user "
+                            "menyebut nomor rangka satu unitnya, atau pastikan nama "
+                            "modelnya. ⛔ JANGAN mengarang PN.")}
+    if len(cocok) > 1:
+        return {"found": True, "ambigu": True, "model_dicari": q,
+                "kandidat": [{"model": k, "jenis": m.get("jenis"), "hp": m.get("hp"),
+                              "unit_populasi": m.get("unit_populasi")}
+                             for k, m in sorted(cocok.items(),
+                                                key=lambda kv: -(kv[1].get("unit_populasi") or 0))][:8],
+                "catatan": ("Lebih dari satu konfigurasi cocok — TANYAKAN user yang mana "
+                            "(sebut jenis, HP, jumlah unit). ⛔ Jangan memilih sendiri: "
+                            "part bisa beda antar konfigurasi.")}
+    kode, info = next(iter(cocok.items()))
+    sampel = [s for s in (info.get("unit_sampel") or []) if s]
+    if not sampel:
+        return {"found": False, "model_dicari": q, "model": kode,
+                "catatan": ("Model dikenali tapi belum ada unit sampel ber-katalog EPC. "
+                            "MINTA NOMOR RANGKA unitnya. ⛔ Jangan mengarang PN.")}
+    vin = sampel[0]
+    hasil = _t_cari_part_di_unit({**{k: v for k, v in args.items() if k != "model"},
+                                  "rangka": vin}, user)
+    if not isinstance(hasil, dict):
+        return {"error": "hasil tool tak dikenal"}
+    hasil = dict(hasil)
+    hasil["dari_unit_sampel"] = True
+    hasil["model"] = kode
+    hasil["jenis"] = info.get("jenis")
+    hasil["rangka_sampel"] = vin
+    hasil["unit_sampel_tersedia"] = len(sampel)
+    hasil["unit_populasi"] = info.get("unit_populasi")
+    # Key TERAKHIR & bernada perintah: _cap_tool_content memotong TENGAH, jadi
+    # peringatan di ekor selamat walau payloadnya besar.
+    hasil["catatan_akurasi"] = (
+        f"⚠️ PN di atas berasal dari unit SAMPEL se-model ({kode}, rangka {vin}) — "
+        "BUKAN dari unit milik user. WAJIB sampaikan itu apa adanya, sebut nomor "
+        f"rangka sampelnya ({vin}), dan TAWARKAN cek per-VIN bila user punya nomor "
+        "rangka unitnya (part bisa beda antar unit yang tampak sama). ⛔ JANGAN "
+        "menyajikan ini seolah pasti terpasang di unit user.")
+    return hasil
 
 
 def _fm_match(q: str, kode: str, m: dict) -> bool:

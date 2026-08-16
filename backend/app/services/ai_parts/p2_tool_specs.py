@@ -1172,23 +1172,28 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "rem SJ346500'). Pencarian nama DI KATALOG EPC UNIT ITU: cepat (~1-2 "
                     "dtk), menjangkau part TERSEMBUNYI di dalam assembly (yang dilewatkan "
                     "bom_dari_rangka). Istilah lapangan ID otomatis diterjemahkan. Tiap PN "
-                    "ber-'di_dalam_assembly' + stok/harga. Beberapa varian (DEPAN vs "
-                    "BELAKANG) → sebutkan SEMUA, bedakan via assembly induk (pemisahan "
-                    "posisi eksplisit: part_aus_dari_rangka). ⚠️ Hasil kosong auto-eskalasi "
-                    "TELITI; hasil ada tapi part diminta tak termuat (cuma bracket/baut) → "
-                    "panggil ulang teliti=true (sisir semua baris; pertama ~1 mnt). "
-                    "⭐ BEBERAPA part / istilah alternatif → kirim SEMUA di kata_kunci "
-                    "(array) dalam SATU panggilan; ⛔ JANGAN panggil tool ini berulang "
-                    "per istilah."
+                    "ber-'di_dalam_assembly' + stok/harga. Varian DEPAN vs BELAKANG → "
+                    "sebutkan SEMUA (pemisahan posisi eksplisit: part_aus_dari_rangka). "
+                    "⚠️ Hasil kosong auto-eskalasi TELITI; part diminta tak termuat (cuma "
+                    "bracket/baut) → ulangi teliti=true (~1 mnt). "
+                    "⭐ TANPA nomor rangka tetap BISA: isi 'model' dengan nama model yang "
+                    "user sebut ('HOWO 380', 'NX360') — sistem memakai unit SAMPEL se-model "
+                    "dan hasilnya ditandai sampel; sampaikan penandanya apa adanya."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "rangka": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Nomor rangka/VIN unit. ARRAY = banyak unit SEKALIGUS, maks 20 — jangan panggil berulang."},
+                        "model": {"type": "string", "description": "HANYA bila user tak punya nomor rangka: nama model ('HOWO 380', 'NX360', kode ZZ…). Sistem memakai unit SAMPEL se-model & menandainya. ⛔ Rangka ADA → isi 'rangka'."},
                         "kata_kunci": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Nama part yang dicari — KIRIM istilah user APA ADANYA (kamus sinonim lapangan diterapkan otomatis di server; ⛔ JANGAN terjemahkan/tebak padanan Inggris sendiri sebelum mencoba mentahnya). Istilah Indonesia/Inggris/PN sama-sama boleh — mis. 'kampas rem', 'filter oli'. BOLEH ARRAY berisi beberapa part/istilah sekaligus (dicari sekali jalan, hasil dilabeli per istilah) — mis. ['handle retarder','tuas retarder'] atau ['filter oli','filter solar']."},
                         "teliti": {"type": "boolean", "description": "true = sisir SEMUA baris part list pohon unit (lambat pencarian pertama, cakupan penuh). Pakai saat hasil mode cepat tidak memuat part yang diminta."},
                     },
-                    "required": ["rangka", "kata_kunci"],
+                    # 'rangka' TIDAK lagi wajib supaya jalur 'model' (tanpa VIN) bisa
+                    # dipakai — itu kelas pertanyaan lapangan yang selama ini berakhir
+                    # "tidak ditemukan". Handler tetap menolak bila KEDUANYA kosong, dan
+                    # aturan AKURASI PER-UNIT di prompt statik tetap menyuruh model
+                    # MEMINTA rangka bila user punya.
+                    "required": ["kata_kunci"],
                 },
             },
         },
@@ -1622,17 +1627,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "katalog_kategori",
                 "description": (
-                    "KATALOG PART BERGAMBAR (exploded view) satu KATEGORI untuk SATU unit dari "
-                    "NOMOR RANGKA — panggil saat user minta 'berikan/buatkan katalog <kategori> "
-                    "<rangka>', 'katalog kabin unit X', 'catalog rem + gambar', 'buku part "
-                    "transmisi unit ini'. Menyusun SEMUA part kategori itu per-figure, LENGKAP "
-                    "dengan gambar exploded view resmi EPC + nomor balon + stok/harga lokal, "
-                    "menjadi FILE EXCEL (kartu unduh muncul otomatis). Kategori: kabin, mesin, "
-                    "kopling, transmisi, gardan depan/belakang, kelistrikan, rem, sasis, dll. "
-                    "Kolom Stok & Harga SELALU KOSONG di file (default) — hanya terisi bila "
-                    "ADMIN secara eksplisit meminta stok/harga disertakan. Proses ±1 menit — "
-                    "HANYA untuk permintaan KATALOG/buku part; pertanyaan part biasa pakai tool "
-                    "lain. Hanya unit Sinotruk/HOWO/SITRAK."
+                    "KATALOG PART BERGAMBAR (exploded view) satu KATEGORI untuk SATU unit "
+                    "dari NOMOR RANGKA — untuk 'buatkan katalog <kategori> <rangka>', "
+                    "'katalog kabin unit X', 'buku part transmisi unit ini'. Menyusun SEMUA "
+                    "part kategori itu per-figure + gambar exploded resmi EPC + nomor balon "
+                    "+ stok/harga lokal jadi FILE EXCEL (kartu unduh otomatis). Kategori: "
+                    "kabin, mesin, kopling, transmisi, gardan depan/belakang, kelistrikan, "
+                    "rem, sasis, dll. Kolom Stok & Harga SELALU KOSONG kecuali ADMIN "
+                    "eksplisit memintanya. Proses ±1 menit — HANYA untuk permintaan KATALOG/"
+                    "buku part. Hanya Sinotruk/HOWO/SITRAK."
                 ),
                 "parameters": {
                     "type": "object",
