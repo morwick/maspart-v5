@@ -376,3 +376,17 @@ def test_rangka_tetap_menang_atas_model(monkeypatch):
                         lambda a, u: pytest.fail("rangka ada — jangan ke jalur model"))
     out = A._t_cari_part_di_unit({"rangka": "", "model": "", "kata_kunci": ""}, ADMIN)
     assert "rangka" in (out.get("error") or "").lower()
+
+
+def test_SEMUA_kunci_list_ikut_digabung_bukan_yang_utama_saja():
+    """⛔ Kehilangan diam-diam: cari_part mengembalikan 'rows' DAN
+    'stok_lokal_tambahan' (barang aftermarket di luar katalog). Bila hanya kunci
+    utama yang digabung, hasil sampingan yang bernilai lenyap tanpa jejak."""
+    def fn(args, user):
+        return {"rows": [{"pn": "KATALOG-" + args["query"]}],
+                "stok_lokal_tambahan": [{"pn": "LOKAL-" + args["query"]}]}
+
+    out = A._batch_wrap(fn, {"query": ["seal roda", "kampas rem"]}, ADMIN, "query")
+    assert len(out["rows"]) == 2
+    assert len(out["stok_lokal_tambahan"]) == 2, "hasil sampingan tak boleh hilang"
+    assert {r["query"] for r in out["stok_lokal_tambahan"]} == {"seal roda", "kampas rem"}

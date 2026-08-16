@@ -751,20 +751,28 @@ def _gabung_hasil(field: str, items: list[str], hasil: list[dict]) -> dict:
     out: dict = {"jumlah_item": len(pasang)}
     gagal = [it for it, r in pasang if r.get("error")]
     if kunci:
-        baris: list[dict] = []
-        for it, r in sukses:
-            for b in (r.get(kunci) or []):
-                if isinstance(b, dict):
-                    baris.append({field: it, **b})
-                else:
-                    baris.append({field: it, "nilai": b})
-        out[kunci] = baris
+        # ⛔ SEMUA kunci list digabung, bukan hanya yang utama. Sekali ini cuma
+        # menggabung `kunci`, hasil sampingan yang bernilai justru lenyap tanpa
+        # jejak — mis. `stok_lokal_tambahan` di cari_part (barang aftermarket di
+        # luar katalog). Kehilangan diam-diam seperti itu persis kelas kerusakan
+        # yang sedang diperbaiki: user tak pernah tahu ada yang tak dicek.
+        semua_list = set()
+        for _, r in sukses:
+            semua_list |= {k for k, v in r.items() if isinstance(v, list)}
+        for k in sorted(semua_list, key=lambda x: (x != kunci, x)):
+            baris: list = []
+            for it, r in sukses:
+                for b in (r.get(k) or []):
+                    baris.append({field: it, **b} if isinstance(b, dict)
+                                 else {field: it, "nilai": b})
+            if baris:
+                out[k] = baris
         # Field non-list yang berbeda per item tetap dibawa sebagai ringkasan,
         # supaya konteks per item (mis. model/nama unit) tak hilang.
         ringkas = []
         for it, r in sukses:
             sisa = {k: v for k, v in r.items()
-                    if k != kunci and not isinstance(v, (list, dict))}
+                    if not isinstance(v, (list, dict))}
             if sisa:
                 ringkas.append({field: it, **sisa})
         if ringkas:
