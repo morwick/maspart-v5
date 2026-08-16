@@ -69,7 +69,12 @@ def create_table_sql() -> str:
         # plus waktu sampai potongan jawaban pertama tiba di klien (0 = tak streaming).
         "  model_ms int not null default 0,\n"
         "  tools_ms int not null default 0,\n"
-        "  ttft_ms int not null default 0\n"
+        "  ttft_ms int not null default 0,\n"
+        # migrations/030 — SINYAL MUTU IMPLISIT: user mengetik ulang pertanyaan
+        # yang sama di sesi yang sama = jawaban pertama tidak memuaskan. Ada
+        # karena kanal 👍/👎 menerima NOL baris dalam 30 hari, sementara
+        # pengulangan seperti ini terjadi 112 kali di periode yang sama.
+        "  diulang boolean not null default false\n"
         ");\n"
         "create index if not exists ai_chat_log_created_idx on ai_chat_log (created_at desc);\n"
         "create index if not exists ai_chat_log_session_idx on ai_chat_log (session_id);\n"
@@ -96,7 +101,8 @@ def log_turn(*, username: str | None, role: str | None, question: str,
              tools_failed: list[str] | None = None,
              session_id: str = "",
              guard_kinds: list[str] | None = None,
-             model_ms: int = 0, tools_ms: int = 0, ttft_ms: int = 0) -> bool:
+             model_ms: int = 0, tools_ms: int = 0, ttft_ms: int = 0,
+             diulang: bool = False) -> bool:
     """Simpan satu baris observabilitas. Best-effort: False bila gagal/tabel absen,
     TAK melempar (pemanggil membungkus lagi, tapi tetap aman di sini).
 
@@ -144,13 +150,14 @@ def log_turn(*, username: str | None, role: str | None, question: str,
     with_failed = {**with_reply, "tools_failed": (", ".join(gagal) if gagal else None)}
     with_session = {**with_failed, "session_id": (session_id or None)}
     with_guard = {**with_session, "guard_kinds": (", ".join(guards) if guards else None)}
-    full = {**with_guard, "model_ms": int(model_ms or 0),
-            "tools_ms": int(tools_ms or 0), "ttft_ms": int(ttft_ms or 0)}
-    # 7 tingkat berjenjang: +fase ms (029) → +guard_kinds (026) → +session_id
-    # (025) → +tools_failed (023) → reply (022) → token (021) → base. Kolom absen
-    # (migrasi belum jalan) bikin PostgREST balas 400 → coba tingkat berikutnya
-    # (log tetap tercatat, degradasi bertahap).
-    tangga = (full, with_guard, with_session, with_failed, with_reply,
+    with_fase = {**with_guard, "model_ms": int(model_ms or 0),
+                 "tools_ms": int(tools_ms or 0), "ttft_ms": int(ttft_ms or 0)}
+    full = {**with_fase, "diulang": bool(diulang)}
+    # 8 tingkat berjenjang: +diulang (030) → +fase ms (029) → +guard_kinds (026)
+    # → +session_id (025) → +tools_failed (023) → reply (022) → token (021) →
+    # base. Kolom absen (migrasi belum jalan) bikin PostgREST balas 400 → coba
+    # tingkat berikutnya (log tetap tercatat, degradasi bertahap).
+    tangga = (full, with_fase, with_guard, with_session, with_failed, with_reply,
               {**base, **tok}, base)
     # MEMO tingkat: bila migrasi tertinggal, tingkat teratas ditolak SETIAP
     # giliran — itu 1-2 POST sia-sia per giliran chat (masing-masing sampai
@@ -395,9 +402,17 @@ def summary() -> dict:
         "rata2_tools_ms": round(f_tools / len(fase_rows)) if fase_rows else 0,
     }
 
+    # SINYAL MUTU IMPLISIT (migrations/030). Diletakkan sejajar guard/tool_gagal
+    # karena inilah satu-satunya angka mutu yang datang dari PERILAKU user, bukan
+    # dari penilaian sistem atas dirinya sendiri — dan sampai 👍/👎 benar-benar
+    # dipakai, ini satu-satunya yang ada.
+    diulang = sum(1 for r in rows if r.get("diulang"))
+
     return {
         "total": n,
         "latensi_ms": {"p50": _pct(50), "p90": _pct(90), "maks": lat[-1]},
+        "pertanyaan_diulang": diulang,
+        "pertanyaan_diulang_persen": round(100 * diulang / n, 1),
         "guard_menyala": guard,
         "guard_rasio_persen": round(100 * guard / n, 1),
         "guard_sebab": guard_freq,

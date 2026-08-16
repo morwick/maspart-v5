@@ -1988,24 +1988,41 @@ function FeedbackButtons({
 
   return (
     <>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+      {/* ⚠️ Dulu dua ikon 13px abu-abu tanpa label: dalam 30 hari produksi tabel
+          ai_feedback menerima NOL baris — kanalnya ada tapi praktis tak terlihat.
+          Kini berlabel & berbingkai, dengan ajakan singkat, karena tanpa sinyal
+          ini tak ada cara membuktikan mutu asisten naik atau turun. */}
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, color: "var(--ink-500)" }}>Jawaban ini membantu?</span>
         <button
           onClick={() => onFeedback("up")}
-          title="Jawaban ini membantu"
+          title="Ya, jawaban ini membantu"
           style={fbBtnStyle}
-          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--brand-700)")}
-          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--ink-400)")}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = "var(--brand-700)";
+            e.currentTarget.style.borderColor = "var(--brand-700)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = "var(--ink-500)";
+            e.currentTarget.style.borderColor = "var(--line)";
+          }}
         >
-          <Icon d={IC.thumbUp} size={13} />
+          <Icon d={IC.thumbUp} size={13} /> Ya
         </button>
         <button
           onClick={() => setNoteOpen((v) => !v)}
-          title="Jawaban ini kurang tepat"
+          title="Kurang tepat — beri tahu kenapa"
           style={fbBtnStyle}
-          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--warn-600)")}
-          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--ink-400)")}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = "var(--warn-600)";
+            e.currentTarget.style.borderColor = "var(--warn-600)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = "var(--ink-500)";
+            e.currentTarget.style.borderColor = "var(--line)";
+          }}
         >
-          <Icon d={IC.thumbDown} size={13} />
+          <Icon d={IC.thumbDown} size={13} /> Kurang tepat
         </button>
       </span>
       {noteOpen && (
@@ -2043,14 +2060,19 @@ function FeedbackButtons({
 }
 
 const fbBtnStyle: React.CSSProperties = {
-  border: "none",
+  border: "1px solid var(--line)",
   background: "transparent",
   cursor: "pointer",
-  color: "var(--ink-400)",
-  padding: "2px 4px",
-  borderRadius: 4,
+  color: "var(--ink-500)",
+  padding: "3px 9px",
+  borderRadius: 999,
   display: "inline-flex",
-  transition: "color 0.12s",
+  alignItems: "center",
+  gap: 5,
+  fontSize: 11,
+  fontWeight: 500,
+  lineHeight: 1.4,
+  transition: "color 0.12s, border-color 0.12s",
 };
 
 function Bubble({
