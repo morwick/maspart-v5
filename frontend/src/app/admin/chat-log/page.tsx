@@ -38,6 +38,8 @@ const GUARD_ARTI: Record<string, string> = {
   excel: "Jawaban menjanjikan kartu unduh yang tak pernah dibuat",
   dtc: "Pertanyaan kode kesalahan dijawab tanpa memanggil cari_kode_kesalahan",
   epc: "User menyebut nomor rangka tapi PN dijawab tanpa tool EPC",
+  ajar: "Jawaban mengaku sudah menyimpan pengetahuan tanpa tool ajarkan_pengetahuan",
+  rem: "Rem anti-loop menolak panggilan tool — model diingatkan item itu BELUM dicek",
 };
 
 export default function ChatLogPage() {
@@ -195,20 +197,27 @@ export default function ChatLogPage() {
               {(summary.tool_gagal_tersering ?? []).length > 0 && (
                 <div className="surface" style={{ padding: 14, flex: 1, minWidth: 240 }}>
                   <div className="stat-label" style={{ marginBottom: 8 }}>Tool paling sering gagal</div>
-                  {(summary.tool_gagal_tersering ?? []).map(([t, n, pct, nf, err]) => (
+                  {(summary.tool_gagal_tersering ?? []).map(([t, n, pct, nf, err, rem]) => (
                     <div key={t} className="flex items-center justify-between" style={{ fontSize: 12.5, padding: "2px 0" }}>
                       <span className="mono">{t}</span>
                       <span
                         style={{ color: "var(--ink-500)" }}
-                        title={`${n} gagal · ${pct}% dari pemakaian · ${nf ?? 0} tak ketemu · ${err ?? 0} error`}
+                        title={`${n} gagal · ${pct}% dari pemakaian · ${nf ?? 0} tak ketemu · ${err ?? 0} error · ${rem ?? 0} ditolak rem (belum dicek)`}
                       >
-                        {n} <span style={{ fontSize: 11 }}>({pct}%{nf || err ? ` · ${nf ?? 0}✕/${err ?? 0}⚠` : ""})</span>
+                        {n}{" "}
+                        <span style={{ fontSize: 11 }}>
+                          ({pct}%{nf || err || rem ? ` · ${nf ?? 0}✕/${err ?? 0}⚠${rem ? `/${rem}⛔` : ""}` : ""})
+                        </span>
                       </span>
                     </div>
                   ))}
                   {summary.tool_gagal_rincian && (
                     <div style={{ fontSize: 11, color: "var(--ink-500)", marginTop: 6 }}>
                       ✕ tak ketemu: {summary.tool_gagal_rincian.nf ?? 0} · ⚠ error: {summary.tool_gagal_rincian.err ?? 0}
+                      {/* ⛔ rem = plafon panggilan KITA yang menolak, bukan data
+                          hilang. Dulu ikut terhitung "lama" sehingga kelas
+                          kegagalan yang paling bisa diperbaiki tak terlihat. */}
+                      {(summary.tool_gagal_rincian.brake ?? 0) > 0 && ` · ⛔ ditolak rem: ${summary.tool_gagal_rincian.brake}`}
                       {(summary.tool_gagal_rincian.legacy ?? 0) > 0 && ` · lama: ${summary.tool_gagal_rincian.legacy}`}
                     </div>
                   )}
@@ -230,7 +239,8 @@ export default function ChatLogPage() {
                     ))}
                   <div style={{ fontSize: 11, color: "var(--ink-500)", marginTop: 6, lineHeight: 1.5 }}>
                     pn/angka = dugaan karangan · subst = PN per-model menyalip EPC ·
-                    dtc/epc/excel = jawaban tanpa tool wajib
+                    dtc/epc/excel/ajar = jawaban tanpa tool wajib · rem = plafon
+                    panggilan tool tercapai (ada item yang belum dicek)
                   </div>
                 </div>
               )}

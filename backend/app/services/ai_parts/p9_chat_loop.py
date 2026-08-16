@@ -1759,14 +1759,49 @@ _KLAIM_TOOLS = frozenset({
 # Log produksi 30 hari: 82,6% giliran ber-ronde ≥4 berisi tool GAGAL — model
 # membakar ronde memanggil tool yang sama berulang. Cache per-giliran: panggilan
 # IDENTIK tak dieksekusi ulang (hasil lama + instruksi berhenti), dan tiap tool
-# maksimal 3 eksekusi BERBEDA per giliran.
-_MAX_CALLS_PER_TOOL = 3
+# dibatasi sejumlah eksekusi BERBEDA per giliran.
+#
+# ⚠️ PLAFON DINAIKKAN 3 → 10 (2026-08-16), dari observabilitas 30 hari (1.226
+# giliran). Angka 3 mencampur dua hal yang berbeda:
+#   • panggilan IDENTIK berulang = model MACET → sudah ditangani _call_cache
+#     (gratis, tak menyentuh hitungan ini sama sekali);
+#   • panggilan ber-ARGUMEN BEDA = KERJA NYATA — user menempel 9 nomor rangka,
+#     11 PN, 3 unit yang mau dipindah fleet. Plafon 3 memotongnya diam-diam.
+# Kerusakan yang TERUKUR di log, bukan dugaan:
+#   • 2026-07-24 04:17 — 9 rangka ke lihat_unit_armada, 3 lolos, jawaban akhir
+#     menyatakan KESEMBILAN "tidak terdaftar di telematics" (6 tak pernah dicek);
+#   • 2026-08-13 04:41 — masukkan_unit_fleet wajib 2 langkah (pratinjau + konfirmasi),
+#     jadi 3 unit = 6 panggilan → "ketiga unit BELUM dipindahkan" padahal user
+#     sudah menyetujui. Dengan plafon 3, alur konfirmasi ini mustahil >1 unit;
+#   • 2026-08-10 & 2026-08-15 — cari_part ditolak di percobaan ke-4, jawaban
+#     "tidak tercatat/tidak ditemukan"; PN-nya ternyata ADA (ditemukan 2 menit
+#     kemudian di giliran lain).
+# 9,8% giliran (83/846) menabrak plafon lama. Biaya ditahan dua pagar lain:
+# plafon KHUSUS untuk tool berat, dan plafon EKSEKUSI SELURUH TOOL per giliran.
+_MAX_CALLS_PER_TOOL = 10
+# Tool yang mahal per panggilan (render gambar EPC, unduh PDF, SSE diagnosa,
+# bangun katalog) — di sini kerja nyata memang jarang butuh banyak panggilan,
+# sedangkan satu panggilan bisa puluhan detik. Plafonnya tetap ketat.
+_MAX_CALLS_PER_TOOL_BERAT = 4
+_TOOL_BERAT = frozenset({
+    "gambar_exploded", "gambar_exploded_shantui", "diagram_wiring",
+    "manual_unit_file", "diagnosa", "katalog_kategori",
+})
+# Plafon EKSEKUSI seluruh tool dalam satu giliran — pagar biaya terakhir supaya
+# menaikkan plafon per-tool tak membuat satu giliran patologis meledak
+# (8 ronde × banyak tool). Giliran terboros yang tercatat 30 hari: ±20 panggilan.
+_MAX_TOOL_EXEC_TURN = 30
 _NOTE_ULANG = ("⛔ PANGGILAN IDENTIK DIABAIKAN: tool ini sudah dipanggil dengan "
                "argumen PERSIS sama giliran ini — hasil di atas adalah hasil "
                "sebelumnya (tidak dijalankan ulang; mengulanginya TIDAK akan "
                "mengubah hasil). Jawab dari data yang sudah ada, coba pendekatan "
                "LAIN (tool/argumen berbeda), atau sampaikan jujur bila datanya "
                "memang tidak ada.")
+
+
+def _plafon_tool(name: str) -> int:
+    """Plafon eksekusi ber-argumen-beda untuk SATU tool dalam satu giliran."""
+    return _MAX_CALLS_PER_TOOL_BERAT if name in _TOOL_BERAT else _MAX_CALLS_PER_TOOL
 
 
 def _tool_call_key(name: str, args: dict) -> tuple | None:
@@ -2316,6 +2351,11 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     # Rem panggilan tool identik (state per-giliran; lihat _tool_call_key).
     _call_cache: dict[tuple, dict] = {}   # key → hasil (sukses & gagal di-cache)
     _call_count: dict[str, int] = {}      # nama tool → jml eksekusi BERBEDA
+    # Panggilan yang DITOLAK rem & belum pernah benar-benar dijalankan giliran
+    # ini: key → (nama, args). Dipakai dua kali — (1) nota tingkat percakapan
+    # tiap ronde, (2) jaring terakhir di _finalize bila sampai akhir tetap tak
+    # tercek. Entri DIHAPUS begitu panggilan yang sama akhirnya dieksekusi.
+    _rem_tertunda: dict[tuple, tuple] = {}
     # Batch >1 tool dieksekusi di ThreadPoolExecutor, jadi state di atas disentuh
     # BEBERAPA THREAD sekaligus. Tanpa lock, cek plafon (baca) dan penambahan
     # (tulis) terpisah — seluruh gelombang worker pertama membaca angka yang sama
@@ -2329,15 +2369,27 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 res = dict(_call_cache[key])      # shallow copy — cache tak termutasi
                 res["catatan_panggilan_ulang"] = _NOTE_ULANG
                 return res
-            if _call_count.get(name, 0) >= _MAX_CALLS_PER_TOOL:
+            _plafon = _plafon_tool(name)
+            _habis_total = sum(_call_count.values()) >= _MAX_TOOL_EXEC_TURN
+            if _call_count.get(name, 0) >= _plafon or _habis_total:
                 # TANPA field 'error' — _tool_fail_kind membacanya sbg "brake",
                 # BUKAN "nf": rem ≠ data tidak ada. Membedakannya penting karena
                 # "nf" dulu menyuntik nota "lookup gagal" ke model, sehingga model
                 # mengira 44 PN sisanya memang tak ada di data.
+                if key is not None:
+                    _rem_tertunda[key] = (name, args or {})
+                # Sebab yang TEPAT: plafon tool ini, atau anggaran eksekusi
+                # SELURUH giliran. Menyebut sebab yang salah membuat model
+                # mencoba jalan keluar yang salah (mis. ganti tool, padahal
+                # anggaran giliran yang habis).
+                _sebab = (f"tool '{name}' sudah dipanggil {_plafon}× dengan "
+                          "argumen berbeda giliran ini"
+                          if _call_count.get(name, 0) >= _plafon else
+                          f"giliran ini sudah menjalankan {_MAX_TOOL_EXEC_TURN} "
+                          "panggilan tool (anggaran habis)")
                 return {"found": False, "dibatasi": True,
-                        "catatan": (f"⛔ BATAS: tool '{name}' sudah dipanggil "
-                                    f"{_MAX_CALLS_PER_TOOL}× dengan argumen berbeda "
-                                    "giliran ini — panggilan berikutnya DITOLAK. "
+                        "catatan": (f"⛔ BATAS: {_sebab} — panggilan berikutnya "
+                                    "DITOLAK. "
                                     "Data yang belum sempat diambil BELUM TENTU tidak "
                                     "ada; jangan menyimpulkan 'tidak ditemukan'. "
                                     "Gabungkan kebutuhan dalam SATU panggilan — untuk "
@@ -2356,6 +2408,10 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         if key is not None and isinstance(res, dict):
             with _call_lock:
                 _call_cache[key] = res
+                # Ronde lebih awal sempat ditolak rem, ronde ini akhirnya jalan
+                # (mis. plafon tool berat sudah lewat lewat jalur lain): item ini
+                # BUKAN lagi 'belum dicek' — jangan diperingatkan di akhir.
+                _rem_tertunda.pop(key, None)
         return res
     epc_vin_used = False
     # PN yang PERNAH ditandai suspect di riwayat → tetap dicurigai di follow-up
@@ -2441,6 +2497,13 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             "empty" if reply == _EMPTY_FINAL_MSG else
             "sanitized" if "tak terverifikasi" in (reply or "") else "ok"
         )
+        # Jaring TERAKHIR rem: bila sampai jawaban jadi masih ada panggilan yang
+        # ditolak rem dan tak pernah benar-benar dijalankan, user berhak tahu —
+        # nota ke model (lihat _rem_note) belum tentu dipatuhi, dan diamnya
+        # persis inilah yang membuat "9 rangka tidak terdaftar" lolos ke layar.
+        # Kartu pertanyaan dilewati: di sana tak ada klaim data untuk dikoreksi.
+        if _rem_tertunda and not pertanyaan:
+            reply = (reply or "") + _rem_tertunda_note(_rem_tertunda.values())
         # Memori sesi: simpan HANYA yang terbukti dari hasil tool giliran ini.
         # Teks jawaban model sengaja TIDAK ikut — kalau ucapan model bisa
         # meng-ground dirinya sendiri di giliran berikutnya, guard anti-karangan
@@ -2895,6 +2958,10 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         tanya_pengantar = ""          # teks yang ikut tampil DI ATAS kartu
         tanya_bebas_pagar = False     # kartu konfirmasi aksi eksplisit user
         _gagal_ronde: list[tuple] = []  # (nama, args) yang gagal → nota ber-rincian
+        _rem_ronde: list[tuple] = []    # (nama, args) yang DITOLAK rem → nota terpisah
+        # Anggaran char hasil tool untuk RONDE ini: plafon per-hasil saja tak
+        # cukup ketika satu ronde boleh berisi banyak panggilan (lihat _cap_ronde).
+        _cap_hasil = _cap_ronde(len(executed))
         for tc, name, args, result in executed:
             tools_used.append(name)
             # tanya_user: kartu pertanyaan. Ambil yang PERTAMA saja — dua kartu
@@ -2926,7 +2993,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.get("id"),
-                "content": _cap_tool_content(_dump),
+                "content": _cap_tool_content(_dump, _cap_hasil),
             })
             _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
             _kind = _tool_fail_kind(result)
@@ -2939,6 +3006,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 if _kind != "brake":
                     lookup_gagal = True
                     _gagal_ronde.append((name, args))
+                else:
+                    _rem_ronde.append((name, args))
                 tool_gagal_pernah = True
                 _catat_tool_gagal(tools_failed, name, _kind)
         if lookup_gagal:
@@ -2948,6 +3017,13 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             messages.append({"role": "user",
                              "content": _lookup_gagal_note(_gagal_ronde)})
             lookup_gagal = False
+        if _rem_ronde:
+            # Penolakan rem naik ke tingkat PERCAKAPAN (lihat _rem_note): sebagai
+            # field di dalam satu hasil tool, ia terbukti terlewat — dan yang
+            # terlewat bukan detail kecil, melainkan fakta bahwa item itu BELUM
+            # DICEK. Guard-nya dicatat agar frekuensinya terlihat di panel admin.
+            messages.append({"role": "user", "content": _rem_note(_rem_ronde)})
+            _catat_guard("rem")
 
         if kartu_tanya:
             _k_tanya = _tanya_kunci(user, conversation_id)

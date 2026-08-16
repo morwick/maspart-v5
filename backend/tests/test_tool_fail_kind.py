@@ -52,7 +52,7 @@ def test_catat_tool_gagal_dedupe_dan_upgrade():
     assert daftar == ["cari_part:err", "stok_gudang:nf"]
 
 
-# ── summary(): parse suffix, denominator nama polos, rincian nf/err/legacy ───
+# ── summary(): parse suffix, denominator nama polos, rincian nf/err/brake/legacy ─
 def test_summary_membelah_nf_err_legacy(monkeypatch):
     rows = [
         {"tools": "cari_part", "tools_failed": "cari_part:nf",
@@ -70,7 +70,29 @@ def test_summary_membelah_nf_err_legacy(monkeypatch):
     assert top[0][0] == "cari_part" and top[0][1] == 3
     assert top[0][2] == 100.0
     assert top[0][3] == 1 and top[0][4] == 1        # [.., nf, err]
-    assert s["tool_gagal_rincian"] == {"nf": 1, "err": 2, "legacy": 1}
+    assert s["tool_gagal_rincian"] == {"nf": 1, "err": 2, "brake": 0, "legacy": 1}
+
+
+def test_summary_memisah_brake_dari_legacy(monkeypatch):
+    """`brake` = rem KITA yang menolak menjalankan tool (belum dicek), bukan data
+    hilang & bukan baris pra-migrasi. Dulu ia jatuh ke 'legacy', sehingga panel
+    admin melaporkan kelas kegagalan yang paling bisa diperbaiki sebagai
+    'sisa data lama' — 33 entri nyata tersembunyi selama 30 hari."""
+    rows = [
+        {"tools": "cari_part, cari_part, cari_part, cari_part",
+         "tools_failed": "cari_part:brake",
+         "tool_failed": True, "latency_ms": 1, "outcome": "ok"},
+        {"tools": "cari_part", "tools_failed": "cari_part",   # baris lama asli
+         "tool_failed": True, "latency_ms": 1, "outcome": "ok"},
+    ]
+    monkeypatch.setattr(ai_chat_log, "list_logs", lambda limit=1000: rows)
+    s = ai_chat_log.summary()
+    assert s["tool_gagal_rincian"]["brake"] == 1
+    assert s["tool_gagal_rincian"]["legacy"] == 1      # tak lagi tercampur
+    top = s["tool_gagal_tersering"][0]
+    assert top[0] == "cari_part"
+    assert top[3] == 0 and top[4] == 0                 # bukan nf, bukan err
+    assert top[5] == 1                                 # kolom brake, di UJUNG
 
 
 # ── integrasi chat(): miss tool → log_turn menerima suffix :nf ───────────────

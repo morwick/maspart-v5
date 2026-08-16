@@ -458,8 +458,30 @@ _MAX_TOOL_CONTENT = 24000  # batas char JSON hasil tool yg di-append ke messages
 
 _TOOL_CAP_TAIL = 3000   # sisakan EKOR: builder menaruh catatan/jawaban_wajib di ujung
 
+# Plafon char SELURUH hasil tool dalam SATU ronde (lihat _cap_ronde). Plafon
+# per-hasil saja tak cukup begitu satu ronde boleh berisi banyak panggilan:
+# 10 × 24.000 char ≈ 60rb token input DALAM SATU RONDE, dan `messages` dikirim
+# ulang utuh tiap panggilan berikutnya (biaya kuadratik). Observabilitas 30 hari
+# menunjukkan token input sudah p90 221rb & maks 661rb per giliran — melebarkan
+# ronde tanpa pagar ini akan memperburuk angka itu, bukan memperbaikinya.
+#
+# Nilainya = 4 × _MAX_TOOL_CONTENT dengan sengaja: ronde SEMPIT (≤4 hasil, yang
+# selama ini paling umum) mendapat jatah penuh PERSIS seperti sebelumnya —
+# penyempitan hanya berlaku pada ronde lebar yang memang baru mungkin terjadi
+# setelah plafon per-tool dinaikkan. Jadi tak ada ronde lama yang jadi kekurangan.
+_MAX_TOOL_CONTENT_RONDE = 96000
+_MIN_TOOL_CONTENT = 4000   # lantai: hasil yang terlalu diciutkan tak berguna
 
-def _cap_tool_content(s: str) -> str:
+
+def _cap_ronde(n_hasil: int) -> int:
+    """Plafon char per hasil bila SATU ronde mengembalikan `n_hasil` hasil tool."""
+    if n_hasil <= 1:
+        return _MAX_TOOL_CONTENT
+    return max(_MIN_TOOL_CONTENT,
+               min(_MAX_TOOL_CONTENT, _MAX_TOOL_CONTENT_RONDE // n_hasil))
+
+
+def _cap_tool_content(s: str, plafon: int | None = None) -> str:
     """Batasi panjang JSON hasil tool yang dimasukkan ke riwayat percakapan.
     Hasil raksasa (banding_rangka_massal, bom_dari_rangka) bila di-append penuh
     tiap ronde membuat token membengkak & bisa menembus limit konteks model
@@ -469,14 +491,20 @@ def _cap_tool_content(s: str) -> str:
     Potong KEPALA + EKOR (bukan kepala saja): tool builder menaruh instruksi
     penyetir model (`catatan`/`jawaban_wajib`/`catatan_cakupan`) di UJUNG dict —
     potong-kepala-saja menghapusnya senyap, membuat model kehilangan aturan
-    (mis. '⛔ jangan mengarang PN di luar daftar')."""
-    if len(s) <= _MAX_TOOL_CONTENT:
+    (mis. '⛔ jangan mengarang PN di luar daftar').
+
+    `plafon` (opsional) = plafon char untuk hasil INI; dipakai jalur batch agar
+    ronde ber-banyak-hasil tetap muat anggaran (lihat _cap_ronde). Default =
+    _MAX_TOOL_CONTENT, persis perilaku lama."""
+    batas = max(_MIN_TOOL_CONTENT, int(plafon or _MAX_TOOL_CONTENT))
+    if len(s) <= batas:
         return s
-    dipotong = len(s) - _MAX_TOOL_CONTENT
+    dipotong = len(s) - batas
     marker = (f"\n…[dipotong {dipotong} karakter di tengah — hasil terlalu besar; "
               "rangkum dari bagian atas & bawah, jangan menebak yang hilang]…\n")
-    head = _MAX_TOOL_CONTENT - _TOOL_CAP_TAIL - len(marker)
-    return s[:head] + marker + s[-_TOOL_CAP_TAIL:]
+    ekor = min(_TOOL_CAP_TAIL, max(600, batas // 4))
+    head = batas - ekor - len(marker)
+    return s[:head] + marker + s[-ekor:]
 
 
 # Key yang KOSONGNYA adalah JAWABAN, bukan ketiadaan data. Untuk key lain
@@ -809,6 +837,73 @@ def _lookup_gagal_note(gagal=()) -> str:
         + (" Tool LAIN di giliran ini yang berhasil tetap boleh kamu pakai."
            if rincian else "")
     )
+
+
+def _rem_note(rem=()) -> str:
+    """[CATATAN SISTEM] rem anti-loop MENOLAK panggilan — item itu BELUM dicek.
+
+    Kembaran `_lookup_gagal_note` untuk kelas yang berkebalikan artinya. Dulu
+    penolakan rem hanya dititipkan sebagai field `catatan` DI DALAM satu hasil
+    tool, terhimpit di antara belasan hasil lain — dan model melewatinya.
+    Bukti produksi 2026-07-24: user menempel 9 nomor rangka, rem meloloskan 3,
+    dan jawaban akhir menyatakan KESEMBILAN "tidak terdaftar di telematics".
+    Enam di antaranya tak pernah dicek sama sekali.
+
+    Karena itu penolakan rem naik ke tingkat PERCAKAPAN (pesan tersendiri,
+    seperti nota lookup-gagal) dan menyebut item yang ditolak satu per satu:
+    yang dilarang di sini bukan "mengarang angka" melainkan menyatakan HASIL
+    NEGATIF ('tidak ada', 'tidak terdaftar') atas sesuatu yang belum dilihat."""
+    rincian: list[str] = []
+    for nama, args in (rem or ()):
+        n = str(nama or "").strip()
+        if not n:
+            continue
+        a = _lookup_gagal_arg(args if isinstance(args, dict) else {})
+        item = f"{n}({a})" if a else n
+        if item not in rincian:
+            rincian.append(item)
+    return (
+        "[CATATAN SISTEM] Panggilan tool berikut DITOLAK rem anti-loop (plafon "
+        "per giliran), jadi datanya BELUM PERNAH DICEK: "
+        + ("; ".join(rincian) if rincian else "(beberapa panggilan)")
+        + ". ⛔ DILARANG menyatakan 'tidak ada' / 'tidak ditemukan' / 'tidak "
+        "terdaftar' / 'kosong' untuk item itu — kamu belum melihat datanya. "
+        "Pilih SALAH SATU: (a) gabungkan sisanya dalam SATU panggilan tool "
+        "massal (mis. cek_massal_part dengan array daftar_pn, spek_massal_rangka "
+        "untuk banyak nomor rangka), ATAU (b) sebutkan APA ADANYA di jawaban "
+        "bahwa item itu BELUM SEMPAT DICEK giliran ini dan tawarkan mengecek "
+        "lanjutannya. Item yang benar-benar sudah dicek tetap boleh kamu "
+        "simpulkan seperti biasa."
+    )
+
+
+_REM_TERTUNDA_CAP = 8       # item yang dikutip ke user; sisanya diringkas "+N lagi"
+
+
+def _rem_tertunda_note(rem=()) -> str:
+    """Catatan ke USER (bukan ke model): apa yang BELUM SEMPAT DICEK giliran ini.
+
+    Dipasang di jalur akhir bila nota `_rem_note` ke model tak ditindaklanjuti.
+    Sengaja TIDAK memakai frasa 'tak terverifikasi' — frasa itu penanda outcome
+    'sanitized' di observabilitas, dan menumpanginya akan mengaburkan dua kelas
+    yang berbeda (PN dugaan karangan vs lookup yang belum dijalankan)."""
+    item: list[str] = []
+    for nama, args in (rem or ()):
+        n = str(nama or "").strip()
+        if not n:
+            continue
+        a = _lookup_gagal_arg(args if isinstance(args, dict) else {})
+        s = f"{n} — {a}" if a else n
+        if s not in item:
+            item.append(s)
+    if not item:
+        return ""
+    sisa = len(item) - _REM_TERTUNDA_CAP
+    daftar = "; ".join(item[:_REM_TERTUNDA_CAP]) + (f"; +{sisa} lagi" if sisa > 0 else "")
+    return ("\n\n⚠️ Catatan sistem: batas pengecekan per giliran tercapai, jadi "
+            f"berikut BELUM sempat dicek — {daftar}. Bila jawaban di atas "
+            "menyatakan item itu tidak ada/tidak terdaftar, abaikan: mintalah "
+            "saya mengeceknya lagi (boleh dipecah beberapa pesan).")
 
 
 # Nota generik (tanpa rincian) — bentuk yang dipakai pemanggil lama di p9.

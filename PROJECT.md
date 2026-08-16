@@ -2258,6 +2258,9 @@ ssh root@maspart.tech 'bash /opt/maspart/deploy/coolify/rollback.sh'   # rollbac
       [PIKIR] (≤6 baris; ronde lanjutan ≤3), tabel >±15 baris → kartu
       buat_excel + preview, nf-nudge (tool sama 2× :nf → catatan sistem
       berhenti variasi argumen; _MAX_CALLS_PER_TOOL=3 tetap rem keras).
+      ⚠️ BASI sejak 2026-08-16: plafon itu kini **10** (tool berat 4) + plafon
+      eksekusi 30/giliran — log 30 hari membuktikan angka 3 memotong KERJA
+      NYATA (daftar rangka/PN tempelan user), bukan cuma model yang macet.
       Kandidat lain yang dipetakan (belum diputuskan): alarm saldo DeepSeek →
       Telegram, provider fallback (env AI_FALLBACK_* — mekanisme sudah ada),
       cache/pre-warm BOM EPC per-VIN utk 257 unit armada, rilis APK 2.2.1

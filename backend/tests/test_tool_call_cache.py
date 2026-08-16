@@ -68,7 +68,11 @@ def test_panggilan_identik_lintas_ronde_dieksekusi_sekali(monkeypatch):
     assert any("PANGGILAN IDENTIK" in str(m.get("content") or "") for m in m3)
 
 
-def test_batas_3_eksekusi_berbeda_per_tool(monkeypatch):
+def test_batas_eksekusi_berbeda_per_tool(monkeypatch):
+    """Plafon eksekusi ber-argumen-BEDA per tool. Angkanya diambil dari
+    `_plafon_tool` (bukan ditulis ulang di sini): plafon itu naik 3 → 10 pada
+    2026-08-16 setelah log produksi menunjukkan angka 3 memotong KERJA NYATA —
+    daftar rangka/PN yang user tempel — bukan cuma model yang macet."""
     hitung = {"n": 0}
 
     def run_tool(name, args, user, sheet_id=""):
@@ -76,18 +80,18 @@ def test_batas_3_eksekusi_berbeda_per_tool(monkeypatch):
         return {"found": False}                    # nf jujur tiap kali
 
     monkeypatch.setattr(ai, "_run_tool", run_tool)
+    plafon = ai._plafon_tool("cari_part")
     seq = [
-        _tool_round(_tc("cari_part", {"query": "a"}, "1")),
-        _tool_round(_tc("cari_part", {"query": "b"}, "2")),
-        _tool_round(_tc("cari_part", {"query": "c"}, "3")),
-        _tool_round(_tc("cari_part", {"query": "d"}, "4")),   # ke-4 → ditolak
+        # plafon+1 ronde ber-argumen beda: yang terakhir DITOLAK rem.
+        *[_tool_round(_tc("cari_part", {"query": f"q{i}"}, str(i)))
+          for i in range(plafon + 1)],
         "Tidak ketemu di semua pencarian.",
     ]
     calls = _stub_model(monkeypatch, seq)
     ai.chat(USER, [{"role": "user", "content": "cari sesuatu"}])
-    assert hitung["n"] == 3                        # eksekusi berhenti di 3
-    m5 = calls["messages"][4]
-    assert any("BATAS" in str(m.get("content") or "") for m in m5)
+    assert hitung["n"] == plafon                   # eksekusi berhenti di plafon
+    m_akhir = calls["messages"][plafon + 1]
+    assert any("BATAS" in str(m.get("content") or "") for m in m_akhir)
 
 
 def test_tool_call_key_abaikan_kunci_server():

@@ -1407,9 +1407,11 @@ export type ChatLogSummary = {
   // [nama, jml_gagal, rasio_gagal_persen, jml_nf, jml_err] — tool paling sering
   // gagal; nf = lookup jujur nihil, err = error/infra. Ringkasan lama tanpa
   // elemen 4-5 (undefined saat destructuring — di-guard di UI).
-  tool_gagal_tersering?: [string, number, number, number?, number?][];
-  // Rincian total kegagalan per jenis; "legacy" = baris lama tanpa suffix jenis.
-  tool_gagal_rincian?: { nf?: number; err?: number; legacy?: number };
+  // [nama, jml_gagal, rasio%, nf?, err?, brake?]
+  tool_gagal_tersering?: [string, number, number, number?, number?, number?][];
+  // Rincian total kegagalan per jenis; "brake" = DITOLAK rem anti-loop (belum
+  // sempat dicek — bukan data hilang); "legacy" = baris lama tanpa suffix jenis.
+  tool_gagal_rincian?: { nf?: number; err?: number; brake?: number; legacy?: number };
   outcome?: Record<string, number>;
   token?: {
     giliran_terukur: number;

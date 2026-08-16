@@ -313,7 +313,8 @@ def summary() -> dict:
     tool_gagal_freq: dict[str, int] = {}
     tool_gagal_nf: dict[str, int] = {}
     tool_gagal_err: dict[str, int] = {}
-    gagal_rincian = {"nf": 0, "err": 0, "legacy": 0}
+    tool_gagal_brake: dict[str, int] = {}
+    gagal_rincian = {"nf": 0, "err": 0, "brake": 0, "legacy": 0}
     outcome_freq: dict[str, int] = {}
     # Sebab guard (migrations/026). Baris SEBELUM rilis itu kosong — dan `guard`
     # di atas pun undercount karena dulu hanya guard anti-karangan yang terhitung.
@@ -324,7 +325,13 @@ def summary() -> dict:
             if t:
                 tool_freq[t] = tool_freq.get(t, 0) + 1
         # Entri tools_failed bisa bersuffix jenis: "nama:nf" (lookup jujur nihil)
-        # / "nama:err" (error/infra); baris lama tanpa suffix = "legacy".
+        # / "nama:err" (error/infra) / "nama:brake" (DITOLAK rem anti-loop —
+        # belum sempat dicek sama sekali); baris lama tanpa suffix = "legacy".
+        # ⚠️ `brake` dulu jatuh ke "legacy" karena rincian ini hanya mengenal
+        # nf/err — panel admin lalu melaporkannya sebagai "baris lama pra-migrasi".
+        # Akibatnya kelas kegagalan yang paling bisa DIPERBAIKI (plafon panggilan
+        # kita sendiri, bukan data/infra) justru yang paling tak terlihat: 33 entri
+        # brake dalam 30 hari terhitung sebagai sisa data lama.
         for t in (r.get("tools_failed") or "").split(", "):
             t = t.strip()
             if not t:
@@ -335,8 +342,9 @@ def summary() -> dict:
                 tool_gagal_nf[nama] = tool_gagal_nf.get(nama, 0) + 1
             elif kind == "err":
                 tool_gagal_err[nama] = tool_gagal_err.get(nama, 0) + 1
-            gagal_rincian["nf" if kind == "nf" else
-                          "err" if kind == "err" else "legacy"] += 1
+            elif kind == "brake":
+                tool_gagal_brake[nama] = tool_gagal_brake.get(nama, 0) + 1
+            gagal_rincian[kind if kind in gagal_rincian else "legacy"] += 1
         for g in (r.get("guard_kinds") or "").split(", "):
             g = g.strip()
             if g:
@@ -346,10 +354,13 @@ def summary() -> dict:
 
     # Tool paling sering GAGAL + rasio gagal/pakai (tool bergantung server eksternal
     # — EPC/SIMS/Accurate — paling rawan). [nama, jml_gagal, rasio_persen, jml_nf,
-    # jml_err] — nf ≠ rusak (data memang tak ada); destructuring 3-elemen lama aman.
+    # jml_err, jml_brake] — nf ≠ rusak (data memang tak ada), brake ≠ gagal sama
+    # sekali (kita sendiri yang menolak menjalankannya). Elemen ditambah di UJUNG:
+    # destructuring 3/5-elemen lama tetap aman.
     tool_gagal_tersering = [
         [t, c, round(100 * c / tool_freq[t], 1) if tool_freq.get(t) else 0.0,
-         tool_gagal_nf.get(t, 0), tool_gagal_err.get(t, 0)]
+         tool_gagal_nf.get(t, 0), tool_gagal_err.get(t, 0),
+         tool_gagal_brake.get(t, 0)]
         for t, c in sorted(tool_gagal_freq.items(), key=lambda kv: -kv[1])[:10]
     ]
 
