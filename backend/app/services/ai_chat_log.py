@@ -93,6 +93,25 @@ _QUESTION_CAP = 1000
 _tier_memo = 0
 
 
+def _sid_cadangan(username: str | None) -> str | None:
+    """session_id CADANGAN untuk klien yang tak mengirim conversation_id.
+
+    Klien web & APK sekarang sudah mengirimnya (beres sejak 30 Jul 2026), tapi di
+    Agustus masih ada 14 giliran (2,4%) tanpa session_id — semuanya dari pemakai
+    yang aplikasinya belum diperbarui. Baris tanpa session_id tak bisa
+    direkonstruksi jadi percakapan, dan justru kegagalan FOLLOW-UP-lah kelas bug
+    terbesar asisten.
+
+    Dikelompokkan per USER + TANGGAL. Kasar, tapi jujur: berprefiks `auto:` agar
+    saat menganalisis tak pernah tertukar dengan percakapan sungguhan, dan tak
+    pernah menimpa session_id asli (hanya dipakai bila kosong).
+    """
+    u = (username or "").strip().lower()
+    if not u:
+        return None
+    return f"auto:{u}:{time.strftime('%Y-%m-%d', time.gmtime())}"
+
+
 def log_turn(*, username: str | None, role: str | None, question: str,
              tools_used: list[str] | None, rounds: int, latency_ms: int,
              guard_hit: bool, tool_failed: bool, reply_len: int,
@@ -148,7 +167,7 @@ def log_turn(*, username: str | None, role: str | None, question: str,
     }
     with_reply = {**base, **tok, "reply": (reply or "")[:_REPLY_CAP] or None}
     with_failed = {**with_reply, "tools_failed": (", ".join(gagal) if gagal else None)}
-    with_session = {**with_failed, "session_id": (session_id or None)}
+    with_session = {**with_failed, "session_id": (session_id or _sid_cadangan(username))}
     with_guard = {**with_session, "guard_kinds": (", ".join(guards) if guards else None)}
     with_fase = {**with_guard, "model_ms": int(model_ms or 0),
                  "tools_ms": int(tools_ms or 0), "ttft_ms": int(ttft_ms or 0)}

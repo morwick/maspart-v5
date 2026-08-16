@@ -134,3 +134,89 @@ def analisa(limit: int = 40, min_kejadian: int = 1,
             "jumlah permintaan barang — jangan menyebutnya sebagai order."
         ),
     }
+
+
+# ── Laporan mingguan DIDORONG ke pemilik (2026-08-17) ───────────────────────
+# Modul ini sudah matang sejak 2026-08-09 (memisahkan 45% sinyal beli asli dari
+# salah ketik & miss basi), TAPI audit 1.189 giliran menemukan tool
+# `permintaan_tak_terlayani` NOL kali dipanggil dalam 30 hari — sementara
+# `pengganti_part:nf` justru kegagalan tool NOMOR SATU (50 kejadian). Datanya
+# menumpuk dan tak pernah dilihat siapa pun.
+#
+# Sebabnya bukan kode melainkan ALUR: ini kanal TARIKAN (harus diminta) untuk
+# informasi yang sifatnya DORONGAN (pemilik tak tahu ada yang perlu dilihat).
+# Maka dijadikan laporan berkala lewat Telegram — kanal notifikasi yang sudah
+# dipakai pesanan masuk, jadi tak ada infrastruktur baru.
+import logging as _logging
+import threading as _threading
+import time as _time
+
+_logger = _logging.getLogger("maspart.permintaan")
+
+_LAPORAN_INTERVAL = 7 * 24 * 3600      # mingguan
+_LAPORAN_JEDA_AWAL = 15 * 60           # jangan menembak saat boot/redeploy
+_LAPORAN_MIN_KEJADIAN = 2              # dicari sekali saja belum tentu sinyal
+_LAPORAN_BARIS = 12
+_laporan_started = False
+_laporan_lock = _threading.Lock()
+
+
+def teks_laporan(limit: int = _LAPORAN_BARIS,
+                 min_kejadian: int = _LAPORAN_MIN_KEJADIAN) -> str:
+    """Ringkasan sinyal PEMBELIAN untuk pesan Telegram. "" = tak ada yang perlu
+    dilaporkan (jangan kirim pesan kosong tiap minggu — itu melatih orang
+    mengabaikan kanalnya)."""
+    try:
+        d = analisa(limit=limit, min_kejadian=min_kejadian)
+    except Exception:
+        _logger.exception("laporan permintaan gagal disusun")
+        return ""
+    baris = (d or {}).get("permintaan_tak_terlayani") or []
+    if not baris:
+        return ""
+    out = [f"🛒 SINYAL PEMBELIAN — {len(baris)} barang dicari tapi TIDAK ADA",
+           f"(total {d.get('total_kejadian_tak_terlayani')} pencarian; "
+           f"minimal {min_kejadian}× dicari)", ""]
+    for b in baris:
+        out.append(f"• {b['dicari']} — {b['berapa_kali']}× "
+                   f"(terakhir {b['terakhir_dicari_hari_lalu']:.0f} hari lalu)")
+    salah = d.get("jumlah_kemungkinan_salah_ketik") or 0
+    if salah:
+        # ⛔ Angka ini SENGAJA disebut: tanpa itu daftar di atas terbaca seolah
+        # seluruh pencarian nihil adalah peluang jualan, padahal 35% justru
+        # salah ketik yang keliru bila dibeli.
+        out.append("")
+        out.append(f"({salah} pencarian nihil lain punya PN mirip di katalog — "
+                   "itu salah ketik/varian, JANGAN dibeli.)")
+    out.append("")
+    out.append("Buka Asisten AI lalu tanya 'permintaan tak terlayani' untuk rincian.")
+    return "\n".join(out)
+
+
+def start_laporan_mingguan() -> bool:
+    """Thread daemon: kirim laporan sinyal pembelian sepekan sekali.
+
+    Best-effort dan idempoten seperti ai_chat_log.start_retention — gagal kirim
+    tak boleh mengganggu apa pun, dan dipanggil dua kali tetap satu thread."""
+    global _laporan_started
+    from . import notify
+    if not notify.available():
+        return False
+    with _laporan_lock:
+        if _laporan_started:
+            return False
+        _laporan_started = True
+
+    def _loop():
+        _time.sleep(_LAPORAN_JEDA_AWAL)
+        while True:
+            try:
+                teks = teks_laporan()
+                if teks:
+                    notify.send_async(teks)
+            except Exception:       # pragma: no cover — laporan tak boleh fatal
+                _logger.exception("laporan permintaan mingguan gagal")
+            _time.sleep(_LAPORAN_INTERVAL)
+
+    _threading.Thread(target=_loop, daemon=True, name="laporan-permintaan").start()
+    return True

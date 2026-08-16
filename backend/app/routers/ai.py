@@ -33,6 +33,46 @@ _PERBAIKAN_MSG = ("Asisten AI sedang dalam perbaikan. Silakan coba lagi nanti �
                   "fitur lain aplikasi tetap berjalan normal.")
 
 
+# ── Saran pembuka: FITUR YANG ADA TAPI TAK PERNAH DIPAKAI ───────────
+# Audit 1.189 giliran (17 Jul–16 Agu 2026): 20 dari 98 tool TIDAK dipanggil
+# sekali pun dalam 30 hari — termasuk yang baru & mahal dibangun (kasus_serupa
+# dari 1.785 klaim garansi, rekap_klaim, banding_part_armada, part_aus_katalog,
+# permintaan_tak_terlayani). Itu masalah PENEMUAN, bukan kode: orang tak bisa
+# meminta yang tak ia tahu ada. Layar pembuka sudah punya preseden mendorong
+# tawaran ke user (`gap_ajar`), jadi saluran yang sama dipakai.
+#
+# ⚠️ Sengaja kalimat LAPANGAN, bukan nama tool: user mengetik keluhan, bukan API.
+_SARAN_UMUM = [
+    "Keluhan 'rem bunyi' — part apa yang paling sering diganti untuk itu?",
+    "Part apa saja yang rawan rusak di unit ini?",
+    "Jadwal servis unit ini apa saja?",
+    "Kode kesalahan SPN 520243 FMI 21 artinya apa?",
+]
+_SARAN_ADMIN = [
+    "Rekap klaim garansi bulan ini",
+    "Cek kampas kopling unit PT ini — sama semua atau beda?",
+    "Part apa yang paling sering dicari tapi tak ada stoknya?",
+    "Riwayat klaim garansi unit ini",
+]
+
+
+def _saran_untuk(user: dict) -> list[str]:
+    """3 contoh pertanyaan untuk layar pembuka, diputar per HARI.
+
+    Diputar (bukan acak) supaya stabil dalam satu hari — user yang membuka ulang
+    layar tak melihat daftar melompat-lompat, tapi tetap berganti antar hari
+    sehingga fitur yang berbeda kebagian giliran terlihat.
+    """
+    import time as _t
+    kolam = list(_SARAN_UMUM)
+    if (user.get("role") or "").lower() == "admin":
+        kolam += _SARAN_ADMIN
+    if not kolam:
+        return []
+    geser = int(_t.strftime("%j"))          # hari ke-N dalam setahun
+    return [kolam[(geser + i) % len(kolam)] for i in range(min(3, len(kolam)))]
+
+
 def _perbaikan_untuk(user: dict) -> bool:
     if (user.get("role") or "").lower() == "admin":
         return False
@@ -92,6 +132,12 @@ def ai_status(user: dict = Depends(get_current_user)):
     # (peta kelemahan asisten cukup dilihat orang yang bisa memperbaikinya).
     # Best-effort: gagal membaca gap tak boleh mematikan status asisten.
     if out["available"]:
+        # Saran pembuka — lihat _saran_untuk. Best-effort: gagal menyusun saran
+        # tak boleh mematikan asisten.
+        try:
+            out["saran"] = _saran_untuk(user)
+        except Exception:  # pragma: no cover
+            pass
         try:
             role = (user.get("role") or "").lower()
             boleh_ajar = role == "admin" or (

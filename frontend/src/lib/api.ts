@@ -2366,6 +2366,11 @@ export async function getAiStatus(
   // Tawaran belajar (hanya utk akun yang boleh MENGAJAR): topik yang berulang
   // gagal dijawab asisten (penambang ai_belajar, ambang >=3 kegagalan).
   gap_ajar?: { jumlah: number; topik: string[] };
+  // Contoh pertanyaan untuk layar pembuka, diputar per hari oleh server.
+  // Ada karena audit 30 hari menemukan 20 dari 98 tool TIDAK dipanggil sekali
+  // pun — termasuk fitur baru & mahal (kasus_serupa, rekap_klaim). Chip statis
+  // lama justru hanya memakai tool yang sudah populer.
+  saran?: string[];
 }> {
   const res = await fetch(`${API_BASE}/api/ai/status`, {
     headers: { Authorization: `Bearer ${token}` },

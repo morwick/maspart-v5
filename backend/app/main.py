@@ -81,6 +81,14 @@ def _warmup():
     except Exception as e:  # pragma: no cover
         print(f"[startup] scheduler retensi chat-log gagal: {e}")
     try:
+        # SINYAL PEMBELIAN mingguan ke Telegram. Datanya sudah matang sejak
+        # 2026-08-09 tapi tool-nya NOL kali dipanggil dalam 30 hari — informasi
+        # dorongan yang selama ini hanya tersedia lewat kanal tarikan.
+        from .services import permintaan_tak_terlayani
+        permintaan_tak_terlayani.start_laporan_mingguan()
+    except Exception as e:  # pragma: no cover
+        print(f"[startup] scheduler laporan permintaan gagal: {e}")
+    try:
         # Hangatkan indeks BERAT SIMS (persisten /app/data) utk part berharga →
         # SIMS jadi sumber berat utama etalase tanpa input manual. Latar, throttled.
         sims_weights.start()

@@ -282,6 +282,7 @@ export default function AsistenPage() {
   // Tawaran belajar (hanya terisi utk akun yang boleh mengajar): topik yang
   // berulang gagal dijawab — lingkaran gagal→terdeteksi→diajarkan menutup di sini.
   const [gapAjar, setGapAjar] = useState<{ jumlah: number; topik: string[] } | null>(null);
+  const [saran, setSaran] = useState<string[]>([]);
 
   useEffect(() => {
     const token = getToken();
@@ -291,6 +292,7 @@ export default function AsistenPage() {
         setAvailable(s.available);
         setAllowed(s.allowed !== false);
         setGapAjar(s.gap_ajar ?? null);
+        setSaran(Array.isArray(s.saran) ? s.saran : []);
         if (s.perbaikan === true) {
           setPerbaikan(true);
           setPopupPerbaikan(true);
@@ -1075,7 +1077,10 @@ export default function AsistenPage() {
                     </button>
                   )}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-                    {SUGGESTIONS.map((s) => (
+                    {/* Saran dari SERVER bila ada (diputar per hari, menyorot
+                        fitur yang jarang/tak pernah dipakai); chip statis hanya
+                        jaring pengaman saat status belum termuat. */}
+                    {(saran.length ? saran : SUGGESTIONS).map((s) => (
                       <button
                         key={s}
                         className="btn btn-secondary btn-sm"

@@ -102,10 +102,23 @@ def test_degradasi_berjenjang_sampai_dasar(kirim):
     assert terakhir["question"] == "q"
 
 
-def test_tanpa_session_id_kolomnya_null(kirim):
+def test_tanpa_session_id_dapat_pengelompokan_cadangan(kirim):
+    """Klien lama tak mengirim conversation_id. Dulu kolomnya NULL, dan baris
+    NULL tak bisa direkonstruksi jadi percakapan — padahal kegagalan FOLLOW-UP
+    justru kelas bug terbesar asisten. Kini diberi kunci cadangan per USER+TANGGAL
+    yang berprefiks `auto:` supaya saat menganalisis tak pernah tertukar dengan
+    percakapan sungguhan."""
     rekam, _ = kirim
     _log()
-    assert rekam[0]["session_id"] is None
+    sid = rekam[0]["session_id"]
+    assert sid.startswith("auto:budi:")
+    assert len(sid.split(":")) == 3
+
+
+def test_session_id_asli_TIDAK_ditimpa_cadangan(kirim):
+    rekam, _ = kirim
+    _log(session_id="conv-abc")
+    assert rekam[0]["session_id"] == "conv-abc"
 
 
 def test_pertanyaan_panjang_tak_lagi_dipotong_500(kirim):
