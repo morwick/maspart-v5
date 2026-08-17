@@ -1138,7 +1138,16 @@ def figure_for_instance(rangka: str, instance: dict, pn: str) -> dict:
     SATU panggilan part/tree/item (pola HAR pemilik), tanpa tebakan/walk kategori.
     Respons membawa d2s (nama file SVG), partListName (nama figure), dan items
     ber-ballNum + amount → balon & qty part kita.
-    {found, svg, balon, qty, nama, nama_item} atau {found:False, _err}."""
+    {found, svg, balon, qty, nama, nama_item, jumlah_item, items_ringkas}
+    atau {found:False, _err}.
+
+    ⚠️ `items_ringkas` = SELURUH balon figure ini (bukan cuma PN yang dicari).
+    Dulu fungsi ini menyimpan HANYA baris `hit` dan membuang sisanya, padahal
+    pemanggilnya (_exploded_via_reverse) membaca `items_ringkas` — kunci yang tak
+    pernah ada → daftar balon SELALU kosong di jalur reverse (jalur DEFAULT).
+    Akibat terukur di ai_chat_log: user tanya "balon 4 & 5 PN-nya apa" untuk
+    LZZ5DMSD0RT108874, asisten menyerah 3× lalu menjawab SALAH 2× (17 dari 18
+    baris jawabannya ada di respons yang sama, cuma dibuang di sini)."""
     frame = _frame(rangka)
     pnu = (pn or "").strip().upper()
     rid, pid = instance.get("root_id"), instance.get("part_id")
@@ -1152,11 +1161,29 @@ def figure_for_instance(rangka: str, instance: dict, pn: str) -> dict:
     if "_err" in res:
         return {"found": False, "_err": res["_err"]}
     d = res.get("data") if isinstance(res.get("data"), dict) else {}
-    hit = next((p for p in (d.get("items") or [])
+    items = [p for p in (d.get("items") or []) if isinstance(p, dict)]
+    hit = next((p for p in items
                 if str(p.get("code") or "").strip().upper() == pnu), None)
     svgs = [s for s in (d.get("d2s") or []) if isinstance(s, str)]
     if not hit or not svgs:
         return {"found": False, "_err": "no_figure"}
+    # Bentuk items_ringkas SAMA dengan exploded_figures (balon/pn/nama/qty) supaya
+    # pemanggil tak perlu tahu lewat jalur mana figure-nya datang. Baris tanpa PN
+    # MAUPUN balon dibuang (tak bisa dijawab "balon N itu apa"); baris berbalon
+    # tanpa PN TETAP disimpan — jujur "ada balonnya, PN-nya tak tercantum".
+    ringkas = []
+    for p in items:
+        cpn = str(p.get("code") or "").strip().upper()
+        balon = p.get("ballNum")
+        if not cpn and (balon is None or str(balon).strip() == ""):
+            continue
+        ringkas.append({
+            "balon": balon,
+            "pn": cpn or None,
+            "nama": (" ".join(str(p.get("name") or "").split())
+                     or " ".join(str(p.get("originalName") or "").split())),
+            "qty": p.get("amount"),
+        })
     return {
         "found": True,
         "svg": svgs[0],
@@ -1164,6 +1191,8 @@ def figure_for_instance(rangka: str, instance: dict, pn: str) -> dict:
         "qty": hit.get("amount"),
         "nama_item": " ".join(str(hit.get("name") or "").split()),
         "nama": " ".join(str(d.get("partListName") or instance.get("parent_nama") or "").split()),
+        "jumlah_item": len(ringkas),
+        "items_ringkas": ringkas,
     }
 
 

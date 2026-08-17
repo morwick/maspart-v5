@@ -577,6 +577,54 @@ def _katalog_kategori_impl(args: dict, user: dict) -> dict:
     }
 
 
+def _balon_cocok(nilai, diminta) -> bool:
+    """Nomor balon SAMA? Bandingkan sebagai TEKS.
+
+    ⛔ `==` polos SALAH di sisi Sinotruk: tipe `ballNum` dari EPC TIDAK STABIL —
+    diprobe 2026-08-17, endpoint yang sama untuk VIN & figure yang sama membalas
+    '4' (string) di dua percobaan dan 4 (int) di percobaan lain. Nomor dari user
+    selalu di-int()-kan, jadi dengan `==` polos pencocokan balon kadang kena
+    kadang tidak — `part_di_balon` jadi None secara ACAK, di jalur reverse
+    MAUPUN jalur kategori lama. (Sisi Weichai aman: balon-nya sudah int.)
+    Sekalian memaafkan balon ber-akhiran huruf ('12a') dan spasi."""
+    if nilai is None or diminta is None:
+        return False
+    return str(nilai).strip().casefold() == str(diminta).strip().casefold()
+
+
+def _part_di_balon(items: list[dict], balon_req, nama_figure: str) -> dict | None:
+    """Baris item yang balon-nya = balon_req → bentuk 'part_di_balon' yang seragam."""
+    hit = next((it for it in (items or []) if _balon_cocok(it.get("balon"), balon_req)), None)
+    if not hit:
+        return None
+    return {"balon": balon_req, "part_number": hit.get("pn") or None,
+            "nama": hit.get("nama") or None, "qty": hit.get("qty"),
+            "figure": nama_figure or None}
+
+
+def _catatan_balon_disorot(balon_req, nama_figure: str, part: dict | None,
+                           extra: str = "") -> str:
+    """Catatan untuk panggilan 'balon=N' — SATU sumber teks (Atlas & mesin dulu
+    menyalinnya masing-masing). Menyebut isi balon bila ketemu; bila tidak,
+    mengatakannya TERUS TERANG plus larangan mengarang — bukan diam, karena
+    diam-lah yang membuat model mengisi sendiri PN-nya (terbukti di log)."""
+    if part:
+        isi = (f"Balon {balon_req} = {part.get('nama') or '—'}"
+               + (f" (PN {part['part_number']}"
+                  + (f", qty {part['qty']}" if part.get("qty") else "") + ")"
+                  if part.get("part_number")
+                  else " — PN tak tercantum terpisah (kemungkinan termasuk dalam assembly)."))
+    else:
+        isi = (f"⛔ Balon {balon_req} TIDAK ADA di daftar item figure ini — katakan "
+               "apa adanya bahwa nomor itu tak terdaftar di figure ini dan tawarkan "
+               "figure/assembly lain. JANGAN menyebut PN mana pun untuk balon itu.")
+    ekor = (f" {extra}" if extra else "")
+    return (f"Gambar exploded view SIAP (tampil INLINE di bawah jawabanmu). NOMOR BALON "
+            f"{balon_req} DISOROT (kuning) di figure '{nama_figure}'. {isi}"
+            " Jawab SINGKAT (figure + isi balon); gambar sudah tampil sendiri — "
+            "⛔ JANGAN mengarang PN; JANGAN buat link/gambar/URL sendiri." + ekor)
+
+
 def _exploded_via_reverse(rangka: str, pn: str, balon_req: int | None) -> dict | None:
     """Gambar exploded TANPA kategori: reverse_find_in_unit → figure_for_instance.
 
@@ -602,6 +650,7 @@ def _exploded_via_reverse(rangka: str, pn: str, balon_req: int | None) -> dict |
     nama_fig_balon = ""       # figure milik 'daftar_balon' (yang PERTAMA ber-item)
     balon_total0 = 0
     balon_pn = None
+    part_di_balon = None
     for inst in (rev.get("instances") or [])[:_MAX_EXPLODED_FIGURES]:
         try:
             fig = epc_bom.figure_for_instance(rangka, inst, pn)
@@ -619,13 +668,19 @@ def _exploded_via_reverse(rangka: str, pn: str, balon_req: int | None) -> dict |
         gambar.append({"image_id": image_id, "filename": filename, "balon": hl,
                        "nama_figure": fig.get("nama") or inst.get("parent_nama"),
                        "kategori": "", "jumlah_item": fig.get("jumlah_item")})
+        _items = fig.get("items_ringkas") or []
+        _nama_fig = fig.get("nama") or inst.get("parent_nama") or ""
+        # Balon yang DIMINTA dicari di SEMUA figure (bukan cuma yang pertama):
+        # satu PN bisa muncul di beberapa figure, dan nomor yang ditanya user
+        # belum tentu di figure pertama.
+        if balon_req is not None and part_di_balon is None:
+            part_di_balon = _part_di_balon(_items, balon_req, _nama_fig)
         if not daftar_balon:
-            _it0 = fig.get("items_ringkas") or []
-            balon_total0 = len(_it0)
-            nama_fig_balon = fig.get("nama") or inst.get("parent_nama") or ""
+            balon_total0 = len(_items)
+            nama_fig_balon = _nama_fig
             daftar_balon = [{"balon": it.get("balon"), "pn": it.get("pn"),
-                             "nama": it.get("nama")}
-                            for it in _it0][:40]
+                             "nama": it.get("nama"), "qty": it.get("qty")}
+                            for it in _items][:40]
     if not gambar:
         return None            # tak ada figure ber-SVG → biar jalur lama mencoba
 
@@ -646,11 +701,9 @@ def _exploded_via_reverse(rangka: str, pn: str, balon_req: int | None) -> dict |
                "lagi gambar_exploded dengan 'balon'=N agar balon itu disorot. ⛔ JANGAN "
                "buat link/gambar/URL sendiri; JANGAN sebut PN lain di luar data ini.")
     if balon_req is not None:
-        catatan = (f"Gambar exploded view SIAP (inline). NOMOR BALON {balon_req} DISOROT "
-                   f"(kuning) di figure '{nama_figure}'. Jawab SINGKAT; gambar sudah "
-                   "tampil sendiri — ⛔ JANGAN mengarang PN.")
+        catatan = _catatan_balon_disorot(balon_req, nama_figure, part_di_balon)
     return {"found": True, "frame_number": rev.get("frame_number"), "pn": pn,
-            "kategori": "", "balon_disorot": balon_req, "part_di_balon": None,
+            "kategori": "", "balon_disorot": balon_req, "part_di_balon": part_di_balon,
             "daftar_balon_gambar": daftar_balon,
             "daftar_balon_figure": nama_fig_balon,
             "daftar_balon_cakupan": {"ditampilkan": len(daftar_balon),
@@ -777,11 +830,9 @@ def _gambar_exploded_atlas_impl(args: dict, user: dict) -> dict:
     part_di_balon = None
     if balon_req is not None:
         for f in d["figures"]:
-            hit = next((it for it in (f.get("items_ringkas") or [])
-                        if it.get("balon") == balon_req), None)
-            if hit:
-                part_di_balon = {"balon": balon_req, "part_number": hit.get("pn") or None,
-                                 "nama": hit.get("nama") or None, "figure": f.get("nama")}
+            part_di_balon = _part_di_balon(f.get("items_ringkas") or [], balon_req,
+                                           f.get("nama") or "")
+            if part_di_balon:
                 break
 
     # Gambar exploded view DIMINTA EKSPLISIT lewat tool ini → stash PNG utk tampil
@@ -807,7 +858,8 @@ def _gambar_exploded_atlas_impl(args: dict, user: dict) -> dict:
         _items0 = d["figures"][0].get("items_ringkas") or []
         balon_total0 = len(_items0)
         nama_fig0 = d["figures"][0].get("nama") or ""
-        daftar_balon = [{"balon": it.get("balon"), "pn": it.get("pn"), "nama": it.get("nama")}
+        daftar_balon = [{"balon": it.get("balon"), "pn": it.get("pn"),
+                         "nama": it.get("nama"), "qty": it.get("qty")}
                         for it in _items0][:40]
     _cakupan = (
         f"'daftar_balon_gambar' = balon figure '{nama_fig0}' saja"
@@ -821,14 +873,7 @@ def _gambar_exploded_atlas_impl(args: dict, user: dict) -> dict:
     )
     b0 = gambar[0]
     if balon_req is not None:
-        catatan = (f"Gambar exploded view SIAP (tampil INLINE di bawah jawabanmu). NOMOR BALON "
-                   f"{balon_req} DISOROT (kuning) di figure '{b0['nama_figure']}'. "
-                   + (f"Balon {balon_req} = {part_di_balon.get('nama') or '—'}"
-                      + (f" (PN {part_di_balon['part_number']})" if part_di_balon and part_di_balon.get('part_number')
-                         else " — PN tak tercantum terpisah (kemungkinan termasuk dalam assembly).")
-                      if part_di_balon else f"Balon {balon_req} tak ada di daftar item figure ini.")
-                   + " Jawab SINGKAT (figure + isi balon); gambar sudah tampil sendiri — "
-                     "⛔ JANGAN mengarang PN; JANGAN buat link/gambar/URL sendiri.")
+        catatan = _catatan_balon_disorot(balon_req, b0["nama_figure"] or "", part_di_balon)
     else:
         catatan = (f"Gambar exploded view SIAP — tampil OTOMATIS (inline) di bawah jawabanmu. "
                    f"PN {pn} = NOMOR BALON '{b0['balon']}' di figure '{b0['nama_figure']}'. "
@@ -893,11 +938,9 @@ def _gambar_exploded_mesin_impl(args: dict, user: dict) -> dict:
     part_di_balon = None
     if balon_req is not None:
         for f in d["figures"]:
-            hit = next((it for it in (f.get("items_ringkas") or [])
-                        if it.get("balon") == balon_req), None)
-            if hit:
-                part_di_balon = {"balon": balon_req, "part_number": hit.get("pn") or None,
-                                 "nama": hit.get("nama") or None, "figure": f.get("nama")}
+            part_di_balon = _part_di_balon(f.get("items_ringkas") or [], balon_req,
+                                           f.get("nama") or "")
+            if part_di_balon:
                 break
 
     # Gambar exploded MESIN DIMINTA EKSPLISIT → stash PNG utk tampil INLINE.
@@ -929,14 +972,8 @@ def _gambar_exploded_mesin_impl(args: dict, user: dict) -> dict:
     )
     b0 = gambar[0]
     if balon_req is not None:
-        catatan = (f"Gambar exploded view MESIN SIAP — tampil INLINE. NOMOR BALON "
-                   f"{balon_req} DISOROT (kuning) di figure '{nama_fig}'. "
-                   + (f"Balon {balon_req} = {part_di_balon.get('nama') or '—'}"
-                      + (f" (PN {part_di_balon['part_number']})" if part_di_balon and part_di_balon.get('part_number')
-                         else " — PN tak tercantum terpisah (kemungkinan termasuk dalam assembly).")
-                      if part_di_balon else f"Balon {balon_req} tak ada di daftar item figure ini.")
-                   + " Jawab SINGKAT; gambar sudah tampil sendiri — ⛔ JANGAN mengarang PN; "
-                     "JANGAN buat link/gambar sendiri.")
+        catatan = _catatan_balon_disorot(balon_req, nama_fig, part_di_balon,
+                                         extra="(figure MESIN Weichai)")
     else:
         catatan = (f"Gambar exploded view MESIN SIAP — tampil OTOMATIS (inline). "
                    f"PN {pn} = NOMOR BALON '{b0['balon']}' di figure '{nama_fig}'. "
