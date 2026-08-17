@@ -42,13 +42,19 @@ def _warmup():
     except Exception as e:  # pragma: no cover
         print(f"[startup] warmup index gagal: {e}")
     try:
+        # Matriks embedding galeri (36.674 × 768 float32 ≈ 113 MB) TETAP di-preload:
+        # dipakai setiap pencarian foto, dan memuatnya berarti mem-parse CSV 319 MB.
+        # Ukurannya sedang dan tetap; bukan dia yang membuat container kehabisan RAM.
         image_search.preload_local_index()
     except Exception as e:  # pragma: no cover
         print(f"[startup] preload galeri lokal gagal: {e}")
-    try:
-        image_search.preload_model()
-    except Exception as e:  # pragma: no cover
-        print(f"[startup] preload model gagal: {e}")
+    # ⛔ Model DINOv2 SENGAJA TIDAK di-preload di sini (2026-08-17).
+    # Bobotnya ±350 MB + arena torch yang menggelembung saat inferensi, sementara
+    # `search-image` hanya dipakai 6× dalam 10 jam terakhir. Preload membuat biaya
+    # itu dibayar setiap restart entah fiturnya dipakai atau tidak, dan menyisakan
+    # ±280 MB dari plafon 2,44 GiB — cukup untuk dibunuh cgroup OOM oleh lonjakan
+    # biasa (terjadi 12 Agu & 17 Agu 02:19 UTC). Model kini dimuat saat foto pertama
+    # masuk dan dilepas lagi setelah menganggur 30 menit (image_search._maybe_unload).
     try:
         # Indeks stok Accurate (menu Stok) ditarik TERJADWAL tiap _INDEX_TTL di
         # latar → cache selalu hangat, tak ada user yang menunggu tarikan penuh.

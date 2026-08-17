@@ -564,8 +564,14 @@ async def search_image(
     if len(data) > _MAX_IMAGE_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Ukuran foto > 15 MB.")
     try:
-        results = image_search.search_by_image(
-            data, top_k=top_k, threshold=threshold, use_tta=use_tta
+        # asyncio.to_thread: SINKRON dan berat. Sejak 2026-08-17 model DINOv2 tak
+        # lagi di-preload saat startup, jadi permintaan foto PERTAMA ikut menanggung
+        # pemuatan model ±15-20 detik — di `async def` itu membekukan SELURUH server,
+        # bukan cuma permintaan ini. (Inferensinya sendiri, 1-3 detik, sebetulnya
+        # sudah lama memblokir event loop dengan cara yang sama.)
+        results = await asyncio.to_thread(
+            image_search.search_by_image,
+            data, top_k=top_k, threshold=threshold, use_tta=use_tta,
         )
     except Exception as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Gagal memproses foto: {e}")
@@ -610,7 +616,12 @@ async def search_image_learn(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File kosong.")
     if len(data) > _MAX_IMAGE_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Ukuran foto > 15 MB.")
-    res = image_search.learn_from_photo(data, pn, indexed_by=user.get("username") or "admin")
+    # Sama seperti /search-image: menghitung embedding (dan mungkin MEMUAT model)
+    # di `async def` akan membekukan seluruh server, bukan cuma permintaan ini.
+    res = await asyncio.to_thread(
+        image_search.learn_from_photo, data, pn,
+        indexed_by=user.get("username") or "admin",
+    )
     if res.get("error"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, res["error"])
     return ImageLearnResponse(ok=True, pn=res["pn"], duplikat=bool(res.get("duplikat")),

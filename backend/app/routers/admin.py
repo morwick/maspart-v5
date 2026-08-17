@@ -390,6 +390,10 @@ def monitoring_memori(_admin: dict = Depends(require_admin)):
         "sisa_mb": round(sisa, 1) if sisa is not None else None,
         "ambang_tolak_foto_mb": vin_ocr._SISA_MIN_MB,
         "foto_ditolak": (sisa is not None and sisa < vin_ocr._SISA_MIN_MB),
+        # Penghuni RAM terbesar BUKAN cache: model DINOv2 (±350 MB + arena torch).
+        # Sejak 2026-08-17 dia dimuat saat dipakai & dilepas setelah menganggur,
+        # jadi keadaannya harus bisa DILIHAT di sini — bukan diyakini.
+        "model_foto": image_search.status_model(),
         "cache_total_entri": sum(c["entri"] for c in caches),
         "cache": caches,
     }

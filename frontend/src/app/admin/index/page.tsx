@@ -155,8 +155,11 @@ export default function AdminIndexPage() {
               Total terindeks: <b>{status.total_indexed.toLocaleString("id-ID")}</b>
             </span>
             <span className="rounded-lg bg-zinc-100 px-3 py-1.5">
+              {/* Sejak 2026-08-17 model DINOv2 dimuat SAAT DIPAKAI lalu dilepas lagi
+                  setelah menganggur 30 menit — backend kehabisan RAM & kena cgroup OOM
+                  2×. "belum termuat" = keadaan NORMAL, bukan gangguan. */}
               Model AI: {status.torch ? "tersedia" : "tidak tersedia"}
-              {status.model_ready ? " (siap)" : ""}
+              {status.torch ? (status.model_ready ? " (termuat)" : " (dimuat saat dipakai)") : ""}
             </span>
             <span className="rounded-lg bg-zinc-100 px-3 py-1.5">
               Galeri: {status.gallery_local ? "file CSV (lokal)" : "database"}

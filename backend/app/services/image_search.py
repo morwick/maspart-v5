@@ -13,9 +13,12 @@ sama dengan app Streamlit. TIDAK ada `st.*` di sini.
 from __future__ import annotations
 
 import csv
+import ctypes
+import gc
 import io
 import re
 import threading
+import time
 from pathlib import Path
 
 import requests
@@ -60,21 +63,106 @@ _AGG_BOOST_CAP = 0.10
 
 
 # ── Model singleton ──────────────────────────────────────────────────
+# Model DINOv2 dimuat SAAT DIPAKAI, lalu DILEPAS lagi setelah menganggur.
+#
+# Diukur di container 2026-08-17: backend duduk di 2,15 GB RSS dari plafon
+# 2,44 GiB — sisa hanya ±280 MB, sehingga satu lonjakan biasa (pembuatan Excel
+# + panggilan SIMS) sudah cukup membunuhnya lewat cgroup OOM. Itu benar-benar
+# terjadi dua kali: 12 Agu dan 17 Agu 02:19 UTC. Padahal `search-image` cuma
+# dipanggil 6× dalam 10 jam terakhir — bobot ±350 MB (plus arena torch yang
+# menggelembung saat inferensi dan tak pernah menyusut sendiri) menganggur
+# hampir sepanjang hari sambil memegang jatah yang dibutuhkan permintaan lain.
+#
+# Dulu model ini malah di-preload di `main._warmup`, jadi biayanya dibayar
+# SETIAP restart entah fiturnya dipakai atau tidak. Harga dari perubahan ini:
+# pencarian foto pertama setelah menganggur menunggu pemuatan model (±15-20
+# detik di 1 vCPU); pencarian berikutnya secepat dulu.
 _model_lock = threading.Lock()
 _model = None
 _preprocess = None
+
+_IDLE_UNLOAD_SEC = 30 * 60      # 0/negatif → jangan pernah lepas (mis. utk tes)
+_PANTAU_TIAP_SEC = 60.0
+_dipakai_terakhir = 0.0         # time.monotonic() saat model terakhir diminta
+_pemantau_mulai = False
 
 
 def torch_available() -> bool:
     return _TORCH_OK
 
 
-def _load_model():
+def _kembalikan_ke_os() -> None:
+    """⚠️ Melepas referensi Python saja TIDAK menurunkan RSS: glibc menahan blok
+    yang sudah dibebaskan di arenanya, jadi `docker stats` tak bergerak sedikit
+    pun dan perbaikan ini akan tampak tidak bekerja. `malloc_trim(0)` yang
+    benar-benar mengembalikannya ke kernel."""
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:  # pragma: no cover — bukan glibc (Windows/musl dev)
+        pass
+
+
+def unload_model() -> bool:
+    """Lepas model dari memori. True bila tadinya memang termuat."""
     global _model, _preprocess
+    with _model_lock:
+        if _model is None:
+            return False
+        _model = None
+        _preprocess = None
+    _kembalikan_ke_os()
+    print("[image_search] model DINOv2 dilepas (menganggur) — memori dikembalikan ke OS")
+    return True
+
+
+def _maybe_unload(sekarang: float) -> bool:
+    """Lepas model bila sudah menganggur ≥ `_IDLE_UNLOAD_SEC`. True = dilepas.
+
+    Dipisah dari loop pemantau supaya bisa diuji tanpa menunggu jam nyata."""
+    if _model is None or _IDLE_UNLOAD_SEC <= 0:
+        return False
+    if (sekarang - _dipakai_terakhir) < _IDLE_UNLOAD_SEC:
+        return False
+    return unload_model()
+
+
+def _loop_pemantau() -> None:  # pragma: no cover — loop tak berujung
+    while True:
+        time.sleep(_PANTAU_TIAP_SEC)
+        try:
+            _maybe_unload(time.monotonic())
+        except Exception as e:
+            print(f"[image_search] pemantau idle gagal: {e}")
+
+
+def _mulai_pemantau_locked() -> None:
+    """Satu thread saja seumur proses — dipanggil dari dalam `_model_lock`.
+    Thread tetap hidup setelah model dilepas (bangun 1×/menit, praktis gratis)
+    supaya pemuatan berikutnya tak menumpuk thread baru."""
+    global _pemantau_mulai
+    if _pemantau_mulai:
+        return
+    _pemantau_mulai = True
+    threading.Thread(target=_loop_pemantau, name="dinov2-idle", daemon=True).start()
+
+
+def status_model() -> dict:
+    """Dipakai /api/admin/monitoring/memori — supaya pelepasan idle bisa DILIHAT,
+    bukan diyakini."""
+    termuat = _model is not None
+    return {
+        "termuat": termuat,
+        "idle_detik": (round(time.monotonic() - _dipakai_terakhir, 1)
+                       if termuat and _dipakai_terakhir else None),
+        "lepas_setelah_detik": _IDLE_UNLOAD_SEC,
+    }
+
+
+def _load_model():
+    global _model, _preprocess, _dipakai_terakhir
     if not _TORCH_OK:
         raise RuntimeError(f"torch/torchvision belum terinstall: {_TORCH_ERR}")
-    if _model is not None:
-        return _model, _preprocess
     with _model_lock:
         if _model is None:
             # Persist cache torch.hub (repo DINOv2 + checkpoint ~350MB) ke volume
@@ -100,7 +188,11 @@ def _load_model():
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
-    return _model, _preprocess
+            _mulai_pemantau_locked()
+        # Stempel dibaca di dalam lock bersama modelnya, jadi tak mungkin
+        # mengembalikan pasangan (model, preprocess) yang setengah dilepas.
+        _dipakai_terakhir = time.monotonic()
+        return _model, _preprocess
 
 
 def model_ready() -> bool:
@@ -108,7 +200,11 @@ def model_ready() -> bool:
 
 
 def preload_model() -> None:
-    """Muat model sekarang (mis. saat startup) supaya request pertama cepat."""
+    """Muat model sekarang supaya permintaan pertama cepat.
+
+    ⛔ SENGAJA TIDAK dipanggil dari `main._warmup` lagi — lihat alasan terukur di
+    blok komentar 'Model singleton' di atas. Tetap disediakan untuk pemanggilan
+    manual/skrip di mesin yang memang punya RAM lega."""
     if _TORCH_OK:
         _load_model()
 

@@ -3,6 +3,13 @@
 #
 #   docker build -f deploy/coolify/backend.Dockerfile -t maspart-backend:latest ./backend
 #
+# ⛔⛔ BUKAN FILE INI yang dipakai deploy nyata. `build.sh` menjalankan
+# `docker build ./backend` TANPA -f, jadi yang terbangun adalah `backend/Dockerfile`
+# — dan `push.sh` pun hanya mengirim file itu ke server. Salinan di sini sudah
+# pernah tertinggal (libgl1 untuk ddddocr hanya ada di backend/Dockerfile).
+# Ubah `backend/Dockerfile` LEBIH DULU; isi di sini disamakan agar build manual
+# dengan -f tidak diam-diam berperilaku beda. Tes menjaga keduanya tetap seragam.
+#
 # Catatan: torch versi CPU dipasang dari index khusus agar TIDAK menarik CUDA (~2GB sia-sia).
 FROM python:3.12-slim
 
@@ -26,6 +33,14 @@ RUN pip install --upgrade pip wheel \
 
 # Kode backend (app/, shared/, selftest.py, dll). .env & data di-mount, bukan di-copy.
 COPY . ./
+
+# Setelan alokator — penjelasan lengkap ada di `backend/Dockerfile` (file ITU yang
+# dipakai deploy). Ditaruh di bawah `pip install` supaya cache layer torch tak batal.
+ENV MALLOC_ARENA_MAX=2 \
+    MALLOC_TRIM_THRESHOLD_=131072 \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1
 
 EXPOSE 8001
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
