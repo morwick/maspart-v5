@@ -17,6 +17,13 @@
 > ⚠️ BACA DULU sebelum bekerja: aturan pemilik **jangan sentuh/jalankan `backend/evals/`
 > dan jangan panggil LLM/API model apa pun** — saldo DeepSeek kritis & tanpa provider
 > cadangan (detail di ujung changelog).
+> ⚠️ **SERVER INI BERISI DUA SISTEM (sejak 2026-08-17).** Selain MASPART, ada
+> **Hermes Agent** (agen AI pribadi pemilik, dipakai lewat Telegram) yang jalan
+> sebagai user `hermes` — **terpisah total**, bukan bagian dari MASPART dan bukan
+> dependensi produksi. Kalau kamu menemukan user/service `hermes`, folder
+> `/home/hermes`, atau perintah `maspart-status`/`hermes-jalan`, baca **§5.5**
+> sebelum menyentuh apa pun. Di sana juga dijelaskan kenapa `/opt/maspart`
+> sengaja `chmod 750`.
 > Struktur kode asisten: `backend/app/services/ai_parts/` + loader `ai_assistant.py`.
 > Ditambah **§3.5 — Cara Kerja Aplikasi (deep-dive fungsional)** pada 2026-06-25 agar AI/dev
 > langsung paham domain, alur data, logika pencarian + sinonim, AI tools, API & frontend.
@@ -1424,6 +1431,20 @@ ssh root@maspart.tech "docker ps && df -h /"
 > muncul di `docker ps`**. Cek statusnya dengan `systemctl status maspart-backend
 > maspart-frontend`, bukan lewat Docker.
 
+> **UPDATE 2026-08-17 — kedua service lama DIHENTIKAN.** Sampai hari itu keduanya
+> ternyata masih `active` (walau `disabled`) selama ~7 minggu setelah cutover,
+> mendengarkan di `127.0.0.1:8001` & `:3000` **tanpa melayani satu permintaan pun**
+> (trafik lewat container). Bukan sekadar menganggur — diukur dari `journalctl`:
+> **4.702 panggilan SIMS / 24 jam** (warmer berat masih jalan), **login-logout
+> Accurate 5×/24 jam** (akun single-session → saling menendang dengan container),
+> dan menulis ke `/opt/maspart/data` yang SAMA dengan bind-mount container. Mereka
+> juga pemegang **±1,3 GB swap**. Dihentikan dengan `systemctl stop maspart-backend
+> maspart-frontend` setelah diverifikasi nol dependensi (tak ada klien di port lokal,
+> tak ada cron, Traefik tak menunjuk host, tak ada unit lain yang bergantung).
+> Jalur rollback tetap utuh: `systemctl start maspart-backend maspart-frontend`.
+> ⚠️ Konsekuensi: **`127.0.0.1:8001` kini TIDAK menjawab**. Verifikasi selalu lewat
+> `https://maspart.tech`, atau dari DALAM container.
+
 ### 5.3 Metode deploy
 
 **A. AKTIF — Coolify (Docker Compose)** ✅ ini yang dipakai server **sejak 2026-06-25**.
@@ -1602,6 +1623,127 @@ ssh root@maspart.tech 'docker exec backend-jmmamc7kvqr6nlev97r79j5q python3 -c "
 
 > Ringkas: **Redeploy SELALU aman ASALKAN image sudah di-`build.sh` lebih dulu.** Setelah
 > build, isi image = kode terbaru, jadi recreate container tidak menghilangkan apa pun.
+
+### 5.5 Hermes Agent — penghuni KEDUA di server yang sama (sejak 2026-08-17)
+
+> **BACA INI DULU kalau kamu AI/dev yang baru membuka server.** Di VPS ini ada
+> **dua sistem yang sama sekali terpisah**. Jangan tertukar:
+>
+> | | MASPART | Hermes Agent |
+> |---|---|---|
+> | Apa | toko sparepart (produk, melayani pelanggan) | alat pribadi pemilik, agen AI serbaguna |
+> | Jalan sebagai | container Docker (root) | user `hermes` (tanpa sudo, tanpa docker) |
+> | Lokasi | `/opt/maspart` + image Docker | `/home/hermes/.hermes` |
+> | Diakses lewat | https://maspart.tech + APK | Telegram **@Morwick_bot** + SSH |
+> | Kunci DeepSeek | milik MASPART (env Coolify) | **kunci TERPISAH** di `~/.hermes/.env` |
+>
+> Hermes **bukan bagian dari MASPART**, tidak dipanggil oleh kode MASPART, dan tidak
+> boleh jadi dependensi produksi. Kalau Hermes mati, MASPART sama sekali tidak
+> terpengaruh.
+
+**Kenapa ada di sini.** Pemilik ingin bisa mengurus server & bertanya dari HP.
+Awalnya tidak muat: sisa RAM host cuma 562 MB. Baru muat setelah perbaikan OOM
+backend hari yang sama (lihat changelog **2026-08-17** — DINOv2 dibuat malas,
+backend 2,15 GB → ±800 MB, RAM host bebas jadi 2,1 GB).
+
+**Apa itu.** Hermes Agent v0.20.2 (Nous Research, MIT) — *harness* agen berbasis
+Python 3.11 + Node, **bukan model**. Memanggil API; di sini `deepseek-v4-flash`.
+
+#### Isolasi — apa yang boleh & tidak boleh disentuh Hermes
+
+Diuji satu per satu, bukan diasumsikan:
+
+| Target | Hasil |
+|---|---|
+| `/data/coolify/.../.env` (SEMUA secret produksi) | **ditolak** (`/data/coolify` = `drwx------`) |
+| `/var/run/docker.sock`, `/root` | **ditolak** |
+| Tulis ke `/opt/maspart` | **ditolak** |
+| Baca `/opt/maspart` (kode & data) | **ditutup** 2026-08-17 → `chmod 750 /opt/maspart` |
+
+⚠️ `chmod 750 /opt/maspart` itu **disengaja**. Container jalan sebagai root jadi
+bind-mount tetap terbaca; yang kehilangan akses hanya user non-root seperti
+`hermes`. Jangan dikembalikan ke 755 tanpa alasan.
+
+**Satu-satunya jembatan ke MASPART** = 3 perintah **baca-saja**, lewat sudoers
+allowlist tanpa wildcard (`/etc/sudoers.d/hermes-maspart`):
+
+```
+sudo maspart-status      # container, memori, /health, disk — TANPA argumen
+sudo maspart-error [N]   # baris error/traceback 24 jam terakhir (N maks 300)
+sudo maspart-log [N]     # N baris log terakhir (N maks 300)
+```
+
+Skripnya milik root di `/usr/local/sbin/` (hermes tak bisa mengubahnya) dan hanya
+menerima argumen angka yang divalidasi. ⚠️ Apa pun yang dibaca agen **terkirim ke
+DeepSeek** — `maspart-log` bisa memuat data pelanggan; pakai `maspart-error` bila cukup.
+
+#### Berkas & layanan
+
+```
+/home/hermes/.hermes/          3,5 GB — kode, venv, node, skills, memories/, state.db
+              ├─ .env  (600)   kunci DeepSeek Hermes + TELEGRAM_BOT_TOKEN + allowlist
+              ├─ config.yaml   model, max_turns, delegation.max_iterations
+              └─ memories/     MEMORY.md & USER.md — ingatan agen, PERSIST lintas restart
+/etc/systemd/system/hermes-gateway.service          gateway Telegram (enabled, User=hermes)
+/etc/systemd/system/hermes-gateway.service.d/50-batas.conf   MemoryMax 700M, CPUQuota 30%, CPUWeight 20
+/usr/local/bin/hermes-jalan                          peluncur interaktif BERPAGAR
+/usr/local/sbin/maspart-{status,error,log}           3 perintah pantau baca-saja
+```
+
+⛔ **Jangan pakai `su - hermes` lalu jalankan `hermes`** — sesi itu masuk
+`/user.slice/user-0.slice` (milik root) sehingga batas memori **TIDAK berlaku**.
+Pakai `hermes-jalan` (memakai `systemd-run`, batasnya terbukti kena).
+
+**Pagar sumber daya.** `CPUWeight=20` lawan default 100 milik container MASPART →
+MASPART selalu menang saat rebutan CPU (server hanya **1 vCPU**). Kalau Hermes
+membengkak melewati 700 MB, **Hermes** yang dibunuh kernel — bukan backend.
+
+#### Rem biaya (aturan pemilik: **flash, JANGAN pro**)
+
+| Setelan | Nilai | Alasan |
+|---|---|---|
+| `model.default` | `deepseek-v4-flash` | ⛔ jangan diganti ke `-pro` |
+| `agent.max_turns` | 50 (dari 500) | |
+| `delegation.max_iterations` | 25 (dari 250) | ⛔ **sub-agen punya plafon SENDIRI** — mudah terlewat; 250 ronde × ±16 rb token ≈ 4 juta token untuk satu tugas |
+
+Terukur 2026-08-17: beban tetap **57 KB/ronde** (`hermes prompt-size`), satu pesan
+Telegram sederhana ≈ **17,6 rb token**, dan **caching DeepSeek aktif** (2/3 prompt
+dari cache). Cek pemakaian: `hermes insights --days 7`; cek saldo: `curl -H
+"Authorization: Bearer $KEY" https://api.deepseek.com/user/balance`.
+
+⚠️ Profil **MoA bawaan** menunjuk ke `deepseek-v4-pro` + Claude Opus lewat OpenRouter.
+Tidak aktif dan tak ada kunci OpenRouter → tak bisa jalan. **Periksa lagi kalau
+kunci OpenRouter/OpenAI suatu saat ditambahkan.**
+
+#### Jebakan yang sudah memakan waktu (jangan diulang)
+
+- ⛔ **`playwright install` + `__dirlock`.** Kuncinya berbasis DIREKTORI. Proses yang
+  mati meninggalkan `~/.cache/ms-playwright/__dirlock`, dan setiap percobaan
+  berikutnya mengunduh 167 MiB lalu **menggantung selamanya sebelum ekstraksi**
+  (`ep_poll`, 0% CPU, tanpa koneksi). Satu proses basi menggantung **3,5 jam** dan
+  menumpuk 3 zip × 168 MB di `/tmp`. Obat: `pkill -f 'playwright install'` +
+  `rm -rf .../__dirlock` + bersihkan `/tmp/playwright-download-*`.
+- ⛔ **`hermes skills uninstall <nama>` PALSU untuk skill bawaan** — keluar sukses
+  (exit 0) tapi berkasnya utuh. `opt-out <nama>` juga bukan per-skill. Satu-satunya
+  cara: hapus direktori `~/.hermes/skills/<kategori>/<nama>`.
+- ⛔ **Installer gagal kalau cwd `/root`** — `uv` menengok `/root/.venv` → permission
+  denied. Jalankan dari `/home/hermes`.
+- ⛔ **Jangan simpulkan sebuah tool "bisa" hanya karena foldernya ada.** `browser-use`
+  sempat dianggap aktif karena folder Chromium ada — isinya 18 MB tanpa binari, dan
+  setelah diunduh penuh pun gagal start karena **12 pustaka sistem hilang** (butuh
+  root). Cek binari + `ldd`. Toolset `browser` & `tts` kini **disabled**, Chromium
+  dihapus.
+
+#### Status & yang belum
+
+- ✅ LIVE: gateway Telegram (@Morwick_bot), allowlist 1 user, pantau MASPART baca-saja.
+- ⏸️ Belum dibuka (butuh keputusan pemilik): baca `/opt/maspart/data`, panggil API
+  MASPART, kendali container (restart/deploy).
+- 💡 Ide yang dibahas & **direkomendasikan**: jangan mengganti mesin asisten MASPART
+  dengan Hermes (gerbang izin per-akun, tabel `.tbl`, kartu Excel, streaming, guard
+  angka, dan `ai_chat_log` semuanya akan hilang). Sebagai gantinya **sambungkan**:
+  buka beberapa tool MASPART baca-saja sebagai **server MCP** (`hermes mcp add`),
+  supaya bisa ditanya dari Telegram tanpa menyentuh asisten produksi.
 
 ## 6. Database & Migrations
 
