@@ -599,7 +599,13 @@ def _dump_tool(result, name: str = "") -> str:
     """Serialisasi hasil tool untuk konsumsi model: proyeksi per-tool (buang
     field yang model tak butuh) + dikompakkan (buang field kosong) + separator
     rapat (tanpa spasi). Dipakai SEKALI lalu string yang sama dipakai ekstraksi
-    PN & konten yang di-append — guard PN melihat persis yang dilihat model."""
+    PN & konten yang di-append — guard PN melihat persis yang dilihat model.
+
+    ⛔ SENGAJA tetap `json` baku, BUKAN orjson. orjson menserialisasi datetime
+    secara NATIVE (RFC 3339 '…T…') sedangkan di sini datetime jatuh ke
+    `default=str` ('… …' berspasi) — menukarnya mengubah teks yang DILIHAT MODEL
+    dan yang dibaca guard PN. Isinya pun sudah dibatasi 24 rb char, jadi
+    untungnya mikrodetik sementara risikonya perubahan perilaku."""
     return json.dumps(_compact_result(_project_for_model(name, result)),
                       ensure_ascii=False, separators=(",", ":"), default=str)
 

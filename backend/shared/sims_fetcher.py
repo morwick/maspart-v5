@@ -5,9 +5,9 @@ Install:
   pip install requests pycryptodome
 """
 
-import json
 import time
 import threading
+import orjson
 import requests
 from pathlib import Path
 
@@ -207,20 +207,33 @@ def _reset_token():
 # ══════════════════════════════════════════════
 _json_lock = threading.Lock()
 
+# Memo per-(mtime,size) — sama persis dengan _load_part_info_json di bawah, yang
+# sudah membuktikan polanya. Tanpa memo, file 1,5 MB ini di-parse ULANG pada
+# SETIAP fetch_sims_images(pn) (lihat pemanggil di bawah) cuma untuk memeriksa
+# `pn_key in cache`: terukur 4,0 ms/parse, jadi ~48 ms terbuang tiap cari_part
+# 12 part, dan ~0,4 dtk untuk batch 100 part. Tulisan lewat _save_json mengubah
+# mtime -> otomatis dimuat ulang.
+_images_memo: dict = {"sig": None, "data": {}}
+
 def _load_json() -> dict:
-    IMAGES_JSON.parent.mkdir(parents=True, exist_ok=True)
-    if IMAGES_JSON.exists():
+    try:
+        st = IMAGES_JSON.stat()
+    except OSError:                      # belum ada file → kosong (tanpa mkdir)
+        return {}
+    sig = (st.st_mtime_ns, st.st_size)
+    if _images_memo["sig"] != sig:
         try:
-            with open(IMAGES_JSON, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(IMAGES_JSON, "rb") as f:
+                _images_memo["data"] = orjson.loads(f.read())
+            _images_memo["sig"] = sig
         except Exception:
-            pass
-    return {}
+            return _images_memo["data"] or {}
+    return _images_memo["data"]
 
 def _save_json(data: dict):
     IMAGES_JSON.parent.mkdir(parents=True, exist_ok=True)
-    with open(IMAGES_JSON, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    with open(IMAGES_JSON, "wb") as f:
+        f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 
 # ══════════════════════════════════════════════
@@ -241,8 +254,8 @@ def _load_part_info_json() -> dict:
     sig = (st.st_mtime_ns, st.st_size)
     if _part_info_memo["sig"] != sig:
         try:
-            with open(PART_INFO_JSON, "r", encoding="utf-8") as f:
-                _part_info_memo["data"] = json.load(f)
+            with open(PART_INFO_JSON, "rb") as f:
+                _part_info_memo["data"] = orjson.loads(f.read())
             _part_info_memo["sig"] = sig
         except Exception:
             return _part_info_memo["data"] or {}
@@ -250,8 +263,8 @@ def _load_part_info_json() -> dict:
 
 def _save_part_info_json(data: dict):
     PART_INFO_JSON.parent.mkdir(parents=True, exist_ok=True)
-    with open(PART_INFO_JSON, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    with open(PART_INFO_JSON, "wb") as f:
+        f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 
 # ══════════════════════════════════════════════

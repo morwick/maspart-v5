@@ -9,6 +9,25 @@ pandas>=2.0
 openpyxl>=3.1
 python-multipart>=0.0.9
 
+# Pencocokan fuzzy (C++) menggantikan difflib di jalur panas: koreksi tipo &
+# saran nama/PN (part_index), saran PN sheet (ai_sheet), dan "mungkin maksud"
+# isi Loading List (p1_dasar) — yang terakhir terukur 96 ms -> 4,3 ms untuk 800
+# part. Juga menjadi SATU implementasi jarak edit yang dipakai search_boost dan
+# pengetahuan (dulu dua salinan byte-identik).
+# ⚠️ Skala rapidfuzz 0-100, difflib 0-1 — ambang di pemanggil sudah disesuaikan.
+# ⛔ Jangan dipakai menggantikan vin_ocr.jarak: itu Levenshtein BERBOBOT (pasangan
+# huruf mirip berbiaya 0,35) yang tak bisa ditiru rapidfuzz — menukarnya =
+# melonggarkan ambang snap nomor rangka.
+rapidfuzz>=3.9
+
+# Parser JSON cepat untuk dataset BESAR yang sering diurai: catalog_bom.json
+# (~7,8 MB), semua .json.gz lewat knowledge_util.load_json (~10 dataset),
+# item EPC per-rangka, serta cache gambar/harga SIMS.
+# ⛔ Sengaja TIDAK dipakai di write_json_gz (jaminan byte-stabil) dan di
+# _dump_tool (orjson menserialisasi datetime secara native → mengubah teks yang
+# dilihat model). Alasannya ditulis di masing-masing fungsi.
+orjson>=3.10
+
 # Dependensi modul root yang di-reuse + Cari by Foto
 # (part_compare, sims_fetcher, sims_price_fetcher, image_search/DINOv2)
 numpy>=1.24

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import orjson
 import re
 import sys
 import threading
@@ -1857,7 +1858,7 @@ def _items_disk_load(frame: str) -> dict | None:
         p = _items_disk_path(frame)
         if not p.exists():
             return None
-        d = json.loads(p.read_text(encoding="utf-8"))
+        d = orjson.loads(p.read_bytes())
         incomplete = bool(d.get("incomplete"))
         umur = time.time() - float(d.get("ts") or 0)
         if incomplete and umur > _ITEMS_PARTIAL_TTL:
@@ -1875,9 +1876,8 @@ def _items_disk_save(frame: str, rows: list[dict], incomplete: bool = False) -> 
     try:
         p = _items_disk_path(frame)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"ts": time.time(), "rows": rows,
-                                 "incomplete": bool(incomplete)}, ensure_ascii=False),
-                     encoding="utf-8")
+        p.write_bytes(orjson.dumps({"ts": time.time(), "rows": rows,
+                                    "incomplete": bool(incomplete)}))
     except Exception:   # disk penuh/read-only → cache RAM tetap jalan
         pass
 

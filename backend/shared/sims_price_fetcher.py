@@ -8,11 +8,11 @@ Install:
   pip install requests pycryptodome
 """
 
-import json
 import time
 import threading
 from pathlib import Path
 
+import orjson
 import requests
 
 # ══════════════════════════════════════════════
@@ -155,21 +155,32 @@ def _reset_token():
 _cache_lock = threading.Lock()
 
 
+# Memo per-(mtime,size), pola yang sama dengan sims_fetcher: cache harga ini
+# dibaca ulang pada tiap permintaan harga hanya untuk memeriksa satu kunci PN.
+# Tulisan lewat _save_price_cache mengubah mtime -> otomatis dimuat ulang.
+_price_memo: dict = {"sig": None, "data": {}}
+
+
 def _load_price_cache() -> dict:
-    PRICE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    if PRICE_CACHE_FILE.exists():
+    try:
+        st = PRICE_CACHE_FILE.stat()
+    except OSError:                      # belum ada file → kosong (tanpa mkdir)
+        return {}
+    sig = (st.st_mtime_ns, st.st_size)
+    if _price_memo["sig"] != sig:
         try:
-            with open(PRICE_CACHE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(PRICE_CACHE_FILE, "rb") as f:
+                _price_memo["data"] = orjson.loads(f.read())
+            _price_memo["sig"] = sig
         except Exception:
-            pass
-    return {}
+            return _price_memo["data"] or {}
+    return _price_memo["data"]
 
 
 def _save_price_cache(data: dict):
     PRICE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(PRICE_CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    with open(PRICE_CACHE_FILE, "wb") as f:
+        f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 
 # ══════════════════════════════════════════════

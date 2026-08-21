@@ -17,6 +17,8 @@ import os
 import re
 from pathlib import Path
 
+import orjson
+
 from ..core.config import get_settings
 
 # ── Cache per-mtime ──────────────────────────────────────────────────────────
@@ -37,7 +39,9 @@ def _load() -> dict:
         data = {}
         try:
             if mt is not None:
-                data = json.loads(_path().read_text(encoding="utf-8")) or {}
+                # orjson + read_bytes: catalog_bom.json ~7,8 MB, parse tunggal
+                # terbesar di backend (start dingin & tiap kali file di-rebuild).
+                data = orjson.loads(_path().read_bytes()) or {}
         except Exception:
             data = {}
         _CACHE.update(mtime=mt, data=data)

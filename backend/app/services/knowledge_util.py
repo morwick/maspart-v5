@@ -19,10 +19,12 @@ Konvensi dataset kanonik (lihat plan rombakan 2026-07-17):
 from __future__ import annotations
 
 import gzip
-import json
+import json          # tetap dipakai write_json_gz (byte-stabil) — lihat catatan di sana
 import re
 import threading
 from pathlib import Path
+
+import orjson
 
 # ── normalisasi PN ───────────────────────────────────────────────────
 # Union dua varian lama: catalog_bom/repairkit buang [spasi _ - /],
@@ -66,11 +68,15 @@ def load_json(path: Path | str, default=None):
     data = [] if default is None else default
     try:
         if mt is not None:
+            # orjson.loads menerima bytes langsung — untuk .gz kita baca biner
+            # lalu urai, bukan lewat pembungkus teks: satu dekode UTF-8 hilang
+            # dan parsernya jauh lebih cepat. Ini SATU pintu untuk ~10 dataset
+            # (dtc_codes, jadwal_perawatan, warranty_klaim, fast_moving, dst).
             if p.suffix == ".gz":
-                with gzip.open(p, "rt", encoding="utf-8") as f:
-                    data = json.load(f)
+                with gzip.open(p, "rb") as f:
+                    data = orjson.loads(f.read())
             else:
-                data = json.loads(p.read_text(encoding="utf-8"))
+                data = orjson.loads(p.read_bytes())
             if data is None:
                 data = [] if default is None else default
     except Exception:
@@ -83,7 +89,13 @@ def load_json(path: Path | str, default=None):
 # ── writer deterministik ─────────────────────────────────────────────
 def write_json_gz(path: Path | str, rows) -> None:
     """Tulis dataset ke .json.gz byte-stable: kunci di-sort, tanpa timestamp
-    gzip (mtime=0), kompak. Dua build dgn data sama → byte identik."""
+    gzip (mtime=0), kompak. Dua build dgn data sama → byte identik.
+
+    ⛔ SENGAJA tetap memakai `json` baku, BUKAN orjson. Fungsi ini hanya dipakai
+    saat BUILD dataset (bukan jalur panas), sedangkan menukar serializer bisa
+    menggeser byte keluaran (mis. format float) — dan justru byte identik itulah
+    yang dijamin fungsi ini. Menukarnya = ~10 dataset .gz tampak 'berubah' pada
+    build berikutnya tanpa isi yang benar-benar berbeda."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(rows, ensure_ascii=False, sort_keys=True,
