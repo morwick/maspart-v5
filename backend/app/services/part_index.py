@@ -1048,12 +1048,19 @@ def idf(word: str) -> float:
     Rumus IDF baku dengan penghalusan; dibatasi bawah 0 supaya kata yang ada di
     HAMPIR SEMUA baris tak pernah bernilai negatif.
 
-    ⚠️ Kata TAK DIKENAL diberi nilai NETRAL, bukan nilai tertinggi. Indeks nama
-    sengaja membuang kata ≤2 huruf (lihat _process_file), jadi 'AS' — kata yang
-    justru sangat umum di katalog Indonesia — punya df=0. Kalau df=0 dihitung
-    apa adanya, ia jadi kata PALING langka dan mendominasi skor: persis kebalikan
-    dari yang dimaui. Hal yang sama berlaku untuk salah ketik: tak dikenal =
-    tak ada buktinya = jangan diistimewakan."""
+    ⚠️ Kata TAK DIKENAL diberi nilai NETRAL, bukan nilai tertinggi. Tak dikenal
+    = tak ada buktinya = jangan diistimewakan (berlaku juga untuk salah ketik).
+
+    ⛔⛔ Kata ≤2 huruf SELALU netral, berapa pun df-nya. _process_file hanya
+    mengindeks token >2 KARAKTER dari hasil txt.split(), sehingga 'AS' yang
+    berdiri sendiri TAK PERNAH masuk indeks — tapi 'AS,' (3 karakter, berkoma)
+    masuk, lalu pemecah DF mengeluarkan 'AS' darinya. Hasilnya df kecil yang
+    MENYESATKAN, bukan nol: terukur di katalog produksi df=72 → idf 11,33,
+    nilai TERTINGGI dari seluruh kosakata, padahal 'as' justru kata yang sangat
+    umum. Memeriksa df==0 saja TIDAK menutup kasus ini — panjang katanya yang
+    harus diperiksa, karena di situlah DF-nya memang tak bisa dipercaya."""
+    if len((word or "").strip()) <= 2:
+        return IDF_NETRAL
     df_map = _state.get("name_df") or {}
     n = _state.get("name_rows") or 0
     if not df_map or n <= 0:

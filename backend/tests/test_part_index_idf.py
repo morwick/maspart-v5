@@ -50,6 +50,31 @@ def test_kata_pendek_tak_dikenal_dapat_nilai_NETRAL_bukan_tertinggi(state_bersih
     assert nilai_as < part_index.idf("turbocharger"), "kata pendek mendominasi skor"
 
 
+def test_kata_pendek_dengan_df_KECIL_TAPI_BUKAN_NOL_tetap_netral(state_bersih):
+    """⛔⛔ Kasus NYATA dari katalog produksi, bukan hipotetis.
+
+    _process_file mengindeks token >2 KARAKTER dari txt.split(), jadi 'AS'
+    sendirian tak masuk — tapi 'AS,' (berkoma) masuk, lalu pemecah DF menarik
+    'AS' darinya. Terukur df=72 dari 6.066.949 baris → idf 11,33, TERTINGGI
+    dari seluruh 5.613 kosakata, mengalahkan CRANKSHAFT (8,63).
+
+    Memeriksa df==0 TIDAK menangkap ini. Panjang katanya yang menentukan."""
+    _set_df({"AS": 72, "CRANKSHAFT": 1083, "BOLT": 127381}, 6_066_949)
+    assert part_index.idf("as") == part_index.IDF_NETRAL
+    assert part_index.idf("as") < part_index.idf("crankshaft"), \
+        "'as' kembali mendominasi skor — df kecil menyesatkan lolos lagi"
+    assert part_index.idf("as") < part_index.idf("bolt"), \
+        "'as' bahkan mengalahkan kata paling umum"
+
+
+def test_kata_3_huruf_tetap_dihitung_normal(state_bersih):
+    """Batasnya HARUS di ≤2, bukan lebih longgar: 'OIL' (3 huruf) diindeks
+    dengan benar, jadi df-nya tepercaya dan tak boleh ikut dinetralkan."""
+    _set_df({"OIL": 41130, "CRANKSHAFT": 1083}, 6_066_949)
+    assert part_index.idf("oil") != part_index.IDF_NETRAL
+    assert part_index.idf("oil") < part_index.idf("crankshaft")
+
+
 def test_salah_ketik_tak_diistimewakan(state_bersih):
     _set_df({"TURBOCHARGER": 12}, 5000)
     assert part_index.idf("turbochrgr") == part_index.IDF_NETRAL
