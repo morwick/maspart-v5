@@ -3191,23 +3191,110 @@ def _stok_int(v) -> int:
         return 0
 
 
+_KATA_RE = re.compile(r"[a-z0-9]+")
+
+# Peredam untuk kata yang BUKAN ketikan asli user (hasil ekspansi sinonim/ejaan):
+# kata yang benar-benar diketik user harus selalu menang atas terjemahannya.
+# Angka mengikuti konvensi yang sudah dipakai search_boost (BOBOT_TIPO/BOBOT_STEM).
+_REDAM_EKSPANSI = 0.7
+
+
+def _tok(s: str) -> list[str]:
+    """Pecah jadi token batas-kata (huruf/angka), huruf kecil."""
+    return _KATA_RE.findall((s or "").lower())
+
+
 def _relevansi(name: str, pn: str, q: str, terms: list[str]) -> tuple[int, str | None]:
     """Skor relevansi part terhadap maksud query + kata kunci yang paling cocok.
-    Makin SPESIFIK kecocokan (kata kunci terpanjang yang jadi substring nama),
-    makin tinggi skornya. Query yang berupa PN diberi skor sangat tinggi."""
-    name_l = (name or "").lower()
+
+    Dulu skornya = PANJANG KARAKTER kata kunci terpanjang yang jadi SUBSTRING
+    nama. Tiga cacatnya nyata:
+      • substring, bukan batas kata → 'as' cocok di CH-AS-SIS/G-AS-KET,
+        'seal' cocok di SEALANT;
+      • bias panjang → 'TRANSMISSION' (12 huruf) mengalahkan kecocokan tepat
+        'OIL SEAL' (8);
+      • tanpa bobot kelangkaan → 'BOLT' (ribuan baris) senilai 'TURBOCHARGER'.
+
+    Sekarang: token batas-kata, dibobot IDF (kata langka lebih menentukan),
+    dikali CAKUPAN query (query 4 kata yang cuma cocok 1 kata tidak boleh
+    disamakan dengan yang cocok semuanya), ditambah bonus frasa berurutan, lalu
+    dinormalisasi ala BM25 supaya nama panjang tak menang hanya karena panjang.
+
+    Nilai balik ke-2 tetap 'kata yang paling menjelaskan kenapa part ini muncul'
+    (dipakai untuk 'cocok_kata' dan penilaian _kuat), kini = token cocok dengan
+    IDF TERTINGGI, bukan yang terpanjang."""
     ql = (q or "").lower().strip()
     if ql and ql in (pn or "").lower():
         return 1000 + len(ql), None  # query = bagian Part Number → match kuat
-    best = None
+
+    nama_tok = _tok(name)
+    if not nama_tok:
+        return 0, None
+    nama_set = set(nama_tok)
+
+    # Token query ASLI diprioritaskan; token dari ekspansi sinonim/ejaan diredam.
+    # (Tanpa memasukkan kata asli, pencarian langsung spt 'injector' tanpa
+    # sinonim akan berskor 0 dan 'jumlah_relevan_kuat' salah lapor 0.)
+    asli = _tok(q)
+    asli_set = set(asli)
+    # Batas atas bobot untuk token EKSPANSI. Meredam dengan pengali saja TIDAK
+    # cukup: sinonim yang kebetulan lebih langka (IDF tinggi) tetap bisa
+    # mengalahkan kata yang benar-benar diketik user — mis. query 'seal' yang
+    # diekspansi ke 'gasket' membuat GASKET RING menang atas SEAL RING. Sinonim
+    # boleh MENDUKUNG kata user, tapi tak boleh melampauinya.
+    idf_asli = [part_index.idf(t) for t in asli_set]
+    plafon = max(idf_asli) if idf_asli else None
+
+    bobot_tok: dict[str, float] = {}
+    for t in asli:
+        bobot_tok[t] = 1.0
     for t in terms:
-        tl = (t or "").lower().strip()
-        # Kata query ASLI yang cocok di nama juga dihitung — tanpa ini, pencarian
-        # langsung (mis. 'injector' tanpa sinonim) berskor 0 semua dan
-        # 'jumlah_relevan_kuat' salah lapor 0 padahal hasil relevan banyak.
-        if tl and tl in name_l:
-            if best is None or len(tl) > len(best):
-                best = tl
-    return (len(best) if best else 0), best
+        for w in _tok(t):
+            bobot_tok.setdefault(w, _REDAM_EKSPANSI)
+    if not bobot_tok:
+        return 0, None
+
+    skor = 0.0
+    total = 0.0
+    cocok_n = 0
+    best_tok, best_idf = None, -1.0
+    for t, bobot in bobot_tok.items():
+        w = part_index.idf(t)
+        if t not in asli_set and plafon is not None:
+            w = min(w, plafon)
+        total += w * bobot
+        if t in nama_set:
+            skor += w * bobot
+            cocok_n += 1
+            if w > best_idf:
+                best_idf, best_tok = w, t
+    if not cocok_n or total <= 0:
+        return 0, None
+
+    # CAKUPAN: berapa bagian dari maksud user yang benar-benar terjawab.
+    cakupan = skor / total
+    # FRASA: token query asli yang muncul BERURUTAN di nama (mis. 'oil seal')
+    # jauh lebih meyakinkan daripada dua kata yang kebetulan sama-sama ada.
+    frasa = 1.0
+    frasa_teks: str | None = None
+    if len(asli) >= 2:
+        n_join = " ".join(nama_tok)
+        if " ".join(asli) in n_join:
+            frasa, frasa_teks = 1.6, " ".join(asli)
+        else:
+            for a, b in zip(asli, asli[1:]):
+                if f"{a} {b}" in n_join:
+                    frasa, frasa_teks = 1.25, f"{a} {b}"
+                    break
+    # Normalisasi panjang ala BM25: nama panjang punya lebih banyak peluang
+    # cocok secara kebetulan, jadi keunggulannya dipangkas (bukan dihapus).
+    norm = 1.0 / (1.0 + 0.35 * max(0, len(nama_tok) - len(asli)))
+
+    nilai = skor * cakupan * frasa * (0.55 + 0.45 * norm)
+    # Bila yang cocok sebuah FRASA, itulah penjelasan terbaik kenapa part ini
+    # muncul — dan p3._kuat memang membaca spasi sebagai tanda kecocokan kuat.
+    # Skala ke int dan DIKUNCI di bawah 1000 supaya tak pernah menabrak tingkat
+    # PN di atas (yang harus selalu menang).
+    return min(999, int(round(nilai * 12))), (frasa_teks or best_tok)
 
 
