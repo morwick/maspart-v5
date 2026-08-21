@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import re
 
+from rapidfuzz.distance import Levenshtein
+
 # Bobot varian (di bawah kecocokan eksak = 1.0).
 BOBOT_TIPO = 0.8      # kueri hasil koreksi typo
 BOBOT_STEM = 0.7      # kecocokan lewat stem
@@ -81,22 +83,13 @@ def vocab_ember(teks_list) -> dict[str, set[str]]:
 
 
 def _jarak_edit(a: str, b: str, maks: int) -> int:
-    """Levenshtein terpangkas: begitu seluruh baris > maks, menyerah (maks+1)."""
-    if abs(len(a) - len(b)) > maks:
-        return maks + 1
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        cur = [i]
-        terbaik = i
-        for j, cb in enumerate(b, 1):
-            v = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
-            cur.append(v)
-            if v < terbaik:
-                terbaik = v
-        if terbaik > maks:
-            return maks + 1
-        prev = cur
-    return prev[-1]
+    """Levenshtein terpangkas: begitu jarak > maks, menyerah (maks+1).
+
+    Dulu ditulis tangan di sini DAN disalin byte-identik ke pengetahuan.py.
+    rapidfuzz `score_cutoff` punya kontrak yang PERSIS sama (kembalikan
+    cutoff+1 saat terlampaui), jadi keduanya kini memakai satu implementasi C++
+    ini — pengetahuan.py mengimpornya, tidak lagi menyalin."""
+    return Levenshtein.distance(a, b, score_cutoff=maks)
 
 
 def koreksi_tipo(ql: str, ember: dict[str, set[str]]) -> str:

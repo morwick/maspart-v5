@@ -29,7 +29,7 @@ import uuid
 from pathlib import Path
 
 from ..core.config import get_settings
-from . import sinonim
+from . import search_boost, sinonim
 from .knowledge_util import load_json
 
 _lock = threading.Lock()
@@ -707,23 +707,10 @@ def _vocab_ember(hays: list[tuple]) -> dict[str, set[str]]:
     return ent["ember"]
 
 
-def _jarak_edit(a: str, b: str, maks: int) -> int:
-    """Levenshtein terpangkas: begitu seluruh baris > maks, menyerah (maks+1)."""
-    if abs(len(a) - len(b)) > maks:
-        return maks + 1
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        cur = [i]
-        terbaik = i
-        for j, cb in enumerate(b, 1):
-            v = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
-            cur.append(v)
-            if v < terbaik:
-                terbaik = v
-        if terbaik > maks:
-            return maks + 1
-        prev = cur
-    return prev[-1]
+# Dulu SALINAN byte-identik dari search_boost._jarak_edit. Satu sumber saja
+# sekarang (rapidfuzz C++ di balik nama yang sama) — dua salinan berarti dua
+# tempat yang harus diperbaiki setiap kali aturan koreksi tipo berubah.
+_jarak_edit = search_boost._jarak_edit
 
 
 def _koreksi_tipo(ql: str, hays: list[tuple]) -> str:

@@ -11,9 +11,9 @@ membangun ulang (mis. setelah admin upload data baru).
 """
 from __future__ import annotations
 
-import difflib
 import hashlib
 import io
+import math
 import os
 import pickle
 import re
@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+from rapidfuzz import fuzz, process
 
 from ..core.config import get_settings
 from . import harga
@@ -116,8 +117,14 @@ _state: dict = {
     "file_count": 0,
     "part_count": 0,
     "name_vocab": set(),       # {WORD_UPPER} semua kata nama part — utk koreksi typo
-    "name_vocab_list": [],     # list(name_vocab) — cache utk difflib
+    "name_vocab_list": [],     # list(name_vocab) — cache utk pencocokan fuzzy
+    "name_df": {},             # {WORD_UPPER: jml baris memuatnya} — sumber IDF
+    "name_rows": 0,            # total baris katalog (N pada rumus IDF)
 }
+
+# Pemecah kata untuk DF/IDF: kunci part_name_index masih membawa tanda baca
+# ('SEAL,', '(L.H.)') karena dibentuk dari txt.split().
+_KATA_IDF_RE = re.compile(r"[A-Z0-9]+")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -399,8 +406,27 @@ def refresh_index() -> dict:
     for fi in excel_files:
         name_vocab.update(fi.get("part_name_index", {}).keys())
 
+    # DF (document frequency) per kata nama part, untuk IDF pada skor relevansi.
+    # GRATIS: part_name_index sudah memetakan kata -> daftar baris, jadi jumlah
+    # barisnya PERSIS document frequency-nya. Tak ada scan tambahan, dan hanya
+    # satu dict kecil (sebesar kosakata) yang disimpan.
+    # ⚠️ Kunci nm_idx dipecah lagi ke [A-Z0-9]+ karena dibentuk dari txt.split()
+    # sehingga masih membawa tanda baca ('SEAL,' pada 'OIL SEAL, CRANKSHAFT').
+    # Tanpa langkah ini, DF untuk 'SEAL' hanya menghitung kemunculan yang
+    # kebetulan tanpa koma → kata umum tampak langka dan IDF-nya melambung.
+    name_df: dict[str, int] = {}
+    name_rows = 0
+    for fi in excel_files:
+        for w, rows in (fi.get("part_name_index", {}) or {}).items():
+            n = len(rows)
+            for t in _KATA_IDF_RE.findall(w):
+                name_df[t] = name_df.get(t, 0) + n
+        name_rows += len(fi.get("dataframe", ()))
+
     with _lock:
         _state.update({
+            "name_df": name_df,
+            "name_rows": name_rows,
             "excel_files": excel_files,
             "stok_cache": stok_cache,
             "gudang_cache": gudang_cache,
@@ -1009,6 +1035,35 @@ def _word_known(word_up: str, vocab: set) -> bool:
     return any(word_up in vw for vw in vocab)
 
 
+IDF_NETRAL = 1.0   # dipakai saat katalog belum terindeks / kata tak dikenal
+
+
+def idf(word: str) -> float:
+    """Bobot kelangkaan sebuah kata nama part: makin jarang, makin bernilai.
+
+    'BOLT'/'SEAL' muncul di ribuan baris → nyaris tak memberi tahu apa-apa;
+    'TURBOCHARGER' muncul di segelintir → hampir menentukan jawabannya. Tanpa
+    bobot ini skor relevansi memperlakukan keduanya sama.
+
+    Rumus IDF baku dengan penghalusan; dibatasi bawah 0 supaya kata yang ada di
+    HAMPIR SEMUA baris tak pernah bernilai negatif.
+
+    ⚠️ Kata TAK DIKENAL diberi nilai NETRAL, bukan nilai tertinggi. Indeks nama
+    sengaja membuang kata ≤2 huruf (lihat _process_file), jadi 'AS' — kata yang
+    justru sangat umum di katalog Indonesia — punya df=0. Kalau df=0 dihitung
+    apa adanya, ia jadi kata PALING langka dan mendominasi skor: persis kebalikan
+    dari yang dimaui. Hal yang sama berlaku untuk salah ketik: tak dikenal =
+    tak ada buktinya = jangan diistimewakan."""
+    df_map = _state.get("name_df") or {}
+    n = _state.get("name_rows") or 0
+    if not df_map or n <= 0:
+        return IDF_NETRAL
+    df = df_map.get((word or "").upper(), 0)
+    if df <= 0:
+        return IDF_NETRAL
+    return max(0.0, math.log((n + 1) / (df + 1)))
+
+
 def correct_typos(term: str) -> tuple[str, list[tuple[str, str]]]:
     """Perbaiki salah ketik tiap KATA pada `term` terhadap kosakata nama part.
     Hanya mengganti kata yang TIDAK dikenal dan punya padanan sangat mirip
@@ -1027,10 +1082,10 @@ def correct_typos(term: str) -> tuple[str, list[tuple[str, str]]]:
         if len(wu) <= 3 or any(ch.isdigit() for ch in wu) or _word_known(wu, vocab):
             out_words.append(w)
             continue
-        match = difflib.get_close_matches(wu, vocab_list, n=1, cutoff=0.82)
-        if match and match[0] != wu:
-            out_words.append(match[0])
-            corrections.append((w, match[0].title()))
+        hit = process.extractOne(wu, vocab_list, scorer=fuzz.ratio, score_cutoff=82)
+        if hit and hit[0] != wu:
+            out_words.append(hit[0])
+            corrections.append((w, hit[0].title()))
         else:
             out_words.append(w)
     return " ".join(out_words), corrections
@@ -1048,7 +1103,9 @@ def suggest_names(term: str, limit: int = 6) -> list[dict]:
     for w in term.upper().split():
         if len(w) <= 3 or any(ch.isdigit() for ch in w):
             continue
-        for m in difflib.get_close_matches(w, vocab_list, n=3, cutoff=0.7):
+        for m, _skor, _i in process.extract(
+            w, vocab_list, scorer=fuzz.ratio, limit=3, score_cutoff=70
+        ):
             close_words.add(m)
     if not close_words:
         return []
@@ -1245,11 +1302,17 @@ def suggest_pns(term: str, limit: int = 5) -> list[dict]:
     if not looks_like_pn(flat):
         return []
     rows = all_parts_min()
-    # Bucket dulu (prefix-4 sama ATAU panjang ±1) supaya difflib murah & fokus.
+    # Bucket dulu (prefix-4 sama ATAU panjang ±1) supaya pencocokan murah & fokus.
     pool: dict[str, tuple[str, str]] = {}
     for pn, nm in rows:
         f = _pn_flat(pn)
         if f[:4] == flat[:4] or abs(len(f) - len(flat)) <= 1:
             pool.setdefault(f, (pn, nm))
-    close = difflib.get_close_matches(flat, list(pool.keys()), n=limit, cutoff=0.85)
-    return [{"part_number": pool[f][0], "part_name": pool[f][1]} for f in close if f != flat]
+    close = process.extract(
+        flat, list(pool.keys()), scorer=fuzz.ratio, limit=limit, score_cutoff=85
+    )
+    return [
+        {"part_number": pool[f][0], "part_name": pool[f][1]}
+        for f, _skor, _i in close
+        if f != flat
+    ]

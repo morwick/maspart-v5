@@ -1204,10 +1204,10 @@ def _pengganti_pn(pn: str) -> str:
 
 
 def _saran_pn(pn: str, fmap: dict) -> str:
-    """'Mungkin maksud' untuk PN tak ketemu: kandidat difflib terdekat (ratio≥0.9)
+    """'Mungkin maksud' untuk PN tak ketemu: kandidat terdekat (ratio≥90 dari 100)
     dari peta flat PN katalog. Deterministik (1 terbaik, tie → alfabet). Kosong bila
     tak ada yang cukup mirip."""
-    import difflib
+    from rapidfuzz import fuzz
     flat = part_index._pn_flat(pn)
     if len(flat) < 5:
         return ""
@@ -1215,10 +1215,10 @@ def _saran_pn(pn: str, fmap: dict) -> str:
     kand = [f for f in fmap if f.startswith(pref) and f != flat]
     best, best_r = "", 0.0
     for f in kand:
-        r = difflib.SequenceMatcher(None, flat, f).ratio()
+        r = fuzz.ratio(flat, f)          # 0-100 (dulu difflib 0-1)
         if r > best_r or (r == best_r and (fmap[f][0] < best)):
             best_r, best = r, fmap[f][0]
-    return best if best_r >= 0.9 else ""
+    return best if best_r >= 90 else ""
 
 
 def _stash_sheet_out(judul: str, headers: list[str], body: list[list],
