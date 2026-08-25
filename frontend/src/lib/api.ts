@@ -852,6 +852,31 @@ export async function getAccurateStock(pn: string, token: string): Promise<Accur
   return res.json();
 }
 
+// ── Stok PEMASOK Weichai (portal tci-pnp) — diambil LIVE saat diminta ──
+// Beda dari Accurate (stok KITA): ini ketersediaan di PEMASOK untuk restok.
+// Portal tak memberi harga → STOK saja. Internal-only (pembeli diblokir server).
+export type WeichaiStock = {
+  configured: boolean;
+  found?: boolean;
+  error?: boolean;
+  blocked?: boolean;
+  stock?: {
+    barcode: string;
+    nama: string;
+    total: number;
+    satuan: string;
+    per_cabang: { cabang: string; qty: number; satuan: string }[];
+  };
+};
+
+export async function getWeichaiStock(pn: string, token: string): Promise<WeichaiStock> {
+  const res = await fetch(`${API_BASE}/api/parts/weichai-stock?pn=${encodeURIComponent(pn)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 // ── Keluarga varian pemasok (kartu Accurate ganda utk 1 part fisik) ──
 // Satu part fisik bisa dipecah per PEMASOK di Accurate dengan suffix huruf
 // (mis. PN dasar + '/SN' + '/SH') — stok DAN harga beda tiap kartu.

@@ -92,6 +92,17 @@ class Settings(BaseSettings):
     accurate_host: str = "iris.accurate.id"  # host aplikasi perusahaan (zona)
     accurate_auto_quotation: bool = True      # buat Penawaran Accurate otomatis saat order lunas
 
+    # ── Portal STOK pemasok Weichai (weichai.tci-pnp.com/warehouse) ──
+    # Stok pemasok untuk restok, diambil LIVE saat user minta (lihat
+    # services/weichai_stock.py). Fallback ke data/weichai_stock_cred.json bila
+    # env kosong. Portal di balik Cloudflare → butuh UA browser (di-set service).
+    weichai_pnp_username: str = ""
+    weichai_pnp_password: str = ""
+
+    @property
+    def weichai_pnp_configured(self) -> bool:
+        return bool(self.weichai_pnp_username and self.weichai_pnp_password)
+
     @property
     def accurate_login_configured(self) -> bool:
         return bool(self.accurate_username and self.accurate_password

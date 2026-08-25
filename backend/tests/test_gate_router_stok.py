@@ -94,6 +94,36 @@ def test_accurate_stock_pembeli_lihat_ketersediaan_tanpa_per_gudang(perms, accur
     assert "per_gudang" not in stock            # rincian gudang DIBUANG
 
 
+# ── /api/parts/weichai-stock (stok PEMASOK, internal-only) ───────────────────
+@pytest.fixture
+def weichai_found(monkeypatch):
+    monkeypatch.setattr(parts_router.weichai_stock, "stok", lambda pn: {
+        "configured": True, "found": True,
+        "stock": {"barcode": pn, "nama": "N", "total": 5, "satuan": "PIECE",
+                  "per_cabang": [{"cabang": "Bekasi", "qty": 5, "satuan": "PIECE"}]}})
+
+
+def test_weichai_stock_pembeli_diblokir(perms, weichai_found):
+    """Pembeli tak boleh melihat stok PEMASOK sama sekali."""
+    out = parts_router.weichai_stock_lookup(pn="X", user=PEMBELI)
+    assert out["blocked"] is True and out.get("found") is False
+    assert "stock" not in out                       # ⛔ tak bocor ke pembeli
+
+
+def test_weichai_stock_staf_tanpa_izin_diblokir(perms, weichai_found):
+    """Staf tanpa centang Kolom Stok → diperlakukan seperti tak berhak."""
+    out = parts_router.weichai_stock_lookup(pn="X", user=WAWAN)
+    assert out["blocked"] is True and "stock" not in out
+
+
+def test_weichai_stock_diteruskan_utk_admin_dan_staf(perms, weichai_found):
+    for u in (ADMIN, AGUS):
+        out = parts_router.weichai_stock_lookup(pn="X", user=u)
+        assert out["found"] is True
+        assert out["stock"]["total"] == 5
+        assert out["stock"]["per_cabang"][0]["cabang"] == "Bekasi"
+
+
 # ── /api/stok/list ───────────────────────────────────────────────────────────
 @pytest.fixture
 def stok_rows(monkeypatch):

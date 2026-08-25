@@ -32,7 +32,8 @@ from ..schemas import (
     SearchResponse,
 )
 from ..services import (accurate, ai_export, catalog, compare, epc_bom, exploded_view, gudang,
-                        image_search, part_index, permissions, reservations, search_log, sims)
+                        image_search, part_index, permissions, reservations, search_log, sims,
+                        weichai_stock)
 from ..services.supabase_client import fetch_part_photos, get_user_gudang
 
 _MAX_IMAGE_BYTES = 15 * 1024 * 1024  # 15 MB
@@ -326,6 +327,26 @@ def accurate_stock(
     if (user.get("role") or "").lower() == "pembeli":
         resp.get("stock", {}).pop("per_gudang", None)
     return resp
+
+
+@router.get("/weichai-stock")
+def weichai_stock_lookup(
+    pn: str = Query(..., min_length=1, description="Part Number untuk cek stok PEMASOK Weichai"),
+    user: dict = Depends(get_current_user),
+):
+    """Stok PEMASOK Weichai (portal tci-pnp) untuk 1 PN — diambil LIVE saat diminta.
+
+    Berbeda dari `/accurate-stock` (stok KITA): ini ketersediaan di PEMASOK untuk
+    restok. Portal tak memberi harga → STOK saja. Non-fatal: kegagalan login/koneksi
+    dibalas sebagai status. Lambat (~5-8 dtk) → frontend memanggil on-demand (tombol),
+    bukan tiap buka halaman; service men-cache per-PN 5 menit.
+
+    ⛔ Internal-only: pembeli tak boleh melihat stok pemasok (sejalan "gudang
+    disembunyikan dari pembeli"), dan hormati gerbang kolom stok Menu Control.
+    """
+    if (user.get("role") or "").lower() == "pembeli" or not permissions.boleh_stok(user):
+        return {"configured": True, "found": False, "blocked": True}
+    return weichai_stock.stok(pn)
 
 
 @router.get("/varian")

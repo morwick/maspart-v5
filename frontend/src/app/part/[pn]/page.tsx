@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import ImageLightbox from "@/components/ImageLightbox";
-import { ApiError, cekPartDiUnit, deleteRakFoto, getAccurateStock, getPartExploded, getPartExplodedFigure, getPartPhotos, getPartSpec, getPartVarian, getBuyerLocations, getRakForPart, partImageUrl, saveRak, searchParts, uploadRakFoto, type AccurateStock, type BuyerLocation, type CekUnitResult, type PartExplodedFigure, type PartResult, type PartSpec, type PartVarian, type PartVarianItem, type RakInfo } from "@/lib/api";
+import { ApiError, cekPartDiUnit, deleteRakFoto, getAccurateStock, getPartExploded, getPartExplodedFigure, getPartPhotos, getPartSpec, getPartVarian, getBuyerLocations, getRakForPart, getWeichaiStock, partImageUrl, saveRak, searchParts, uploadRakFoto, type AccurateStock, type BuyerLocation, type CekUnitResult, type PartExplodedFigure, type PartResult, type PartSpec, type PartVarian, type PartVarianItem, type RakInfo, type WeichaiStock } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { ensurePerms } from "@/lib/perms";
 import { addToCart, hasPrice, hasWeight } from "@/lib/cart";
@@ -674,6 +674,11 @@ export default function PartDetailPage() {
                         )}
                       </div>
                     )}
+
+                    {/* Stok PEMASOK Weichai — diambil LIVE saat diminta (tombol).
+                        Terpisah dari stok Accurate (beda makna: stok KITA vs
+                        ketersediaan di PEMASOK untuk restok). Internal-only. */}
+                    {showStok && <WeichaiStockCard pn={main.part_number} />}
                   </>
                 )}
 
@@ -1236,6 +1241,113 @@ function CekUnitCard({ pn }: { pn: string }) {
         <div className="alert alert-error" style={{ marginTop: 12 }}>
           ❌ {res.pesan}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Stok PEMASOK Weichai (portal tci-pnp) ────────────────────────────────────
+// Diambil LIVE saat staf menekan tombol — BUKAN tiap buka halaman (portal lambat
+// ~5-8 dtk & di balik Cloudflare). Beda makna dari stok Accurate: ini
+// ketersediaan di PEMASOK untuk restok, bukan stok yang kita pegang. Portal tak
+// memberi harga → STOK saja. Non-fatal; internal-only (server memblokir pembeli).
+function WeichaiStockCard({ pn }: { pn: string }) {
+  const [data, setData] = useState<WeichaiStock | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // PN berganti (navigasi antar-part) → reset, jangan tampilkan hasil part lama.
+  useEffect(() => {
+    setData(null);
+    setErr(null);
+    setBusy(false);
+  }, [pn]);
+
+  async function cek() {
+    const token = getToken();
+    if (!token || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      setData(await getWeichaiStock(pn, token));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Gagal menghubungi portal Weichai.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const stock = data?.found ? data.stock : null;
+
+  return (
+    <div className="surface" style={{ overflow: "hidden" }}>
+      <div
+        className="px-4 py-2.5 flex items-center gap-2"
+        style={{ fontSize: 13, fontWeight: 600, borderBottom: "1px solid var(--ink-150)" }}
+      >
+        <span>Stok Pemasok</span>
+        <span className="pill" style={{ background: "var(--brand-50, #eef4ff)", color: "#1d4ed8", borderColor: "#bfdbfe" }}>
+          Weichai
+        </span>
+        {!data && !busy && (
+          <button className="btn btn-ghost ml-auto" style={{ fontSize: 12 }} onClick={cek}>
+            Cek stok Weichai
+          </button>
+        )}
+        {data && !busy && (
+          <button className="btn btn-ghost ml-auto" style={{ fontSize: 12 }} onClick={cek} title="Ambil ulang (live)">
+            ↻ Perbarui
+          </button>
+        )}
+      </div>
+
+      <div className="px-4 py-3" style={{ fontSize: 12.5, color: "var(--ink-500)" }}>
+        {!data && !busy && !err && (
+          <>Ketersediaan di pemasok Weichai untuk restok — diambil langsung dari portal saat diminta (±5–8 dtk). Tanpa harga.</>
+        )}
+        {busy && <span>Mengecek ke portal Weichai…</span>}
+        {err && <span style={{ color: "var(--danger, #dc2626)" }}>{err}</span>}
+        {data && !busy && data.configured === false && (
+          <span>Portal Weichai belum dikonfigurasi di server.</span>
+        )}
+        {data && !busy && data.error && (
+          <span style={{ color: "var(--danger, #dc2626)" }}>Gagal login/koneksi ke portal Weichai. Coba lagi.</span>
+        )}
+        {data && !busy && data.configured !== false && !data.error && !stock && (
+          <span>Part ini <b>tidak tersedia</b> di Weichai.</span>
+        )}
+      </div>
+
+      {stock && !busy && (
+        <>
+          <div className="px-4 pb-1 flex items-baseline gap-2">
+            <div className="stat-value" style={{ fontSize: 20 }}>
+              {stock.total.toLocaleString("id-ID")} {stock.satuan}
+            </div>
+            <span style={{ fontSize: 12, color: "var(--ink-500)" }}>tersedia di pemasok</span>
+          </div>
+          {stock.per_cabang.length > 0 ? (
+            <table className="tbl">
+              <tbody>
+                {stock.per_cabang.map((b) => (
+                  <tr key={b.cabang}>
+                    <td style={{ color: "var(--ink-600)" }}>{b.cabang}</td>
+                    <td className="num" style={{ fontWeight: 550 }}>
+                      {b.qty.toLocaleString("id-ID")} {b.satuan}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="px-4 pb-3" style={{ fontSize: 12, color: "var(--ink-400)" }}>
+              Rincian per-cabang tak tersedia.
+            </div>
+          )}
+          <div className="px-4 py-2" style={{ fontSize: 11.5, color: "var(--ink-400)", borderTop: "1px solid var(--ink-150)" }}>
+            Sumber: portal Weichai (tci-pnp) · barcode <span className="mono">{stock.barcode}</span> · stok pemasok, bukan stok kita.
+          </div>
+        </>
       )}
     </div>
   );
