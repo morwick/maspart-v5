@@ -43,7 +43,12 @@ _LOGIN = (_LOG_BASE + "/sso/auth/login?redirect="
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 _BRANCHES = ["6", "5", "4", "3", "1"]
-_CRED_FILE = Path(__file__).resolve().parents[3] / "data" / "weichai_stock_cred.json"
+
+
+def _cred_file() -> Path:
+    # <DATA_DIR>/weichai_stock_cred.json — DATA_DIR = bind-mount di server
+    # (pola accurate._session_file), BUKAN path relatif kode (beda di container).
+    return get_settings().data_path / "weichai_stock_cred.json"
 
 _CARD_SPLIT = 'class="col-sm-6 col-md-4 product-item"'
 
@@ -65,8 +70,9 @@ def _creds() -> tuple[str, str] | None:
     if s.weichai_pnp_configured:
         return s.weichai_pnp_username, s.weichai_pnp_password
     try:
-        if _CRED_FILE.exists():
-            d = json.loads(_CRED_FILE.read_text(encoding="utf-8"))
+        cf = _cred_file()
+        if cf.exists():
+            d = json.loads(cf.read_text(encoding="utf-8"))
             u, p = d.get("username"), d.get("password")
             if u and p:
                 return u, p
