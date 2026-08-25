@@ -928,6 +928,10 @@ export type MyPermissions = {
   role: string;
   branch?: string | null; // label gudang bila akun cabang
   can_price?: boolean; // boleh ekspor kolom harga di Batch (admin & akun 'mas')
+  // Fitur halaman elevated yang menyala untuk akun ini (Menu Control tab
+  // "Fitur"), mis. "stok_weichai". Default: admin & akun 'mas' saja. Opsional
+  // supaya backend lama (tanpa field ini) tetap terparse.
+  fitur?: string[];
   // Gudang yang boleh DITULIS akun ini di Rak & Kartu Stok (label PENUH,
   // mis. "01.Jakarta"). [] untuk pembeli & selama migrasi 027 belum jalan —
   // opsional supaya backend lama (tanpa field ini) tetap terparse.
@@ -944,7 +948,7 @@ export async function getMyPermissions(token: string): Promise<MyPermissions> {
 
 /** 'sesi' bukan izin melainkan PEMBATASAN (mis. hanya 1 perangkat);
  *  'asisten' = kemampuan Asisten AI elevated (default kosong, centang MEMBERI). */
-export type PermKind = "menu" | "column" | "harga" | "sesi" | "asisten";
+export type PermKind = "menu" | "column" | "harga" | "sesi" | "asisten" | "fitur";
 
 export type PermOverview = {
   kind: string;

@@ -91,6 +91,16 @@ ASISTEN_KEYS: dict[str, str] = {
     "ai_mengajar": "Mengajari Pengetahuan (chat)",
 }
 
+# Fitur HALAMAN yang elevated (bukan kemampuan Asisten AI) — tab "Fitur" di Menu
+# Control. Sama-sama `grant_off`: tanpa centang, staf TIDAK dapat.
+# `stok_weichai` = kartu "Stok Pemasok — Weichai" di halaman part (portal
+# tci-pnp). Aturan pemilik 2026-08-25: DEFAULT hanya admin & akun 'mas'; staf
+# lain harus dicentang admin. Alasannya data PEMASOK (bukan stok kita) dan tiap
+# klik memukul portal pihak ketiga yang login-nya satu akun bersama.
+FITUR_KEYS: dict[str, str] = {
+    "stok_weichai": "Stok Pemasok Weichai (halaman part)",
+}
+
 # kind → (perm_type, semua key+label, key yang selalu aktif)
 #
 # `default_off`: kind ini BUKAN daftar izin melainkan PEMBATASAN. Aturan umum
@@ -115,6 +125,12 @@ KINDS: dict[str, dict] = {
     # SEMUA (beda dari default_off yang = PEMBATASAN sehingga admin dapat []).
     "asisten": {"perm_type": "ai_ability", "all": ASISTEN_KEYS, "always": set(),
                 "grant_off": True},
+    # Fitur halaman elevated (bukan tool asisten) — semantik sama dgn 'asisten':
+    # tanpa baris = KOSONG untuk staf, admin tetap semua. Akun SEE_ALL ('mas')
+    # ditambahkan di `fitur_aktif`, bukan di sini, supaya `effective` tetap
+    # generik (satu arti untuk semua kind).
+    "fitur": {"perm_type": "feature", "all": FITUR_KEYS, "always": set(),
+              "grant_off": True},
 }
 
 
@@ -153,6 +169,10 @@ def all_effective(username: str, role: str) -> dict:
         "branch": gudang.gudang_label(branch) if branch else None,
         # Boleh ekspor kolom harga di Batch Download — admin & akun 'mas' saja.
         "can_price": gudang.can_see_price(username, role),
+        # Fitur halaman elevated (tab "Fitur" di Menu Control), mis.
+        # 'stok_weichai'. Frontend memakainya untuk MENYEMBUNYIKAN kartunya;
+        # gerbang sebenarnya tetap di router (React saja tak menutup curl).
+        "fitur": fitur_aktif(username, role),
         # Gudang yang boleh DITULIS akun ini di Rak & Kartu Stok (label penuh).
         # Frontend memakainya untuk (a) memunculkan menu Rak dan (b) menampilkan
         # tombol "Ubah" hanya di baris gudang yang memang ia kelola. [] untuk
@@ -258,6 +278,30 @@ def boleh_ai(user: dict, key: str) -> bool:
         return False
     try:
         return key in effective("asisten", user.get("username", ""), role)
+    except Exception:
+        return False
+
+
+def fitur_aktif(username: str, role: str) -> list[str]:
+    """Fitur halaman elevated yang AKTIF untuk akun ini (tab 'Fitur').
+
+    admin & akun SEE_ALL ('mas') SELALU semua — itu DEFAULT yang diminta pemilik
+    2026-08-25; staf lain hanya yang dicentang admin; pembeli tak pernah (fitur
+    internal). Pola OR yang sama dengan `_can_sims` di asisten: centang MEMBERI,
+    tak pernah mencabut dari admin/'mas'."""
+    r = (role or "").lower()
+    if r == "pembeli":
+        return []
+    if r == "admin" or (username or "").strip().lower() in gudang.SEE_ALL_ACCOUNTS:
+        return list(FITUR_KEYS.keys())
+    return effective("fitur", username, r)
+
+
+def boleh_fitur(user: dict, key: str) -> bool:
+    """Gerbang satu fitur halaman elevated — fail-CLOSED (sama seperti boleh_ai:
+    memberi akses elevated tak boleh terjadi gara-gara Supabase mati)."""
+    try:
+        return key in fitur_aktif(user.get("username", ""), user.get("role", ""))
     except Exception:
         return False
 

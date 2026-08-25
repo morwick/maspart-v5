@@ -43,6 +43,10 @@ export default function PartDetailPage() {
   const [backHref, setBackHref] = useState("/search");
   const [showStok, setShowStok] = useState(true);
   const [showHarga, setShowHarga] = useState(true);
+  // Stok PEMASOK Weichai: fitur elevated (Menu Control tab "Fitur"). Default
+  // hanya admin & akun 'mas' — mulai FALSE supaya kartunya tak sempat berkedip
+  // untuk akun yang tak berhak. Gerbang sebenarnya tetap di backend.
+  const [showWeichai, setShowWeichai] = useState(false);
   const [isBuyer, setIsBuyer] = useState(false);
   const [buyerLocs, setBuyerLocs] = useState<BuyerLocation[]>([]);
   const [accStock, setAccStock] = useState<AccurateStock | null>(null);
@@ -79,6 +83,7 @@ export default function PartDetailPage() {
       if (p) {
         setShowStok(admin || p.columns.includes("col_stok"));
         setShowHarga(admin || p.columns.includes("col_harga"));
+        setShowWeichai(admin || (p.fitur ?? []).includes("stok_weichai"));
         setKelola(p.gudang_kelola ?? []);
       }
     });
@@ -678,7 +683,7 @@ export default function PartDetailPage() {
                     {/* Stok PEMASOK Weichai — diambil LIVE saat diminta (tombol).
                         Terpisah dari stok Accurate (beda makna: stok KITA vs
                         ketersediaan di PEMASOK untuk restok). Internal-only. */}
-                    {showStok && <WeichaiStockCard pn={main.part_number} />}
+                    {showStok && showWeichai && <WeichaiStockCard pn={main.part_number} />}
                   </>
                 )}
 

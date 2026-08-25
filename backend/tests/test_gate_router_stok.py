@@ -14,15 +14,18 @@ from app.routers import stok as stok_router
 ADMIN = {"username": "admin", "role": "admin"}
 WAWAN = {"username": "wawan", "role": "user"}        # col_stok OFF
 AGUS = {"username": "agustiono", "role": "user"}     # col_stok ON
+MAS = {"username": "mas", "role": "user"}            # akun SEE_ALL
 PEMBELI = {"username": "roni", "role": "pembeli"}
 
 
 @pytest.fixture
 def perms(monkeypatch):
-    """Menu Control: agustiono punya col_stok, wawan tidak (col_harga dua-duanya)."""
+    """Menu Control: agustiono & mas punya col_stok, wawan tidak (col_harga
+    dua-duanya). Tak ada satu pun yang dicentang 'stok_weichai' — itulah keadaan
+    DEFAULT yang diuji: cuma admin & 'mas' yang tembus."""
     monkeypatch.setattr("app.services.permissions.effective",
-                        lambda kind, u, r: ["col_stok", "col_harga"] if u == "agustiono"
-                        else ["col_harga"])
+                        lambda kind, u, r: ["col_stok", "col_harga"]
+                        if u in ("agustiono", "mas") else ["col_harga"])
 
 
 @pytest.fixture
@@ -116,12 +119,41 @@ def test_weichai_stock_staf_tanpa_izin_diblokir(perms, weichai_found):
     assert out["blocked"] is True and "stock" not in out
 
 
-def test_weichai_stock_diteruskan_utk_admin_dan_staf(perms, weichai_found):
-    for u in (ADMIN, AGUS):
+def test_weichai_stock_staf_ber_kolom_stok_tetap_perlu_centang_fitur(perms, weichai_found):
+    """Aturan pemilik 2026-08-25: 'Kolom Stok' SAJA tidak cukup. Stok PEMASOK
+    butuh centang tersendiri di Menu Control tab 'Fitur' (stok_weichai) —
+    defaultnya hanya admin & 'mas'."""
+    out = parts_router.weichai_stock_lookup(pn="X", user=AGUS)
+    assert out["blocked"] is True and "stock" not in out
+
+
+def test_weichai_stock_diteruskan_utk_admin_dan_mas(perms, weichai_found):
+    """DEFAULT tanpa centang apa pun: admin & akun SEE_ALL ('mas') tetap bisa."""
+    for u in (ADMIN, MAS):
         out = parts_router.weichai_stock_lookup(pn="X", user=u)
         assert out["found"] is True
         assert out["stock"]["total"] == 5
         assert out["stock"]["per_cabang"][0]["cabang"] == "Bekasi"
+
+
+def test_weichai_stock_staf_boleh_setelah_dicentang(monkeypatch, weichai_found):
+    """Admin mencentang 'stok_weichai' untuk staf → fiturnya terbuka untuk dia."""
+    monkeypatch.setattr("app.services.permissions.effective",
+                        lambda kind, u, r: (["stok_weichai"] if kind == "fitur"
+                                            else ["col_stok", "col_harga"]))
+    out = parts_router.weichai_stock_lookup(pn="X", user=AGUS)
+    assert out["found"] is True and out["stock"]["total"] == 5
+
+
+def test_weichai_stock_gagal_baca_izin_menutup_bukan_membuka(monkeypatch, weichai_found):
+    """Fail-CLOSED: Supabase/izin error → fitur elevated TIDAK terbuka."""
+    def _meledak(kind, u, r):
+        if kind == "fitur":
+            raise RuntimeError("supabase mati")
+        return ["col_stok", "col_harga"]
+    monkeypatch.setattr("app.services.permissions.effective", _meledak)
+    out = parts_router.weichai_stock_lookup(pn="X", user=AGUS)
+    assert out["blocked"] is True and "stock" not in out
 
 
 # ── /api/stok/list ───────────────────────────────────────────────────────────

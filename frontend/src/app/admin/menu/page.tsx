@@ -21,6 +21,7 @@ const KINDS: [PermKind, string][] = [
   ["harga", "Sub-tab Harga"],
   ["sesi", "Sesi"],
   ["asisten", "Asisten AI"],
+  ["fitur", "Fitur"],
 ];
 
 // Tab 'sesi' berbeda sifatnya: centang = MEMBATASI, bukan memberi akses.
@@ -36,6 +37,11 @@ const KETERANGAN: Partial<Record<PermKind, string>> = {
     "mencabut dari mereka. Akun pembeli tidak bisa diberi kemampuan ini. " +
     "Stok Tertahan & Alternatif juga butuh centang “Kolom Stok”; hasil berharga " +
     "butuh “Kolom Harga” (blok pertama di bawah).",
+  fitur:
+    "Centang = MENYALAKAN fitur halaman yang defaultnya tertutup. " +
+    "Admin & akun “mas” selalu punya semuanya — centang tidak pernah mencabut " +
+    "dari mereka. Akun pembeli tidak bisa diberi fitur ini. " +
+    "“Stok Pemasok Weichai” juga butuh centang “Kolom Stok” (tab Kolom).",
 };
 
 export default function AdminMenuPage() {

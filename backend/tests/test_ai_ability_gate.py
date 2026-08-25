@@ -164,3 +164,53 @@ def test_overview_asisten(monkeypatch):
     assert ov["default"] == []                    # baris default mulai kosong
     assert set(ov["all_keys"]) == set(permissions.ASISTEN_KEYS)
     assert permissions.is_valid_kind("asisten")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Menu Control tab "Fitur" — fitur HALAMAN elevated (kind `fitur`)
+# ══════════════════════════════════════════════════════════════════════════════
+# Aturan pemilik 2026-08-25: "Stok Pemasok Weichai" di halaman part bisa
+# dikontrol admin, DEFAULT-nya hanya akun 'mas' & admin. Semantiknya meniru
+# kind `asisten` (grant_off + fail-closed), bedanya akun SEE_ALL ikut SELALU
+# dapat — jadi tanpa centang apa pun pun pemilik tetap bisa memakainya.
+def test_fitur_default_hanya_admin_dan_mas(monkeypatch):
+    monkeypatch.setattr("app.services.permissions.perms_load", lambda pt: {})
+    semua = list(permissions.FITUR_KEYS)
+    assert permissions.fitur_aktif("admin", "admin") == semua
+    assert permissions.fitur_aktif("mas", "user") == semua       # SEE_ALL
+    assert permissions.fitur_aktif("polos", "user") == []        # staf: tertutup
+    assert permissions.fitur_aktif("toko", "pembeli") == []      # pembeli: tak pernah
+
+
+def test_fitur_terbuka_setelah_dicentang(monkeypatch):
+    monkeypatch.setattr("app.services.permissions.perms_load",
+                        lambda pt: {"budi": ["stok_weichai"]})
+    assert permissions.boleh_fitur(BUDI, "stok_weichai") is True
+    assert permissions.boleh_fitur(POLOS, "stok_weichai") is False
+    # Centang tak bisa mencabut dari admin/'mas'.
+    assert permissions.boleh_fitur(ADMIN, "stok_weichai") is True
+    assert permissions.boleh_fitur(MAS, "stok_weichai") is True
+
+
+def test_boleh_fitur_fail_closed(monkeypatch):
+    """Izin gagal dibaca → fitur elevated TETAP TERTUTUP (jangan fail-open)."""
+    def meledak(pt):
+        raise RuntimeError("supabase mati")
+    monkeypatch.setattr("app.services.permissions.perms_load", meledak)
+    assert permissions.boleh_fitur(BUDI, "stok_weichai") is False
+    assert permissions.boleh_fitur(ADMIN, "stok_weichai") is True   # admin tak baca DB
+
+
+def test_overview_fitur_dan_izin_saya(monkeypatch):
+    monkeypatch.setattr("app.services.permissions.perms_load", lambda pt: {})
+    monkeypatch.setattr("app.services.permissions.list_users",
+                        lambda: [{"username": "budi", "role": "user"}])
+    ov = permissions.overview("fitur")
+    assert permissions.is_valid_kind("fitur")
+    assert ov["default"] == []                     # baris default mulai kosong
+    assert set(ov["all_keys"]) == set(permissions.FITUR_KEYS)
+    # Frontend menyembunyikan kartunya lewat field ini.
+    monkeypatch.setattr("app.services.permissions.gudang.gudang_for_user", lambda u, r: None)
+    monkeypatch.setattr("app.services.permissions.rak.gudang_kelola_for", lambda u: [])
+    assert permissions.all_effective("mas", "user")["fitur"] == list(permissions.FITUR_KEYS)
+    assert permissions.all_effective("polos", "user")["fitur"] == []

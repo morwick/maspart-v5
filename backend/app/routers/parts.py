@@ -342,9 +342,15 @@ def weichai_stock_lookup(
     bukan tiap buka halaman; service men-cache per-PN 5 menit.
 
     ⛔ Internal-only: pembeli tak boleh melihat stok pemasok (sejalan "gudang
-    disembunyikan dari pembeli"), dan hormati gerbang kolom stok Menu Control.
+    disembunyikan dari pembeli"), hormati gerbang kolom stok Menu Control, DAN
+    fitur ini harus dinyalakan per akun di Menu Control tab "Fitur"
+    (`stok_weichai`). Aturan pemilik 2026-08-25: DEFAULT hanya admin & akun
+    'mas' — ini data PEMASOK dan tiap klik memukul portal pihak ketiga yang
+    login-nya satu akun bersama.
     """
     if (user.get("role") or "").lower() == "pembeli" or not permissions.boleh_stok(user):
+        return {"configured": True, "found": False, "blocked": True}
+    if not permissions.boleh_fitur(user, "stok_weichai"):
         return {"configured": True, "found": False, "blocked": True}
     return weichai_stock.stok(pn)
 
