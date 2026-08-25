@@ -742,6 +742,48 @@ def test_isi_pn_hanya_sel_kosong_jaga_yang_terisi(bom_unit):
     assert r["baris_kosong"] == 0
 
 
+def test_isi_pn_ditulis_ke_file_asli_bukan_file_baru(bom_unit):
+    """sheet_isi_part_number juga menulis ke FILE USER (aturan pemilik 2026-08-25):
+    baris judul di atas header tetap ada & PN mendarat di sel kolom yang benar."""
+    from openpyxl import load_workbook
+
+    from app.services import ai_export
+    p = ai_sheet.parse_upload(_xlsx([
+        ["DAFTAR PERMINTAAN PART"],                 # baris judul milik user
+        ["Nama Part", "Part Number"],
+        ["Spring bracket", ""],
+    ]), "campur.xlsx")
+    sid = ai_sheet.put_sheet(USER["username"], p)
+    r = ai._t_sheet_isi_part_number({"_sheet_id": sid, "rangka": "RJ-TEST"}, USER)
+    assert r["format_asli_dipertahankan"] is True
+    data, _ = ai_export.generic_excel(r["export_id"])
+    ws = load_workbook(io.BytesIO(data)).active
+    assert ws["A1"].value == "DAFTAR PERMINTAAN PART"   # baris judul tak dibuang
+    assert ws["A2"].value == "Nama Part"                # header tetap di baris 2
+    assert ws["B3"].value == "WG9925520270"             # PN masuk ke kolom yang ADA
+
+
+def test_cek_qty_ditulis_ke_file_asli(bom_unit):
+    """sheet_cek_qty: qty BOM masuk sebagai ANGKA ke sel qty user yang kosong."""
+    from openpyxl import load_workbook
+
+    from app.services import ai_export
+    p = ai_sheet.parse_upload(_xlsx([
+        ["Part Number", "Qty"],
+        ["WG9925520270", None],
+    ]), "qty.xlsx")
+    sid = ai_sheet.put_sheet(USER["username"], p)
+    r = ai._t_sheet_cek_qty({"_sheet_id": sid, "rangka": "RJ-TEST"}, USER)
+    assert r["found"] and r["format_asli_dipertahankan"] is True
+    data, _ = ai_export.generic_excel(r["export_id"])
+    ws = load_workbook(io.BytesIO(data)).active
+    assert isinstance(ws["B2"].value, int)      # angka, bukan teks → SUM user jalan
+    # Regresi: label otomatis "Cek Qty" pernah fuzzy-match ke kolom "Qty" user,
+    # sehingga catatan "diisi dari BOM" MENIMPA angka qty-nya.
+    assert ws["B1"].value == "Qty" and ws["C1"].value == "Cek Qty"
+    assert ws["C2"].value == "diisi dari BOM"
+
+
 def test_isi_pn_nama_ambigu_dikosongkan(bom_unit):
     # 'spring' cocok ke DUA PN (Spring bracket & Leaf spring) → ambigu → kosong.
     # 'leaf spring' hanya cocok satu → terisi.

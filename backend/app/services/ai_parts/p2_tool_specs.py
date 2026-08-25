@@ -2806,7 +2806,10 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "SATU file berisi semua kolom bersebelahan. JANGAN memanggil tool ini "
                     "berkali-kali dalam satu giliran; panggil lebih dari sekali HANYA bila user "
                     "eksplisit minta filenya DIPISAH. "
-                    "Baris yang Part Number-nya tak ditemukan dibiarkan KOSONG. "
+                    "Hasilnya = FILE USER SENDIRI yang diisi di tempat: format, rumus, baris "
+                    "judul, sheet lain TIDAK diubah; kolom baru ditambahkan di kanan. "
+                    "Baris yang Part Number-nya tak ditemukan dibiarkan KOSONG (dan sel user "
+                    "yang sudah berisi tidak dikosongkan). "
                     "Set 'tandai_status'=true untuk kolom Status + WARNA baris (hijau ready/merah "
                     "kosong-kurang/kuning tak-ketemu-atau-ada-pengganti) + saran 'mungkin maksud'; "
                     "'rekap'=true untuk blok RINGKASAN (jumlah, subtotal, PPN, berat, ongkir). "
@@ -2843,7 +2846,13 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                                     "nama_kolom": {
                                         "type": "string",
                                         "description": ("Opsional: nama header atau huruf kolom "
-                                                        "('D') tujuan. Kosong = nama otomatis."),
+                                                        "('D') tujuan. Kosong = kolom BARU di kanan "
+                                                        "(atau kolom user yang namanya PERSIS sama). "
+                                                        "Bila sheet_ringkasan menunjukkan user SUDAH "
+                                                        "punya kolom untuk data ini tapi namanya beda "
+                                                        "(mis. 'Harga Jual', 'Stok Gudang'), sebut "
+                                                        "nama kolom itu di sini supaya diisi DI SITU, "
+                                                        "bukan bikin kolom baru."),
                                     },
                                 },
                                 "required": ["isi"],

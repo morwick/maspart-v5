@@ -2836,7 +2836,9 @@ def _t_sheet_isi_part_number(args: dict, user: dict) -> dict:
 
     tersisa_kosong = len(body) - sudah - terisi
     judul = f"{parsed['filename'].rsplit('.', 1)[0]} + Part Number"
-    export_id, filename = ai_export.stash_export(judul, headers, body)
+    # Ditulis ke SALINAN FILE ASLI user — format/rumus/baris kop tak diubah.
+    export_id, filename, lapor_format = ai_sheet._stash_sheet_out(
+        parsed, judul, headers, body)
     return {
         "found": True,
         "export_id": export_id,
@@ -2851,8 +2853,10 @@ def _t_sheet_isi_part_number(args: dict, user: dict) -> dict:
         "baris_sudah_terisi": sudah,
         "baris_ambigu": ambigu,
         "baris_kosong": tersisa_kosong,
+        **lapor_format,
         "catatan": (
-            "📎 Kartu unduh Excel muncul otomatis di bawah jawaban — beri tahu user singkat. "
+            ai_sheet._catatan_format(lapor_format)
+            + "📎 Kartu unduh Excel muncul otomatis di bawah jawaban — beri tahu user singkat. "
             f"Dari {len(body)} baris: {sudah} sudah punya PN (tak diubah), {terisi} baru diisi "
             f"(cocok UNIK di BOM unit {bom.get('frame_number')}), {ambigu} ambigu (nama cocok "
             f">1 PN), sisanya tak ada di BOM. {tersisa_kosong} baris masih kosong. Nama umum "
@@ -2923,7 +2927,12 @@ def _t_sheet_cek_qty(args: dict, user: dict) -> dict:
         return {"found": False,
                 "error": "BOM unit ini tak memuat data jumlah (qty) per part — tak bisa validasi qty."}
 
-    cek_i = ai_sheet._cari_kolom(headers, "Cek Qty")
+    # ⛔ COCOK PERSIS untuk label OTOMATIS. `_cari_kolom` (fuzzy) mencocokkan
+    # "Cek Qty" ke kolom "Qty" MILIK USER ('qty' ⊂ 'cek qty') → catatan "diisi dari
+    # BOM" menimpa angka qty-nya sendiri. Dulu kerusakannya "hanya" di file salinan;
+    # sejak isian ditulis ke file user, itu merusak dokumennya. Lihat aturan yang
+    # sama di ai_sheet._kolom_persis.
+    cek_i = ai_sheet._kolom_persis(headers, "Cek Qty")
     if cek_i is None:
         headers.append("Cek Qty")
         cek_i = len(headers) - 1
@@ -2946,7 +2955,10 @@ def _t_sheet_cek_qty(args: dict, user: dict) -> dict:
             continue
         cur = (str(r[qty_i]).strip() if qty_i < len(r) and r[qty_i] is not None else "")
         if cur == "":
-            r[qty_i] = str(bom_q)
+            # ANGKA, bukan teks: sel qty ditulis langsung ke file user, dan sel teks
+            # membuat SUM() milik user mengembalikan 0.
+            q_int = _qty_int(bom_q)
+            r[qty_i] = q_int if q_int is not None else str(bom_q)
             r[cek_i] = "diisi dari BOM"
             diisi += 1
         elif _qty_int(cur) == bom_q:
@@ -2957,7 +2969,9 @@ def _t_sheet_cek_qty(args: dict, user: dict) -> dict:
             selisih += 1
 
     judul = f"{parsed['filename'].rsplit('.', 1)[0]} + Cek Qty"
-    export_id, filename = ai_export.stash_export(judul, headers, body)
+    # Ditulis ke SALINAN FILE ASLI user — format/rumus/baris kop tak diubah.
+    export_id, filename, lapor_format = ai_sheet._stash_sheet_out(
+        parsed, judul, headers, body)
     return {
         "found": True,
         "export_id": export_id,
@@ -2970,8 +2984,10 @@ def _t_sheet_cek_qty(args: dict, user: dict) -> dict:
         "qty_cocok": cocok,
         "qty_selisih": selisih,
         "tanpa_referensi_bom": tanpa_ref,
+        **lapor_format,
         "catatan": (
-            "📎 Kartu unduh Excel muncul otomatis. Kolom 'Cek Qty': 'OK' = qty user sama dengan "
+            ai_sheet._catatan_format(lapor_format)
+            + "📎 Kartu unduh Excel muncul otomatis. Kolom 'Cek Qty': 'OK' = qty user sama dengan "
             "BOM, 'BOM: N' = BEDA (qty user TAK diubah, hanya ditandai), 'diisi dari BOM' = sel "
             f"qty tadinya kosong lalu diisi. {diisi} diisi, {cocok} cocok, {selisih} selisih, "
             f"{tanpa_ref} PN tanpa data qty BOM. ⛔ JANGAN mengarang qty; selisih = fakta, "

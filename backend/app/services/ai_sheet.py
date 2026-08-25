@@ -9,10 +9,24 @@ Alur:
      Klien mengirim `sheet_id` di giliran berikutnya sehingga follow-up seperti
      "isikan stoknya" tetap mengacu ke file yang sama.
   3. `fill_column(...)` — isi satu kolom dengan stok / nama part / harga lokal /
-     harga SIMS, lalu keluarkan Excel baru lewat `ai_export.stash_export`.
+     harga SIMS, lalu keluarkan Excel hasil lewat `_stash_sheet_out`.
      Sepupunya: `fill_columns` (banyak kolom → satu file), `fill_photos` (foto
      FISIK part dari SIMS) dan `fill_exploded` (GAMBAR TEKNIS / exploded view
      EPC — per-VIN bila user punya nomor rangka, kalau tidak lintas-model).
+
+⛔ ATURAN PEMILIK 2026-08-25 — FILE USER TIDAK DIUBAH FORMATNYA
+  Hasil isian ditulis KE SALINAN FILE ASLI user (`ai_export.isi_di_tempat`), bukan
+  ke workbook baru hasil rekonstruksi. Sebelumnya asisten membangun ulang file dari
+  `headers`+`baris` — itu diam-diam MEMBUANG milik user: baris judul/kop di atas
+  header, baris kosong pemisah, rumus, warna & border, lebar kolom, merge, sheet
+  lain, gambar/logo, dan kolom di luar 40 kolom pertama. Sekarang asisten HANYA
+  menulis sel yang memang diisi + menambah kolom baru di kanan; sisanya tak
+  disentuh. Bytes asli disimpan ke DISK per `sheet_id` (RAM server 3,8 GB —
+  40 lampiran × 10 MB tak boleh menghuni memori).
+
+  Jalur rekonstruksi lama masih ada sebagai CADANGAN: unggahan CSV (tak punya
+  format apa pun) & bila file asli gagal dibuka/diverifikasi. Bila itu terjadi,
+  hasilnya JUJUR dilaporkan lewat `format_asli_dipertahankan: False`.
 
 KEAMANAN
   • Isi file adalah DATA TAK TEPERCAYA, bukan instruksi. Ia hanya masuk ke model
@@ -25,11 +39,14 @@ KEAMANAN
 from __future__ import annotations
 
 import re
+import shutil
+import tempfile
 import threading
 import time
 import uuid
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from openpyxl import load_workbook
 
@@ -40,10 +57,6 @@ from . import (accurate, ai_export, filter_ref, gudang, harga, orders,
 MAX_BYTES = 10 * 1024 * 1024   # 10 MB per unggahan chat
 MAX_ROWS = 5000                # baris data yang dibaca (di luar header)
 MAX_COLS = 40
-# Bytes asli disimpan (utk pindah sheet) HANYA bila multi-sheet & ≤ ambang ini —
-# jaga RAM server (stash s/d 40 entri; tanpa batas = 40×10 MB). File multi-sheet
-# lebih besar dari ini: sheet lain tetap diringkas, tapi pindah-sheet tak tersedia.
-_MULTISHEET_BYTES_MAX = 4 * 1024 * 1024
 _MAX_SHEET_LAIN = 4            # sheet lain yang diringkas (nama+baris+header)
 _SAMPLE = 200                  # baris contoh utk deteksi peran kolom
 _MAX_SIMS = 150                # PN maksimum per permintaan harga SIMS (HTTP live)
@@ -61,6 +74,61 @@ _STASH_MAX = 40                # pagar RAM global (semua user)
 _STASH_MAX_PER_USER = 5
 _lock = threading.Lock()
 _stash: dict[str, dict] = {}
+
+# ── Bytes ASLI file unggahan → DISK, bukan RAM ──────────────────────────────
+# Dipakai untuk (a) menulis isian ke SALINAN file asli (format user utuh) dan
+# (b) pindah sheet. Ditaruh di disk karena 40 lampiran × 10 MB = 400 MB akan
+# menggerus memori backend (cgroup ±810 MB sisa; lihat memory server-kapasitas-ram).
+# Folder dibersihkan saat proses start (sisa proses sebelumnya yang mati mendadak).
+_SRC_DIR = Path(tempfile.gettempdir()) / "maspart_sheet_src"
+
+
+def _src_init() -> None:
+    try:
+        shutil.rmtree(_SRC_DIR, ignore_errors=True)
+        _SRC_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:                                   # pragma: no cover
+        pass   # disk read-only/penuh → in-place mati, jalur rekonstruksi tetap ada
+
+
+_src_init()
+
+
+def _src_write(sheet_id: str, data: bytes) -> str | None:
+    """Tulis bytes asli ke disk (atomik). Return path, None bila gagal."""
+    p = _SRC_DIR / sheet_id
+    try:
+        _SRC_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".part")
+        tmp.write_bytes(data)
+        tmp.replace(p)
+        return str(p)
+    except OSError:                                   # pragma: no cover
+        return None
+
+
+def _src_drop(parsed: dict | None) -> None:
+    p = (parsed or {}).get("_src_path")
+    if p:
+        try:
+            Path(p).unlink(missing_ok=True)
+        except OSError:                               # pragma: no cover
+            pass
+
+
+def src_bytes(parsed: dict) -> bytes | None:
+    """Bytes file ASLI (dari disk, atau RAM bila belum sempat di-stash).
+    None untuk CSV / bila file sudah tak ada."""
+    data = parsed.get("_src")
+    if data:
+        return data
+    p = parsed.get("_src_path")
+    if not p:
+        return None
+    try:
+        return Path(p).read_bytes()
+    except OSError:
+        return None
 
 # Isi kolom yang bisa diminta user.
 ISI_STOK = "stok"
@@ -266,8 +334,9 @@ def parse_upload(data: bytes, filename: str = "", pilih_sheet: str = "") -> dict
         raw = _read_csv(data)
         if raw is None:
             return {"ok": False, "error": "File CSV tak terbaca (encoding/format tak dikenal)."}
+        # CSV tak punya format untuk dipertahankan → jalur rekonstruksi (xlsx=False).
         return _finish_parse(raw, filename or "unggahan.csv", "(csv)", [], [],
-                             ["(csv)"], data, False)
+                             ["(csv)"], data, False, xlsx=False)
 
     import io
     try:
@@ -359,9 +428,14 @@ def _read_csv(data: bytes) -> list[list] | None:
 
 def _finish_parse(raw: list, filename: str, target: str, lain: list,
                   sheet_lain_ringkas: list, sheet_names: list, data: bytes,
-                  kolom_terpotong: bool) -> dict:
+                  kolom_terpotong: bool, xlsx: bool = True) -> dict:
     """Bagian bersama xlsx/csv: deteksi header (termasuk header 2-baris), peran
-    kolom, bangun body, dan rakit dict parsed."""
+    kolom, bangun body, dan rakit dict parsed.
+
+    Ikut mencatat PETA BALIK ke file asli (`_hdr_row`, `_row_map`): baris judul di
+    atas header & baris kosong memang dibuang dari `_body`, tapi nomor baris
+    ASLINYA disimpan supaya isian bisa ditulis kembali ke sel yang TEPAT tanpa
+    membangun ulang file (lihat `_stash_sheet_out`)."""
     if not raw:
         return {"ok": False, "error": "Sheet kosong."}
 
@@ -374,8 +448,17 @@ def _finish_parse(raw: list, filename: str, target: str, lain: list,
     ncol = len(headers)
     headers = [h or f"Kolom {i + 1}" for i, h in enumerate(headers)]
 
-    body = [[_txt(c) for c in (r[:ncol] + [None] * (ncol - len(r)))] for r in raw[hi + 1:]]
-    body = [r for r in body if any(r)][:MAX_ROWS]
+    # `row_map[i]` = nomor baris ASLI (1-based) di sheet untuk `body[i]`.
+    body: list[list[str]] = []
+    row_map: list[int] = []
+    for k, r in enumerate(raw[hi + 1:], start=hi + 1):
+        rr = [_txt(c) for c in (list(r[:ncol]) + [None] * (ncol - len(r)))]
+        if not any(rr):
+            continue                      # baris kosong: dilewati, TAPI tetap di file
+        body.append(rr)
+        row_map.append(k + 1)             # raw[0] = baris 1 di sheet
+        if len(body) >= MAX_ROWS:
+            break
     if not body:
         return {"ok": False, "error": "Tidak ada baris data di bawah header."}
 
@@ -416,11 +499,15 @@ def _finish_parse(raw: list, filename: str, target: str, lain: list,
         "_body": body,
         "terpotong": len(body) >= MAX_ROWS,
         "kolom_terpotong": kolom_terpotong,
+        # Peta balik ke file asli (kosong utk CSV) — dipakai menulis di tempat.
+        "_hdr_row": hi + 1,
+        "_row_map": row_map,
     }
-    # Simpan bytes utk pindah-sheet HANYA bila multi-sheet & tak kelewat besar
-    # (jaga RAM). Tanpa ini select_sheet tak bisa re-parse tab lain.
-    if len(sheet_names) > 1 and len(data) <= _MULTISHEET_BYTES_MAX:
-        parsed["_bytes"] = data
+    # Bytes ASLI: dipakai menulis isian TANPA mengubah format & untuk pindah sheet.
+    # Dipindah ke DISK oleh put_sheet (jaga RAM); di sini masih di RAM karena
+    # parse_upload juga dipanggil langsung oleh test & select_sheet.
+    if xlsx and data:
+        parsed["_src"] = data
     return parsed
 
 
@@ -445,14 +532,19 @@ def select_sheet(sheet_id: str, user: dict, nama_sheet: str) -> dict:
     if target == parsed.get("sheet"):
         return {"found": True, "sudah_aktif": True, "sheet": target,
                 "catatan": f"Sheet '{target}' memang sedang aktif."}
-    data = parsed.get("_bytes")
+    data = src_bytes(parsed)
     if not data:
         return {"found": False,
-                "error": ("File ini tak bisa pindah sheet (terlalu besar / tunggal). "
-                          f"Minta user mengunggah ulang khusus sheet '{nama}'.")}
+                "error": ("File ini tak bisa pindah sheet (bukan Excel / file asli sudah "
+                          f"tak ada). Minta user mengunggah ulang khusus sheet '{nama}'.")}
     baru = parse_upload(data, parsed.get("filename", ""), pilih_sheet=target)
     if not baru.get("ok"):
         return {"found": False, "error": baru.get("error") or "Gagal membaca sheet itu."}
+    # File asli tetap file yang sama → pakai salinan disk yang SUDAH ada, jangan
+    # menahan bytes-nya lagi di RAM.
+    if parsed.get("_src_path"):
+        baru.pop("_src", None)
+        baru["_src_path"] = parsed["_src_path"]
     replace_sheet(sheet_id, user.get("username", ""), baru)
     return {"found": True, "sheet": target, "ringkas": ringkas(baru),
             "catatan": f"Sheet aktif kini '{target}'. Kolom & isinya di 'ringkas'."}
@@ -552,23 +644,39 @@ def ringkas(parsed: dict) -> dict:
 
 
 # ── Stash per-user ──
+def _buang(sid: str) -> None:
+    """Keluarkan satu entri stash + hapus salinan file aslinya di disk.
+    Dipanggil SELALU di dalam `_lock`."""
+    e = _stash.pop(sid, None)
+    if e:
+        _src_drop(e.get("data"))
+
+
 def put_sheet(username: str, parsed: dict) -> str:
     now = time.monotonic()
     sid = uuid.uuid4().hex
     u = (username or "").lower()
+    # Bytes asli pindah ke DISK sebelum masuk stash (RAM server terbatas).
+    data = parsed.pop("_src", None)
+    if data:
+        p = _src_write(sid, data)
+        if p:
+            parsed["_src_path"] = p
+        else:                                    # pragma: no cover — disk penuh
+            parsed["_src"] = data                # terpaksa di RAM; tetap berfungsi
     with _lock:
         for k in [k for k, v in _stash.items() if now - v["at"] > _STASH_TTL_SEC]:
-            _stash.pop(k, None)
+            _buang(k)
         # 1) Kuota PER-USER: unggahan ke-6 menggusur lampiran TERTUA milik user
         #    yang sama — kerugiannya ditanggung pengunggahnya sendiri.
         milik = [k for k, v in _stash.items() if v["user"] == u]
         while len(milik) >= _STASH_MAX_PER_USER:
             tertua = min(milik, key=lambda k: _stash[k]["at"])
-            _stash.pop(tertua, None)
+            _buang(tertua)
             milik.remove(tertua)
         # 2) Pagar RAM global tetap ada sebagai jaring terakhir (banyak user aktif).
         while len(_stash) >= _STASH_MAX:
-            _stash.pop(min(_stash, key=lambda k: _stash[k]["at"]), None)
+            _buang(min(_stash, key=lambda k: _stash[k]["at"]))
         _stash[sid] = {"at": now, "user": u, "data": parsed}
     return sid
 
@@ -582,7 +690,7 @@ def replace_sheet(sheet_id: str, username: str, parsed: dict) -> bool:
         if not e or e["user"] != (username or "").lower():
             return False
         if time.monotonic() - e["at"] > _STASH_TTL_SEC:
-            _stash.pop(sheet_id, None)
+            _buang(sheet_id)
             return False
         e["data"] = parsed
         e["at"] = time.monotonic()
@@ -599,7 +707,7 @@ def get_sheet(sheet_id: str, username: str) -> dict | None:
         if not e:
             return None
         if time.monotonic() - e["at"] > _STASH_TTL_SEC:
-            _stash.pop(sheet_id, None)
+            _buang(sheet_id)
             return None
         if e["user"] != (username or "").lower():
             return None
@@ -790,7 +898,7 @@ def fill_column(
     pn_tidak_ditemukan = [p for p in unik if p not in peta]
 
     judul = f"{parsed['filename'].rsplit('.', 1)[0]} + {label}"
-    export_id, filename = ai_export.stash_export(judul, headers, body)
+    export_id, filename, lapor_format = _stash_sheet_out(parsed, judul, headers, body)
     return {
         "found": True,
         "export_id": export_id,
@@ -798,6 +906,7 @@ def fill_column(
         "judul": judul,
         "jumlah_baris": len(body),
         "kolom_diisi": headers[tgt],
+        **lapor_format,
         "kolom_part_number": headers[pn_i],
         "baris_terisi": terisi,
         "baris_kosong": len(body) - terisi,
@@ -810,6 +919,7 @@ def fill_column(
             ("Harga SIMS diisi dalam CNY apa adanya (harga MODAL) — sebut mata uangnya "
              "saat menjawab & ⛔ JANGAN mengonversi ke rupiah sendiri. "
              if isi == ISI_HARGA_SIMS and not konversi_idr else "")
+            + _catatan_format(lapor_format)
             + "📎 Kartu unduh Excel muncul otomatis di bawah jawaban — beri tahu user singkat. "
             f"{terisi} dari {len(body)} baris terisi; sisanya PN tak ditemukan di sumber — "
             "sampaikan apa adanya, ⛔ JANGAN mengarang nilai untuk baris kosong."
@@ -1221,19 +1331,122 @@ def _saran_pn(pn: str, fmap: dict) -> str:
     return best if best_r >= 90 else ""
 
 
-def _stash_sheet_out(judul: str, headers: list[str], body: list[list],
+def _rencana_isi(parsed: dict, headers: list[str], body: list[list]) -> dict | None:
+    """Bandingkan hasil olah (headers/body) dengan isi ASLI → RENCANA menulis balik
+    ke file user: kolom apa yang baru & sel mana saja yang berubah. None bila peta
+    balik tak tersedia (CSV / parse lama). Sel yang nilainya SAMA sengaja tak masuk
+    rencana — sel itu tak akan disentuh sama sekali."""
+    row_map = parsed.get("_row_map") or []
+    hdr_row = parsed.get("_hdr_row") or 0
+    asli = parsed.get("_body") or []
+    ncol = parsed.get("jumlah_kolom") or 0
+    if not row_map or not hdr_row or not ncol or len(row_map) != len(asli):
+        return None
+    isian: list[list] = []
+    for i, r in enumerate(body):
+        if i >= len(asli):
+            break
+        lama = asli[i]
+        for j, v in enumerate(r):
+            if _txt(v) != _txt(lama[j] if j < len(lama) else ""):
+                isian.append([i, j, v])
+    return {
+        "sheet": parsed.get("sheet") or "",
+        "hdr_row": hdr_row,
+        "row_map": row_map,
+        "ncol": ncol,
+        "headers": list(parsed.get("headers") or []),
+        "kolom_baru": [[j, headers[j]] for j in range(ncol, len(headers))],
+        "isian": isian,
+        "fmt": {j: ai_export.num_format(headers[j]) for j in range(ncol, len(headers))},
+    }
+
+
+def _is_xlsm(parsed: dict) -> bool:
+    return (parsed.get("filename") or "").lower().endswith(".xlsm")
+
+
+def _catatan_format(lapor: dict) -> str:
+    """Kalimat penyetir model soal keutuhan file user — pendek & jujur."""
+    if not lapor.get("format_asli_dipertahankan"):
+        return ("⚠️ File asli TIDAK bisa diisi di tempat "
+                f"({lapor.get('alasan_format') or 'sebab tak diketahui'}) → yang diunduh "
+                "adalah tabel data yang dibangun ulang, tanpa format/rumus aslinya. "
+                "Sampaikan ini ke user apa adanya. ")
+    s = ("File unduhan = FILE ASLI user apa adanya: hanya kolom yang diminta yang "
+         "ditambahkan/diisi; format, rumus, baris judul & sheet lain TIDAK diubah. ")
+    if lapor.get("sel_dilewati_sudah_terisi"):
+        s += (f"{lapor['sel_dilewati_sudah_terisi']} sel TIDAK ditimpa karena datanya tak "
+              "ketemu dan sel itu sudah ada isinya (nilai lama user dibiarkan) — sebutkan. ")
+    if lapor.get("sel_dilewati_rumus"):
+        s += (f"{lapor['sel_dilewati_rumus']} sel dilewati karena berisi RUMUS milik user "
+              "(tak dirusak) — sebutkan. ")
+    if lapor.get("sel_dilewati_merge"):
+        s += f"{lapor['sel_dilewati_merge']} sel dilewati karena sel gabungan (merge). "
+    if lapor.get("baris_di_luar_batas"):
+        s += (f"⚠️ File ini lebih panjang dari batas baca ({MAX_ROWS} baris): baris "
+              "selebihnya TETAP ADA di file tapi TIDAK terisi — beri tahu user & "
+              "sarankan memecah filenya. ")
+    return s
+
+
+def _stash_sheet_out(parsed: dict, judul: str, headers: list[str], body: list[list],
                      status: list[str] | None = None,
-                     ringkasan: list | None = None, sub: str = ""):
-    """Stash hasil olah-Excel → (export_id, filename). TANPA status & ringkasan →
-    `stash_export` (bytes identik perilaku lama, dipakai fitur fill biasa). DENGAN
-    status/ringkasan → builder `sheet_status` (baris berwarna + blok rekap)."""
+                     ringkasan: list | None = None, sub: str = "",
+                     gambar: dict | None = None) -> tuple[str, str, dict]:
+    """Stash hasil olah-Excel → (export_id, filename, lapor_format).
+
+    JALUR UTAMA (aturan pemilik 2026-08-25): isian ditulis ke SALINAN FILE ASLI
+    user — format, rumus, baris kop, sheet lain, semuanya utuh.
+    JALUR CADANGAN (CSV, atau file asli gagal dibuka/diverifikasi): bangun workbook
+    baru seperti dulu, dan katakan apa adanya lewat `format_asli_dipertahankan`."""
+    gambar = gambar or {}
+    src = src_bytes(parsed)
+    rencana = _rencana_isi(parsed, headers, body) if src else None
+    alasan = ""
+    if src and rencana:
+        ext = "xlsm" if _is_xlsm(parsed) else "xlsx"
+        data, peta_kolom, lapor, alasan = ai_export.isi_di_tempat(
+            src, rencana, status=status, ringkasan=ringkasan, xlsm=(ext == "xlsm"))
+        if data is not None:
+            lapor = {"format_asli_dipertahankan": True, **lapor}
+            # Baris di luar plafon parser kini TETAP ADA di file (dulu terpotong
+            # habis) — tapi TIDAK terisi. Itu beda arti, jadi harus disebut.
+            if parsed.get("terpotong"):
+                lapor["baris_di_luar_batas"] = True
+            if gambar:
+                # Gambar ditempel SAAT DIUNDUH (berat) — dasarnya file yang sudah
+                # terisi ini, disimpan ke cache disk milik entri export.
+                payload = {"kind": "sheet_gambar_isi", "judul": judul,
+                           "sheet": lapor.get("sheet") or rencana["sheet"],
+                           "row_map": rencana["row_map"], "kol": peta_kolom,
+                           "xlsm": (ext == "xlsm"), **gambar}
+                eid, fn = ai_export.stash_builder(judul, payload, ext=ext, src=data)
+            else:
+                eid, fn = ai_export.stash_raw(judul, data, ai_export.nama_file(judul, ext))
+            return eid, fn, lapor
+    elif not src:
+        alasan = ("file sumber bukan Excel (CSV/link) — tak ada format asli untuk "
+                  "dipertahankan")
+    lapor = {"format_asli_dipertahankan": False,
+             "alasan_format": alasan or "peta baris file asli tak tersedia"}
+    # ── CADANGAN: workbook baru (perilaku lama) ──
+    if gambar:
+        payload = {"kind": "sheet_gambar", "judul": judul, "kolom": headers,
+                   "baris": body,
+                   **({"status": status} if status else {}),
+                   **({"ringkasan": ringkasan} if ringkasan else {}),
+                   **gambar}
+        if sub:
+            payload["sub"] = sub
+        return (*ai_export.stash_builder(judul, payload), lapor)
     if not status and not ringkasan:
-        return ai_export.stash_export(judul, headers, body)
+        return (*ai_export.stash_export(judul, headers, body), lapor)
     payload = {"kind": "sheet_status", "judul": judul, "kolom": headers,
                "baris": body, "status": status or [], "ringkasan": ringkasan or []}
     if sub:
         payload["sub"] = sub
-    return ai_export.stash_builder(judul, payload)
+    return (*ai_export.stash_builder(judul, payload), lapor)
 
 
 def fill_columns(
@@ -1559,12 +1772,15 @@ def fill_columns(
     if tandai_status:
         fmap = part_index._pn_flat_map()
         saran = {p: _saran_pn(p, fmap) for p in pn_tidak_ditemukan}
-        st_i = _cari_kolom(headers, "Status")
+        # ⛔ COCOK PERSIS untuk label OTOMATIS (lihat _kolom_persis): fuzzy akan
+        # menabrak kolom user seperti 'Status Order' / 'Keterangan Pengiriman' dan
+        # menimpa isinya — sejak isian ditulis ke FILE USER, itu merusak dokumennya.
+        st_i = _kolom_persis(headers, "Status")
         if st_i is None:
             headers.append("Status"); st_i = len(headers) - 1
             for r in body:
                 r.append("")
-        ket_i = _cari_kolom(headers, "Keterangan")
+        ket_i = _kolom_persis(headers, "Keterangan")
         if ket_i is None:
             headers.append("Keterangan"); ket_i = len(headers) - 1
             for r in body:
@@ -1655,19 +1871,13 @@ def fill_columns(
     if JENIS_EXPLODED in gambar:
         bagian.append("Gambar Teknis")
     judul = f"{parsed['filename'].rsplit('.', 1)[0]} + " + " & ".join(bagian or ["Data"])
-    if gambar:
-        # Ada gambar → WAJIB lewat builder (gambar diunduh & ditempel saat kartu
-        # diklik). Warna status & blok rekap ikut di payload yang sama.
-        export_id, filename = ai_export.stash_builder(judul, {
-            "kind": "sheet_gambar", "judul": judul, "kolom": headers, "baris": body,
-            **({"status": row_status} if tandai_status else {}),
-            **({"ringkasan": ringkasan} if ringkasan else {}),
-            **g["payload"]})
-    else:
-        export_id, filename = _stash_sheet_out(
-            judul, headers, body,
-            status=row_status if tandai_status else None,
-            ringkasan=ringkasan or None)
+    # SATU pintu keluar: isian ditulis ke SALINAN FILE ASLI user (format utuh);
+    # gambar — bila diminta — ditempel ke file yang sama saat kartu diunduh.
+    export_id, filename, lapor_format = _stash_sheet_out(
+        parsed, judul, headers, body,
+        status=row_status if tandai_status else None,
+        ringkasan=ringkasan or None,
+        gambar=g["payload"] if gambar else None)
     out = {
         "found": True,
         "export_id": export_id,
@@ -1686,11 +1896,13 @@ def fill_columns(
                        + (f" + {sumber_sims}" if sumber_sims else ""))}
            if _perlu_lokal or sumber_sims else {}),
         **lap_gambar,
+        **lapor_format,
         "catatan": (
             "📎 SATU kartu unduh Excel muncul otomatis di bawah — SEMUA yang diminta (kolom "
             "data, foto, gambar teknis) ada di file yang SAMA. ⛔ JANGAN membuat file kedua / "
             "memanggil tool ini lagi giliran ini, kecuali user eksplisit minta filenya dipisah. "
-            "Untuk stok per-gudang, '0' = terlacak tapi kosong di gudang itu, sel "
+            + _catatan_format(lapor_format)
+            + "Untuk stok per-gudang, '0' = terlacak tapi kosong di gudang itu, sel "
             "KOSONG = PN tak ada di sumber. "
             + catatan_gambar
             + (f"⚠️ Gudang tak dikenal: {gudang_tak_dikenal}. " if gudang_tak_dikenal else "")

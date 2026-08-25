@@ -51,24 +51,35 @@ def _sid(rows, user=USER):
     return ai_sheet.put_sheet(user["username"], p)
 
 
+def _ws(export_id):
+    """Hasil olah = FILE ASLI user yang diisi di tempat → sheet & tata letaknya
+    milik user (header di baris 1, data mulai baris 2), bukan sheet 'Data' plus
+    baris judul bikinan builder lama."""
+    data, _ = ai_export.generic_excel(export_id)
+    return load_workbook(io.BytesIO(data)).active
+
+
+def _hdr(ws):
+    return [ws.cell(row=1, column=j).value for j in range(1, ws.max_column + 1)]
+
+
 def test_status_warna_dan_flag(dunia):
     sid = _sid([["Part Number", "Qty"], ["WG9925520270", 3], ["AZ9925520271", 1],
                 ["GANTIME1", 1], ["WG9925520271", 1]])
     r = ai_sheet.fill_columns(sid, USER, permintaan=[], tandai_status=True)
     assert r["found"]
-    data, _ = ai_export.generic_excel(r["export_id"])
-    ws = load_workbook(io.BytesIO(data))["Data"]
-    # kolom Status ada; baca teks per baris data (mulai baris 5)
-    hdr = [ws.cell(row=4, column=j).value for j in range(1, ws.max_column + 1)]
+    ws = _ws(r["export_id"])
+    # kolom Status ada; baca teks per baris data (mulai baris 2)
+    hdr = _hdr(ws)
     si = hdr.index("Status") + 1
     ki = hdr.index("Keterangan") + 1
-    assert ws.cell(row=5, column=si).value == "READY"          # stok 12
-    assert ws.cell(row=6, column=si).value == "STOK KOSONG"    # stok 0
-    assert ws.cell(row=7, column=si).value.startswith("ADA PENGGANTI: NEW777")
-    assert ws.cell(row=8, column=si).value == "PN TAK DITEMUKAN"
+    assert ws.cell(row=2, column=si).value == "READY"          # stok 12
+    assert ws.cell(row=3, column=si).value == "STOK KOSONG"    # stok 0
+    assert ws.cell(row=4, column=si).value.startswith("ADA PENGGANTI: NEW777")
+    assert ws.cell(row=5, column=si).value == "PN TAK DITEMUKAN"
     # 'mungkin maksud' hanya di Keterangan, TAK menimpa kolom PN
-    assert "mungkin maksud" in (ws.cell(row=8, column=ki).value or "")
-    assert ws.cell(row=8, column=1).value == "WG9925520271"    # PN user utuh
+    assert "mungkin maksud" in (ws.cell(row=5, column=ki).value or "")
+    assert ws.cell(row=5, column=1).value == "WG9925520271"    # PN user utuh
     assert {"pn": "WG9925520271", "saran": "WG9925520270"} in r["mungkin_maksud"]
     assert r["pn_diganti"] == [{"pn": "GANTIME1", "pengganti": "NEW777"}]
     assert r["status_ringkas"]["merah"] >= 1 and r["status_ringkas"]["kuning"] == 2
@@ -77,28 +88,26 @@ def test_status_warna_dan_flag(dunia):
 def test_status_kurang_pakai_qty(dunia):
     sid = _sid([["Part Number", "Qty"], ["WG9925520270", 99]])  # butuh 99, stok 12
     r = ai_sheet.fill_columns(sid, USER, permintaan=[], tandai_status=True)
-    data, _ = ai_export.generic_excel(r["export_id"])
-    ws = load_workbook(io.BytesIO(data))["Data"]
-    hdr = [ws.cell(row=4, column=j).value for j in range(1, ws.max_column + 1)]
-    assert ws.cell(row=5, column=hdr.index("Status") + 1).value.startswith("KURANG")
+    ws = _ws(r["export_id"])
+    hdr = _hdr(ws)
+    assert ws.cell(row=2, column=hdr.index("Status") + 1).value.startswith("KURANG")
 
 
 def test_kolom_pengganti_crossref_berat(dunia):
     sid = _sid([["Part Number"], ["WG9925520270"], ["GANTIME1"]])
     r = ai_sheet.fill_columns(sid, USER, permintaan=[
         {"isi": "pengganti"}, {"isi": "cross_ref"}, {"isi": "berat"}])
-    data, _ = ai_export.generic_excel(r["export_id"])
-    ws = load_workbook(io.BytesIO(data))["Data"]
-    hdr = [ws.cell(row=4, column=j).value for j in range(1, ws.max_column + 1)]
+    ws = _ws(r["export_id"])
+    hdr = _hdr(ws)
     pg = hdr.index("PN Pengganti") + 1
-    cr = [h for h in hdr if h.startswith("Cross Ref")][0]
+    cr = [h for h in hdr if h and str(h).startswith("Cross Ref")][0]
     cri = hdr.index(cr) + 1
     br = hdr.index("Berat (kg)") + 1
-    assert ws.cell(row=6, column=pg).value == "NEW777"          # GANTIME1 → NEW777
-    assert ws.cell(row=5, column=cri).value == "FF5052, P550008"
+    assert ws.cell(row=3, column=pg).value == "NEW777"          # GANTIME1 → NEW777
+    assert ws.cell(row=2, column=cri).value == "FF5052, P550008"
     # Berat kini ANGKA, bukan teks "2,50" — supaya rumus Excel user jalan
     # (aturan pemilik 2026-07-20). Lihat ai_export.ke_angka.
-    berat = ws.cell(row=5, column=br).value
+    berat = ws.cell(row=2, column=br).value
     assert isinstance(berat, float) and abs(berat - 2.5) < 1e-9
 
 

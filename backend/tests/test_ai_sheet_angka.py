@@ -49,8 +49,10 @@ def _sid(rows):
 
 
 def _ws(export_id):
+    # Hasil = FILE ASLI user yang diisi di tempat → sheet-nya sheet milik user
+    # (bukan lagi sheet "Data" bikinan builder lama).
     data, _ = ai_export.generic_excel(export_id)
-    return load_workbook(io.BytesIO(data))["Data"]
+    return load_workbook(io.BytesIO(data)).active
 
 
 def _kolom(ws, header):
@@ -103,15 +105,16 @@ def test_stok_per_gudang_int(dunia):
     r = ai_sheet.fill_columns(sid, USER,
                               permintaan=[{"isi": "stok", "gudang": "Jakarta"}])
     ws = _ws(r["export_id"])
-    hdr = [ws.cell(row=4, column=j).value for j in range(1, ws.max_column + 1)]
-    kol = [h for h in hdr if h and h.startswith("Stok")][0]
+    hdr = [ws.cell(row=1, column=j).value for j in range(1, ws.max_column + 1)]
+    kol = [h for h in hdr if h and str(h).startswith("Stok")][0]
     hr, hc = _kolom(ws, kol)
     assert ws.cell(row=hr + 1, column=hc).value == 8
 
 
 def test_qty_milik_user_ikut_jadi_angka(dunia):
-    """Kolom Qty diketik user sendiri; parse unggahan menstringkannya. Koersi di
-    titik tulis mengembalikannya jadi angka supaya =Qty*Harga & SUM jalan."""
+    """Kolom Qty milik user tetap ANGKA di file hasil. Sejak isian ditulis di
+    tempat, sel itu memang tak pernah disentuh — tipe aslinya (angka) bertahan,
+    jadi =Qty*Harga & SUM milik user tetap jalan."""
     sid = _sid([["Part Number", "Qty"], ["WG9925520270", 3]])
     r = ai_sheet.fill_columns(sid, USER, permintaan=[{"isi": "harga_lokal"}])
     ws = _ws(r["export_id"])

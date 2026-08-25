@@ -17,9 +17,10 @@ import time
 import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from copy import copy
 from pathlib import Path
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -192,17 +193,20 @@ _MODIFIED_RE = re.compile(rb"(<dcterms:modified[^>]*>)[^<]*(</dcterms:modified>)
 _MODIFIED_TETAP = b"2000-01-01T00:00:00Z"
 
 
-def _zip_stabil(raw: bytes) -> bytes:
+def _zip_stabil(raw: bytes, modified: bytes = _MODIFIED_TETAP) -> bytes:
     """Tulis ulang arsip xlsx menjadi byte-stabil: stempel waktu tiap entri ZIP
     dipin, dan `dcterms:modified` di core.xml dinormalkan. Urutan entri & metode
-    kompresi dipertahankan agar isinya identik bagi Excel."""
+    kompresi dipertahankan agar isinya identik bagi Excel.
+
+    `modified` bisa diisi nilai ASLI file user (lihat `_save_asli`) supaya properti
+    dokumen miliknya tidak ikut berubah."""
     src = zipfile.ZipFile(io.BytesIO(raw))
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as dst:
         for info in src.infolist():
             data = src.read(info.filename)
             if info.filename == _CORE_XML:
-                data = _MODIFIED_RE.sub(rb"\g<1>" + _MODIFIED_TETAP + rb"\g<2>", data)
+                data = _MODIFIED_RE.sub(rb"\g<1>" + modified + rb"\g<2>", data)
             zi = zipfile.ZipInfo(info.filename, date_time=_ZIP_EPOCH)
             zi.compress_type = info.compress_type
             zi.external_attr = info.external_attr
@@ -351,12 +355,13 @@ def _cache_read(p: Path) -> bytes | None:
 
 
 def _cache_drop(entry: dict) -> None:
-    p = entry.get("_path")
-    if p:
-        try:
-            Path(p).unlink(missing_ok=True)
-        except OSError:
-            pass
+    for key in ("_path", "_src_path"):
+        p = entry.get(key)
+        if p:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except OSError:
+                pass
 
 # Header kolom yang isinya kode/PN → font mono di Excel.
 _MONO_HEAD_RE = re.compile(r"\b(part\s*number|part\s*no|pn|nomor\s*part|kode)\b", re.IGNORECASE)
@@ -494,10 +499,15 @@ def ke_angka(v, uang: bool = False):
     return v
 
 
+def nama_file(judul: str, ext: str = "xlsx") -> str:
+    """Judul → nama file unduhan (slug aman, ekstensi mengikuti file SUMBER)."""
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", judul).strip("_")[:60] or "Data_MASPART"
+    return f"{slug}.{ext}"
+
+
 def _stash_put(entry: dict, judul: str, ext: str = "xlsx") -> tuple[str, str]:
     now = time.monotonic()
-    slug = re.sub(r"[^A-Za-z0-9]+", "_", judul).strip("_")[:60] or "Data_MASPART"
-    filename = f"{slug}.{ext}"
+    filename = nama_file(judul, ext)
     export_id = uuid.uuid4().hex
     with _stash_lock:
         for k in [k for k, v in _stash.items() if now - v["at"] > _STASH_TTL_SEC]:
@@ -513,11 +523,24 @@ def stash_export(judul: str, kolom: list[str], baris: list[list[str]]) -> tuple[
     return _stash_put({"kolom": kolom, "baris": baris}, judul)
 
 
-def stash_builder(judul: str, builder: dict, ext: str = "xlsx") -> tuple[str, str]:
+def stash_builder(judul: str, builder: dict, ext: str = "xlsx",
+                  src: bytes | None = None) -> tuple[str, str]:
     """Simpan RESEP export yang dibangun SAAT DIUNDUH (mis. katalog bergambar —
     berat, jadi dibangun ketika kartu diklik lalu bytes-nya di-cache di entri).
-    `ext` = ekstensi file hasil (xlsx/pdf) sesuai format yang dipilih user."""
-    return _stash_put({"builder": builder}, judul, ext=ext)
+    `ext` = ekstensi file hasil (xlsx/pdf) sesuai format yang dipilih user.
+
+    `src` = workbook DASAR yang akan ditempeli gambar (file ASLI user yang sudah
+    diisi kolom datanya). Ditulis ke cache DISK & umurnya mengikuti entri ini,
+    jadi kartu unduh tetap sah walau lampiran chat-nya sudah kedaluwarsa."""
+    export_id, filename = _stash_put({"builder": builder}, judul, ext=ext)
+    if src:
+        p = _cache_write(export_id + "_src", src)
+        if p:
+            with _stash_lock:
+                e = _stash.get(export_id)
+                if e is not None:
+                    e["_src_path"] = str(p)
+    return export_id, filename
 
 
 def stash_raw(judul: str, data: bytes, filename: str) -> tuple[str, str]:
@@ -572,6 +595,22 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
                 data, err = katalog_pdf(b.get("rangka", ""), b.get("kategori", ""), src, isi_stok_harga=ish)
             else:
                 data, err = katalog_excel(b.get("rangka", ""), b.get("kategori", ""), src, isi_stok_harga=ish)
+            if data is None:
+                return None, err
+            p = _cache_write(export_id, data)
+            if p:
+                with _stash_lock:
+                    d["_path"] = str(p)
+            return data, d["filename"]
+        # Lampiran user yang DIISI DI TEMPAT lalu ditempeli gambar: dasarnya file
+        # ASLI user (sudah berisi kolom data), disimpan di cache disk entri ini.
+        if b.get("kind") == "sheet_gambar_isi":
+            sp = d.get("_src_path")
+            dasar = _cache_read(Path(sp)) if sp else None
+            if not dasar:
+                return None, ("File dasar sudah kedaluwarsa — minta asisten mengisi "
+                              "Excel-nya sekali lagi.")
+            data, err = gambar_di_tempat(dasar, b)
             if data is None:
                 return None, err
             p = _cache_write(export_id, data)
@@ -661,6 +700,235 @@ def generic_excel(export_id: str) -> tuple[bytes | None, str]:
     return _save_stable(wb), d["filename"]
 
 
+# ── ISI DI TEMPAT: tulis hasil ke SALINAN FILE ASLI user ────────────────────
+# ⛔ Aturan pemilik 2026-08-25: file Excel yang dikirim user JANGAN diubah
+# formatnya — asisten hanya MENGISI data (atau membacanya). Semua jalur pengisi
+# lampiran (`ai_sheet.fill_columns`, sheet_isi_part_number, sheet_cek_qty) lewat
+# sini; workbook dibuka apa adanya lalu HANYA sel yang benar-benar diisi yang
+# disentuh. Yang otomatis ikut selamat karena tak pernah dibangun ulang: baris
+# kop/judul di atas header, baris kosong pemisah, rumus, warna/border/font,
+# lebar kolom, merge, freeze pane, filter, sheet lain, gambar & logo, serta
+# kolom di luar 40 kolom yang dibaca parser.
+_SHEET_REKAP = "Ringkasan MASPART"
+
+
+def _modified_asli(src: bytes) -> bytes:
+    """Nilai `dcterms:modified` milik file ASLI (utk dipasang balik setelah save —
+    openpyxl menimpanya dengan jam simpan). Fallback: konstanta byte-stabil."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(src)) as z:
+            m = _MODIFIED_RE.search(z.read(_CORE_XML))
+        if m:
+            inti = m.group(0)[len(m.group(1)):-len(m.group(2))]
+            if inti:
+                return inti
+    except Exception:
+        pass
+    return _MODIFIED_TETAP
+
+
+def _save_asli(wb, src: bytes) -> bytes:
+    """Simpan workbook TURUNAN file user: properti dokumen (dibuat/diubah) tetap
+    milik user, tapi bytes tetap deterministik (aman cache & test)."""
+    buf = io.BytesIO()
+    wb.save(buf)
+    try:
+        return _zip_stabil(buf.getvalue(), modified=_modified_asli(src))
+    except Exception:  # pragma: no cover — file tetap sah walau tak ternormalisasi
+        return buf.getvalue()
+
+
+def _buka_asli(src: bytes, xlsm: bool = False):
+    """Buka workbook user untuk DITULISI. data_only=False → RUMUS milik user tetap
+    utuh (nilai cache-nya hilang, karena itu Excel disuruh hitung ulang saat dibuka)."""
+    wb = load_workbook(io.BytesIO(src), keep_vba=xlsm)
+    try:
+        wb.calculation.fullCalcOnLoad = True
+    except Exception:  # pragma: no cover
+        pass
+    return wb
+
+
+def _sel_ada(ws, row: int, col: int):
+    """Sel yang MEMANG ADA di sheet, tanpa membuatnya. `ws.cell()` biasa menciptakan
+    sel kosong — dipakai berulang atas file 5.000 baris, itu menggelembungkan file
+    user dengan ratusan ribu sel hampa."""
+    return getattr(ws, "_cells", {}).get((row, col))
+
+
+def _kolom_terakhir(ws, hdr_row: int, rows: list[int]) -> int:
+    """Kolom TERAKHIR yang benar-benar BERISI NILAI (bukan sekadar berformat) pada
+    baris header + baris data. Kolom baru ditaruh setelahnya, jadi kolom user yang
+    tak terbaca parser (tanpa header, atau kolom ke-41+) tak pernah tertimpa."""
+    cells = getattr(ws, "_cells", None)
+    if cells is None:                                  # pragma: no cover
+        return ws.max_column or 0
+    minat = {hdr_row, *rows}
+    akhir = 0
+    for (r, c), sel in cells.items():
+        if c <= akhir or r not in minat:
+            continue
+        v = sel.value
+        if v is not None and str(v).strip() != "":
+            akhir = c
+    return akhir
+
+
+def _bisa_tulis(cell) -> bool:
+    """Sel gabungan (merge) selain sel jangkarnya TIDAK bisa ditulis openpyxl."""
+    from openpyxl.cell.cell import MergedCell
+    return cell is not None and not isinstance(cell, MergedCell)
+
+
+def isi_di_tempat(src: bytes, rencana: dict, status: list[str] | None = None,
+                  ringkasan: list | None = None,
+                  xlsm: bool = False) -> tuple[bytes | None, dict, dict, str]:
+    """Terapkan isian ke SALINAN file ASLI user. Return (bytes, peta_kolom, lapor, error).
+
+    `rencana` (dibuat `ai_sheet._rencana_isi`):
+      sheet      nama sheet aktif saat file diparse
+      hdr_row    baris header (1-based, nomor baris ASLI di sheet)
+      row_map    [nomor baris asli] per baris `_body`
+      ncol       jumlah kolom yang dibaca parser (kolom 1..ncol)
+      headers    header hasil parse (untuk VERIFIKASI file masih file yang sama)
+      kolom_baru [[idx_kolom_body, judul]] kolom yang ditambahkan di kanan
+      isian      [[idx_baris_body, idx_kolom_body, nilai]] HANYA sel yang berubah
+      fmt        {idx_kolom_body: number_format} untuk kolom BARU
+
+    Aturan tulis (menjaga milik user):
+      • kolom user + sel berisi RUMUS   → dilewati (rumus tak dirusak);
+      • kolom user + hasil KOSONG       → dilewati (nilai lama user dibiarkan);
+      • sel merge non-jangkar           → dilewati;
+      • sisanya ditulis; number_format & gaya sel user TIDAK disentuh.
+    """
+    hdr_row = int(rencana.get("hdr_row") or 0)
+    row_map = list(rencana.get("row_map") or [])
+    ncol = int(rencana.get("ncol") or 0)
+    if not hdr_row or not row_map or not ncol:
+        return None, {}, {}, "peta baris/kolom file asli tidak tersedia"
+    try:
+        wb = _buka_asli(src, xlsm=xlsm)
+    except Exception as e:
+        return None, {}, {}, f"file asli tak bisa dibuka untuk ditulisi ({e})"
+
+    try:
+        nama = rencana.get("sheet") or ""
+        ws = wb[nama] if nama in wb.sheetnames else wb.active
+
+        # VERIFIKASI: baris header di file masih sama dengan yang diparse. Bila
+        # tidak, peta baris/kolom tak bisa dipercaya → lebih baik gagal & jatuh ke
+        # jalur cadangan daripada menulis ke sel yang salah.
+        for j, h in enumerate(rencana.get("headers") or []):
+            if j >= ncol or re.fullmatch(r"Kolom \d+", h or ""):
+                continue
+            sel = ws.cell(row=hdr_row, column=j + 1).value
+            if str(sel if sel is not None else "").strip() != h:
+                return None, {}, {}, "baris header file asli tak cocok dengan hasil baca"
+
+        # Kolom BARU ditaruh setelah kolom terakhir yang benar-benar terpakai.
+        mulai_baru = max(ncol, _kolom_terakhir(ws, hdr_row, row_map)) + 1
+        peta_kolom = {j: (j + 1 if j < ncol else mulai_baru + (j - ncol))
+                      for j in range(ncol + len(rencana.get("kolom_baru") or []))}
+
+        # Header kolom baru — gaya menyontek sel header TERAKHIR milik user supaya
+        # tabelnya tetap terlihat menyatu (sel user sendiri tak disentuh).
+        contoh_hdr = _sel_ada(ws, hdr_row, ncol)
+        for j, judul in (rencana.get("kolom_baru") or []):
+            c = ws.cell(row=hdr_row, column=peta_kolom[j])
+            if not _bisa_tulis(c):
+                continue
+            if _bisa_tulis(contoh_hdr):
+                c._style = copy(contoh_hdr._style)
+            c.value = _safe(judul)
+            c.number_format = "General"
+            lebar = max(10, min(60, len(str(judul or "")) + 4))
+            ws.column_dimensions[get_column_letter(peta_kolom[j])].width = lebar
+
+        fmt = {int(k): v for k, v in (rencana.get("fmt") or {}).items()}
+        lapor = {"sel_diisi": 0, "sel_dilewati_rumus": 0,
+                 "sel_dilewati_sudah_terisi": 0, "sel_dilewati_merge": 0}
+        for i, j, val in (rencana.get("isian") or []):
+            if i >= len(row_map) or j not in peta_kolom:
+                continue
+            r, c = row_map[i], peta_kolom[j]
+            sel = ws.cell(row=r, column=c)
+            if not _bisa_tulis(sel):
+                lapor["sel_dilewati_merge"] += 1
+                continue
+            if j < ncol:                       # ── kolom MILIK user: hati-hati ──
+                lama = sel.value
+                if isinstance(lama, str) and lama.startswith("="):
+                    lapor["sel_dilewati_rumus"] += 1
+                    continue
+                if (val is None or val == "") and lama is not None and str(lama).strip() != "":
+                    lapor["sel_dilewati_sudah_terisi"] += 1
+                    continue
+            else:                              # ── kolom BARU: warisi gaya baris ──
+                tetangga = _sel_ada(ws, r, ncol)
+                if _bisa_tulis(tetangga):
+                    sel._style = copy(tetangga._style)
+            sel.value = _safe(val)
+            if j >= ncol:
+                angka = isinstance(sel.value, (int, float)) and not isinstance(sel.value, bool)
+                sel.number_format = fmt.get(j, _FMT_DEFAULT) if angka else "General"
+            lapor["sel_diisi"] += 1
+
+        # WARNA status HANYA di kolom yang kita tambahkan — sel milik user tak
+        # pernah dicat ulang. Statusnya tetap terbaca karena dwi-encode (ada kolom
+        # teks "Status" di sebelahnya).
+        kol_baru = [peta_kolom[j] for j, _h in (rencana.get("kolom_baru") or [])]
+        for i, warna in enumerate(status or []):
+            fill = _STATUS_FILL.get(warna or "")
+            if not fill or i >= len(row_map):
+                continue
+            for c in kol_baru:
+                sel = ws.cell(row=row_map[i], column=c)
+                if _bisa_tulis(sel):
+                    sel.fill = fill
+
+        # REKAP ditaruh di SHEET BARU, bukan disisipkan di bawah data user (di sana
+        # kerap sudah ada baris TOTAL / catatan miliknya sendiri).
+        if ringkasan:
+            _tulis_rekap(wb, ringkasan)
+
+        lapor["sheet"] = ws.title
+        lapor["kolom_ditambah"] = [h for _j, h in (rencana.get("kolom_baru") or [])]
+        return _save_asli(wb, src), peta_kolom, lapor, ""
+    except Exception as e:  # pragma: no cover — jaring terakhir, ada jalur cadangan
+        return None, {}, {}, f"gagal menulis ke file asli ({e})"
+    finally:
+        try:
+            wb.close()
+        except Exception:  # pragma: no cover
+            pass
+
+
+def _tulis_rekap(wb, ringkasan: list) -> None:
+    """Blok RINGKASAN → sheet TERSENDIRI (sheet user tak ditambahi baris)."""
+    nama, n = _SHEET_REKAP, 2
+    while nama in wb.sheetnames:
+        nama, n = f"{_SHEET_REKAP} {n}", n + 1
+    ws = wb.create_sheet(nama)
+    ws.column_dimensions["A"].width = 38
+    ws.column_dimensions["B"].width = 30
+    hc = ws.cell(row=1, column=1, value="RINGKASAN")
+    hc.font = Font(bold=True, color=_BRAND_DK, size=12)
+    r = 2
+    for item in ringkasan:
+        label, nilai = item[0], item[1]
+        warna = item[2] if len(item) > 2 else ""
+        lc = ws.cell(row=r, column=1, value=_safe(str(label)))
+        lc.font = _BOLD
+        lc.fill = _STATUS_FILL.get(warna, _SUB1_FILL)
+        lc.border = _BORDER
+        lc.alignment = _LEFT
+        vc = ws.cell(row=r, column=2, value=_safe(nilai))
+        vc.font = _INK
+        vc.border = _BORDER
+        vc.alignment = _LEFT
+        r += 1
+
+
 def sheet_status_excel(b: dict) -> tuple[bytes | None, str]:
     """Excel olahan lampiran BERWARNA STATUS + blok RINGKASAN, tanpa gambar —
     pembungkus `sheet_gambar_excel`. Dipertahankan untuk payload lama di stash
@@ -743,6 +1011,119 @@ def sheet_exploded_excel(b: dict) -> tuple[bytes | None, str]:
     return sheet_gambar_excel(b)
 
 
+def _ambil_gambar(foto: list, n_kol_foto: int, pns: list, rangka: str,
+                  ada_expl: bool) -> tuple[dict, dict, str]:
+    """Ambil bahan GAMBAR sekali untuk kedua jalur (file baru & isi-di-tempat):
+    (a) foto SIMS diunduh paralel lalu diciutkan, (b) exploded EPC lewat gerbang
+    satu-batch (server 1 vCPU & EPC mudah menolak). Return (thumb, peta, error)."""
+    from . import exploded_view       # impor lokal: hindari siklus saat modul dimuat
+
+    thumb: dict[tuple[int, int], bytes] = {}
+    if n_kol_foto:
+        tugas: list[tuple[int, int, str]] = []   # (baris_i, urutan_foto, url)
+        for i, urls in enumerate(foto or []):
+            for k, u in enumerate((urls or [])[:n_kol_foto]):
+                if u and len(tugas) < _FOTO_MAX_TOTAL:
+                    tugas.append((i, k, u))
+        if tugas:
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                for (i, k, _u), png in zip(tugas, ex.map(lambda t: _foto_thumb(t[2]), tugas)):
+                    if png:
+                        thumb[(i, k)] = png
+
+    peta: dict[str, dict] = {}
+    if ada_expl:
+        unik = [p for p in dict.fromkeys(pns or []) if p]
+        try:
+            peta = exploded_view.bangun_dengan_gerbang(
+                exploded_view.png_batch, unik, anggaran=_EXPL_ANGGARAN, rangka=rangka)
+        except exploded_view.SedangSibuk:
+            return {}, {}, ("Server sedang menyusun satu batch gambar exploded lain (hanya "
+                            "boleh satu sekaligus — server 1 vCPU dan server EPC mudah "
+                            "menolak). Coba klik unduh lagi beberapa menit lagi.")
+        except Exception:
+            return {}, {}, "Gagal mengambil gambar exploded dari EPC. Coba lagi sebentar."
+    return thumb, peta, ""
+
+
+def gambar_di_tempat(src: bytes, b: dict) -> tuple[bytes | None, str]:
+    """Tempel FOTO & GAMBAR TEKNIS ke SALINAN FILE ASLI user (yang kolom datanya
+    sudah diisi `isi_di_tempat`). Format file user tetap: yang berubah hanya sel
+    gambar di kolom BARU, lebar kolom gambar itu, dan tinggi baris yang memang
+    kebagian gambar (kalau tidak, gambarnya terpotong).
+
+    Dipanggil SAAT KARTU DIUNDUH — satu PN exploded dingin bisa puluhan detik."""
+    from openpyxl.drawing.image import Image as XLImage
+
+    from . import exploded_view
+
+    row_map = list(b.get("row_map") or [])
+    kol = {int(k): int(v) for k, v in (b.get("kol") or {}).items()}
+    kol_foto = [kol[j] for j in (b.get("kol_foto") or []) if j in kol]
+    pns: list[str] = b.get("pns") or []
+    rangka = (b.get("rangka") or "").strip()
+    j_info, j_gambar = b.get("kol_info"), b.get("kol_gambar")
+    kol_info = kol.get(j_info) if j_info is not None else None
+    kol_gambar = kol.get(j_gambar) if j_gambar is not None else None
+    ada_expl = kol_gambar is not None
+
+    thumb, peta, err = _ambil_gambar(b.get("foto") or [], len(kol_foto), pns,
+                                     rangka, ada_expl)
+    if err:
+        return None, err
+    try:
+        wb = _buka_asli(src, xlsm=bool(b.get("xlsm")))
+    except Exception as e:  # pragma: no cover
+        return None, f"File hasil tak bisa dibuka untuk ditempeli gambar ({e})."
+    try:
+        nama = b.get("sheet") or ""
+        ws = wb[nama] if nama in wb.sheetnames else wb.active
+        for c in kol_foto:
+            ws.column_dimensions[get_column_letter(c)].width = _FOTO_COL_W
+        if kol_gambar:
+            ws.column_dimensions[get_column_letter(kol_gambar)].width = _EXPL_COL_W
+        if kol_info:
+            ws.column_dimensions[get_column_letter(kol_info)].width = _EXPL_INFO_COL_W
+
+        for i, r in enumerate(row_map):
+            pn = pns[i] if i < len(pns) else ""
+            d = peta.get(exploded_view.kunci(pn, rangka)) if (ada_expl and pn) else None
+            if kol_info:
+                sel = ws.cell(row=r, column=kol_info)
+                if _bisa_tulis(sel):
+                    sel.value = _safe(_info_exploded_sel(d, rangka))
+                    sel.alignment = _LEFT
+            tinggi = 0.0
+            for k, c in enumerate(kol_foto):
+                png = thumb.get((i, k))
+                if not png:
+                    continue
+                img = XLImage(io.BytesIO(png))
+                ratio = img.width / img.height if img.height else 1
+                img.height = _FOTO_H_PX
+                img.width = int(_FOTO_H_PX * ratio)
+                ws.add_image(img, f"{get_column_letter(c)}{r}")
+                tinggi = max(tinggi, _FOTO_H_PX * 0.78)
+            png = (d or {}).get("png")
+            if png and kol_gambar:
+                img = XLImage(io.BytesIO(png))
+                w, h = int(img.width or 1), int(img.height or 1)
+                skala = min(_EXPL_IMG_W / w, _EXPL_IMG_H / h, 1.0)
+                img.width, img.height = max(1, int(w * skala)), max(1, int(h * skala))
+                ws.add_image(img, f"{get_column_letter(kol_gambar)}{r}")
+                tinggi = max(tinggi, min(_EXPL_ROW_PT_MAX, img.height * 0.78 + 8))
+            if tinggi:
+                ws.row_dimensions[r].height = tinggi
+        return _save_asli(wb, src), ""
+    except Exception as e:  # pragma: no cover
+        return None, f"Gagal menempelkan gambar ke file ({e})."
+    finally:
+        try:
+            wb.close()
+        except Exception:  # pragma: no cover
+            pass
+
+
 def sheet_gambar_excel(b: dict) -> tuple[bytes | None, str]:
     """SATU builder untuk SEMUA Excel olahan lampiran user: kolom data (stok/harga/
     dst, lengkap dengan WARNA status & blok RINGKASAN) + FOTO fisik part (SIMS) +
@@ -782,34 +1163,9 @@ def sheet_gambar_excel(b: dict) -> tuple[bytes | None, str]:
     ada_foto = bool(kol_foto)
     ada_expl = kol_gambar is not None
 
-    # 1) FOTO SIMS: unduh paralel + ciutkan (plafon total dijaga).
-    thumb: dict[tuple[int, int], bytes] = {}
-    if ada_foto:
-        tugas: list[tuple[int, int, str]] = []   # (baris_i, urutan_foto, url)
-        for i, urls in enumerate(foto):
-            for k, u in enumerate(urls[:len(kol_foto)]):
-                if u and len(tugas) < _FOTO_MAX_TOTAL:
-                    tugas.append((i, k, u))
-        if tugas:
-            with ThreadPoolExecutor(max_workers=8) as ex:
-                for (i, k, _u), png in zip(tugas, ex.map(lambda t: _foto_thumb(t[2]), tugas)):
-                    if png:
-                        thumb[(i, k)] = png
-
-    # 2) GAMBAR TEKNIS EPC: gerbang satu-batch (server 1 vCPU + EPC mudah menolak);
-    #    diambil DI DALAM thread pekerja, sama seperti Batch Download.
-    peta: dict[str, dict] = {}
-    if ada_expl:
-        unik = [p for p in dict.fromkeys(pns) if p]
-        try:
-            peta = exploded_view.bangun_dengan_gerbang(
-                exploded_view.png_batch, unik, anggaran=_EXPL_ANGGARAN, rangka=rangka)
-        except exploded_view.SedangSibuk:
-            return None, ("Server sedang menyusun satu batch gambar exploded lain (hanya "
-                          "boleh satu sekaligus — server 1 vCPU dan server EPC mudah "
-                          "menolak). Coba klik unduh lagi beberapa menit lagi.")
-        except Exception:
-            return None, "Gagal mengambil gambar exploded dari EPC. Coba lagi sebentar."
+    thumb, peta, err = _ambil_gambar(foto, len(kol_foto), pns, rangka, ada_expl)
+    if err:
+        return None, err
 
     wb = Workbook()
     ws = wb.active

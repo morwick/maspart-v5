@@ -87,6 +87,7 @@ def _tolak_bila_perbaikan(user: dict) -> None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, _PERBAIKAN_MSG)
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_XLSM_MIME = "application/vnd.ms-excel.sheet.macroEnabled.12"
 
 
 class ChatTurn(BaseModel):
@@ -347,7 +348,9 @@ def export_ai_excel(export_id: str, _user: dict = Depends(require_ai)):
                                  "Cache-Control": "private, max-age=86400"})
     return Response(
         content=data,
-        media_type=_XLSX_MIME,
+        # .xlsm = lampiran BERMAKRO milik user yang diisi di tempat; mime-nya beda
+        # dari .xlsx (kalau tertukar, Excel mengeluh filenya rusak).
+        media_type=(_XLSM_MIME if fl.endswith(".xlsm") else _XLSX_MIME),
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
 
