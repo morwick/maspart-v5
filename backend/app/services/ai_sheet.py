@@ -49,6 +49,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 from . import (accurate, ai_export, filter_ref, gudang, harga, orders,
                part_index, reservations, sims)
@@ -560,10 +561,18 @@ def ringkas(parsed: dict) -> dict:
     # NON-PN berkardinalitas rendah (satuan/kategori/status/gudang). Membantu model
     # paham ISI tiap kolom tanpa membaca body penuh — murah (≤5 nilai/kolom, hanya
     # sekali per unggahan) & tetap patuh batas 5 baris contoh (tak bocorkan body).
+    # Huruf kolom Excel + nomor baris ASLI: tanpa ini model tak punya cara menyebut
+    # sasaran tulis yang tepat ("tulis di kolom H", "baris 12") — ia hanya melihat
+    # nama header & 5 baris contoh, sedangkan `sheet_tulis` menargetkan sel nyata.
+    hdr_row = parsed.get("_hdr_row") or 0
+    row_map = parsed.get("_row_map") or []
+
     kolom = []
     for i, (h, p) in enumerate(zip(headers, roles)):
         vals = [str(r[i]).strip() if i < len(r) and r[i] is not None else "" for r in body]
         info = {"nama": h, "peran": p, "terisi": sum(1 for v in vals if v)}
+        if hdr_row and i < (parsed.get("jumlah_kolom") or 0):
+            info["kolom_excel"] = get_column_letter(i + 1)
         if p != "part_number":
             distinct: list[str] = []
             terlalu_banyak = False
@@ -613,6 +622,12 @@ def ringkas(parsed: dict) -> dict:
         "terpotong": parsed["terpotong"],
         "kolom_terpotong": parsed.get("kolom_terpotong", False),
     }
+    if hdr_row:
+        out["baris_header_excel"] = hdr_row
+        # Nomor baris ASLI dari 5 baris contoh — sejajar dengan 'contoh_baris'.
+        # Baris judul/kosong dibuang saat parse, jadi baris data ke-1 sering BUKAN
+        # baris 2 di Excel; menebaknya = menulis ke baris yang salah.
+        out["contoh_baris_nomor"] = row_map[:len(parsed["contoh"])]
     # Sheet lain di workbook (bila ada) — supaya model tahu tab lain berisi apa &
     # bisa menawarkan pindah lewat sheet_pilih_sheet (tanpa minta unggah ulang).
     # 'sheet_lain' tetap daftar NAMA (kontrak frontend); rinciannya di key terpisah.
@@ -1929,3 +1944,488 @@ def fill_columns(
     if rekap:
         out["rekap"] = [{"label": a, "nilai": b} for a, b, _c in ringkasan]
     return out
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MENULIS NILAI / RUMUS YANG DIDIKTE USER  (tool `sheet_tulis`)
+# ══════════════════════════════════════════════════════════════════════════════
+# `fill_columns` mengisi DATA MASPART yang diturunkan dari Part Number (stok,
+# harga, nama, …) — menu tetap. Yang TIDAK bisa dilakukannya: menulis apa yang
+# USER dikte sendiri ("kolom Keterangan: 'kirim batch 2' untuk 3 PN ini", "isi
+# kolom Supplier 'MAS' untuk semua baris", "kolom Total = Qty × Harga", "tandai
+# 'KURANG' di baris yang stoknya di bawah qty"). Sebelum ini asisten hanya bisa
+# menjawab tidak bisa — atau lebih buruk, membangun file baru & merusak format user.
+#
+# Tool ini memakai JALUR TULIS YANG SAMA (`_stash_sheet_out` → `isi_di_tempat`),
+# jadi seluruh pagar yang sudah ada tetap berlaku apa adanya: rumus lama user tak
+# dirusak, sel merge dilewati, header wajib masih cocok, properti dokumen kembali.
+# Pagar TAMBAHAN khusus di sini:
+#   • `timpa=False` (default) — sel user yang SUDAH BERISI tidak ditimpa. Menulis
+#     nilai dikte-an di atas data user itu satu arah; harus diminta eksplisit.
+#   • RUMUS hanya lewat `ai_export.Rumus` + hanya merujuk kolom yang MEMANG ada,
+#     tak pernah kolom tujuannya sendiri (melingkar), dan wajib ada peta baris
+#     asli (unggahan CSV tak punya nomor sel yang bisa dipercaya).
+#   • Nilai yang tak mendarat di mana pun (PN tak ada di file) DILAPORKAN, bukan
+#     dibuang diam-diam — supaya model tak mengklaim "sudah diisi" untuk baris
+#     yang sebenarnya tak pernah ada di file itu.
+
+_MAX_SEL_TULIS = MAX_ROWS        # plafon sel per panggilan (sama dengan plafon baris)
+_MAX_ITEM_TULIS = 2000           # plafon item `nilai` dari model (jaga token & RAM)
+_OP_BILA = ("kosong", "terisi", "sama", "tidak_sama", "memuat",
+            "lebih_besar", "lebih_kecil")
+_REF_KOLOM = re.compile(r"\{([^{}]+)\}")     # {Qty} → referensi kolom
+_ANGKA_POLOS = re.compile(r"-?\d{1,8}(?:[.,]\d{1,2})?")
+
+
+def _bila_num(v) -> float | None:
+    """Isi sel → angka untuk pembanding `bila`. None bila bukan angka.
+
+    File lapangan memakai dua format sekaligus ('1.500.000' Indonesia dan
+    '1,500,000.5' Inggris) — pemisah ribuan dibuang, pemisah desimal (yang muncul
+    TERAKHIR, berekor 1-2 digit) dijadikan titik. Salah tebak di sini membuat
+    perbandingan stok/qty meleset 1000x, jadi sengaja eksplisit."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    m = re.search(r"-?\d[\d.,]*", str(v if v is not None else "").strip())
+    if not m:
+        return None
+    t = m.group(0)
+    if "," in t and "." in t:
+        des = "," if t.rfind(",") > t.rfind(".") else "."
+        t = t.replace("." if des == "," else ",", "").replace(des, ".")
+    elif "," in t:
+        t = t.replace(",", ".") if len(t.rsplit(",", 1)[1]) in (1, 2) else t.replace(",", "")
+    elif "." in t:
+        if t.count(".") > 1 or len(t.rsplit(".", 1)[1]) not in (1, 2):
+            t = t.replace(".", "")
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def _nilai_sel(v):
+    """Nilai dari model → nilai sel Excel.
+
+    Angka tetap ANGKA supaya SUM/rumus milik user tetap jalan (sel TEKS membuat
+    SUM mengembalikan 0 — lihat `_rp_tampilan`). String angka polos ikut
+    dijadikan angka, TAPI dengan rem:
+      • ≥9 digit    → TEKS (wilayah PN numerik Weichai, lihat `_NUM_PN_RE`);
+      • berawalan 0 → TEKS (kode pos, nomor telepon, kode gudang '007').
+    Salah koersi di sini mendarat di FILE USER, jadi ragu = biarkan teks."""
+    if isinstance(v, bool):
+        return "YA" if v else "TIDAK"
+    if isinstance(v, (int, float)):
+        return v
+    s = str(v if v is not None else "").strip()
+    if not s or not _ANGKA_POLOS.fullmatch(s):
+        return s
+    inti = s.lstrip("-")
+    if len(inti) > 1 and inti[0] == "0" and inti[1] not in ".,":
+        return s
+    t = s.replace(",", ".")
+    return float(t) if "." in t else int(t)
+
+
+def _kolom_tulis(headers: list[str], nama: str) -> int | None:
+    """Cocokkan kolom SASARAN TULIS. Seperti `_cari_kolom` tapi SATU ARAH.
+
+    ⛔⛔ `_cari_kolom` cocok dua arah (`nl in h` ATAU `h in nl`), dan arah kedua
+    itu racun di sini: nama kolom BARU yang kebetulan MEMUAT nama kolom user —
+    'Status Stok' ⊃ 'Stok', 'Qty Kirim' ⊃ 'Qty', 'Total Harga' ⊃ 'Harga' —
+    akan menyasar kolom user itu sendiri dan (dengan timpa=true) menimpa angkanya.
+    Ini persis keluarga bug 'Cek Qty' → 'Qty' yang sudah pernah merusak file user
+    (lihat `_kolom_persis`). Di sini yang dipertahankan hanya arah yang aman:
+    header user MEMUAT yang diketik user ('keterangan' → 'Keterangan Pengiriman'),
+    sehingga nama yang lebih panjang selalu jatuh jadi KOLOM BARU."""
+    n = (nama or "").strip()
+    if not n:
+        return None
+    low = [h.strip().lower() for h in headers]
+    nl = n.lower()
+    if nl in low:
+        return low.index(nl)
+    m = re.fullmatch(r"(?:kolom\s*)?([a-zA-Z]{1,2})", n)
+    if m:
+        try:
+            from openpyxl.utils import column_index_from_string
+            i = column_index_from_string(m.group(1).upper()) - 1
+        except Exception:                       # pragma: no cover
+            i = -1
+        if 0 <= i < len(headers):
+            return i
+    kandidat = [i for i, h in enumerate(low) if nl in h]
+    if kandidat:
+        kandidat.sort(key=lambda i: (not low[i].startswith(nl), len(low[i])))
+        return kandidat[0]
+    return None
+
+
+def _peta_pn_baris(body: list[list], pn_i: int) -> dict[str, list[int]]:
+    """PN di file → daftar indeks baris. PN yang SAMA boleh muncul berkali-kali
+    (daftar kirim per gudang) — semuanya ikut ditulis, bukan yang pertama saja.
+    Kunci ganda: apa adanya (upper) + bentuk PEMAAF `_pn_flat` ('WG95/2' ↔
+    'WG95'), sebab PN yang diketik user di chat jarang sama persis formatnya."""
+    peta: dict[str, list[int]] = {}
+    for i, r in enumerate(body):
+        p = (str(r[pn_i]).strip().upper()
+             if pn_i < len(r) and r[pn_i] is not None else "")
+        if not p:
+            continue
+        peta.setdefault(p, []).append(i)
+        try:
+            fl = part_index._pn_flat(p)
+        except Exception:
+            fl = ""
+        if fl and fl != p:
+            peta.setdefault(fl, []).append(i)
+    return peta
+
+
+def _cocok_bila(body: list[list], headers: list[str], bila: dict) -> tuple[set[int] | None, str]:
+    """Saring baris dengan syarat sederhana atas kolom LAIN → (indeks lolos, error).
+
+    Ini yang membuat 'tandai KURANG di baris yang stoknya di bawah qty' mungkin:
+    model tak pernah melihat seluruh baris file (hanya contoh 5 baris), jadi
+    penyaringan WAJIB dihitung di sini — deterministik di Python, bukan ditebak
+    model. Nilai pembanding boleh merujuk kolom lain: nilai='{Qty}'."""
+    kb = str(bila.get("kolom") or "").strip()
+    op = str(bila.get("operator") or "").strip().lower()
+    pv = bila.get("nilai")
+    if not kb:
+        return None, "Syarat 'bila' tanpa nama kolom."
+    j = _kolom_tulis(headers, kb)
+    if j is None:
+        return None, f"Kolom syarat '{kb}' tak ada di file. Kolom yang ada: {headers}"
+    if op not in _OP_BILA:
+        return None, f"Operator '{op}' tak dikenal. Pilihan: {list(_OP_BILA)}."
+    ref_j = None
+    if isinstance(pv, str):
+        m = _REF_KOLOM.fullmatch(pv.strip())
+        if m:
+            ref_j = _kolom_tulis(headers, m.group(1))
+            if ref_j is None:
+                return None, (f"Kolom pembanding '{m.group(1)}' tak ada di file. "
+                              f"Kolom yang ada: {headers}")
+    if op != "kosong" and op != "terisi" and pv is None and ref_j is None:
+        return None, f"Operator '{op}' butuh 'nilai' pembanding."
+
+    lolos: set[int] = set()
+    for i, r in enumerate(body):
+        s = _txt(r[j]) if j < len(r) else ""
+        if op == "kosong":
+            if not s:
+                lolos.add(i)
+            continue
+        if op == "terisi":
+            if s:
+                lolos.add(i)
+            continue
+        banding = _txt(r[ref_j]) if ref_j is not None and ref_j < len(r) else _txt(pv)
+        if op == "memuat":
+            if banding and banding.lower() in s.lower():
+                lolos.add(i)
+            continue
+        if op in ("sama", "tidak_sama"):
+            a, b = _bila_num(s), _bila_num(banding)
+            sama = (a == b) if (a is not None and b is not None) else (s.lower() == banding.lower())
+            if sama == (op == "sama"):
+                lolos.add(i)
+            continue
+        a, b = _bila_num(s), _bila_num(banding)
+        if a is None or b is None:      # tak bisa dibandingkan → BUKAN cocok
+            continue
+        if (a > b) if op == "lebih_besar" else (a < b):
+            lolos.add(i)
+    return lolos, ""
+
+
+def tulis(
+    sheet_id: str,
+    user: dict,
+    kolom: str,
+    nilai: list | None = None,
+    nilai_semua=None,
+    rumus: str = "",
+    bila: dict | None = None,
+    kolom_pn: str = "",
+    timpa: bool = False,
+) -> dict:
+    """Tulis nilai/rumus yang DIDIKTE USER ke Excel lampiran, di tempat.
+
+    Sasaran baris (pilih salah satu):
+      • `nilai=[{pn:'…', nilai:…}, …]`      — per Part Number (SEMUA baris ber-PN itu);
+      • `nilai=[{baris:12, nilai:…}, …]`    — per NOMOR BARIS Excel yang user lihat;
+      • `nilai_semua=…`                     — satu nilai untuk semua baris data;
+      • `rumus="={Qty}*{Harga}"`            — rumus HIDUP per baris (referensi sel
+        dihitung dari peta baris asli: '={Qty}*{Harga}' di baris 7 jadi '=E7*H7');
+        boleh digabung dengan sasaran mana pun.
+    `bila={kolom,operator,nilai}` menyaring baris (nilai boleh '{Kolom}' = kolom lain).
+    `timpa=True` baru mengizinkan menimpa sel user yang sudah ada isinya.
+    """
+    parsed = get_sheet(sheet_id, user.get("username", ""))
+    if not parsed:
+        return {"found": False,
+                "error": "Belum ada file Excel yang diunggah di percakapan ini (atau sudah "
+                         "kedaluwarsa). Minta user unggah ulang."}
+
+    kolom = str(kolom or "").strip()
+    if not kolom:
+        return {"found": False,
+                "error": "Sebutkan kolom tujuan: nama header yang ada di file, huruf kolom "
+                         "Excel ('H'), atau nama kolom BARU yang mau ditambahkan."}
+
+    headers = list(parsed["headers"])
+    body = [list(r) for r in parsed["_body"]]
+    ncol = int(parsed.get("jumlah_kolom") or len(headers))
+    row_map = list(parsed.get("_row_map") or [])
+    roles = parsed["roles"]
+
+    # ── Kolom tujuan: kolom user yang disebut, atau kolom BARU di kanan ──
+    # Pencocokan SATU ARAH (`_kolom_tulis`), bukan `_cari_kolom`: 'Qty Kirim' tak
+    # boleh mendarat di kolom 'Qty' milik user. Sel yang sudah berisi tetap
+    # terlindung `timpa=False` sebagai lapis kedua.
+    tgt = _kolom_tulis(headers, kolom)
+    if tgt is None and re.fullmatch(r"(?:kolom\s*)?[a-zA-Z]", kolom.strip()):
+        # "tulis di kolom J" padahal file cuma sampai kolom G: membuat kolom BARU
+        # bernama "J" jelas bukan maksudnya, dan menulis ke tempat lain lebih buruk.
+        return {"found": False,
+                "error": (f"Kolom '{kolom}' di luar kolom yang terbaca. File ini punya "
+                          f"{ncol} kolom: "
+                          + ", ".join(f"{get_column_letter(i + 1)}={h}"
+                                      for i, h in enumerate(headers[:ncol]))
+                          + ". Sebut huruf kolom yang ada, atau nama kolom BARU.")}
+    kolom_baru = tgt is None
+    if kolom_baru:
+        headers.append(kolom)
+        tgt = len(headers) - 1
+        for r in body:
+            r.append("")
+
+    # ── Rumus: rakit referensi sel dari peta baris ASLI ──
+    rumus = str(rumus or "").strip()
+    kol_ref: dict[str, int] = {}
+    if rumus:
+        # Rumus hanya sah bila isian mendarat di FILE ASLI: koordinat sel ('=D4*E4')
+        # diambil dari peta baris file itu. Pada jalur CADANGAN (CSV/link → workbook
+        # dibangun ulang) nomor barisnya bergeser dan rumusnya akan menunjuk sel
+        # yang salah — lebih baik menolak daripada mengirim rumus yang bohong.
+        if not row_map or not (parsed.get("_src") or parsed.get("_src_path")):
+            return {"found": False,
+                    "error": "File ini bukan Excel asli yang bisa ditulisi di tempat (unggahan "
+                             "CSV/link), jadi rumus tak bisa dirujuk ke sel yang benar. Minta "
+                             "user mengunggah file .xlsx-nya, atau tulis nilai biasa."}
+        if not rumus.startswith("="):
+            rumus = "=" + rumus
+        for nm in set(_REF_KOLOM.findall(rumus)):
+            if nm.strip().lower() in ("baris", "row"):
+                continue
+            j = _kolom_tulis(headers[:ncol], nm)
+            if j is None:
+                return {"found": False,
+                        "error": (f"Rumus merujuk kolom '{nm}' yang tak ada di file. Kolom yang "
+                                  f"bisa dirujuk: {headers[:ncol]}")}
+            if j == tgt:
+                return {"found": False,
+                        "error": (f"Rumus merujuk kolom tujuannya sendiri ('{nm}') — itu rumus "
+                                  "melingkar. Pakai kolom lain sebagai sumbernya.")}
+            kol_ref[nm] = j
+
+    def _isi_rumus(i: int):
+        baris = row_map[i]
+
+        def _sub(m):
+            nm = m.group(1)
+            if nm.strip().lower() in ("baris", "row"):
+                return str(baris)
+            return f"{get_column_letter(kol_ref[nm] + 1)}{baris}"
+
+        return ai_export.Rumus(_REF_KOLOM.sub(_sub, rumus))
+
+    # ── Syarat baris ──
+    lolos: set[int] | None = None
+    if isinstance(bila, dict) and bila:
+        lolos, err = _cocok_bila(body, headers, bila)
+        if err:
+            return {"found": False, "error": err}
+
+    # ── Baris sasaran ──
+    items = [x for x in (nilai or []) if isinstance(x, dict)][:_MAX_ITEM_TULIS]
+    if not items and nilai_semua is None and not rumus:
+        return {"found": False,
+                "error": "Tak ada yang ditulis: isi 'nilai' (per PN / per baris), atau "
+                         "'nilai_semua' untuk semua baris, atau 'rumus'."}
+
+    sasaran: list[tuple[int, object]] = []
+    pn_tak_ada: list[str] = []
+    baris_tak_ada: list = []
+    tanpa_pn = 0
+    if items:
+        pn_i = _kolom_tulis(headers, kolom_pn) if kolom_pn else None
+        if pn_i is None and "part_number" in roles:
+            pn_i = roles.index("part_number")
+        peta_pn = _peta_pn_baris(body, pn_i) if pn_i is not None else {}
+        peta_baris = {n: i for i, n in enumerate(row_map)}
+        for it in items:
+            pn = str(it.get("pn") or "").strip().upper()
+            no = it.get("baris")
+            v = it.get("nilai")
+            if pn:
+                if pn_i is None:
+                    return {"found": False,
+                            "error": "Kolom Part Number tak terdeteksi di file — sebutkan "
+                                     "'kolom_pn', atau targetkan baris lewat 'baris'."}
+                idxs = peta_pn.get(pn)
+                if not idxs:
+                    try:
+                        idxs = peta_pn.get(part_index._pn_flat(pn))
+                    except Exception:
+                        idxs = None
+                if not idxs:
+                    if pn not in pn_tak_ada:
+                        pn_tak_ada.append(pn)
+                    continue
+                sasaran.extend((i, v) for i in idxs)
+                continue
+            if no is not None:
+                if not row_map:
+                    return {"found": False,
+                            "error": "File ini tak punya nomor baris asli (unggahan CSV/link) — "
+                                     "targetkan baris lewat 'pn'."}
+                try:
+                    i = peta_baris[int(no)]
+                except (TypeError, ValueError, KeyError):
+                    baris_tak_ada.append(no)
+                    continue
+                sasaran.append((i, v))
+    else:
+        # "SEMUA baris" = semua baris DATA. Di file ber-kolom PN, baris yang PN-nya
+        # kosong itu baris TOTAL / pemisah / sub-judul milik user — menulis 'MAS' di
+        # baris TOTAL-nya jelas bukan yang user maksud, dan sejak isian mendarat di
+        # file aslinya itu merusak dokumen. Dilewati, KECUALI user memang menyasar
+        # baris tanpa PN lewat `bila` atas kolom PN itu sendiri.
+        pn_i = _kolom_tulis(headers, kolom_pn) if kolom_pn else None
+        if pn_i is None and "part_number" in roles:
+            pn_i = roles.index("part_number")
+        bila_i = (_kolom_tulis(headers, str((bila or {}).get("kolom") or ""))
+                  if isinstance(bila, dict) and bila else None)
+        lewati_pn_kosong = pn_i is not None and bila_i != pn_i
+        for i, r in enumerate(body):
+            if lewati_pn_kosong and not _txt(r[pn_i]):
+                tanpa_pn += 1
+                continue
+            sasaran.append((i, nilai_semua))
+
+    # ── Tulis ke body (isian sesungguhnya dilakukan `_stash_sheet_out`) ──
+    ditulis = 0
+    dilewati_terisi = 0
+    dilewati_syarat = 0
+    rumus_contoh = ""
+    dipotong = False
+    sudah: set[int] = set()
+    for i, v in sasaran:
+        if i in sudah:
+            continue
+        if lolos is not None and i not in lolos:
+            dilewati_syarat += 1
+            continue
+        if not timpa and tgt < ncol and _txt(body[i][tgt]):
+            dilewati_terisi += 1
+            continue
+        val = _isi_rumus(i) if rumus else _nilai_sel(v)
+        if val == "":
+            continue                       # tak ada isi = tak usah menyentuh sel
+        body[i][tgt] = val
+        sudah.add(i)
+        ditulis += 1
+        if rumus and not rumus_contoh:
+            rumus_contoh = str(val)
+        if ditulis >= _MAX_SEL_TULIS:
+            dipotong = True               # ⛔ plafon TAK BOLEH senyap — ikut dilaporkan
+            break
+
+    if not ditulis:
+        sebab = "tak ada baris yang cocok dengan sasaran/syarat"
+        if dilewati_terisi:
+            sebab = (f"{dilewati_terisi} sel sasaran SUDAH BERISI dan tidak ditimpa "
+                     "(default aman). Bila user memang ingin menggantinya, panggil lagi "
+                     "dengan timpa=true")
+        elif pn_tak_ada:
+            sebab = f"Part Number yang disebut tak ada di file: {pn_tak_ada[:10]}"
+        elif dilewati_syarat:
+            sebab = f"{dilewati_syarat} baris tak memenuhi syarat 'bila'"
+        return {"found": False, "error": f"Tidak ada sel yang ditulis — {sebab}.",
+                "sel_dilewati_sudah_terisi": dilewati_terisi,
+                "pn_tidak_ada_di_file": pn_tak_ada[:20],
+                "baris_tidak_ada": baris_tak_ada[:20]}
+
+    judul = f"{parsed['filename'].rsplit('.', 1)[0]} + {headers[tgt]}"
+    export_id, filename, lapor_format = _stash_sheet_out(parsed, judul, headers, body)
+    huruf = (lapor_format.get("kolom_ditambah_di") or {}).get(headers[tgt]) or (
+        get_column_letter(tgt + 1) if tgt < ncol else "")
+
+    # Angka yang DILAPORKAN harus angka yang BENAR-BENAR mendarat. `ditulis` di atas
+    # baru RENCANA; mesin isi-di-tempat masih boleh menolak sel (rumus milik user,
+    # sel merge). Kalau tidak diselaraskan, model akan bilang "5 sel terisi" untuk
+    # file yang tak berubah sama sekali.
+    if lapor_format.get("format_asli_dipertahankan"):
+        ditulis = int(lapor_format.get("sel_diisi") or 0)
+        dilewati_terisi += int(lapor_format.get("sel_dilewati_sudah_terisi") or 0)
+    dilewati_rumus = int(lapor_format.get("sel_dilewati_rumus") or 0)
+    dilewati_merge = int(lapor_format.get("sel_dilewati_merge") or 0)
+    if not ditulis:
+        return {"found": False,
+                "error": ("Tidak ada sel yang berubah: sasarannya "
+                          + (f"{dilewati_rumus} sel berisi RUMUS milik user (tak dirusak)"
+                             if dilewati_rumus else
+                             f"{dilewati_merge} sel gabungan (merge)" if dilewati_merge else
+                             "sudah berisi nilai yang SAMA persis, jadi tak ada yang berubah")
+                          + ". Sampaikan apa adanya — jangan mengklaim file sudah diisi."),
+                "sel_dilewati_rumus": dilewati_rumus,
+                "sel_dilewati_merge": dilewati_merge}
+
+    return {
+        **lapor_format,
+        "found": True,
+        "export_id": export_id,
+        "filename": filename,
+        "judul": judul,
+        "kolom_tujuan": headers[tgt],
+        "kolom_excel": huruf,
+        "kolom_baru": kolom_baru,
+        "jumlah_baris": len(body),
+        "sel_ditulis": ditulis,
+        "sel_dilewati_sudah_terisi": dilewati_terisi,
+        "baris_tak_penuhi_syarat": dilewati_syarat,
+        **({"dipotong_plafon": _MAX_SEL_TULIS} if dipotong else {}),
+        **({"baris_tanpa_part_number_dilewati": tanpa_pn} if tanpa_pn else {}),
+        **({"pn_tidak_ada_di_file": pn_tak_ada[:20],
+            "pn_tidak_ada_di_file_total": len(pn_tak_ada)} if pn_tak_ada else {}),
+        **({"baris_tidak_ada": baris_tak_ada[:20]} if baris_tak_ada else {}),
+        **({"rumus_contoh": rumus_contoh} if rumus_contoh else {}),
+        "catatan": (
+            f"📎 Kartu unduh muncul otomatis. {ditulis} sel ditulis ke kolom "
+            f"'{headers[tgt]}'" + (f" (kolom {huruf})" if huruf else "")
+            + (" — kolom BARU di kanan data. " if kolom_baru else " — kolom yang sudah ada. ")
+            + _catatan_format(lapor_format)
+            + (f"{dilewati_terisi} sel TIDAK ditimpa karena sudah ada isinya (default aman) — "
+               "sebutkan, dan tawarkan menulis ulang dengan timpa=true bila user memang mau "
+               "menggantinya. " if dilewati_terisi else "")
+            + (f"⚠️ PN ini tak ada di file, jadi nilainya TIDAK tertulis di mana pun: "
+               f"{pn_tak_ada[:10]} — sampaikan apa adanya. " if pn_tak_ada else "")
+            + (f"⚠️ Nomor baris ini tak ada di file: {baris_tak_ada[:10]}. "
+               if baris_tak_ada else "")
+            + (f"Rumusnya HIDUP (contoh baris pertama: {rumus_contoh}) — nilainya dihitung "
+               "Excel saat file dibuka, bukan angka mati. " if rumus_contoh else "")
+            + (f"{dilewati_syarat} baris dilewati karena tak memenuhi syarat. "
+               if dilewati_syarat else "")
+            + (f"{tanpa_pn} baris tanpa Part Number (baris TOTAL/pemisah/sub-judul milik user) "
+               "sengaja DILEWATI. " if tanpa_pn else "")
+            + (f"⚠️ Plafon {_MAX_SEL_TULIS} sel tercapai — sisanya TIDAK ditulis; sampaikan. "
+               if dipotong else "")
+            + "⛔ Laporkan apa yang BENAR-BENAR ditulis (angka di atas), jangan mengklaim "
+              "baris yang dilewati ikut terisi."
+        ),
+    }

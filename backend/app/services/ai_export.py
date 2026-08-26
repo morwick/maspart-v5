@@ -56,7 +56,23 @@ _RIGHT = Alignment(horizontal="right", vertical="center")   # sel angka
 _FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r", "\n")
 
 
+class Rumus(str):
+    """Nilai sel yang MEMANG rumus Excel (bukan teks) — satu-satunya jalan tembus
+    pagar anti formula-injection di `_safe`.
+
+    Pagar itu wajib tetap galak untuk string biasa: nama part SIMS/EPC & isi sel
+    user tak tepercaya, dan '=cmd|…' di dalamnya tak boleh jadi rumus hidup.
+    Rumus yang memang DIMINTA user (tool `sheet_tulis`) dibungkus tipe ini di
+    titik yang tahu persis bahwa ia rumus — jadi asalnya eksplisit, bukan ditebak
+    dari bentuk teksnya. Turunan `str` supaya perbandingan/serialisasi lama
+    (mis. `_rencana_isi`, payload stash) tetap jalan tanpa perubahan.
+    """
+    __slots__ = ()
+
+
 def _safe(v):
+    if isinstance(v, Rumus):        # rumus yang memang diminta — lihat class Rumus
+        return str(v)
     if isinstance(v, str):
         s = v.lstrip("﻿")  # buang BOM di depan, jangan tertipu
         if s[:1] in _FORMULA_LEAD:
@@ -869,7 +885,12 @@ def isi_di_tempat(src: bytes, rencana: dict, status: list[str] | None = None,
                     sel._style = copy(tetangga._style)
             sel.value = _safe(val)
             if j >= ncol:
-                angka = isinstance(sel.value, (int, float)) and not isinstance(sel.value, bool)
+                # RUMUS ikut dapat number_format kolomnya: '={Qty}*{Harga}' di kolom
+                # "Total Harga" harus tampil "Rp1.500.000", bukan angka telanjang.
+                # Rumus yang mengembalikan TEKS (IF(...,"KURANG","OK")) tak terpengaruh
+                # — Excel mengabaikan number_format untuk sel teks.
+                angka = (isinstance(sel.value, (int, float)) and not isinstance(sel.value, bool)) \
+                    or isinstance(val, Rumus)
                 sel.number_format = fmt.get(j, _FMT_DEFAULT) if angka else "General"
             lapor["sel_diisi"] += 1
 
@@ -893,6 +914,13 @@ def isi_di_tempat(src: bytes, rencana: dict, status: list[str] | None = None,
 
         lapor["sheet"] = ws.title
         lapor["kolom_ditambah"] = [h for _j, h in (rencana.get("kolom_baru") or [])]
+        # HURUF kolom Excel tempat kolom baru mendarat — hanya di sini yang tahu
+        # (posisinya bergantung `_kolom_terakhir`). Model perlu menyebutnya ke user
+        # ("ditulis di kolom H") supaya isian bisa dicek tanpa menebak.
+        lapor["kolom_ditambah_di"] = {
+            h: get_column_letter(peta_kolom[j])
+            for j, h in (rencana.get("kolom_baru") or []) if j in peta_kolom
+        }
         return _save_asli(wb, src), peta_kolom, lapor, ""
     except Exception as e:  # pragma: no cover — jaring terakhir, ada jalur cadangan
         return None, {}, {}, f"gagal menulis ke file asli ({e})"

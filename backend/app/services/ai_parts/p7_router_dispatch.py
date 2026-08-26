@@ -241,6 +241,7 @@ _DISPATCH = {
     "sheet_isi_exploded": _t_sheet_isi_exploded,    # shim
     "sheet_isi_part_number": _t_sheet_isi_part_number,
     "sheet_cek_qty": _t_sheet_cek_qty,
+    "sheet_tulis": _t_sheet_tulis,
     "sheet_pilih_sheet": _t_sheet_pilih_sheet,
     "buat_penawaran": _t_buat_penawaran,
     "buat_permintaan_barang": _t_buat_permintaan_barang,

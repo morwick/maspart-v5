@@ -448,7 +448,7 @@ async def ai_chat_sheet(
 ):
     """Chat dengan LAMPIRAN EXCEL. File dibaca di server (kolom dikenali otomatis),
     disimpan sementara (TTL 2 jam, discoped per-user), lalu asisten menjawab dengan
-    tool `sheet_ringkasan`/`sheet_isi_kolom`.
+    tool `sheet_ringkasan`/`sheet_isi_kolom`/`sheet_tulis`.
 
     `stream=true` → respons SSE dengan frame yang SAMA seperti /chat-stream
     (progress/delta/reset/done), dan frame `done` membawa `sheet_id` + ringkasan

@@ -2821,7 +2821,9 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "lintas_model=true (figure EPC mana pun yang memuat PN itu — peringatan "
                     "lintas-model WAJIB disampaikan). Tanpa keduanya tool hanya mengembalikan "
                     "perintah bertanya. ⚠️ 'exploded' LAMBAT: maks 60 PN per-VIN / 25 PN lintas "
-                    "model & unduhan pertama butuh beberapa menit (sampaikan ke user)."
+                    "model & unduhan pertama butuh beberapa menit (sampaikan ke user). "
+                    "Nilai/catatan/RUMUS yang DIDIKTE USER (bukan data MASPART turunan PN) "
+                    "BUKAN urusan tool ini — pakai sheet_tulis."
                     + ket_sims
                 ),
                 "parameters": {
@@ -2912,6 +2914,109 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                             "description": "KHUSUS gambar='foto': foto per part (1-3). Kosong = 2.",
                         },
                     },
+                },
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "sheet_tulis",
+                "description": (
+                    "Tulis nilai / catatan / RUMUS yang DIDIKTE USER ke Excel unggahannya — "
+                    "pelengkap sheet_isi_kolom. Bedanya: sheet_isi_kolom mengisi DATA MASPART "
+                    "yang diturunkan dari Part Number (stok/harga/nama/berat/gambar); tool ini "
+                    "menulis apa yang USER tentukan sendiri. Pakai untuk: 'isi kolom Keterangan "
+                    "\"kirim batch 2\" untuk PN A, B, C', 'tulis 5 di baris 12 kolom Qty', 'isi "
+                    "kolom Supplier dengan MAS untuk semua baris', 'buat kolom Total = Qty × "
+                    "Harga', 'tandai KURANG untuk baris yang stoknya di bawah qty', 'kosongkan "
+                    "…' (⛔ MENGOSONGKAN sel dan MENAMBAH BARIS baru TIDAK didukung — tool ini "
+                    "hanya mengisi baris yang SUDAH ADA di file; katakan apa adanya, jangan "
+                    "menulis part baru ke baris milik part lain). "
+                    "⛔ SUMBER NILAI: hanya yang user sebutkan sendiri atau hasil tool giliran "
+                    "ini — JANGAN mengarang isi sel. Bila user belum menyebut nilainya, TANYA. "
+                    "Hasilnya = FILE USER SENDIRI yang diisi di tempat (format, rumus lama, "
+                    "baris judul & sheet lain tak diubah); kolom yang belum ada ditambahkan di "
+                    "kanan. Sel yang SUDAH BERISI tidak ditimpa kecuali timpa=true. "
+                    "⭐ RUMUS: 'rumus' menulis rumus Excel HIDUP (dihitung Excel saat dibuka, "
+                    "bukan angka mati) — tulis referensi kolomnya sebagai {Nama Kolom}, mis. "
+                    "rumus='={Qty}*{Harga}' → di baris 7 menjadi '=E7*H7'. Jauh lebih berguna "
+                    "daripada menghitung sendiri lalu menempel angka. "
+                    "Untuk menyasar baris, sebut PART NUMBER-nya (paling aman) atau NOMOR BARIS "
+                    "Excel (lihat 'contoh_baris_nomor'/'baris_header_excel' di sheet_ringkasan). "
+                    "Panggil sheet_ringkasan dulu bila belum tahu nama & huruf kolomnya."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "kolom": {
+                            "type": "string",
+                            "description": ("Kolom tujuan: nama header yang ADA di file, huruf "
+                                            "kolom Excel ('H'), atau nama kolom BARU yang mau "
+                                            "ditambahkan di kanan data."),
+                        },
+                        "nilai": {
+                            "type": "array",
+                            "description": ("Nilai per baris. Tiap elemen menyasar baris lewat "
+                                            "'pn' (Part Number — SEMUA baris ber-PN itu terisi) "
+                                            "ATAU 'baris' (nomor baris Excel). Contoh: "
+                                            "[{pn:'…', nilai:'kirim batch 2'}, {baris:12, nilai:5}]."),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "pn": {"type": "string",
+                                           "description": "Part Number baris sasaran."},
+                                    "baris": {"type": "integer",
+                                              "description": ("Nomor baris Excel (yang user lihat), "
+                                                              "bukan urutan data.")},
+                                    "nilai": {"type": ["string", "number", "boolean"],
+                                              "description": "Isi selnya. Angka kirim sebagai angka."},
+                                },
+                            },
+                        },
+                        "nilai_semua": {
+                            "type": ["string", "number", "boolean"],
+                            "description": ("Satu nilai untuk SEMUA baris data (dipersempit oleh "
+                                            "'bila' bila ada). Mis. kolom 'Supplier' = 'MAS'."),
+                        },
+                        "rumus": {
+                            "type": "string",
+                            "description": ("Rumus Excel HIDUP untuk tiap baris sasaran, dengan "
+                                            "referensi kolom di dalam kurung kurawal: "
+                                            "'={Qty}*{Harga}', '=IF({Stok}<{Qty},\"KURANG\",\"OK\")'. "
+                                            "{baris} = nomor baris. ⛔ Kolom yang dirujuk harus "
+                                            "SUDAH ada di file & tak boleh kolom tujuannya sendiri."),
+                        },
+                        "bila": {
+                            "type": "object",
+                            "description": ("Syarat baris — hanya baris yang cocok yang ditulis. "
+                                            "Dihitung di server atas SELURUH baris (kamu hanya "
+                                            "melihat 5 baris contoh, jadi jangan menyaring sendiri)."),
+                            "properties": {
+                                "kolom": {"type": "string", "description": "Kolom yang diperiksa."},
+                                "operator": {"type": "string",
+                                             "enum": list(ai_sheet._OP_BILA),
+                                             "description": ("kosong/terisi tak butuh 'nilai'; "
+                                                             "lebih_besar & lebih_kecil = "
+                                                             "perbandingan ANGKA.")},
+                                "nilai": {"type": ["string", "number"],
+                                          "description": ("Pembanding. Boleh merujuk kolom lain: "
+                                                          "'{Qty}' = nilai kolom Qty di baris itu.")},
+                            },
+                            "required": ["kolom", "operator"],
+                        },
+                        "kolom_pn": {
+                            "type": "string",
+                            "description": ("Kolom Part Number sumber (opsional; default kolom PN "
+                                            "yang terdeteksi otomatis)."),
+                        },
+                        "timpa": {
+                            "type": "boolean",
+                            "description": ("true = boleh MENIMPA sel user yang sudah ada isinya. "
+                                            "Default false (aman). Set true HANYA bila user "
+                                            "eksplisit minta nilainya diganti."),
+                        },
+                    },
+                    "required": ["kolom"],
                 },
             },
         })

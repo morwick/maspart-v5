@@ -2576,6 +2576,41 @@ def _t_sheet_isi_kolom(args: dict, user: dict) -> dict:
     )
 
 
+def _t_sheet_tulis(args: dict, user: dict) -> dict:
+    """Tulis nilai/catatan/RUMUS yang DIDIKTE USER ke Excel lampiran (`ai_sheet.tulis`).
+
+    Bentuk argumen dari model dinormalkan dengan pemaaf — bukan kelonggaran asal,
+    tapi karena tiga bentuk ini muncul berulang di log dan semuanya bermakna satu
+    hal yang sama:
+      • nilai = {"pn": …, "nilai": …}        → satu item (dict, bukan array);
+      • nilai = {"PN-A": "x", "PN-B": "y"}   → peta PN→isi;
+      • nilai = "MAS" (skalar)               → maksudnya SEMUA baris (nilai_semua).
+    """
+    nilai = args.get("nilai")
+    nilai_semua = args.get("nilai_semua")
+    if isinstance(nilai, dict):
+        if "nilai" in nilai or "pn" in nilai or "baris" in nilai:
+            nilai = [nilai]
+        else:                                   # peta {PN: isi}
+            nilai = [{"pn": k, "nilai": v} for k, v in nilai.items()]
+    elif nilai is not None and not isinstance(nilai, list):
+        if nilai_semua is None:                 # skalar = untuk semua baris
+            nilai_semua = nilai
+        nilai = None
+    bila = args.get("bila")
+    return ai_sheet.tulis(
+        sheet_id=args.get("_sheet_id", ""),
+        user=user,
+        kolom=(args.get("kolom") or args.get("kolom_tujuan") or "").strip(),
+        nilai=nilai,
+        nilai_semua=nilai_semua,
+        rumus=(args.get("rumus") or "").strip(),
+        bila=bila if isinstance(bila, dict) else None,
+        kolom_pn=(args.get("kolom_pn") or "").strip(),
+        timpa=bool(args.get("timpa")),
+    )
+
+
 # ── Shim tool LAMA (spec-nya tak lagi ditawarkan; lihat _LEGACY_TOOL_ALIAS) ──
 # Semuanya bermuara ke sheet_isi_kolom: SATU alat pengisi Excel lampiran = mustahil
 # menghasilkan file terpisah. Model kadang menulis nama lama dari kebiasaan

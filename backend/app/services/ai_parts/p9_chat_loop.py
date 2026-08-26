@@ -2135,7 +2135,12 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             "(figure unit itu sendiri), TIDAK ADA → lintas_model=true & sampaikan peringatan "
             "lintas-model), sheet_isi_part_number (KEBALIKAN: isi Part Number dari kolom NAMA "
             "part, butuh nomor rangka/VIN), sheet_cek_qty (isi/validasi Qty dari BOM unit, butuh "
-            "rangka). "
+            "rangka), sheet_tulis (tulis nilai/catatan/RUMUS yang DIDIKTE USER — 'isi kolom "
+            "Keterangan \"kirim batch 2\" untuk PN ini', 'tulis 5 di baris 12', 'kolom Total = "
+            "Qty × Harga' → pakai param 'rumus' supaya rumusnya HIDUP, bukan angka mati, "
+            "'tandai KURANG bila stok di bawah qty' → pakai 'bila'; sel yang sudah berisi tak "
+            "ditimpa kecuali timpa=true; ⛔ nilainya HARUS dari user/hasil tool — jangan "
+            "mengarang isi sel, kalau belum disebut TANYA dulu). "
             "⛔ FILE USER TIDAK DIUBAH FORMATNYA: yang diunduh adalah FILE USER SENDIRI, hanya "
             "diisi/ditambahi kolom yang ia minta — format, rumus, baris judul & sheet lain tak "
             "disentuh. Jangan menjanjikan file 'dirapikan'/'diformat ulang'; bila hasil tool "
@@ -2204,6 +2209,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     "katalog_kategori", "katalog_mesin", "banding_rangka_massal",
                     "sheet_isi_kolom", "sheet_isi_part_number", "sheet_cek_qty",
                     "sheet_isi_gambar", "sheet_isi_foto", "sheet_isi_exploded",
+                    "sheet_tulis",
                     "buat_penawaran",
                     "excel_unit_armada", "sheet_garansi_massal",
                     "excel_riwayat_klaim", "cek_massal_part",
