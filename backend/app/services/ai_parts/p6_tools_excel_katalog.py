@@ -488,6 +488,30 @@ def _katalog_mesin_impl(args: dict, user: dict) -> dict:
     }
 
 
+# Audit ai_chat_log 2026-08-28: katalog_kategori konsisten 70-85 dtk SINKRON di
+# jalur chat (p50 71 dtk, 12 giliran) — user menatap spinner. Walk EPC kini
+# dijalankan di thread; chat menunggu paling lama ini, lalu kartu tetap dikirim.
+_KATALOG_TUNGGU_DTK = 20.0
+
+
+def _katalog_walk_tunggu(rangka: str, kategori: str) -> dict | None:
+    """catalog_walk di thread daemon; None bila belum selesai dalam
+    _KATALOG_TUNGGU_DTK (walk tetap lanjut & mengisi cache epc_bom)."""
+    box: dict = {}
+
+    def _kerja():
+        try:
+            box["d"] = epc_bom.catalog_walk(rangka, kategori)
+        except Exception:  # pragma: no cover
+            logger.exception("catalog_walk latar gagal")
+            box["d"] = {"found": False, "_err": "api"}
+
+    t = threading.Thread(target=_kerja, name="katalog-walk", daemon=True)
+    t.start()
+    t.join(_KATALOG_TUNGGU_DTK)
+    return box.get("d")
+
+
 def _katalog_kategori_impl(args: dict, user: dict) -> dict:
     """KATALOG BERGAMBAR per kategori per-VIN — walk Atlas (epc_bom.catalog_walk,
     di-cache), lalu stash RESEP export; Excel bergambar dibangun saat kartu
@@ -525,7 +549,29 @@ def _katalog_kategori_impl(args: dict, user: dict) -> dict:
                               "argumen 'format' = 'excel' atau 'pdf'."),
         }
 
-    d = epc_bom.catalog_walk(rangka, kategori)
+    d = _katalog_walk_tunggu(rangka, kategori)
+    if d is None:
+        # Walk masih berjalan di latar → kartu unduh TETAP diberikan sekarang;
+        # builder unduhan (ai_export.katalog_excel → catalog_walk) menunggu walk
+        # yang sama selesai (dedup in-flight di epc_bom), bukan memulai lagi.
+        ext = "pdf" if fmt == "pdf" else "xlsx"
+        fmt_label = "PDF" if fmt == "pdf" else "Excel"
+        isi_sh = _boleh_isi_stok_harga(args, user)
+        lengkap = " ".join(kategori.split()).lower() in epc_bom._KATALOG_ALL_TERMS
+        judul = f"Katalog {'Lengkap' if lengkap else kategori.title()} {epc_bom._frame(rangka) or rangka}"
+        export_id, filename = ai_export.stash_builder(
+            judul, {"kind": "katalog", "rangka": rangka, "kategori": kategori, "fmt": fmt,
+                    "isi_stok_harga": isi_sh}, ext=ext)
+        return {
+            "found": True, "sedang_disusun": True, "export_id": export_id,
+            "filename": filename, "judul": judul, "format": fmt_label,
+            "stok_harga_diisi": isi_sh,
+            "catatan": (f"Katalog {fmt_label} MASIH DISUSUN di latar (EPC ditelusuri, "
+                        "±1-3 menit) — KARTU UNDUH sudah muncul di bawah jawabanmu; unduhan "
+                        "pertama akan menunggu sampai selesai. Jawab SINGKAT: kartu siap, "
+                        "unduhan pertama butuh beberapa menit. ⛔ JANGAN menyebut jumlah "
+                        "figure/part (belum diketahui), JANGAN membuat link/URL sendiri."),
+        }
     if not d.get("found"):
         err = d.get("_err")
         if err in ("token_expired", "no_token"):

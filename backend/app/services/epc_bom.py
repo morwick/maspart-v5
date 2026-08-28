@@ -2236,24 +2236,58 @@ def _zz_chapter(kode_kategori: str) -> str:
     return _ZZ_CHAPTER_LABEL.get((kode_kategori or "")[:5], "Lain-lain")
 
 
+# Walk yang SEDANG berjalan per kunci — pemanggil kedua (mis. builder unduhan
+# yang datang saat walk latar dari chat belum selesai) MENUNGGU hasilnya,
+# bukan memulai walk paralel kedua ke EPC untuk unit+kategori yang sama.
+_katalog_inflight: dict[str, threading.Event] = {}
+_KATALOG_INFLIGHT_TUNGGU = 300.0
+
+
+def _katalog_kunci(rangka: str, kategori: str) -> tuple[str, str, str]:
+    frame = _frame(rangka)
+    term = " ".join((kategori or "").split()).lower()
+    return frame, term, f"{frame}|{term}"
+
+
 def catalog_walk(rangka: str, kategori: str) -> dict:
     """Kumpulkan SEMUA figure satu KATEGORI unit utk katalog bergambar:
     tiap figure = satu view Spare Part List EPC = {nama, kode, svg (nama file
     exploded view), items:[{balon, pn, nama, nama_cn, qty, pengganti}]}.
     {found, frame_number, order_no, kategori_kode, kategori_cocok:[nama...],
-     jumlah_figure, jumlah_part, figures:[...], incomplete} atau {found:False,_err}."""
-    from . import catalog_bom  # impor lokal: hindari siklus saat import modul
-
-    frame = _frame(rangka)
-    term = " ".join((kategori or "").split()).lower()
+     jumlah_figure, jumlah_part, figures:[...], incomplete} atau {found:False,_err}.
+    Di-cache 1 jam; walk yang sedang berjalan untuk kunci sama TIDAK digandakan."""
+    frame, term, ckey = _katalog_kunci(rangka, kategori)
     if not frame or not term:
         return {"found": False, "_err": "input"}
-    ckey = f"{frame}|{term}"
     with _katalog_lock:
         c = _katalog_cache.get(ckey)
         if c and (time.monotonic() - c["at"] < _KATALOG_TTL):
             return c["val"]
+        ev = _katalog_inflight.get(ckey)
+        pemilik = ev is None
+        if pemilik:
+            ev = threading.Event()
+            _katalog_inflight[ckey] = ev
+    if not pemilik:
+        ev.wait(_KATALOG_INFLIGHT_TUNGGU)
+        with _katalog_lock:
+            c = _katalog_cache.get(ckey)
+        if c:
+            return c["val"]
+        # Walk pemilik gagal / hasil terdegradasi (tak di-cache) → coba sendiri.
+        return _catalog_walk_impl(rangka, kategori, ckey)
+    try:
+        return _catalog_walk_impl(rangka, kategori, ckey)
+    finally:
+        with _katalog_lock:
+            _katalog_inflight.pop(ckey, None)
+        ev.set()
 
+
+def _catalog_walk_impl(rangka: str, kategori: str, ckey: str) -> dict:
+    from . import catalog_bom  # impor lokal: hindari siklus saat import modul
+
+    frame, term, _ = _katalog_kunci(rangka, kategori)
     top = category_top(rangka)
     if not top.get("found"):
         return {"found": False, "frame_number": frame, "_err": top.get("_err") or "api"}
