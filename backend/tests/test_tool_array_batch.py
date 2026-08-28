@@ -59,6 +59,7 @@ def _tipe(nama, param, sheet_id=""):
     ("cek_populasi", "query"),
     ("lihat_unit_armada", "unit"),
     ("masukkan_unit_fleet", "unit"),
+    ("harga_sims", "part_number"),
 ])
 def test_parameter_menerima_array_DAN_string(nama, param):
     t = _tipe(nama, param)

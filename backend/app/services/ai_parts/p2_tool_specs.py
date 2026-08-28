@@ -2539,21 +2539,24 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "harga_sims",
                 "description": (
-                    "Cek harga MODAL part dari sumber SIMS secara live. Satuannya CNY "
-                    "(yuan) — itu mata uang aslinya, sajikan apa adanya. ⛔ JANGAN "
-                    "mengonversi ke rupiah kecuali user eksplisit memintanya; harga JUAL "
-                    "rupiah datang dari Accurate (detail_part/cari_part), BUKAN dari kurs. "
-                    "Gunakan saat user minta harga modal/SIMS."
+                    "Harga MODAL part dari SIMS (live), satuan CNY — sajikan apa adanya, "
+                    "⛔ jangan dikonversi ke rupiah kecuali user minta; harga JUAL rupiah = "
+                    "Accurate (detail_part/cari_part), bukan kurs. BANYAK PN → SATU panggilan "
+                    "part_number ARRAY (maks 100), ⛔ jangan per-PN/dicicil; >15 PN → Excel."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "part_number": {"type": "string", "description": "Part Number yang dicek harganya."},
+                        "part_number": {
+                            "type": ["string", "array"],
+                            "items": {"type": "string"},
+                            "description": "PN atau ARRAY banyak PN.",
+                        },
+                        "excel": {"type": "boolean", "description": "true bila user minta Excel."},
                         "konversi_idr": {
                             "type": "boolean",
-                            "description": ("true HANYA bila user eksplisit minta harga SIMS "
-                                            "dalam rupiah/dikonversi/'berapa kalau di-rupiah-kan'. "
-                                            "Default false = CNY apa adanya."),
+                            "description": ("true HANYA bila user eksplisit minta dalam rupiah/"
+                                            "dikonversi. Default false = CNY."),
                         },
                     },
                     "required": ["part_number"],

@@ -1733,9 +1733,12 @@ def _t_harga_sims(args: dict, user: dict) -> dict:
             "error": "Akses harga SIMS/modal hanya untuk admin & akun 'mas'. "
                      "Jangan menampilkan atau memperkirakan harga SIMS untuk user ini.",
         }
-    pn = (args.get("part_number") or "").strip()
-    if not pn:
+    pns = _parse_daftar_pn(args.get("part_number") or "")
+    if not pns:
         return {"error": "part_number kosong"}
+    if len(pns) > 1:
+        return _harga_sims_massal(pns, args)
+    pn = pns[0]
     try:
         d = harga.cari_harga(pn)
         out = {
@@ -1744,6 +1747,10 @@ def _t_harga_sims(args: dict, user: dict) -> dict:
             "mata_uang": "CNY",
             "catatan": d.get("note"),
         }
+        if d.get("cny") is None:
+            # Telemetri: PN tanpa harga = lookup nihil ('nf'), bukan sukses.
+            out["found"] = False
+            out["catatan"] = (out["catatan"] or "Harga tidak ditemukan di SIMS")
         # Harga SIMS = harga MODAL, satuan aslinya CNY. Harga JUAL rupiah datang
         # dari Accurate (detail_part/cari_part), BUKAN dari kurs. Nilai IDR hanya
         # disertakan bila user memintanya — kalau selalu dikirim, model hampir
@@ -1758,6 +1765,71 @@ def _t_harga_sims(args: dict, user: dict) -> dict:
     except Exception as e:  # pragma: no cover
         logger.exception("harga SIMS gagal")
         return {"error": "gagal ambil harga SIMS (gangguan internal/jaringan)"}
+
+
+# Audit ai_chat_log 2026-08-28: user 'mas' mengecek 133 PN → harga_sims cuma
+# terima satu PN → 12 giliran "lanjut", 10,6 menit, 37 panggilan API, 1,7 jt
+# token masuk, dan rem anti-loop menyala 4×. Satu panggilan array menyelesaikan
+# semuanya; di atas ambang ini tabel tak muat di jawaban → langsung Excel.
+_HARGA_SIMS_EXCEL_OTOMATIS = 15
+_HARGA_SIMS_WORKERS = 6
+
+
+def _harga_sims_massal(pns: list[str], args: dict) -> dict:
+    dibuang = pns[_MAX_MASSAL_PN:]
+    pns = pns[:_MAX_MASSAL_PN]
+    try:
+        b = harga.batch_harga(pns, max_workers=_HARGA_SIMS_WORKERS)
+    except Exception:  # pragma: no cover
+        logger.exception("harga SIMS massal gagal")
+        return {"found": False, "error": "gagal ambil harga SIMS (gangguan internal/jaringan)"}
+    idr = bool(args.get("konversi_idr"))
+    hasil: list[dict] = []
+    nihil: list[str] = []
+    for r in b.get("results") or []:
+        if r.get("cny") is None:
+            nihil.append(r["pn"])
+            continue
+        row = {"part_number": r["pn"], "harga_cny": r["cny"]}
+        if idr:
+            row["harga_idr"] = r.get("idr")
+        if r.get("note"):
+            row["catatan"] = r["note"]
+        hasil.append(row)
+    out: dict = {
+        "found": bool(hasil),
+        "jumlah": len(pns),
+        "ketemu": len(hasil),
+        "mata_uang": "IDR" if idr else "CNY",
+        "hasil": hasil,
+        "tidak_ditemukan": nihil,
+    }
+    if idr:
+        out["kurs_cny_idr"] = b.get("rate")
+    catatan = ("Harga SIMS = harga MODAL dalam CNY; sajikan apa adanya, ⛔ jangan "
+               "dikonversi ke rupiah kecuali diminta. PN di 'tidak_ditemukan' memang "
+               "tak punya harga di SIMS — katakan jujur, jangan ditebak.")
+    if dibuang:
+        catatan += (f" ⚠️ {len(dibuang)} PN terakhir TIDAK dicek (plafon {_MAX_MASSAL_PN} "
+                    f"per panggilan): {', '.join(dibuang[:10])}"
+                    + (" …" if len(dibuang) > 10 else "") + " — panggil lagi untuk sisanya.")
+    if hasil and (bool(args.get("excel")) or len(pns) > _HARGA_SIMS_EXCEL_OTOMATIS):
+        kolom = ["No", "Part Number", "Harga SIMS (CNY)"] + (["Harga (IDR)"] if idr else []) + ["Catatan"]
+        baris: list[list] = []
+        for i, r in enumerate(hasil, start=1):
+            row = [str(i), r["part_number"], r["harga_cny"]]
+            if idr:
+                row.append(r.get("harga_idr"))
+            row.append(r.get("catatan") or "")
+            baris.append(row)
+        for pn in nihil:
+            baris.append([str(len(baris) + 1), pn, "—"] + ([""] if idr else []) + ["tidak ditemukan di SIMS"])
+        export_id, filename = ai_export.stash_export(f"Harga SIMS {len(pns)} PN", kolom, baris)
+        out.update(export_id=export_id, filename=filename, jumlah_baris=len(baris))
+        catatan += (" File Excel siap — kartu unduh muncul OTOMATIS di bawah jawaban; "
+                    "JANGAN tulis ulang seluruh tabel, cukup ringkas (jumlah ketemu/nihil).")
+    out["catatan"] = catatan
+    return out
 
 
 # ── tanya_user: asisten BERTANYA balik dgn pilihan (kartu di klien) ─────────
