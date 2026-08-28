@@ -221,3 +221,20 @@ def test_unit_name_tokens_ikut_model_populasi_dan_knowledge(monkeypatch):
     monkeypatch.setitem(ai._UNIT_TOKEN_CACHE, "at", 0.0)
     toks = ai._unit_name_tokens()
     assert {"ZZ3317V486JB1R", "ZZ4257V324HE1B", "MC11.44-50"} <= toks
+
+
+# ── Pertanyaan diulang tanpa VIN → jangan minta VIN lagi (audit 2026-08-28) ──
+def test_konteks_ulang_tanpa_vin_larang_minta_vin_lagi():
+    q = "Center per spring belakang untuk howo 380"
+    hist = [{"role": "user", "content": q},
+            {"role": "assistant", "content": "Kirim dulu nomor rangka (VIN) ya."},
+            {"role": "user", "content": q}]
+    blk = ai._active_context_block(hist)
+    assert "JANGAN minta VIN lagi" in blk
+    # Pertama kali ditanya → tidak ada instruksi itu.
+    assert "JANGAN minta VIN lagi" not in ai._active_context_block(hist[:1])
+    # Sudah ada rangka di riwayat → bukan kasus ini.
+    hist_vin = [{"role": "user", "content": q + " LZZ5EXSF9RJ380449"},
+                {"role": "assistant", "content": "…"},
+                {"role": "user", "content": q + " LZZ5EXSF9RJ380449"}]
+    assert "JANGAN minta VIN lagi" not in ai._active_context_block(hist_vin)

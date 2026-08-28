@@ -666,6 +666,17 @@ def _active_context_block(history: list[dict], memo: dict | None = None,
         except Exception:  # pragma: no cover — deteksi opsional, jangan jatuhkan chat
             pass
     lines = ["KONTEKS AKTIF (rujukan untuk pesan terakhir user — data yang BARU dibahas):"]
+    # User MENGULANG pertanyaan yang sama TANPA VIN (audit ai_chat_log 2026-08-28:
+    # 'Center per spring belakang untuk howo 380' 4× dalam 6 menit — asisten
+    # bergantian menjawab lalu menolak & minta VIN lagi). Minta VIN sekali sudah
+    # cukup; pengulangan = user memang tak punya/tak mau memberi rangka.
+    if not rangka and _pertanyaan_diulang(last_user_up, history):
+        lines.append(
+            "- ⚠️ User MENGULANG pertanyaan yang sama tanpa memberi nomor rangka — "
+            "⛔ JANGAN minta VIN lagi. Jawab LANGSUNG dari katalog per-model (cari_part) "
+            "dengan label tegas 'perkiraan per-model (belum tentu PN unit Anda)'; "
+            "sebut manfaat VIN sekali di akhir sebagai catatan, bukan syarat."
+        )
     if rangka and rangka_hist:
         lines.append(
             "- Nomor rangka AKTIF: " + ", ".join(rangka) + ". Bila user bertanya lanjutan "

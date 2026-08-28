@@ -452,10 +452,12 @@ def _t_cari_part(args: dict, user: dict) -> dict:
     if unit:
         out_res["peringatan_akurasi"] = (
             "Hasil ini dari KATALOG PER-MODEL (perkiraan) — dua unit bermodel sama bisa "
-            "beda PN. Bila user BELUM memberi nomor rangka (VIN) di percakapan, WAJIB "
-            "awali jawaban dengan meminta nomor rangka agar part dicek PERSIS via EPC, "
-            "dan labeli hasil ini 'perkiraan per-model'. Bila rangka SUDAH ada, utamakan "
-            "tool EPC (part_aus_dari_rangka/bom_dari_rangka) alih-alih hasil ini."
+            "beda PN. Bila user BELUM memberi nomor rangka (VIN) dan BELUM pernah "
+            "dimintai di percakapan ini, awali jawaban dengan meminta nomor rangka agar "
+            "part dicek PERSIS via EPC; bila sudah pernah diminta (user mengulang tanpa "
+            "VIN), JANGAN minta lagi — cukup labeli hasil ini 'perkiraan per-model'. "
+            "Bila rangka SUDAH ada, utamakan tool EPC (part_aus_dari_rangka/"
+            "bom_dari_rangka) alih-alih hasil ini."
         )
     # Tautan pengetahuan + keluarga taksonomi HANYA saat hasil sempit (≤3 PN)
     # — daftar panjang tak butuh tautan & hemat token.
