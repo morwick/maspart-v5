@@ -1676,10 +1676,37 @@ def _unit_name_tokens() -> set[str]:
             f"{m.get('model') or ''} {m.get('tipe') or ''}" for m in repairkit.list_models()))
     except Exception:
         pass
+    # Kode MODEL armada dari populasi ('ZZ3317V486JB1R', 'ZZ3128G3415E1R') +
+    # kode sasis/mesin per prefix VIN dari ai_knowledge ('ZZ…', 'MC13.48-50',
+    # 'WP10.380E22'). Audit log 2026-08-28: token seperti ini keluar dari
+    # cek_kendaraan giliran SEBELUMNYA lalu disebut lagi → disamarkan guard.
+    try:
+        toks |= _extract_pns(" ".join(populasi.filter_options().get("MODEL") or []))
+    except Exception:
+        pass
+    try:
+        _kn = ai_knowledge._load() or {}
+        toks |= _extract_pns(" ".join(
+            f"{r.get('sasis') or ''} {r.get('mesin') or ''}" for r in (_kn.get("unit_vin") or [])))
+    except Exception:
+        pass
     if toks:
         _UNIT_TOKEN_CACHE["tokens"] = toks
         _UNIT_TOKEN_CACHE["at"] = now
     return toks
+
+
+# Bentuk token yang PASTI bukan part number walau lolos regex mirip-PN — audit
+# ai_chat_log 2026-08-28: 7 dari 8 jawaban 'sanitized' ternyata jawaban BENAR
+# yang dirusak karena token berikut disamarkan '⟨PN tak terverifikasi⟩':
+#   • kode mesin  'WP10.380E22', 'MC13.48-50', 'WD615.47'  (pola = fast_moving._HP_MESIN_RE)
+#   • grade oli   '90W-140', '15W40', '85W-90'
+#   • kode sasis pabrik 'ZZ3128G3415E1R' (bila belum ada di populasi)
+_BUKAN_PN_RE = (
+    re.compile(r"^(?:WP|MC|MT|WD|YC|ISM|SC)\d{1,2}[A-Z]?\.\d{2,3}[A-Z0-9.\-]*$"),
+    re.compile(r"^\d{1,2}W-?\d{2,3}$"),
+    re.compile(r"^ZZ\d{4}[A-Z0-9]{4,}$"),
+)
 
 
 def _drop_unit_tokens(bad: list[str]) -> list[str]:
@@ -1692,12 +1719,17 @@ def _drop_unit_tokens(bad: list[str]) -> list[str]:
     for p in bad:
         if p in unit_toks:
             continue
+        if any(rx.match(p) for rx in _BUKAN_PN_RE):
+            continue
         # Klitik Indonesia menempel di kode unit ('NX360-mu', 'SITRAK-nya') ikut
         # tertangkap regex mirip-PN (kasus nyata: 'unit NX360-mu' disamarkan guard).
-        # Buang HANYA bila hasil melepas '-<1-3 huruf>' di ujung = token unit sah —
-        # PN asli berujung '-LH'/'-RH' tak terpengaruh (basisnya bukan nama unit).
-        base = re.sub(r"-[A-Z]{1,3}$", "", p)
-        if base != p and base in unit_toks:
+        # Buang bila hasil melepas '-<1-3 huruf>' di ujung = token unit sah, ATAU
+        # basisnya SENDIRI bukan bentuk PN (terlalu pendek / tanpa huruf / tanpa
+        # angka: 'NX400-nya' → 'NX400', 'HOWO 380-nya' → '380', 'HOMAN-4X4' →
+        # 'HOMAN'). PN asli berujung '-LH'/'-RH' tak terpengaruh: basisnya ≥7 char
+        # ber-huruf+angka & bukan nama unit → tetap dicurigai.
+        base = re.sub(r"-[A-Z0-9]{1,3}$", "", p)
+        if base != p and (base in unit_toks or not _PN_TOKEN_RE.fullmatch(base)):
             continue
         out.append(p)
     return out

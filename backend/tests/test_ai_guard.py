@@ -190,3 +190,34 @@ def test_rangka_candidates_vin_tak_disaring(monkeypatch):
     monkeypatch.setattr(ai, "_unit_name_tokens", lambda: set())
     vin = "LZZ5EXSF0KX123456"      # 17 char VIN
     assert vin in ai._rangka_candidates("UNIT " + vin)
+
+
+def test_nama_model_kode_mesin_grade_oli_bukan_pn(monkeypatch):
+    # Audit ai_chat_log 2026-08-28: 7/8 jawaban 'sanitized' adalah jawaban BENAR
+    # yang dirusak — 'unit NX400-nya', 'HOWO 380-nya', 'oli SAE 90W-140',
+    # 'mesin MC13.48-50 / WP10.380E22', 'sasis ZZ3128G3415E1R', 'HOMAN-4X4'
+    # disamarkan jadi '⟨PN tak terverifikasi⟩'. Basis klitik yang bukan bentuk
+    # PN, kode mesin, grade oli & kode sasis tidak boleh dicurigai.
+    monkeypatch.setitem(ai._UNIT_TOKEN_CACHE, "tokens", {"NX360HP"})
+    monkeypatch.setitem(ai._UNIT_TOKEN_CACHE, "at", __import__("time").time())
+    bukan = ["NX400-NYA", "380-NYA", "HOMAN-4X4", "90W-140", "15W40",
+             "WP10.380E22", "MC13.48-50", "ZZ3128G3415E1R"]
+    assert ai._drop_unit_tokens(bukan) == []
+    # PN sungguhan (termasuk berklitik/akhiran) TETAP dicurigai.
+    tetap = ["WG9725520789", "AZ9998887776-LH", "WG9725520789-01", "VG1500040106A"]
+    assert ai._drop_unit_tokens(tetap) == tetap
+
+
+def test_unit_name_tokens_ikut_model_populasi_dan_knowledge(monkeypatch):
+    from app.services import populasi, ai_knowledge, part_index, catalog_bom, gudang_config, repairkit
+    monkeypatch.setattr(part_index, "unit_models", lambda: [])
+    monkeypatch.setattr(catalog_bom, "list_units", lambda: [])
+    monkeypatch.setattr(gudang_config, "coords_map", lambda: {})
+    monkeypatch.setattr(repairkit, "list_models", lambda: [])
+    monkeypatch.setattr(populasi, "filter_options", lambda: {"MODEL": ["ZZ3317V486JB1R"]})
+    monkeypatch.setattr(ai_knowledge, "_load",
+                        lambda: {"unit_vin": [{"sasis": "ZZ4257V324HE1B", "mesin": "MC11.44-50"}]})
+    monkeypatch.setitem(ai._UNIT_TOKEN_CACHE, "tokens", set())
+    monkeypatch.setitem(ai._UNIT_TOKEN_CACHE, "at", 0.0)
+    toks = ai._unit_name_tokens()
+    assert {"ZZ3317V486JB1R", "ZZ4257V324HE1B", "MC11.44-50"} <= toks
