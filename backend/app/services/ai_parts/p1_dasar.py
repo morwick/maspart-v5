@@ -30,6 +30,7 @@ from rapidfuzz import fuzz
 import requests
 
 from ..core.config import get_settings
+from .cache_util import CacheTTL
 from . import (abs_scr_codes, accurate, ai_belajar, ai_chat_log, ai_export, ai_knowledge,
                ai_session, ai_sheet,
                catalog_bom, dtc_codes,

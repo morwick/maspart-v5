@@ -6,8 +6,40 @@
 # Urutan muat & pembagian: lihat _PARTS di ai_assistant.py.
 from __future__ import annotations
 
+# Cache NEGATIF render figure: hanya kegagalan INFRA ('err' — jaringan/render
+# EPC), bukan 'nf'. Audit ai_chat_log 2026-08-10: "Berikan gambar exploded
+# viewnya" 3× beruntun dalam 1 menit → 3× render gagal yang sama. Selama
+# jendela ini tool menjawab dari cache & menyuruh model berhenti mencoba.
+_EXPLODED_GAGAL_TTL = 600.0
+_exploded_gagal = CacheTTL("exploded.gagal", _EXPLODED_GAGAL_TTL, 200)
+
+
+def _kunci_exploded_gagal(args: dict) -> tuple:
+    return tuple((args.get(k) or "").strip().upper()
+                 for k in ("pn", "part_number", "rangka", "kategori", "sumber"))
+
+
 def _t_gambar_exploded_satu(args: dict, user: dict) -> dict:
-    """Jalur SATU PN (perilaku lama persis, termasuk auto-fallback Atlas→mesin)."""
+    """Jalur SATU PN (auto-fallback Atlas→mesin) + cache negatif gagal-infra."""
+    kunci = _kunci_exploded_gagal(args)
+    hit = _exploded_gagal.get(kunci)
+    if hit:
+        at, res = hit
+        menit = max(1, int((time.time() - at) // 60))
+        out = dict(res)
+        out["_err_kind"] = "err"
+        out["catatan"] = (f"⛔ Render figure ini SUDAH GAGAL {menit} menit lalu (server EPC "
+                          "bermasalah) — JANGAN panggil ulang tool ini giliran ini; sampaikan ke "
+                          "user gambarnya belum bisa dirender dan sarankan coba beberapa menit lagi. "
+                          + (out.get("catatan") or ""))
+        return out
+    res = _gambar_exploded_satu_impl(args, user)
+    if isinstance(res, dict) and not res.get("found") and _tool_fail_kind(res) == "err"             and not res.get("denied") and not res.get("_token_issue"):
+        _exploded_gagal[kunci] = (time.time(), res)
+    return res
+
+
+def _gambar_exploded_satu_impl(args: dict, user: dict) -> dict:
     sumber = (args.get("sumber") or "").strip().lower()
     if sumber == "mesin":
         return _gambar_exploded_mesin_impl(args, user)
