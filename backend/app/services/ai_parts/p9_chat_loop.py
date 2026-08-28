@@ -1716,7 +1716,9 @@ def _unit_name_tokens() -> set[str]:
 _BUKAN_PN_RE = (
     re.compile(r"^(?:WP|MC|MT|WD|YC|ISM|SC)\d{1,2}[A-Z]?\.\d{2,3}[A-Z0-9.\-]*$"),
     re.compile(r"^\d{1,2}W-?\d{2,3}$"),
-    re.compile(r"^ZZ\d{4}[A-Z0-9]{4,}$"),
+    # bentuk nyata: ZZ3317V486JB1R / ZZ3128G3415E1R / ZZ4257V324HE1B — huruf
+    # WAJIB setelah 4 digit (PN palsu 'ZZ9999999888777' tetap tertangkap).
+    re.compile(r"^ZZ\d{4}[A-Z]\d{3,4}[A-Z][A-Z0-9]{0,3}$"),
 )
 
 
