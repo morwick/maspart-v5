@@ -167,6 +167,10 @@ export default function ChatLogPage() {
                     hint={`${summary.guard_menyala ?? 0} giliran`} />
               <Stat label="Tool gagal" value={`${summary.tool_gagal_rasio_persen ?? 0}%`}
                     hint={`${summary.tool_gagal ?? 0} giliran`} />
+              {/* Sinyal mutu implisit (migrasi 030): user mengetik ulang pertanyaan
+                  yang sama = jawaban pertama kemungkinan tak memuaskan. */}
+              <Stat label="Pertanyaan diulang" value={`${summary.pertanyaan_diulang_persen ?? 0}%`}
+                    hint={`${summary.pertanyaan_diulang ?? 0} giliran`} />
               {/* Biaya DeepSeek per pesan: rata-rata token masuk+keluar per giliran.
                   Cache hit = bagian input bertarif ±1/10 (makin tinggi makin hemat). */}
               <Stat
@@ -354,6 +358,7 @@ export default function ChatLogPage() {
                       {r.question || "—"}
                       {r.guard_hit && <span className="pill" style={{ marginLeft: 6, height: 18, fontSize: 10, padding: "0 6px" }}>guard</span>}
                       {r.tool_failed && <span className="pill" style={{ marginLeft: 4, height: 18, fontSize: 10, padding: "0 6px" }}>tool gagal</span>}
+                      {r.diulang && <span className="pill" style={{ marginLeft: 4, height: 18, fontSize: 10, padding: "0 6px" }} title="User mengetik ulang pertanyaan yang sama">🔁 diulang</span>}
                     </td>
                     <td style={{ fontSize: 11, color: "var(--ink-600)" }} title={r.tools || ""}>
                       {r.tools_count > 0 ? `${r.tools_count} tool` : "—"}

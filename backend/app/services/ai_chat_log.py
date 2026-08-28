@@ -233,14 +233,18 @@ _SELECT_FAILED = _SELECT_REPLY + ",tools_failed"
 _SELECT_SESSION = _SELECT_FAILED + ",session_id"
 _SELECT_GUARD = _SELECT_SESSION + ",guard_kinds"
 _SELECT_FULL = _SELECT_GUARD + ",model_ms,tools_ms,ttft_ms"
+# Audit 2026-08-28: tangga TULIS sudah mengirim `diulang` (030) tapi tangga BACA
+# berhenti di 029 → PostgREST tak pernah mengembalikan kolomnya → summary()
+# selalu 0 walau migrasi sudah jalan. Tier baca wajib ikut naik tiap migrasi.
+_SELECT_DIULANG = _SELECT_FULL + ",diulang"
 
 
 def list_logs(limit: int = 200) -> list[dict]:
     """Baris observabilitas terbaru dulu (untuk halaman admin). Kolom terkaya dicoba
-    dulu (fase ms=029, guard_kinds=026, session_id=025, tools_failed=023, reply=022,
-    token=021); skema lama → fallback ke select yang lebih ramping."""
-    for sel in (_SELECT_FULL, _SELECT_GUARD, _SELECT_SESSION, _SELECT_FAILED,
-                _SELECT_REPLY, _SELECT_TOKENS, _SELECT_BASE):
+    dulu (diulang=030, fase ms=029, guard_kinds=026, session_id=025, tools_failed=023,
+    reply=022, token=021); skema lama → fallback ke select yang lebih ramping."""
+    for sel in (_SELECT_DIULANG, _SELECT_FULL, _SELECT_GUARD, _SELECT_SESSION,
+                _SELECT_FAILED, _SELECT_REPLY, _SELECT_TOKENS, _SELECT_BASE):
         try:
             r = requests.get(
                 _rest_url("ai_chat_log"),

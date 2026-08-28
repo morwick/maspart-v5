@@ -245,3 +245,39 @@ def test_summary_tanpa_data_fase_tetap_utuh(monkeypatch):
     assert s["fase"]["giliran_terukur"] == 0
     assert s["fase"]["rata2_model_ms"] == 0
     assert s["total"] == 1                        # metrik lama tak terganggu
+
+
+# ── Tangga BACA ikut migrasi 030 (audit 2026-08-28: kolom diulang tak pernah diminta) ─
+def test_list_logs_minta_diulang_dulu_lalu_jatuh_ke_full(monkeypatch):
+    from app.services import ai_chat_log as cl
+    dilihat = []
+
+    class _R:
+        def __init__(self, ok, data):
+            self.ok, self._data = ok, data
+
+        def raise_for_status(self):
+            if not self.ok:
+                raise RuntimeError("400")
+
+        def json(self):
+            return self._data
+
+    def get(url, headers=None, params=None, timeout=None):
+        dilihat.append(params["select"])
+        if params["select"].endswith(",diulang"):
+            return _R(False, None)          # migrasi 030 belum dijalankan
+        return _R(True, [{"id": 1}])
+
+    monkeypatch.setattr(cl.requests, "get", get)
+    assert cl.list_logs(5) == [{"id": 1}]
+    assert dilihat[0] == cl._SELECT_DIULANG and dilihat[1] == cl._SELECT_FULL
+
+
+def test_summary_menghitung_diulang_bila_kolom_ada(monkeypatch):
+    from app.services import ai_chat_log as cl
+    rows = [{"latency_ms": 1, "diulang": True}, {"latency_ms": 1, "diulang": False},
+            {"latency_ms": 1}]
+    monkeypatch.setattr(cl, "list_logs", lambda limit=1000: rows)
+    s = cl.summary()
+    assert s["pertanyaan_diulang"] == 1 and s["pertanyaan_diulang_persen"] > 0

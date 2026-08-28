@@ -1421,6 +1421,9 @@ export type ChatLogRow = {
   // undefined pada baris lama — dan `guard_hit` baris lama UNDERCOUNT (dulu hanya
   // guard anti-karangan yang terhitung), jadi jangan bandingkan lintas rilis.
   guard_kinds?: string;
+  // User mengetik ulang pertanyaan yang sama di sesi yang sama (migrasi 030) =
+  // sinyal mutu implisit; undefined pada baris lama / sebelum migrasi.
+  diulang?: boolean;
 };
 export type ChatLogSummary = {
   total: number;
@@ -1441,6 +1444,10 @@ export type ChatLogSummary = {
   // Rincian total kegagalan per jenis; "brake" = DITOLAK rem anti-loop (belum
   // sempat dicek — bukan data hilang); "legacy" = baris lama tanpa suffix jenis.
   tool_gagal_rincian?: { nf?: number; err?: number; brake?: number; legacy?: number };
+  // Giliran yang pertanyaannya DIULANG user (migrasi 030) — layak diperiksa,
+  // bukan vonis salah; 0 sebelum migrasi dijalankan.
+  pertanyaan_diulang?: number;
+  pertanyaan_diulang_persen?: number;
   outcome?: Record<string, number>;
   token?: {
     giliran_terukur: number;
