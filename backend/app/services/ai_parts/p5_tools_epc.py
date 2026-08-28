@@ -745,6 +745,9 @@ def _t_cek_kendaraan(args: dict, user: dict) -> dict:
                           "spesifikasi (engine/gearbox/axle/Euro) unit ini — sampaikan apa adanya "
                           "bahwa unit tak terbaca di EPC & minta user cek ejaan nomor rangka "
                           "(EPC hanya memuat unit Sinotruk/HOWO/SITRAK).")
+        fb = res.get("format_rangka")
+        if fb:
+            res["catatan"] = "⚠️ " + fb["pesan"] + " " + res["catatan"]
     return res
 
 

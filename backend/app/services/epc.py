@@ -46,6 +46,53 @@ def _frame(rangka: str) -> str:
     return n[-8:] if len(n) >= 11 else n
 
 
+# Check digit VIN (ISO 3779 / GB 16735) — salinan kecil dari vin_ocr (modul OCR
+# berat, sengaja tak diimpor di jalur asisten).
+_CD_TRANS = {c: i for i, c in enumerate("0123456789")}
+_CD_TRANS.update({"A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6, "G": 7, "H": 8,
+                  "J": 1, "K": 2, "L": 3, "M": 4, "N": 5, "P": 7, "R": 9,
+                  "S": 2, "T": 3, "U": 4, "V": 5, "W": 6, "X": 7, "Y": 8, "Z": 9})
+_CD_BOBOT = (8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2)
+
+
+def check_digit(vin: str) -> str:
+    total = sum(_CD_TRANS.get(c, 0) * _CD_BOBOT[i] for i, c in enumerate(vin[:17]))
+    sisa = total % 11
+    return "X" if sisa == 10 else str(sisa)
+
+
+def periksa_bentuk_rangka(rangka: str) -> dict | None:
+    """Deteksi VIN yang BENTUKNYA janggal — supaya jawaban "tidak terbaca di EPC"
+    bisa menyebut sebabnya. Audit ai_chat_log 2026-08-28: 'LZZ5EXSF9RJ38044'
+    (16 char) dicoba 3× & 'LZZ5BBFE1SE592853' 2×; `_frame` diam-diam memotong
+    8 char terakhir sehingga EPC ditanya frame yang salah dan user cuma disuruh
+    "cek ejaan". None = bentuk wajar (17 char cd cocok, atau frame 8 char)."""
+    n = re.sub(r"[^A-Z0-9]", "", (rangka or "").upper())
+    if not n or len(n) <= 8:
+        return None
+    if len(n) != 17:
+        if 9 <= len(n) <= 16:
+            sel = 17 - len(n)
+            pesan = (f"Nomor rangka yang diberikan {len(n)} karakter — VIN Sinotruk "
+                     f"17 karakter, kemungkinan KURANG {sel} karakter (salah ketik/terlewat). "
+                     "Sampaikan jumlah karakternya ke user & minta cek ulang/foto plat rangka.")
+        else:
+            sel = len(n) - 17
+            pesan = (f"Nomor rangka yang diberikan {len(n)} karakter — VIN 17 karakter, "
+                     f"kemungkinan KELEBIHAN {sel} karakter. Sampaikan ke user & minta cek ulang.")
+        return {"panjang": len(n), "harus": 17, "selisih": len(n) - 17, "pesan": pesan}
+    if any(c in "IOQ" for c in n):
+        return {"panjang": 17, "harus": 17, "selisih": 0,
+                "pesan": "VIN memuat huruf I/O/Q yang tak pernah dipakai di VIN — kemungkinan "
+                         "salah baca 1/0/O. Sampaikan ke user & minta cek ulang."}
+    cd = check_digit(n)
+    if n[8] != cd:
+        return {"panjang": 17, "harus": 17, "selisih": 0, "check_digit_salah": True,
+                "pesan": ("VIN 17 karakter tapi check digit (karakter ke-9) TIDAK cocok — "
+                          "kemungkinan salah ketik 1 karakter. Sampaikan ke user & minta cek ulang.")}
+    return None
+
+
 def available() -> bool:
     return True  # endpoint publik, tanpa auth
 
@@ -110,10 +157,15 @@ def lookup(rangka: str) -> dict:
                            "BELUM bisa dipastikan. ⛔ JANGAN bilang nomor rangkanya "
                            "salah/tak terdaftar; minta user coba lagi sebentar."}
     if not d:
-        return {"found": False, "input": (rangka or "").strip(),
-                "frame_number": _frame(rangka),
-                "catatan": "Nomor rangka tidak ditemukan di EPC Sinotruk (cek ejaan; "
-                           "EPC hanya memuat unit Sinotruk/HOWO/SITRAK)."}
+        out = {"found": False, "input": (rangka or "").strip(),
+               "frame_number": _frame(rangka),
+               "catatan": "Nomor rangka tidak ditemukan di EPC Sinotruk (cek ejaan; "
+                          "EPC hanya memuat unit Sinotruk/HOWO/SITRAK)."}
+        fb = periksa_bentuk_rangka(rangka)
+        if fb:
+            out["format_rangka"] = fb
+            out["catatan"] = fb["pesan"] + " " + out["catatan"]
+        return out
     brand = d.get("brandName") or ""
     return {
         "found": True,
