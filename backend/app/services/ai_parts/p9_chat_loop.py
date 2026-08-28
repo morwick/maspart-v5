@@ -2618,7 +2618,9 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 # terhitung; giliran yang diselamatkan DTC-FIRST/EPC-FIRST/
                 # klaim-Excel tercatat "tanpa guard". Angka lama UNDERCOUNT.
                 guard_hit=bool(guard_kinds), guard_kinds=guard_kinds,
-                tool_failed=tool_gagal_pernah,
+                # Keadaan AKHIR giliran (entri sukses-belakangan sudah dicabut),
+                # bukan "pernah gagal" — konsisten dengan kolom tools_failed.
+                tool_failed=bool(tools_failed),
                 reply_len=len(reply or ""), outcome=outcome_for,
                 tokens_in=_tok["in"], tokens_out=_tok["out"],
                 tokens_cache_hit=_tok["cache"], api_calls=_tok["calls"],
@@ -2804,6 +2806,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     _kind = _tool_fail_kind(result)
                     if name == "ajarkan_pengetahuan" and not _kind:
                         ajar_tool_ok = True
+                    if not _kind:
+                        _hapus_tool_gagal(tools_failed, name)
                     if _kind:
                         tool_gagal_pernah = True
                         _catat_tool_gagal(tools_failed, name, _kind)
@@ -3081,6 +3085,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             _kind = _tool_fail_kind(result)
             if name == "ajarkan_pengetahuan" and not _kind:
                 ajar_tool_ok = True
+            if not _kind:
+                _hapus_tool_gagal(tools_failed, name)
             if _kind:
                 # Lihat catatan jalur bocor di atas: "brake" tak menyalakan
                 # lookup_gagal — kalau ikut, model menyimpulkan puluhan PN yang

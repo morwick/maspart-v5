@@ -744,6 +744,12 @@ def _tool_fail_kind(result) -> str:
     kind = str(result.get("_err_kind") or "").strip().lower()
     if kind in _FAIL_KIND_RANK:
         return kind
+    # "ok" = tool MENYATAKAN ini bukan kegagalan walau found=False / ada `error`
+    # (pratinjau 2-langkah, kartu tanya_user cacat = model salah pakai, bukan
+    # data/infra gagal). Audit 2026-08-28: keduanya menggelembungkan rasio
+    # "tool gagal" 29% padahal jawabannya sehat.
+    if kind == "ok":
+        return ""
     if result.get("dibatasi"):
         return "brake"
     if result.get("denied") or result.get("_token_issue"):
@@ -789,6 +795,15 @@ def _catat_tool_gagal(daftar: list[str], name: str, kind: str) -> None:
                 daftar[i] = f"{name}:{kind}"
             return
     daftar.append(f"{name}:{kind}")
+
+
+def _hapus_tool_gagal(daftar: list[str], name: str) -> None:
+    """Tool `name` SUKSES belakangan di giliran yang sama → entri nf/err-nya
+    dicabut: tools_failed = KEADAAN AKHIR, bukan "pernah gagal". (Audit
+    2026-08-28: `buat_excel:err` tercatat padahal retry-nya berhasil & file
+    jadi.) `brake` dibiarkan — rem tetap sinyal walau akhirnya sukses."""
+    daftar[:] = [e for e in daftar
+                 if not (e.partition(":")[0] == name and e.partition(":")[2] in ("nf", "err"))]
 
 
 # Argumen IDENTITAS (barang/unit APA) dan argumen PENCARIAN (dicari APA).

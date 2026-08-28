@@ -127,3 +127,65 @@ def test_chat_mencatat_tools_failed_bersuffix(monkeypatch):
     ai.chat(USER, [{"role": "user", "content": "ada part zzz?"}])
     assert captured["tools_failed"] == ["cari_part:nf"]
     assert captured["tool_failed"] is True
+
+
+# ── tools_failed = KEADAAN AKHIR (audit 2026-08-28) ──────────────────────────
+def test_err_kind_ok_bukan_kegagalan():
+    # Pratinjau 2-langkah & kartu tanya_user cacat → bukan gagal data/infra.
+    assert ai._tool_fail_kind({"found": False, "_err_kind": "ok", "pratinjau": True}) == ""
+    assert ai._tool_fail_kind({"_err_kind": "ok", "error": "Kartu pertanyaan tak sah"}) == ""
+    assert ai._tool_failed({"_err_kind": "ok", "error": "x"}) is False
+
+
+def test_hapus_tool_gagal_cabut_nf_err_biarkan_brake():
+    daftar = ["buat_excel:err", "cari_part:nf", "detail_part:brake"]
+    ai._hapus_tool_gagal(daftar, "buat_excel")
+    assert daftar == ["cari_part:nf", "detail_part:brake"]
+    ai._hapus_tool_gagal(daftar, "detail_part")       # brake TETAP
+    assert daftar == ["cari_part:nf", "detail_part:brake"]
+    ai._hapus_tool_gagal(daftar, "tidak_ada")         # no-op
+    assert daftar == ["cari_part:nf", "detail_part:brake"]
+
+
+def test_chat_err_lalu_sukses_tak_tercatat_gagal(monkeypatch):
+    # Skenario nyata: buat_excel ditolak (PN tak grounded) → model perbaiki →
+    # buat_excel sukses & file jadi. Dulu log tetap 'buat_excel:err'.
+    monkeypatch.setattr(ai, "_system_prompt", lambda user: "system uji")
+    monkeypatch.setattr(ai, "_tool_specs", lambda user, sheet_id="": [])
+    monkeypatch.setattr(ai, "_allowed_tool_names", lambda user, sheet_id="": {"buat_excel"})
+    monkeypatch.setattr(ai, "_unit_name_tokens", lambda: set())
+    monkeypatch.setattr(ai, "_prefetch_epc_rangka", lambda history: None)
+    n = {"k": 0}
+
+    def run(name, args, user, sheet_id=""):
+        n["k"] += 1
+        if n["k"] == 1:
+            return {"error": "PN berikut TIDAK pernah muncul dari hasil tool"}
+        return {"found": True, "export_id": "abc", "filename": "x.xlsx", "jumlah_baris": 2}
+
+    monkeypatch.setattr(ai, "_run_tool", run)
+    seq = [
+        {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": "c1", "function": {"name": "buat_excel",
+                                      "arguments": '{"kolom":["a"],"baris":[["1"]]}'}}]},
+                      "finish_reason": "tool_calls"}]},
+        {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": "c2", "function": {"name": "buat_excel",
+                                      "arguments": '{"kolom":["a"],"baris":[["2"]]}'}}]},
+                      "finish_reason": "tool_calls"}]},
+        {"choices": [{"message": {"content": "File sudah jadi."}, "finish_reason": "stop"}]},
+    ]
+    calls = {"n": 0}
+
+    def fake(messages, tools, max_tokens=6000):
+        c = seq[min(calls["n"], len(seq) - 1)]
+        calls["n"] += 1
+        return c
+
+    monkeypatch.setattr(ai, "_post_chat", fake)
+    captured = {}
+    monkeypatch.setattr(ai.ai_chat_log, "log_turn_async", lambda **kw: captured.update(kw))
+    out = ai.chat({"username": "admin", "role": "admin"},
+                  [{"role": "user", "content": "buatkan excel"}])
+    assert out["excel_exports"] and out["excel_exports"][0]["id"] == "abc"
+    assert captured["tools_failed"] == [] and captured["tool_failed"] is False

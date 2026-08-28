@@ -1903,6 +1903,7 @@ def _t_tanya_user(args: dict, user: dict) -> dict:
         logger.info("tanya_user DITOLAK (kartu cacat) user=%s args=%r",
                     user.get("username") or "?", str(args)[:200])
         return {
+            "_err_kind": "ok",   # model salah pakai tool, bukan data/infra gagal
             "error": ("Kartu pertanyaan tak sah: tiap pertanyaan butuh teks + MINIMAL "
                       "2 opsi singkat (maks 4), dan JANGAN sertakan 'Lainnya'/'Lewati' "
                       "(disediakan tampilan). Jangan coba lagi — lanjutkan bekerja "
@@ -2466,7 +2467,7 @@ def _t_buat_permintaan_barang(args: dict, user: dict) -> dict:
         except accurate.AccurateError as e:
             return {"found": False, "error": f"Gagal menghitung nomor permintaan: {e}"}
         return {
-            "found": False, "pratinjau": True, "nomor_diusulkan": nomor,
+            "found": False, "_err_kind": "ok", "pratinjau": True, "nomor_diusulkan": nomor,
             "tanggal": tanggal, "sektor": sektor, "no_unit": no_unit,
             "jumlah_baris": len(lines), "baris": baris_tampil,
             **({"qty_default_1": tanpa_qty} if tanpa_qty else {}),
