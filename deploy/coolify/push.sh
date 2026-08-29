@@ -28,8 +28,13 @@ fi
 if [ "$WHAT" = "all" ] || [ "$WHAT" = "frontend" ]; then
   echo "== bersihkan + kirim frontend =="
   ssh "$HOST" "rm -rf /opt/maspart/frontend/src"
+  # ⚠️ next.config.ts WAJIB ikut: ia memuat CSP/security headers. 2026-08-29
+  # 'wasm-unsafe-eval' (viewer 3D) tidak tayang karena file ini tak terkirim →
+  # server membangun dengan config lama.
   scp -r "$REPO/frontend/src" "$REPO/frontend/public" \
          "$REPO/frontend/package.json" "$REPO/frontend/package-lock.json" \
+         "$REPO/frontend/next.config.ts" "$REPO/frontend/tsconfig.json" \
+         "$REPO/frontend/postcss.config.mjs" \
          "$HOST:/opt/maspart/frontend/"
 fi
 
