@@ -2633,6 +2633,37 @@ export async function getPartExplodedFigure(
   return res.json();
 }
 
+/** Model 3D (.pvz PTC Creo View) figure EPC yang memuat sebuah PN — tanpa
+ * nomor rangka, lintas model. Kembar getPartExplodedFigure untuk 3D. */
+export type Part3d = {
+  found: boolean;
+  part_number: string;
+  /** Nama file .pvz — byte-nya diambil lewat part3dFileUrl() oleh engine di browser. */
+  d3s?: string[];
+  balon?: number | string | null;
+  figure_pn?: string;
+  figure_nama?: string;
+  nama_item?: string;
+  sumber_model?: string;
+  jumlah_model_pemakai?: number;
+  jumlah_figure?: number;
+};
+
+/** ON-DEMAND (tombol) — menembak EPC seperti exploded-figure. */
+export async function getPart3d(token: string, pn: string): Promise<Part3d> {
+  const res = await fetch(`${API_BASE}/api/parts/epc-3d?pn=${encodeURIComponent(pn)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+/** URL proxy byte file EPC (.pvz/.svg). Ber-auth: engine WASM mengambilnya
+ * sendiri lewat XHR, jadi header Authorization disisipkan oleh Viewer3D. */
+export function part3dFileUrl(name: string): string {
+  return `${API_BASE}/api/parts/epc-file?name=${encodeURIComponent(name)}`;
+}
+
 export type AiOcrRangka = {
   ok: boolean;
   rangka: string;

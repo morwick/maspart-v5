@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import ImageLightbox from "@/components/ImageLightbox";
-import { ApiError, cekPartDiUnit, deleteRakFoto, getAccurateStock, getPartExploded, getPartExplodedFigure, getPartPhotos, getPartSpec, getPartVarian, getBuyerLocations, getRakForPart, getWeichaiStock, partImageUrl, saveRak, searchParts, uploadRakFoto, type AccurateStock, type BuyerLocation, type CekUnitResult, type PartExplodedFigure, type PartResult, type PartSpec, type PartVarian, type PartVarianItem, type RakInfo, type WeichaiStock } from "@/lib/api";
+import Viewer3D from "@/components/Viewer3D";
+import { ApiError, cekPartDiUnit, deleteRakFoto, getAccurateStock, getPart3d, getPartExploded, getPartExplodedFigure, getPartPhotos, getPartSpec, getPartVarian, getBuyerLocations, getRakForPart, getWeichaiStock, part3dFileUrl, partImageUrl, saveRak, searchParts, uploadRakFoto, type AccurateStock, type BuyerLocation, type CekUnitResult, type Part3d, type PartExplodedFigure, type PartResult, type PartSpec, type PartVarian, type PartVarianItem, type RakInfo, type WeichaiStock } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { ensurePerms } from "@/lib/perms";
 import { addToCart, hasPrice, hasWeight } from "@/lib/cart";
@@ -61,6 +62,11 @@ export default function PartDetailPage() {
   const [exploded, setExploded] = useState<PartExplodedFigure | null>(null);
   const [explodedBusy, setExplodedBusy] = useState(false);
   const [explodedErr, setExplodedErr] = useState<string | null>(null);
+  // Model 3D (.pvz) — sama: HANYA saat diminta; engine WASM ±13 MB dimuat sekali.
+  const [tiga, setTiga] = useState<Part3d | null>(null);
+  const [tigaBusy, setTigaBusy] = useState(false);
+  const [tigaErr, setTigaErr] = useState<string | null>(null);
+  const [tigaToken, setTigaToken] = useState("");
   // Rak & kartu stok per gudang (staf internal saja). `kelola` = gudang yang
   // boleh DITULIS akun ini; admin selalu boleh.
   const [rakMap, setRakMap] = useState<Record<string, RakInfo>>({});
@@ -292,6 +298,26 @@ export default function PartDetailPage() {
     if (!lo || !hi) return null;
     return lo === hi ? rupiah(lo) : `${rupiah(lo)} – ${angka(hi)}`;
   }, [varianData?.harga_min, varianData?.harga_max]);
+
+  async function loadTiga() {
+    if (tigaBusy || tiga) return;
+    const token = getToken();
+    if (!token) return router.replace("/login");
+    setTigaBusy(true);
+    setTigaErr(null);
+    try {
+      setTiga(await getPart3d(token, pn));
+      setTigaToken(token);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearSession();
+        return router.replace("/login");
+      }
+      setTigaErr(err instanceof Error ? err.message : "Gagal memuat model 3D.");
+    } finally {
+      setTigaBusy(false);
+    }
+  }
 
   async function loadExploded() {
     if (explodedBusy || exploded) return;
@@ -774,6 +800,18 @@ export default function PartDetailPage() {
                     {explodedBusy ? "memuat… (1–2 menit)" : "Tampilkan exploded view"}
                   </button>
                 )}
+                {!tiga && (
+                  <button
+                    type="button"
+                    className={`btn btn-ghost${exploded ? " ml-auto" : ""}`}
+                    onClick={loadTiga}
+                    disabled={tigaBusy}
+                    style={{ fontSize: 12 }}
+                    title="Model 3D interaktif (putar/zoom) dari file CAD resmi EPC"
+                  >
+                    {tigaBusy ? "mencari model 3D…" : "🧊 Lihat 3D"}
+                  </button>
+                )}
               </div>
 
               {!exploded && !explodedBusy && !explodedErr && (
@@ -827,6 +865,41 @@ export default function PartDetailPage() {
                     )}
                   </div>
                 </>
+              )}
+
+              {/* Model 3D interaktif — render di browser (engine WASM), byte .pvz lewat proxy ber-auth */}
+              {tigaErr && (
+                <div className="mt-3" style={{ fontSize: 12, color: "var(--danger, #dc2626)" }}>{tigaErr}</div>
+              )}
+              {tiga && !tiga.found && (
+                <div className="mt-3" style={{ fontSize: 12, color: "var(--ink-500)", lineHeight: 1.6 }}>
+                  Model 3D tidak tersedia untuk part ini di EPC
+                  {tiga.jumlah_figure ? ` (${tiga.jumlah_figure} figure diperiksa, semuanya hanya gambar 2D)` : ""}.
+                </div>
+              )}
+              {tiga?.found && tiga.d3s?.[0] && tigaToken && (
+                <div className="mt-4">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <h3 style={{ fontSize: 12, fontWeight: 600 }}>Model 3D</h3>
+                    <span className="pill">CAD resmi EPC</span>
+                    {tiga.balon != null && <span className="pill">balon {tiga.balon}</span>}
+                    {tiga.d3s.length > 1 && <span className="pill">{tiga.d3s.length} file, ditampilkan yang pertama</span>}
+                  </div>
+                  <Viewer3D fileUrl={part3dFileUrl(tiga.d3s[0])} token={tigaToken} />
+                  <div className="mt-2" style={{ fontSize: 12, color: "var(--ink-600)", lineHeight: 1.6 }}>
+                    {tiga.figure_nama && (
+                      <div>
+                        Figure: <b>{tiga.figure_nama}</b>
+                        {tiga.figure_pn ? ` (${tiga.figure_pn})` : ""}
+                        {tiga.sumber_model ? ` · dari model ${tiga.sumber_model}` : ""}
+                      </div>
+                    )}
+                    <div className="mt-1" style={{ color: "var(--ink-500)" }}>
+                      ⚠️ Figure ini lintas-model (bukan unit tertentu) — untuk unit spesifik pakai nomor rangka.
+                      Model diunduh ulang dari EPC tiap dibuka (tidak disimpan di server).
+                    </div>
+                  </div>
+                </div>
               )}
             </section>
           </>

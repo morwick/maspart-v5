@@ -7,9 +7,11 @@ const isProd = process.env.NODE_ENV === "production";
 
 // leaflet dimuat dari unpkg (dengan SRI di MapPicker); tile peta = OpenStreetMap;
 // font Geist + JetBrains Mono dari Google Fonts (CSS di googleapis, file di gstatic).
+// 'wasm-unsafe-eval' = engine 3D ThingView (/viewer3d, WebAssembly.instantiate) —
+// tanpa ini Chrome menolak kompilasi WASM di bawah CSP (Viewer3D).
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://unpkg.com",
+  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://unpkg.com",
   "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https://fonts.gstatic.com",

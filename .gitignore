@@ -105,3 +105,6 @@ data/wiring/*.jpg
 # sekali pakai untuk dibaca manusia, bukan kode. Sengaja DI-ANCHOR ke root:
 # katalog data/Shantui/*.xlsx memang di-track dan tak boleh ikut tersaring.
 /*.xlsx
+
+# Engine 3D PTC ThingView (.wasm 12,8 MB) — dikirim scp lewat push.sh seperti .apk, BUKAN via git
+frontend/public/viewer3d/*.wasm
