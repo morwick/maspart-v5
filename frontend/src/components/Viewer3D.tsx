@@ -125,7 +125,9 @@ export default function Viewer3D({ fileUrl, token, height = 480 }: Props) {
         try { session.ShowProgress(true); } catch { /* opsional */ }
         try { session.SetSelectionFilter(M.SelectionFilter.PART, M.SelectionList.PRIMARYSELECTION); } catch { /* opsional */ }
         try { session.SetAntialiasingMode(M.AntialiasingMode.SS4X); } catch { /* opsional */ }
-        try { session.SetBackgroundColor(0xf5f7fa); } catch { /* opsional */ }
+        // ⚠️ Engine membaca warna sebagai RGBA (0xRRGGBBAA), BUKAN 0xRRGGBB:
+        // 0xf5f7fa terbukti tampil CYAN di produksi (R=0x00). Alpha wajib 0xff.
+        try { session.SetBackgroundColor(0xf5f7faff); } catch { /* opsional */ }
         setFase("model");
         const model = session.MakeModel();
         model.LoadFromURLWithCallback(fileUrl, true, true, false, (ok: boolean) => {
