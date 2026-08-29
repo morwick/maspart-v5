@@ -37,9 +37,21 @@ const securityHeaders = [
     : []),
 ];
 
+// Halaman part memuat engine 3D ThingView (embind Emscripten lama) yang membangun
+// invoker lewat konstruktor `Function` (craftInvokerFunction) → butuh 'unsafe-eval'.
+// Menulis ulang embind di blob minified proprietary terlalu berisiko, jadi
+// 'unsafe-eval' diberikan HANYA untuk /part/* (entri belakangan menimpa kunci
+// header yang sama — perilaku resmi Next). Sisa situs tetap tanpa 'unsafe-eval'.
+const cspPart = csp.replace("'wasm-unsafe-eval'", "'wasm-unsafe-eval' 'unsafe-eval'");
+
 const nextConfig: NextConfig = {
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      ...(isProd
+        ? [{ source: "/part/:path*", headers: [{ key: "Content-Security-Policy", value: cspPart }] }]
+        : []),
+    ];
   },
 };
 
