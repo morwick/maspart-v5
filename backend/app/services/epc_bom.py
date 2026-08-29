@@ -1374,6 +1374,73 @@ def figure_global(pn: str, max_figures: int = 4) -> dict:
             "jumlah_model_pemakai": len(rows), "jumlah_figure": len(figures)}
 
 
+def pvz_untuk_pn(pn: str, max_figures: int = 4) -> dict:
+    """FILE 3D (.pvz) figure yang MEMUAT sebuah PN — TANPA nomor rangka.
+
+    Kembar dari `figure_global`, tapi mengumpulkan field `d3s` (nama file .pvz
+    model 3D PTC Creo View) alih-alih `d2s` (SVG 2D). Dipakai viewer 3D: nama
+    file dikembalikan ke klien, lalu byte-nya diambil lewat proxy `fetch_file`
+    (token EPC tetap di server — tak pernah sampai ke browser).
+
+    Utamakan figure yang PN-nya benar-benar terdeteksi (balon tahu) DAN punya
+    .pvz; jatuh ke figure ber-.pvz pertama bila balon tak ketemu.
+
+    {found, part_number, d3s:[nama.pvz...], balon, figure_pn, figure_nama,
+     nama_item, sumber_model, jumlah_model_pemakai, jumlah_figure} |
+    {found:False, part_number, _err?}
+    """
+    pnu = (pn or "").strip().upper()
+    if not pnu:
+        return {"found": False, "part_number": "", "_err": "input"}
+    res = _get_auto(_REVERSE_URL, {"t": "global", "k": pnu},
+                    timeout=_TIMEOUT_GLOBAL, retries=_RETRIES_GLOBAL)
+    if "_err" in res:
+        return {"found": False, "part_number": pnu, "_err": res["_err"]}
+    rows = [d for d in (res.get("data") or []) if isinstance(d, dict)]
+    figures: dict[str, dict] = {}
+    for d in rows:
+        fig = (d.get("partCode") or "").strip()
+        if fig and fig not in figures:
+            figures[fig] = d
+
+    cadangan = None       # figure ber-.pvz tapi PN-nya tak terdeteksi (balon kosong)
+    for fig, d in list(figures.items())[:max_figures]:
+        rid, pid, plid = d.get("rootId"), d.get("partId"), d.get("partListId")
+        if not (rid and pid):
+            continue
+        r = _get_auto(_ATLAS_ITEM_URL, {
+            "id": plid or 0, "partId": pid, "parentId": rid, "rootId": rid,
+            "partCode": fig, "type": "model", "isSearch": "0"})
+        if "_err" in r:
+            continue
+        data = r.get("data") if isinstance(r.get("data"), dict) else {}
+        items = data.get("items") or []
+        pvz = [s for s in (data.get("d3s") or []) if isinstance(s, str) and s.strip()]
+        if not pvz:
+            continue
+        balon = nama_item = None
+        for p in items:
+            if _pn_sama(p.get("code"), pnu):
+                balon = p.get("ballNum")
+                nama_item = " ".join(str(p.get("name") or "").split())
+                break
+        hasil = {
+            "found": True, "part_number": pnu, "d3s": pvz, "balon": balon,
+            "figure_pn": fig,
+            "figure_nama": " ".join(str(d.get("partName") or "").split()),
+            "nama_item": nama_item,
+            "sumber_model": " ".join(str(d.get("model") or "").split()),
+            "jumlah_model_pemakai": len(rows), "jumlah_figure": len(figures),
+        }
+        if balon:
+            return hasil          # figure yang PN-nya benar-benar terdeteksi → utamakan
+        cadangan = cadangan or hasil
+    if cadangan:
+        return cadangan
+    return {"found": False, "part_number": pnu,
+            "jumlah_model_pemakai": len(rows), "jumlah_figure": len(figures)}
+
+
 def category_top(rangka: str) -> dict:
     """Daftar kategori/assembly TINGKAT-ATAS untuk 1 unit (1 panggilan + cache).
     Sukses → {found, frame_number, order_no, root_id, jumlah, kategori:[norm_cat...]}.

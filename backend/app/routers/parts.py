@@ -713,6 +713,57 @@ def exploded_figure_global(
     return out
 
 
+# Viewer 3D (PTC Creo View / ThingView WASM) — render di BROWSER, server hanya
+# kembalikan nama file .pvz lalu meneruskan byte-nya. TANPA simpan ke disk
+# (Opsi A): tiap buka mengunduh ulang dari EPC — 0 pertumbuhan disk server.
+_EPC_FILE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.(pvz|svg)$", re.IGNORECASE)
+
+
+@router.get("/epc-3d")
+def epc_3d_untuk_pn(
+    pn: str = Query(..., min_length=3, description="Part Number (tanpa nomor rangka)."),
+    _user: dict = Depends(get_current_user),
+):
+    """Nama file model 3D (.pvz) figure yang MEMUAT sebuah PN, untuk viewer 3D.
+
+    ⚠️ ON-DEMAND (tombol), bukan saat halaman dibuka — panggilan pertama menembak
+    EPC. Byte .pvz-nya diambil terpisah lewat `/epc-file` supaya token EPC tak
+    pernah sampai ke browser."""
+    pnu = (pn or "").strip()
+    if not pnu:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part Number kosong.")
+    try:
+        d = epc_bom.pvz_untuk_pn(pnu)
+    except Exception:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                            "EPC sedang tak bisa diakses. Coba lagi sebentar.")
+    return d
+
+
+@router.get("/epc-file")
+def epc_file_proxy(
+    name: str = Query(..., min_length=5, description="Nama file EPC (.pvz/.svg)."),
+    _user: dict = Depends(get_current_user),
+):
+    """Teruskan byte satu file EPC (.pvz model 3D / .svg) lewat proxy ber-auth.
+
+    Token EPC + Referer disuntik di server (fetch_file). Nama file DIBATASI pola
+    aman ekstensi .pvz/.svg — mencegah SSRF ke path sembarang. TANPA cache disk."""
+    nm = (name or "").strip()
+    if not _EPC_FILE_NAME_RE.match(nm):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nama file tidak sah.")
+    try:
+        buf = epc_bom.fetch_file(nm)
+    except Exception:
+        buf = None
+    if not buf:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                            "File EPC tak bisa diambil (token/akses?). Coba lagi.")
+    ctype = "image/svg+xml" if nm.lower().endswith(".svg") else "application/octet-stream"
+    return Response(content=buf, media_type=ctype,
+                    headers={"Cache-Control": "no-store"})
+
+
 @router.get("/photos", response_model=PartPhotos)
 def photos(
     pn: str = Query(..., min_length=1, description="Part number"),
