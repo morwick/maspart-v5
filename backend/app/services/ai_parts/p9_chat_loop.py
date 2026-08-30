@@ -2385,11 +2385,20 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     "excel_riwayat_klaim", "cek_massal_part",
                     "cek_massal_part_mesin", "cek_massal_part_rangka", "harga_sims",
                     "spek_massal_rangka", "banding_konfigurasi_rangka",
-                    "part_fast_moving") and result.get("found"):
-            item = {"id": result.get("export_id"), "filename": result.get("filename"),
-                    "judul": result.get("judul"), "jumlah_baris": result.get("jumlah_baris")}
-            if item["id"] and item not in excel_exports:
-                excel_exports.append(item)
+                    "part_fast_moving") and (result.get("found")
+                                             or result.get("ringkasan_per_item")):
+            # Hasil BATCH (_gabung_hasil) menaruh export_id tiap item di
+            # 'ringkasan_per_item' — tanpa ini kartu unduh per kategori/rangka
+            # lenyap diam-diam padahal file-nya ada.
+            _kandidat = [result] + [it for it in (result.get("ringkasan_per_item") or [])
+                                    if isinstance(it, dict) and it.get("found")]
+            for _c in _kandidat:
+                item = {"id": _c.get("export_id"), "filename": _c.get("filename"),
+                        "judul": _c.get("judul"), "jumlah_baris": _c.get("jumlah_baris")}
+                if _c.get("sedang_disusun"):
+                    item["sedang_disusun"] = True   # kartu klien: "disusun di latar"
+                if item["id"] and item not in excel_exports:
+                    excel_exports.append(item)
         elif name in ("cari_kode_kesalahan", "diagnosa") and result.get("pdf_diagnosa"):
             # Lembar diagnosa PDF resmi per-SPN/FMI (data/Fault) → kartu file
             # yang sama dengan export Excel/PDF penawaran (bisa dibuka user).

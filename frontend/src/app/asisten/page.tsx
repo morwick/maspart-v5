@@ -1733,9 +1733,13 @@ function AiExcelCard({ exp }: { exp: AIExcelExport }) {
     }
   }
 
-  const sub = isPdf
-    ? "PDF · klik untuk membuka"
-    : `Spreadsheet · XLSX${exp.jumlah_baris ? ` · ${exp.jumlah_baris} baris` : ""}`;
+  // Katalog dibangun di LATAR (walk EPC ±1–3 mnt): tanpa keterangan ini user
+  // mengira tombolnya macet — unduhan pertama memang menunggu file selesai.
+  const sub = exp.sedang_disusun
+    ? "⏳ Disusun di latar ±1–3 mnt — unduhan pertama menunggu sampai selesai"
+    : isPdf
+      ? "PDF · klik untuk membuka"
+      : `Spreadsheet · XLSX${exp.jumlah_baris ? ` · ${exp.jumlah_baris} baris` : ""}`;
 
   return (
     <ExcelCardShell

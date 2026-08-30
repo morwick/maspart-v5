@@ -1451,76 +1451,99 @@ def _katalog_source(rangka: str, kategori: str, source: str):
     return _epc.catalog_walk(rangka, kategori), _epc.fetch_file
 
 
-def katalog_excel(rangka: str, kategori: str, source: str = "sinotruk",
-                  isi_stok_harga: bool = False) -> tuple[bytes | None, str]:
-    """KATALOG PART BERGAMBAR satu kategori per-VIN: satu sheet per FIGURE
-    (gambar exploded view EPC + tabel part ber-nomor balon) + sheet Ringkasan.
-    Kolom Stok & Harga SELALU ADA tapi ISINYA KOSONG secara default; hanya diisi
-    bila isi_stok_harga=True (admin minta). Return (bytes, filename) atau
-    (None, pesan_error). source='weichai' → katalog MESIN Weichai."""
-    d, _fetch = _katalog_source(rangka, kategori, source)
+_SHEET_NAMA_TERLARANG = re.compile(r"[\[\]:*?/\\]")
 
-    if not d.get("found"):
-        return None, (d.get("message") or "Gagal mengambil katalog dari EPC. Coba lagi.")
-    figures = (d.get("figures") or [])[:_KATALOG_MAX_FIGURES]
-    if not figures:
-        return None, f"Tidak ada figure untuk kategori '{kategori}' di unit ini."
-    frame = d.get("frame_number") or ""
 
-    # 1) Unduh + render SEMUA gambar paralel (referensi gambar → PNG bytes).
-    svg_names = list(dict.fromkeys(f["svg"] for f in figures if f.get("svg")))
+def _nama_sheet_unik(nama: list[str], terpakai: set[str] | None = None) -> dict[str, str]:
+    """Nama kategori → nama sheet Excel yang SAH (≤31 char, tanpa []:*?/\\) dan
+    UNIK (tabrakan diberi akhiran ' (2)', ' (3)', …)."""
+    dipakai = {n.lower() for n in (terpakai or set())}
+    out: dict[str, str] = {}
+    for n in nama:
+        if n in out:
+            continue
+        dasar = " ".join(_SHEET_NAMA_TERLARANG.sub(" ", str(n or "")).split()).strip("'") or "Sheet"
+        dasar = dasar[:31].rstrip()
+        calon, k = dasar, 2
+        while calon.lower() in dipakai:
+            akhiran = f" ({k})"
+            calon = dasar[:31 - len(akhiran)].rstrip() + akhiran
+            k += 1
+        dipakai.add(calon.lower())
+        out[n] = calon
+    return out
 
-    def _render(name: str) -> tuple[str, bytes | None]:
-        return name, _svg_to_png(_fetch(name))
 
-    pngs: dict[str, bytes] = {}
-    if svg_names:
-        with ThreadPoolExecutor(max_workers=8) as ex:
-            for name, png in ex.map(_render, svg_names):
-                if png:
-                    pngs[name] = png
+def _katalog_daftar_isi_kategori(ws, frame: str, grup: dict[str, list[dict]],
+                                 nama_sheet: dict[str, str], n_fig: int, n_part: int) -> None:
+    """Sheet pertama katalog LENGKAP: satu baris per kategori ber-hyperlink ke
+    sheet-nya (No · Kategori · Jumlah Figure · Jumlah Part)."""
+    from openpyxl.worksheet.hyperlink import Hyperlink
 
-    # 2) Stok/harga lokal utk SEMUA PN (sekali query).
-    all_pns = list({it["pn"] for f in figures for it in f["items"]})
-    local: dict[str, dict] = {}
-    for r in part_index.search_exact_pns(all_pns):
-        pn = (r.get("part_number") or "").upper()
-        if pn and pn not in local:
-            local[pn] = r
+    ws.sheet_view.showGridLines = False
+    headers = ["No", "Kategori (klik untuk membuka sheet-nya)", "Figure", "Part"]
+    widths = [6, 58, 10, 10]
+    for j, wd in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(j)].width = wd
+    _title(ws, f"Katalog Lengkap — Unit {frame}",
+           f"{n_fig} figure · {n_part} part · {len(grup)} kategori — tiap kategori di "
+           "SHEET terpisah · gambar exploded view resmi EPC · MASPART Asisten AI", len(headers))
+    for j, h in enumerate(headers, start=1):
+        hc = ws.cell(row=4, column=j, value=h)
+        hc.fill = _SUB1_FILL
+        hc.font = Font(bold=True, color=_BRAND_DK, size=10)
+        hc.alignment = _CENTER if j != 2 else _LEFT
+        hc.border = _BORDER
+    row = 5
+    for i, (kat, figs) in enumerate(grup.items(), start=1):
+        vals = [i, kat, len(figs), sum(len(f["items"]) for f in figs)]
+        for j, v in enumerate(vals, start=1):
+            c = ws.cell(row=row, column=j, value=_safe(v))
+            c.border = _BORDER
+            c.alignment = _LEFT if j == 2 else _CENTER
+            c.font = Font(color="0563C1", underline="single", size=10) if j == 2 else _INK
+            if i % 2:
+                c.fill = _ZEBRA
+        ws.cell(row=row, column=2).hyperlink = Hyperlink(
+            ref=f"B{row}", location=f"'{nama_sheet[kat]}'!A1")
+        row += 1
+    ws.freeze_panes = "A5"
 
-    # ── SATU SHEET, alur vertikal per figure: bar seksi → GAMBAR → TABEL.
-    #    Plus DAFTAR ISI ber-hyperlink di atas & link "↑ Daftar Isi" di tiap seksi,
-    #    supaya 60+ seksi mudah dinavigasi dan urutan bacanya tak membingungkan. ──
+
+def _katalog_tulis_sheet(ws, judul: str, sub: str, figures: list[dict], pngs: dict,
+                         local: dict, isi_stok_harga: bool, link_kembali: str = "") -> None:
+    """SATU sheet katalog bergambar: judul → cara baca → DAFTAR ISI figure
+    ber-hyperlink → seksi per figure (bar → GAMBAR → TABEL part ber-nomor balon).
+    `link_kembali` = lokasi hyperlink ke sheet Daftar Isi (katalog lengkap)."""
     from openpyxl.drawing.image import Image as XLImage
     from openpyxl.worksheet.hyperlink import Hyperlink
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Katalog"
     ws.sheet_view.showGridLines = False
-    n_part = sum(len(f["items"]) for f in figures)
-
     headers = ["No. Balon", "Part Number", "Nama Part", "Qty", "Stok", "Harga", "Pengganti"]
     widths = [10, 20, 52, 6, 8, 14, 20]
     ncol = len(headers)
     for j, wd in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(j)].width = wd
-
-    kat_title = ("Lengkap (Semua Kategori)" if d.get("lengkap") else kategori.title())
-    _title(ws, f"Katalog {kat_title} — Unit {frame}",
-           f"{len(figures)} figure · {n_part} part · gambar exploded view resmi EPC "
-           "(Parts Atlas per-VIN) · MASPART Asisten AI", ncol)
-    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=ncol)
+    _title(ws, judul, sub, ncol)
+    ws.merge_cells(start_row=3, start_column=1, end_row=3,
+                   end_column=ncol - 1 if link_kembali else ncol)
     note = ws.cell(row=3, column=1,
                    value="ℹ️ Cara baca: tiap figure = GAMBAR lalu TABEL part-nya di bawah. "
                          "Angka pada gambar = kolom 'No. Balon' — baris itulah Part Number-nya.")
     note.font = Font(color=_BRAND_DK, size=10, bold=True)
     note.fill = _SUB1_FILL
     note.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    if link_kembali:
+        back0 = ws.cell(row=3, column=ncol, value="← Semua kategori")
+        back0.fill = _SUB1_FILL
+        back0.font = Font(color="0563C1", underline="single", size=10, bold=True)
+        back0.alignment = _CENTER
+        back0.hyperlink = Hyperlink(ref=f"{get_column_letter(ncol)}3", location=link_kembali)
     ws.freeze_panes = "A4"   # judul + cara baca tetap terlihat saat scroll
 
     _ROW_PX = 19.0    # tinggi baris default Excel ±19px — utk melewati tinggi gambar
     _LINK_FONT = Font(color="0563C1", underline="single", size=10)
+    sheet_ref = f"'{ws.title}'"   # nama sheet WAJIB dikutip di lokasi hyperlink
 
     def _num(v):
         """Angka murni ditulis sbg NUMBER (hindari segitiga hijau 'number as text')."""
@@ -1584,7 +1607,7 @@ def katalog_excel(rangka: str, kategori: str, source: str = "sinotruk",
         back.font = Font(color="FFFFFF", underline="single", size=10)
         back.alignment = _CENTER
         back.hyperlink = Hyperlink(ref=f"{get_column_letter(ncol)}{row}",
-                                   location=f"Katalog!A{TOC_BAR}")
+                                   location=f"{sheet_ref}!A{TOC_BAR}")
         ws.row_dimensions[row].height = 22
         row += 1
 
@@ -1630,7 +1653,80 @@ def katalog_excel(rangka: str, kategori: str, source: str = "sinotruk",
     for i, target in enumerate(sec_rows):
         r = toc_first + i
         ws.cell(row=r, column=2).hyperlink = Hyperlink(
-            ref=f"B{r}", location=f"Katalog!A{target}")
+            ref=f"B{r}", location=f"{sheet_ref}!A{target}")
+
+
+def katalog_excel(rangka: str, kategori: str, source: str = "sinotruk",
+                  isi_stok_harga: bool = False) -> tuple[bytes | None, str]:
+    """KATALOG PART BERGAMBAR per-VIN: seksi per FIGURE (gambar exploded view
+    EPC + tabel part ber-nomor balon) + DAFTAR ISI ber-hyperlink. Kategori
+    tunggal = satu sheet "Katalog"; katalog LENGKAP = sheet "Daftar Isi" +
+    SATU SHEET PER KATEGORI.
+    Kolom Stok & Harga SELALU ADA tapi ISINYA KOSONG secara default; hanya diisi
+    bila isi_stok_harga=True (admin minta). Return (bytes, filename) atau
+    (None, pesan_error). source='weichai' → katalog MESIN Weichai."""
+    d, _fetch = _katalog_source(rangka, kategori, source)
+
+    if not d.get("found"):
+        return None, (d.get("message") or "Gagal mengambil katalog dari EPC. Coba lagi.")
+    figures = (d.get("figures") or [])[:_KATALOG_MAX_FIGURES]
+    if not figures:
+        return None, f"Tidak ada figure untuk kategori '{kategori}' di unit ini."
+    frame = d.get("frame_number") or ""
+
+    # 1) Unduh + render SEMUA gambar paralel (referensi gambar → PNG bytes).
+    svg_names = list(dict.fromkeys(f["svg"] for f in figures if f.get("svg")))
+
+    def _render(name: str) -> tuple[str, bytes | None]:
+        return name, _svg_to_png(_fetch(name))
+
+    pngs: dict[str, bytes] = {}
+    if svg_names:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for name, png in ex.map(_render, svg_names):
+                if png:
+                    pngs[name] = png
+
+    # 2) Stok/harga lokal utk SEMUA PN (sekali query).
+    all_pns = list({it["pn"] for f in figures for it in f["items"]})
+    local: dict[str, dict] = {}
+    for r in part_index.search_exact_pns(all_pns):
+        pn = (r.get("part_number") or "").upper()
+        if pn and pn not in local:
+            local[pn] = r
+
+    wb = Workbook()
+    n_part = sum(len(f["items"]) for f in figures)
+    kat_title = ("Lengkap (Semua Kategori)" if d.get("lengkap") else kategori.title())
+    sub_all = ("gambar exploded view resmi EPC (Parts Atlas per-VIN) · MASPART Asisten AI")
+
+    # Katalog LENGKAP → SATU sheet per KATEGORI + sheet "Daftar Isi". Audit
+    # ai_chat_log 2026-08-29: user meminta "1 Excel, sheet per kategori" TIGA
+    # kali dan model akhirnya MENGKLAIM fitur yang tak ada; 350 seksi dalam
+    # satu sheet terbukti tak terpakai. Kategori tunggal (atau lengkap yang
+    # kebetulan hanya punya satu kelompok) → satu sheet "Katalog" persis lama.
+    grup: dict[str, list[dict]] = {}
+    if d.get("lengkap"):
+        for f in figures:
+            k = " ".join(str(f.get("kategori") or "").split()) or "Lain-lain"
+            grup.setdefault(k, []).append(f)
+    if len(grup) > 1:
+        nama_sheet = _nama_sheet_unik(list(grup), terpakai={"Daftar Isi"})
+        ws0 = wb.active
+        ws0.title = "Daftar Isi"
+        _katalog_daftar_isi_kategori(ws0, frame, grup, nama_sheet, len(figures), n_part)
+        for kat, figs in grup.items():
+            ws = wb.create_sheet(nama_sheet[kat])
+            _katalog_tulis_sheet(
+                ws, f"Katalog {kat} — Unit {frame}",
+                f"{len(figs)} figure · {sum(len(f['items']) for f in figs)} part · " + sub_all,
+                figs, pngs, local, isi_stok_harga, link_kembali="'Daftar Isi'!A1")
+    else:
+        ws = wb.active
+        ws.title = "Katalog"
+        _katalog_tulis_sheet(ws, f"Katalog {kat_title} — Unit {frame}",
+                             f"{len(figures)} figure · {n_part} part · " + sub_all,
+                             figures, pngs, local, isi_stok_harga)
 
     buf = io.BytesIO()
     wb.save(buf)

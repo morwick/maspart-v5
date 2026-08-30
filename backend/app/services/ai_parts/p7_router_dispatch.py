@@ -146,6 +146,13 @@ def _t_uraikan_mesin(args: dict, user: dict) -> dict:
 
 
 def _t_katalog_kategori(args: dict, user: dict) -> dict:
+    # BANYAK kategori (audit ai_chat_log 2026-08-29: "pisahkan katalog per bagian"
+    # → 9 panggilan; plafon tool berat 4 menolak sisanya, dua giliran "lanjut"
+    # tetap 0 file baru) → SATU panggilan ber-array; tiap kategori tetap lewat
+    # jalur satu-kategori utuh (kartu unduh per kategori, walk EPC di-cache).
+    _b = _batch_wrap(_t_katalog_kategori, args, user, "kategori", maks=4, min_len=2)
+    if _b is not None:
+        return _b
     # 'mesin' juga kategori Atlas (02 powertrain) → HANYA sumber eksplisit yang
     # mengalihkan ke katalog mesin Weichai; tanpa itu perilaku lama dipertahankan.
     if (args.get("sumber") or "").strip().lower() == "mesin":

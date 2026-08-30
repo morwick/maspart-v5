@@ -1631,17 +1631,15 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "dari NOMOR RANGKA — untuk 'buatkan katalog <kategori> <rangka>', "
                     "'katalog kabin unit X', 'buku part transmisi unit ini'. Menyusun SEMUA "
                     "part kategori itu per-figure + gambar exploded resmi EPC + nomor balon "
-                    "+ stok/harga lokal jadi FILE EXCEL (kartu unduh otomatis). Kategori: "
-                    "kabin, mesin, kopling, transmisi, gardan depan/belakang, kelistrikan, "
-                    "rem, sasis, dll. Kolom Stok & Harga SELALU KOSONG kecuali ADMIN "
-                    "eksplisit memintanya. Proses ±1 menit — HANYA untuk permintaan KATALOG/"
-                    "buku part. Hanya Sinotruk/HOWO/SITRAK."
+                    "+ stok/harga lokal jadi FILE EXCEL (kartu unduh otomatis). Kolom Stok & "
+                    "Harga SELALU KOSONG kecuali ADMIN eksplisit memintanya. Proses ±1 menit — "
+                    "HANYA untuk permintaan KATALOG/buku part. Hanya Sinotruk/HOWO/SITRAK."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "rangka": {"type": "string", "description": "Nomor rangka: VIN penuh atau frame number 8 digit."},
-                        "kategori": {"type": "string", "description": "Kategori yang mau dikatalogkan (mis. 'kabin', 'rem', 'transmisi', 'gardan belakang', 'kelistrikan', 'ac') — ATAU 'semua' untuk KATALOG LENGKAP seluruh kategori unit. HANYA diisi bila user MENYEBUTNYA; bila user belum menyebut kategori, KOSONGKAN (tool akan menyuruhmu menawarkan pilihan) — JANGAN menebak."},
+                        "kategori": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Kategori (mis. 'kabin', 'rem', 'transmisi', 'gardan belakang', 'kelistrikan', 'ac'); ARRAY bila user minta BEBERAPA kategori (maks 4/panggilan) — ATAU 'semua' = KATALOG LENGKAP (Excel: SATU file, satu SHEET per kategori + Daftar Isi). HANYA bila user MENYEBUTNYA; belum → KOSONGKAN (tool menyuruhmu menawarkan pilihan), JANGAN menebak."},
                         "format": {"type": "string", "enum": ["excel", "pdf"], "description": "Format file hasil: 'excel' (.xlsx) atau 'pdf' (siap cetak). HANYA diisi bila user SUDAH memilih; bila belum, KOSONGKAN (tool akan menyuruhmu menanyakan Excel atau PDF) — JANGAN menebak/mengasumsikan."},
                         "sertakan_stok_harga": {"type": "boolean", "description": "Isi TRUE HANYA bila user (yang seorang ADMIN) secara eksplisit minta stok & harga ikut diisi di katalog. Default kosong/false = kolom Stok/Harga dibiarkan KOSONG. Untuk user non-admin, tetap KOSONG walau diminta (sistem menahannya). JANGAN set true tanpa permintaan eksplisit."},
                         "sumber": {"type": "string", "enum": ["atlas", "mesin"], "description": "'atlas' (default) = katalog bodi/sasis Sinotruk (Parts Atlas). 'mesin' = KATALOG MESIN Weichai per-VIN ('katalog mesin <rangka>', 'buku part mesin'): part internal mesin per-kelompok (blok, kepala silinder, kruk as, bahan bakar, pelumas, pendingin, turbo, kompresor, alternator/starter); kategori diisi kelompok mesin itu atau 'lengkap'. Hanya unit bermesin Weichai."},

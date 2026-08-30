@@ -2267,6 +2267,8 @@ export type AIExcelExport = {
   filename: string;
   judul: string;
   jumlah_baris: number;
+  /** Katalog masih disusun di latar (EPC ditelusuri ±1–3 mnt): unduhan pertama menunggu. */
+  sedang_disusun?: boolean;
 };
 /** Gambar exploded view untuk 1 PN → tampil INLINE di jawaban asisten. */
 export type AIExplodedImage = {

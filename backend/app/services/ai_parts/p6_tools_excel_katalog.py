@@ -512,6 +512,20 @@ def _katalog_walk_tunggu(rangka: str, kategori: str) -> dict | None:
     return box.get("d")
 
 
+def _katalog_isi_file(lengkap: bool, fmt: str) -> str:
+    """Susunan file katalog PERSIS seperti yang dibangun ai_export — disebut di
+    hasil tool supaya model menjelaskannya apa adanya. Audit 2026-08-29: user
+    minta "sheet per kategori" 3×, model akhirnya MENGKLAIM susunan yang tak ada."""
+    if fmt == "pdf":
+        return "PDF: satu bagian per figure (gambar exploded view + tabel part ber-balon)."
+    if lengkap:
+        return ("Excel LENGKAP = SATU file: sheet 'Daftar Isi' (hyperlink ke tiap kategori) "
+                "+ SATU SHEET PER KATEGORI (kabin, mesin, sasis, kelistrikan, …); tiap "
+                "sheet = daftar isi figure + seksi per figure (gambar + tabel).")
+    return ("Excel: satu sheet 'Katalog' = daftar isi figure ber-hyperlink + seksi per "
+            "figure (gambar exploded view + tabel part ber-balon).")
+
+
 def _katalog_kategori_impl(args: dict, user: dict) -> dict:
     """KATALOG BERGAMBAR per kategori per-VIN — walk Atlas (epc_bom.catalog_walk,
     di-cache), lalu stash RESEP export; Excel bergambar dibangun saat kartu
@@ -565,6 +579,7 @@ def _katalog_kategori_impl(args: dict, user: dict) -> dict:
         return {
             "found": True, "sedang_disusun": True, "export_id": export_id,
             "filename": filename, "judul": judul, "format": fmt_label,
+            "isi_file": _katalog_isi_file(lengkap, fmt),
             "stok_harga_diisi": isi_sh,
             "catatan": (f"Katalog {fmt_label} MASIH DISUSUN di latar (EPC ditelusuri, "
                         "±1-3 menit) — KARTU UNDUH sudah muncul di bawah jawabanmu; unduhan "
@@ -603,6 +618,7 @@ def _katalog_kategori_impl(args: dict, user: dict) -> dict:
         "found": True, "export_id": export_id, "filename": filename, "judul": judul,
         "format": fmt_label,
         "frame_number": frame, "katalog_lengkap": bool(d.get("lengkap")),
+        "isi_file": _katalog_isi_file(bool(d.get("lengkap")), fmt),
         "jumlah_figure": d.get("jumlah_figure"), "jumlah_baris": d.get("jumlah_part"),
         "kategori_cocok": (d.get("kategori_cocok") or [])[:20],
         **({"peringatan_tidak_lengkap":
@@ -616,6 +632,7 @@ def _katalog_kategori_impl(args: dict, user: dict) -> dict:
                   if _is_admin(user)
                   else "Kolom Stok & Harga sengaja DIKOSONGKAN di katalog (kebijakan).")),
         "catatan": (f"Katalog {fmt_label} siap — KARTU UNDUH otomatis muncul di bawah jawabanmu. "
+                    "Susunan file PERSIS seperti 'isi_file' — ⛔ jangan mengarang susunan sheet. "
                     "Jawab SINGKAT: sebut jumlah figure + jumlah part + bahwa tiap figure ada "
                     "GAMBAR exploded view resmi EPC dengan nomor balon, dan UNDUHAN PERTAMA "
                     f"butuh {durasi} (menyusun gambar). Sampaikan juga sesuai 'info_stok_harga'. "
