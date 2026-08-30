@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 # ── Gerbang konteks RANGKA (2026-08-09) ─────────────────────────────────
-# Ukuran produksi: blok TETAP tiap panggilan API = 77 spec tool (24.691 tok) +
-# system prompt (17.569 tok) ≈ 44.400 token, dan itu dibayar SETIAP RONDE tool.
+# Ukuran produksi (diukur ulang 2026-08-30): 102 spec tool ≈ 122 rb char
+# (≈36 rb tok; 59 tool ALWAYS = 72 rb char, gerbang rangka menyembunyikan
+# ≈19,5 rb char) + system prompt ≈ 60 rb char, dibayar SETIAP RONDE tool
+# (angka 2026-08-09: 77 spec / 24.691 tok + prompt 17.569 tok ≈ 44.400 tok).
 # Giliran 8 ronde di log nyata memakai 480.084 token masuk — mayoritas beban
 # tetap ini, bukan isi percakapan. 67% waktu giliran Agustus habis di MODEL
 # (3.829 dtk) vs tool (1.854 dtk), jadi memangkas prompt = memangkas latensi.

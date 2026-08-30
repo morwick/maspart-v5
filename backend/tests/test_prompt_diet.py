@@ -68,8 +68,10 @@ def test_prompt_statik_tanpa_kamus_penuh_tapi_masih_ber_domain():
     assert "KAMUS ISTILAH LAPANGAN (Indonesia → kata kunci Inggris):" not in sp
     assert "[KAMUS ISTILAH GILIRAN INI]" in sp  # rujukan cara kerjanya tetap dijelaskan
     assert "PENGETAHUAN DOMAIN — TRANSMISI / GEARBOX" in sp  # dari ai_domain.md
-    # diet: prompt admin turun dari 86,7rb → jauh di bawah 75rb chars
-    assert len(sp) < 75_000
+    # diet: prompt admin turun dari 86,7rb → plafon yang BERLAKU 60rb chars
+    # (sama dengan test_prompt_diet_pervin; angka 75rb lama tak pernah bisa gagal
+    # lebih dulu = pagar mati).
+    assert len(sp) <= 60_000
 
 
 def test_aturan_teruskan_mentah_berlaku_semua_tool_pencarian():

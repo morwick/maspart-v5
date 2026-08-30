@@ -35,7 +35,6 @@ USER = {"username": "admin", "role": "admin"}
 ])
 def test_tool_fail_kind_matrix(result, kind):
     assert ai._tool_fail_kind(result) == kind
-    assert ai._tool_failed(result) is bool(kind)   # kesetaraan dgn guard lama
 
 
 # ── _catat_tool_gagal: dedupe per nama + upgrade nf→err ──────────────────────
@@ -134,7 +133,6 @@ def test_err_kind_ok_bukan_kegagalan():
     # Pratinjau 2-langkah & kartu tanya_user cacat → bukan gagal data/infra.
     assert ai._tool_fail_kind({"found": False, "_err_kind": "ok", "pratinjau": True}) == ""
     assert ai._tool_fail_kind({"_err_kind": "ok", "error": "Kartu pertanyaan tak sah"}) == ""
-    assert ai._tool_failed({"_err_kind": "ok", "error": "x"}) is False
 
 
 def test_hapus_tool_gagal_cabut_nf_err_biarkan_brake():

@@ -92,12 +92,14 @@ def test_detail_pesanan_username_kosong_ditolak(monkeypatch):
 # ── #2 Deteksi kegagalan tool ───────────────────────────────────────────────
 
 def test_tool_failed_deteksi():
-    assert ai._tool_failed({"error": "x"})
-    assert ai._tool_failed({"denied": True})
-    assert ai._tool_failed({"found": False})
-    assert ai._tool_failed({"ditemukan": False})
-    assert not ai._tool_failed({"found": True, "stok": 5})
-    assert not ai._tool_failed({"stok": 5})
+    # _tool_failed (boolean) dihapus 2026-08-30 — satu-satunya sumber kebenaran
+    # kegagalan tool = _tool_fail_kind (''/'nf'/'err'/'brake').
+    assert ai._tool_fail_kind({"error": "x"})
+    assert ai._tool_fail_kind({"denied": True})
+    assert ai._tool_fail_kind({"found": False})
+    assert ai._tool_fail_kind({"ditemukan": False})
+    assert not ai._tool_fail_kind({"found": True, "stok": 5})
+    assert not ai._tool_fail_kind({"stok": 5})
 
 
 # ── #7 Cap ukuran hasil tool ────────────────────────────────────────────────

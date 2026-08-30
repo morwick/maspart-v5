@@ -1874,6 +1874,26 @@ _TOOL_BERAT = frozenset({
 # menaikkan plafon per-tool tak membuat satu giliran patologis meledak
 # (8 ronde × banyak tool). Giliran terboros yang tercatat 30 hari: ±20 panggilan.
 _MAX_TOOL_EXEC_TURN = 30
+# BATAS WAKTU per eksekusi tool (audit ai_chat_log 2026-08-30): tak ada pagar
+# waktu di jalur tool sama sekali — 9 Agu satu giliran menggantung 337 dtk saat
+# jaringan EPC putus (4 tool err beruntun, tiap panggilan HTTP retry sendiri).
+# Lewat batas → tool dijawab GAGAL-CEK (bukan 'tidak ada'), giliran lanjut;
+# thread tool aslinya dibiarkan selesai & hasilnya tetap masuk cache giliran,
+# jadi panggilan ulang di ronde berikut langsung dapat hasilnya.
+_TOOL_TIMEOUT_S = 90.0
+_TOOL_TIMEOUT_BERAT_S = 180.0    # render figure / unduh PDF / walk katalog
+
+
+def _tool_timeout(name: str) -> float:
+    return _TOOL_TIMEOUT_BERAT_S if name in _TOOL_BERAT else _TOOL_TIMEOUT_S
+
+
+def _hasil_tool_timeout(name: str, detik: float) -> dict:
+    return {"found": False, "_err_kind": "err", "timeout": True,
+            "error": (f"Tool {name} BELUM selesai dalam {int(detik)} detik (server sumber "
+                      "lambat / tak menjawab) — datanya BELUM DICEK, bukan tidak ada. "
+                      "Sampaikan jujur ke user & sarankan coba lagi sebentar; ⛔ JANGAN "
+                      "menyimpulkan 'tidak ditemukan'.")}
 _NOTE_ULANG = ("⛔ PANGGILAN IDENTIK DIABAIKAN: tool ini sudah dipanggil dengan "
                "argumen PERSIS sama giliran ini — hasil di atas adalah hasil "
                "sebelumnya (tidak dijalankan ulang; mengulanginya TIDAK akan "
@@ -2474,7 +2494,11 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             _ada = {p.upper() for p in part_index.rows_for_pns(list(_asst_pns))}
             grounded |= {p for p in _asst_pns if p.upper() in _ada}
         except Exception:
-            pass  # gagal cek katalog → jangan ground dari assistant (aman by default)
+            # Gagal cek katalog → PN riwayat asisten TAK di-ground (aman by
+            # default) — tapi akibatnya jawaban BENAR bisa ikut disamarkan, jadi
+            # kejadiannya WAJIB terlihat di log, bukan ditelan diam-diam.
+            logger.exception("gagal cek katalog utk %d PN riwayat asisten — tak di-ground",
+                             len(_asst_pns))
     # MEMORI SESI: PN & angka yang giliran LALU benar-benar keluar dari HASIL TOOL.
     # Ini menutup kasus "asisten menyangkal datanya sendiri": PN dari bom_dari_rangka
     # sering HANYA ada di EPC, tidak di katalog lokal, sehingga saat user bertanya
@@ -2637,20 +2661,43 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                                     + _saran)}
             # RESERVASI slot sebelum eksekusi — inilah yang membuat plafon benar.
             _call_count[name] = _call_count.get(name, 0) + 1
-        try:
-            res = _run_tool(name, args, u, sid)   # eksekusi DI LUAR lock: jangan
-        except Exception:                         # menyerialkan thread pool.
+        # Eksekusi DI LUAR lock (jangan menyerialkan thread pool) dan DI BAWAH
+        # pagar waktu: thread daemon menjalankan tool, pemanggil menunggu paling
+        # lama _tool_timeout(name). Lewat batas → hasil gagal-cek; thread tetap
+        # lanjut dan hasilnya (bila datang) masuk _call_cache lewat _simpan.
+        box: dict = {}
+        selesai = threading.Event()
+
+        def _simpan(res: dict) -> None:
+            if key is not None and isinstance(res, dict):
+                with _call_lock:
+                    _call_cache[key] = res
+                    # Ronde lebih awal sempat ditolak rem, ronde ini akhirnya
+                    # jalan (mis. plafon tool berat sudah lewat lewat jalur lain):
+                    # item ini BUKAN lagi 'belum dicek' — jangan diperingatkan.
+                    _rem_tertunda.pop(key, None)
+
+        def _kerja() -> None:
+            try:
+                box["res"] = _run_tool(name, args, u, sid)
+            except BaseException as e:            # diangkat lagi di pemanggil
+                box["exc"] = e
+            else:
+                _simpan(box["res"])
+            finally:
+                selesai.set()
+
+        threading.Thread(target=_kerja, name=f"tool-{name}", daemon=True).start()
+        batas = _tool_timeout(name)
+        if not selesai.wait(batas):
+            logger.warning("tool %s melewati batas %.0f dtk — dijawab gagal-cek, "
+                           "thread dibiarkan selesai", name, batas)
+            return _hasil_tool_timeout(name, batas)
+        if "exc" in box:
             with _call_lock:                      # gagal → kembalikan slotnya,
                 _call_count[name] = max(0, _call_count.get(name, 0) - 1)
-            raise
-        if key is not None and isinstance(res, dict):
-            with _call_lock:
-                _call_cache[key] = res
-                # Ronde lebih awal sempat ditolak rem, ronde ini akhirnya jalan
-                # (mis. plafon tool berat sudah lewat lewat jalur lain): item ini
-                # BUKAN lagi 'belum dicek' — jangan diperingatkan di akhir.
-                _rem_tertunda.pop(key, None)
-        return res
+            raise box["exc"]
+        return box["res"]
     epc_vin_used = False
     # PN yang PERNAH ditandai suspect di riwayat → tetap dicurigai di follow-up
     # (state guard mereset tiap turn; tanpa ini PN lokal per-model jadi 'bersih'
@@ -2791,7 +2838,9 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 # Sinyal mutu IMPLISIT (migrations/030) — lihat _pertanyaan_diulang.
                 diulang=_pertanyaan_diulang(_pertanyaan, history))
         except Exception:
-            pass
+            # Telemetri best-effort: tak boleh menjatuhkan jawaban, tapi seluruh
+            # audit mutu bertumpu padanya → kegagalan harus tercatat.
+            logger.warning("telemetri ai_chat_log gagal dicatat", exc_info=True)
         out = {"reply": reply, "tools_used": tools_used,
                "repairkit_models": repairkit_models, "banding_exports": banding_exports,
                "excel_exports": excel_exports, "exploded_images": exploded_images,
@@ -2957,7 +3006,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                             f"[HASIL TOOL {name}] (sistem sudah MENJALANKAN tool ini — "
                             "JANGAN tulis pemanggilan tool sebagai teks; pakai hasil ini "
                             "untuk menjawab):\n"
-                            + _cap_tool_content(_dump)
+                            + _cap_tool_content(_dump, _cap_ronde(len(leaked)))
                         ),
                     })
                     _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
@@ -3352,7 +3401,9 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             and _EXCEL_CLAIM_RE.search(reply) and _EXCEL_CLAIM_DONE_RE.search(reply)):
         reply += ("\n\n⚠️ Catatan sistem: kartu file yang disebut BELUM tersedia — "
                   "minta asisten membuatkannya lagi bila perlu.")
-    elif ((user_dtc_tokens and not dtc_tool_attempted
+    # `if` TERPISAH (dulu `elif`): dua cacat kejujuran = dua peringatan — klaim
+    # Excel palsu tak boleh menyembunyikan PN/DTC yang belum diverifikasi.
+    if ((user_dtc_tokens and not dtc_tool_attempted
            and any(t in reply.upper() for t in user_dtc_tokens))
           or (user_rangka_recent and not rangka_tool_attempted
               and [p for p in _drop_unit_tokens(list(_extract_pns(reply)))

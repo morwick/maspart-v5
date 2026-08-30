@@ -795,8 +795,12 @@ def _exploded_tanpa_rangka(pn: str, balon_req: int | None) -> dict:
     try:
         d = exploded_view.figure_untuk_pn(pn)
     except Exception:
-        return {"found": False,
-                "error": "Gagal mengambil gambar exploded dari EPC. Coba lagi sebentar."}
+        logger.exception("figure_untuk_pn gagal (%s)", pn)
+        # _cek_tak_lengkap: telemetri & model membacanya sbg GAGAL-CEK ('err'),
+        # bukan 'tidak ada' — bentuknya dulu identik dgn cabang nihil di bawah.
+        return {"found": False, "_cek_tak_lengkap": True,
+                "error": ("GAGAL mengambil gambar exploded dari EPC (gangguan) — belum "
+                          "bisa dipastikan ada/tidaknya. Coba lagi sebentar.")}
     if not d.get("found"):
         return {"found": False, "part_number": pn,
                 "error": d.get("alasan") or "Figure exploded untuk PN ini tidak ditemukan.",

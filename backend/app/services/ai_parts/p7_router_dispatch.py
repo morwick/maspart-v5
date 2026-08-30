@@ -812,8 +812,9 @@ def _tool_fail_kind(result) -> str:
 
 def _tool_failed(result: dict) -> bool:
     """True bila hasil tool = kegagalan/kekosongan lookup (error, ditolak, atau
-    'tidak ditemukan'). Dipakai untuk mengingatkan model agar TIDAK mengarang
-    stok/harga saat data sebenarnya gagal diambil (guard PN tak menangkap angka)."""
+    'tidak ditemukan') — pembungkus boolean _tool_fail_kind. Tak dipakai di
+    app/ (jalur chat memakai _tool_fail_kind langsung), tapi dipertahankan sebagai
+    ORAKEL di ±20 tes (test_compact_result, test_router_gagal_dan_stub, …)."""
     return bool(_tool_fail_kind(result))
 
 

@@ -1504,15 +1504,21 @@ def _t_pesanan_bermasalah(args: dict, user: dict) -> dict:
     return res
 
 
-def _ready_breakdown(pn: str, gudang_filter: str = "") -> dict[str, int]:
-    """{gudang: qty SIAP KIRIM} untuk 1 PN = stok Accurate − reservasi aktif, hanya di
-    gudang yang boleh mengirim ('Bisa Kirim'). Definisi 'ready' yang sama dengan yang
-    dipakai checkout — kalau beda, asisten akan menjanjikan barang yang tak bisa dibeli."""
+def _ready_breakdown(pn: str, gudang_filter: str = "") -> tuple[dict[str, int], bool]:
+    """({gudang: qty SIAP KIRIM}, berhasil_dicek) untuk 1 PN = stok Accurate − reservasi
+    aktif, hanya di gudang yang boleh mengirim ('Bisa Kirim'). Definisi 'ready' yang
+    sama dengan yang dipakai checkout — kalau beda, asisten akan menjanjikan barang
+    yang tak bisa dibeli.
+
+    GAGAL-CEK ≠ NOL (audit 2026-08-30): dulu `except → {}` tak terbedakan dari
+    "stok siap kirim nol", sehingga Accurate/gudang yang cegukan membuat
+    alternatif_ready menjawab "tak ada pengganti siap kirim" — user lalu mencari
+    ke luar padahal barangnya ada. Pola sama dgn _acc_stok (p5)."""
     try:
         raw = gudang.shippable(part_index.gudang_breakdown(pn) or {})
     except Exception:
         logger.exception("_ready_breakdown gagal (%s)", pn)
-        return {}
+        return {}, False
     resv = reservations.reserved_map()
     key = (pn or "").strip().upper()
     out: dict[str, int] = {}
@@ -1525,7 +1531,7 @@ def _ready_breakdown(pn: str, gudang_filter: str = "") -> dict[str, int]:
             if want not in _norm_gudang(g) and _norm_gudang(g) not in want:
                 continue
         out[g] = net
-    return out
+    return out, True
 
 
 def _t_alternatif_ready(args: dict, user: dict) -> dict:
@@ -1609,13 +1615,17 @@ def _t_alternatif_ready(args: dict, user: dict) -> dict:
             if not k.get("nama"):
                 k["nama"] = " ".join((local.get(k["pn"], {}).get("part_name") or "").split()) or None
 
-    asli = _ready_breakdown(pn, gud)
+    asli, _asli_ok = _ready_breakdown(pn, gud)
     siap: list[dict] = []
     tak_siap: list[dict] = []
+    stok_gagal: list[str] = [] if _asli_ok else [pn]
     for k in kandidat:
-        bd = _ready_breakdown(k["pn"], gud)
+        bd, _ok = _ready_breakdown(k["pn"], gud)
         row = {**k, "siap_kirim": sum(bd.values()),
                "gudang": [{"gudang": g, "qty": q} for g, q in sorted(bd.items(), key=lambda x: -x[1])]}
+        if not _ok:
+            stok_gagal.append(k["pn"])
+            row["stok_gagal_dicek"] = True
         (siap if bd else tak_siap).append(row)
     siap.sort(key=lambda r: -r["siap_kirim"])
 
@@ -1633,6 +1643,14 @@ def _t_alternatif_ready(args: dict, user: dict) -> dict:
     }
     if gud:
         out["gudang_dicari"] = gud
+    if stok_gagal:
+        # Stok siap-kirim PN ini GAGAL dicek (Accurate/gudang) — angka 0-nya
+        # bukan nol sungguhan. Dibaca _tool_fail_kind → 'err'.
+        out["_cek_tak_lengkap"] = True
+        out["stok_gagal_dicek"] = stok_gagal
+        out["catatan"] += (f" ⚠️ Stok siap-kirim {len(stok_gagal)} PN GAGAL dicek "
+                           f"({', '.join(stok_gagal[:8])}) — angkanya BUKAN nol; sampaikan "
+                           "bahwa pengecekan stok belum tuntas & sarankan coba lagi.")
     out["sumber_dicek"] = sumber_dicek
     _gagal = [k for k, v in sumber_dicek.items() if v != "ok"]
     _nama = {"sims": "SIMS Sinotruk (sasis)", "weichai": "EPC Weichai (mesin)"}
@@ -1784,7 +1802,9 @@ def _harga_sims_massal(pns: list[str], args: dict) -> dict:
         b = harga.batch_harga(pns, max_workers=_HARGA_SIMS_WORKERS)
     except Exception:  # pragma: no cover
         logger.exception("harga SIMS massal gagal")
-        return {"found": False, "error": "gagal ambil harga SIMS (gangguan internal/jaringan)"}
+        return {"found": False, "_cek_tak_lengkap": True,
+                "error": ("gagal ambil harga SIMS (gangguan internal/jaringan) — SEMUA PN "
+                          "belum dicek, bukan tak berharga")}
     idr = bool(args.get("konversi_idr"))
     hasil: list[dict] = []
     nihil: list[str] = []
@@ -3649,6 +3669,7 @@ def _fault_pdf_cards(spn: int | None, fmi: int | None, max_cards: int = 4) -> li
     try:
         matches = fault_pdf.find(spn, fmi) or (fault_pdf.find(spn) if fmi is not None else [])
     except Exception:  # pragma: no cover
+        logger.exception("lembar diagnosa PDF gagal dicari (SPN %s FMI %s)", spn, fmi)
         return []
     cards: list[dict] = []
     for m in matches[:max_cards]:

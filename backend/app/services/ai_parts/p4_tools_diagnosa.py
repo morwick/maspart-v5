@@ -2823,7 +2823,8 @@ def _t_kasus_serupa(args: dict, user: dict) -> dict:
         return warranty_kasus.cari(gejala)
     except Exception:                       # dataset rusak ≠ asisten mati
         logger.exception("kasus_serupa gagal")
-        return {"found": False,
-                "catatan": "Dataset kasus klaim tak terbaca di server."}
+        return {"found": False, "_cek_tak_lengkap": True,
+                "catatan": ("Dataset kasus klaim TAK TERBACA di server — ini gangguan, "
+                            "BUKAN bukti tidak ada kasus serupa; sampaikan apa adanya.")}
 
 
