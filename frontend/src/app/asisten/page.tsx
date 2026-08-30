@@ -548,8 +548,7 @@ export default function AsistenPage() {
         clearSession();
         return router.replace("/login");
       }
-      const msg = err instanceof Error ? err.message : "Gagal menghubungi asisten.";
-      setError(msg);
+      setError(pesanGalatAsisten(err));
       // Buang PLACEHOLDER saja. Dulu pesan user ikut dihapus (slice(0,-2)),
       // sehingga setelah menunggu lama lalu gagal, pertanyaannya lenyap dari
       // layar dan chat seolah "mundur" — membingungkan.
@@ -1751,6 +1750,18 @@ function AiExcelCard({ exp }: { exp: AIExcelExport }) {
       actionLabel={isPdf ? "Buka" : "Unduh"}
     />
   );
+}
+
+// Galat giliran → kalimat untuk user. Saldo/kuota penyedia AI habis (HTTP 402
+// dari DeepSeek, diteruskan backend sebagai teks) dulu tampil sebagai galat
+// teknis mentah; user tak tahu harus apa. Selain itu pesan server dipakai
+// apa adanya (jangan ditelan).
+function pesanGalatAsisten(err: unknown): string {
+  const raw = err instanceof Error ? err.message : "";
+  if (/\b402\b|insufficient balance|saldo|kuota/i.test(raw)) {
+    return "Layanan AI sementara tidak tersedia (kuota penyedia AI habis) — hubungi admin.";
+  }
+  return raw || "Gagal menghubungi asisten.";
 }
 
 // Kartu file yang MENUNGGU dikirim (gaya Claude): tampil di atas kotak ketik

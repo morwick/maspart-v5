@@ -2481,6 +2481,8 @@ export async function aiChatStream(
   return bacaAliranChat(res, onProgress, onDelta);
 }
 
+const STREAM_IDLE_MS = 240_000;
+
 /**
  * Baca aliran SSE asisten (frame `progress`/`delta`/`reset`/`done`/`error`) →
  * hasil AKHIR. Dipakai `aiChatStream` DAN `aiChatSheetStream` supaya protokolnya
@@ -2500,7 +2502,27 @@ async function bacaAliranChat(
   let errMsg: string | null = null;
 
   for (;;) {
-    const { value, done } = await reader.read();
+    // Pagar DIAM: tanpa ini proxy/koneksi yang macet membuat giliran menggantung
+    // selamanya (satu-satunya jalan keluar = tombol Stop). Jam di-reset tiap
+    // frame; server mengirim progress/delta tiap langkah, dan tool kini dibatasi
+    // 90–180 dtk, jadi 4 menit tanpa satu byte pun = aliran memang mati.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const idle = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("Aliran jawaban terhenti — tidak ada data dari server selama 4 menit.")),
+        STREAM_IDLE_MS,
+      );
+    });
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await Promise.race([reader.read(), idle]);
+    } catch (e) {
+      reader.cancel().catch(() => {});
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+    const { value, done } = chunk;
     if (done) break;
     buf += dec.decode(value, { stream: true });
     const parts = buf.split("\n\n");
