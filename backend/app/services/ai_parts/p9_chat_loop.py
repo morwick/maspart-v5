@@ -1899,6 +1899,131 @@ def _tool_call_key(name: str, args: dict) -> tuple | None:
         return None
 
 
+# ── KOALISI panggilan paralel satu tool → SATU panggilan ber-array ──────────
+# Audit ai_chat_log 2026-08-30 (2 hari pasca-deploy 28 Agu): user 'mas' kirim
+# 133 PN → model memanggil harga_sims 115× SKALAR paralel dalam satu giliran,
+# padahal spec-nya sudah bilang "ARRAY maks 100, ⛔ jangan per-PN" (dan aturan
+# batch sudah pindah dari prosa ke SKEMA sejak e1be15b). Rem menolak 105 sisanya
+# → 11 giliran "lanjut" ×10 PN, 2 Excel parsial, ±1,9 jt token, 40 menit.
+# Pelajaran: larangan (prosa MAUPUN skema) tak menjamin model patuh, dan
+# MENOLAK hanya memindahkan kerja ke user. Server yang menggabungkan:
+# panggilan paralel satu tool yang hanya berbeda pada SATU argumen ber-tipe
+# array (nilai skalar tiap panggilan) dilebur jadi satu panggilan ber-array —
+# eksekusi 1×, plafon item milik tool sendiri (dipotong TERBUKA), rem tak
+# menyala. Registri argumen array DITURUNKAN dari spec (bukan ditulis tangan)
+# supaya tool baru yang menerima array otomatis ikut.
+#
+# Tool yang array-nya = DATA TERSTRUKTUR (baris Excel, daftar pertanyaan, item
+# penawaran), bukan daftar item pencarian — tak boleh dilebur.
+_KOALISI_TOLAK = frozenset({
+    "tanya_user", "buat_excel", "hitung_part", "ajarkan_pengetahuan",
+    "buat_penawaran", "buat_permintaan_barang", "sheet_isi_kolom", "sheet_tulis",
+    "ganti_nama_unit",
+})
+
+
+def _param_array_map(specs) -> dict[str, set[str]]:
+    """tool → argumen yang menerima ARRAY of string (tipe `array` beritem string,
+    atau union `["string","array"]`). Toleran terhadap spec cacat (tes memakai
+    spec stub `[{"x": 1}]`)."""
+    out: dict[str, set[str]] = {}
+    for sp in specs or []:
+        try:
+            fn = sp.get("function") or {}
+            name = fn.get("name") or ""
+            props = ((fn.get("parameters") or {}).get("properties") or {})
+        except AttributeError:
+            continue
+        if not name or name in _KOALISI_TOLAK or not isinstance(props, dict):
+            continue
+        ps: set[str] = set()
+        for k, v in props.items():
+            if not isinstance(v, dict):
+                continue
+            t = v.get("type")
+            it = (v.get("items") or {}).get("type") if isinstance(v.get("items"), dict) else None
+            if (isinstance(t, list) and "array" in t and "string" in t) \
+                    or (t == "array" and it == "string"):
+                ps.add(str(k))
+        if ps:
+            out[name] = ps
+    return out
+
+
+def _nilai_skalar(v):
+    """str → str; list SATU elemen str → str; selain itu None (tak layak dilebur)."""
+    if isinstance(v, str):
+        return v.strip() or None
+    if isinstance(v, (list, tuple)) and len(v) == 1 and isinstance(v[0], str):
+        return v[0].strip() or None
+    return None
+
+
+def _koalisi_panggilan(parsed: list[tuple[str, dict]],
+                       arr_map: dict[str, set[str]]) -> tuple[list[tuple[str, dict]], dict[int, dict]]:
+    """Lebur panggilan PARALEL satu tool yang hanya berbeda pada SATU argumen
+    ber-array (skalar tiap panggilan; argumen lain identik) menjadi SATU
+    panggilan ber-array pada WAKIL grup (indeks pertama).
+
+    Return (parsed_baru, dilebur): parsed_baru[wakil] = argumen ber-array;
+    dilebur[i] = {"wakil", "field", "item", "jumlah"} untuk panggilan yang
+    dilebur (JANGAN dieksekusi; balasannya stub yang menunjuk hasil wakil).
+    Grup <2, tool tanpa argumen array, nilai bukan skalar, atau argumen lain
+    berbeda → tak disentuh (perilaku lama persis)."""
+    if not arr_map or len(parsed) < 2:
+        return parsed, {}
+    per_nama: dict[str, list[int]] = {}
+    for i, (n, a) in enumerate(parsed):
+        if n in arr_map and isinstance(a, dict):
+            per_nama.setdefault(n, []).append(i)
+    baru = list(parsed)
+    dilebur: dict[int, dict] = {}
+    for name, idxs in per_nama.items():
+        if len(idxs) < 2:
+            continue
+        sisa = list(idxs)
+        for field in sorted(arr_map[name]):
+            ember: dict[str, list[int]] = {}
+            for i in sisa:
+                a = parsed[i][1]
+                if field not in a or _nilai_skalar(a.get(field)) is None:
+                    continue
+                try:
+                    sig = json.dumps({k: v for k, v in a.items()
+                                      if k != field and not str(k).startswith("_")},
+                                     sort_keys=True, ensure_ascii=False, default=str)
+                except Exception:
+                    continue
+                ember.setdefault(sig, []).append(i)
+            for grup in ember.values():
+                if len(grup) < 2:
+                    continue
+                items = list(dict.fromkeys(_nilai_skalar(parsed[i][1][field]) for i in grup))
+                wakil = grup[0]
+                baru[wakil] = (name, {**parsed[wakil][1], field: items})
+                for i in grup[1:]:
+                    dilebur[i] = {"wakil": wakil, "field": field,
+                                  "item": _nilai_skalar(parsed[i][1][field]),
+                                  "jumlah": len(items)}
+                sisa = [i for i in sisa if i not in grup]
+    return baru, dilebur
+
+
+def _stub_koalisi(name: str, info: dict, wakil_id: str) -> dict:
+    """Balasan untuk tool_call yang dilebur: pendek (hemat token), menunjuk ke
+    hasil wakil, dan menegaskan item ini SUDAH ikut dicek (bukan ditolak rem)."""
+    return {
+        "_digabung": True,
+        "digabung": True,
+        "tool": name,
+        info["field"]: info["item"],
+        "catatan": (f"Panggilan ini DILEBUR server bersama {info['jumlah']} item lain ke "
+                    f"SATU panggilan {name} ber-array — hasilnya ada pada tool_call_id "
+                    f"{wakil_id}. Item ini SUDAH ikut dicek di sana; jangan panggil ulang. "
+                    f"Lain kali kirim semua item dalam satu array '{info['field']}'."),
+    }
+
+
 def _subst_correction_msg(subst: list[str]) -> str:
     return (
         "⛔ KOREKSI OTORITAS DATA: PN berikut berasal dari KATALOG LOKAL per-model "
@@ -2454,6 +2579,13 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     # (tulis) terpisah — seluruh gelombang worker pertama membaca angka yang sama
     # dan lolos bersamaan, membuat plafon efektif ≈ 3 + (worker-1) alih-alih 3.
     _call_lock = threading.Lock()
+    # Registri argumen ber-array per tool (dari spec PENUH, bukan yang disaring
+    # _saring_pervin — tersembunyi ≠ terlarang) untuk koalisi & pesan rem.
+    try:
+        _arr_params = _param_array_map(_tool_specs(user, sheet_id))
+    except Exception:  # pragma: no cover — koalisi hanya optimisasi
+        logger.exception("registri argumen array gagal dibangun (koalisi dimatikan)")
+        _arr_params = {}
 
     def _run_tool_turn(name: str, args: dict, u: dict, sid: str = "") -> dict:
         key = _tool_call_key(name, args)
@@ -2480,16 +2612,20 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                           if _call_count.get(name, 0) >= _plafon else
                           f"giliran ini sudah menjalankan {_MAX_TOOL_EXEC_TURN} "
                           "panggilan tool (anggaran habis)")
+                _fld = ", ".join(f"'{f}'" for f in sorted(_arr_params.get(name, ())))
+                _saran = (f"Tool '{name}' MENERIMA ARRAY pada argumen {_fld} — kirim "
+                          "SEMUA item dalam SATU panggilan ber-array. "
+                          if _fld else
+                          "Gabungkan kebutuhan dalam SATU panggilan — untuk BANYAK Part "
+                          "Number pakai cek_massal_part (array daftar_pn, sudah memuat "
+                          "berat; dimensi=true bila perlu ukuran). Banyak tool lain juga "
+                          "menerima ARRAY/multi-istilah.")
                 return {"found": False, "dibatasi": True,
                         "catatan": (f"⛔ BATAS: {_sebab} — panggilan berikutnya "
                                     "DITOLAK. "
                                     "Data yang belum sempat diambil BELUM TENTU tidak "
                                     "ada; jangan menyimpulkan 'tidak ditemukan'. "
-                                    "Gabungkan kebutuhan dalam SATU panggilan — untuk "
-                                    "BANYAK Part Number pakai cek_massal_part (array "
-                                    "daftar_pn, sudah memuat berat; dimensi=true bila "
-                                    "perlu ukuran). Banyak tool lain juga menerima "
-                                    "ARRAY/multi-istilah.")}
+                                    + _saran)}
             # RESERVASI slot sebelum eksekusi — inilah yang membuat plafon benar.
             _call_count[name] = _call_count.get(name, 0) + 1
         try:
@@ -3026,15 +3162,23 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             # Panggilan IDENTIK dalam SATU batch di-dedup SEBELUM pool — tanpa
             # ini dua thread paralel lolos cache (race) dan dobel eksekusi.
             parsed = [_parse_call(tc) for tc in tool_calls]
+            # KOALISI: N panggilan skalar satu tool → SATU panggilan ber-array
+            # pada wakilnya; yang dilebur tak dieksekusi (lihat _koalisi_panggilan).
+            parsed, _dilebur = _koalisi_panggilan(parsed, _arr_params)
+            if _dilebur:
+                logger.info("koalisi tool: %d panggilan dilebur (%s)", len(_dilebur),
+                            ", ".join(sorted({parsed[v["wakil"]][0] for v in _dilebur.values()})))
             keys = [_tool_call_key(n, a) for n, a in parsed]
             first_idx: dict = {}
             uniq: list[int] = []
             for i, k in enumerate(keys):
+                if i in _dilebur:
+                    continue
                 if k is None or k not in first_idx:
                     if k is not None:
                         first_idx[k] = i
                     uniq.append(i)
-            with ThreadPoolExecutor(max_workers=min(4, len(uniq))) as _ex:
+            with ThreadPoolExecutor(max_workers=min(_BATCH_WORKERS, len(uniq))) as _ex:
                 uniq_res = dict(zip(uniq, _ex.map(
                     lambda i: _run_tool_turn(parsed[i][0],
                                              {**parsed[i][1], "_q_user": q_user_terakhir,
@@ -3043,7 +3187,11 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             executed = []
             for i, tc in enumerate(tool_calls):
                 n, a = parsed[i]
-                if i in uniq_res:
+                if i in _dilebur:
+                    _info = _dilebur[i]
+                    executed.append((tc, n, a, _stub_koalisi(
+                        n, _info, str((tool_calls[_info["wakil"]] or {}).get("id") or ""))))
+                elif i in uniq_res:
                     executed.append((tc, n, a, uniq_res[i]))
                 else:   # kembaran identik dalam batch → hasil sama + catatan
                     res = dict(uniq_res[first_idx[keys[i]]])
@@ -3062,6 +3210,18 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         # cukup ketika satu ronde boleh berisi banyak panggilan (lihat _cap_ronde).
         _cap_hasil = _cap_ronde(len(executed))
         for tc, name, args, result in executed:
+            if isinstance(result, dict) and result.get("_digabung"):
+                # Dilebur ke panggilan wakil: cukup balasan pendek utk tool_call_id
+                # ini (API wajib punya balasan per id). Tak dihitung sbg eksekusi,
+                # tak di-ground (datanya ada di hasil wakil), tak masuk telemetri.
+                messages.append({
+                    "role": "tool", "tool_call_id": tc.get("id"),
+                    "content": json.dumps({k: v for k, v in result.items()
+                                           if not str(k).startswith("_")},
+                                          ensure_ascii=False, separators=(",", ":")),
+                })
+                _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
+                continue
             tools_used.append(name)
             # tanya_user: kartu pertanyaan. Ambil yang PERTAMA saja — dua kartu
             # dalam satu giliran akan menumpuk di layar user.
