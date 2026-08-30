@@ -2144,6 +2144,119 @@ def _skor_item(hay: str, kws: list[str], boost_elemen: bool = False) -> tuple[in
     return total, first_hit
 
 
+# ── Jaring KE-2: pencocokan TOKEN (audit ai_chat_log 2026-08-30) ──────────
+# _skor_item hanya cocok bila FRASA keyword utuh ada di nama: "valve ac" tak
+# pernah menemukan "Expansion valve (air conditioner)", "housing ac" tak
+# menemukan "HVAC assembly", "handle luar pintu" tak menemukan "Outer door
+# handle" → model meraba bom_dari_rangka/uraikan_assembly 6-8 ronde (100-220
+# dtk, 450-600k token) atau menyerah. Bila frasa NIHIL, keyword multi-kata
+# dipecah jadi token; tiap token boleh diwakili aliasnya (id/en/cn); baris
+# cocok bila SEMUA token wajib kena (kata posisi kiri/kanan/depan = bonus).
+# Hanya jalan saat frasa nihil → peringkat hasil frasa yang ada tak bergeser.
+_TOKEN_STOP = frozenset({
+    "untuk", "yang", "bagian", "part", "unit", "dan", "dengan", "the", "of", "for", "and",
+    "assy", "assembly", "buat", "pada", "di", "ke", "yg", "nya", "berbentuk", "bentuk",
+    "model", "tipe", "jenis", "samping", "sisi", "ini", "itu", "punya", "milik",
+})
+_TOKEN_POSISI = {
+    "kiri": ("left", "左"), "kanan": ("right", "右"), "depan": ("front", "前"),
+    "belakang": ("rear", "back", "后"), "atas": ("upper", "top", "上"),
+    "bawah": ("lower", "bottom", "下"), "luar": ("outer", "outside", "外"),
+    "dalam": ("inner", "inside", "内"),
+    "left": ("左",), "right": ("右",), "front": ("前",), "rear": ("后",),
+    "upper": ("上",), "lower": ("下",), "outer": ("外",), "inner": ("内",),
+}
+_TOKEN_ALIAS = {
+    "ac": ("air condition", "a/c", "aircon", "hvac", "空调"),
+    "kompresor": ("compressor", "压缩机"), "kompressor": ("compressor", "压缩机"),
+    "compressor": ("压缩机",),
+    "housing": ("housing", "shell", "casing", "case", "壳", "罩"),
+    "rumah": ("housing", "shell", "casing", "case", "壳"),
+    "valve": ("valve", "阀"), "katup": ("valve", "阀"), "klep": ("valve", "阀"),
+    "handle": ("handle", "把手"), "gagang": ("handle", "把手"), "hendel": ("handle", "把手"),
+    "kaca": ("glass", "玻璃"), "glass": ("玻璃",),
+    "pintu": ("door", "门"), "door": ("门",),
+    "sensor": ("sensor", "传感器"), "switch": ("switch", "开关"), "saklar": ("switch", "开关"),
+    "pin": ("pin", "销"), "pen": ("pin", "销"), "cucuk": ("pin", "销"),
+    "selang": ("hose", "软管"), "hose": ("软管",),
+    "pipa": ("pipe", "tube", "管"), "pipe": ("管",),
+    "bracket": ("bracket", "support", "支架"), "braket": ("bracket", "support", "支架"),
+    "dudukan": ("bracket", "support", "mounting", "seat", "支架", "座"),
+    "mounting": ("mounting", "mount", "support", "悬置", "支架"),
+    "baut": ("bolt", "screw", "螺栓"), "mur": ("nut", "螺母"), "ring": ("washer", "垫圈"),
+    "karet": ("rubber", "橡胶"), "seal": ("seal", "密封"), "sil": ("seal", "密封"),
+    "lampu": ("lamp", "light", "灯"), "lamp": ("灯",),
+    "kabel": ("cable", "harness", "wire", "线"), "cable": ("线",),
+    "tangki": ("tank", "箱"), "tank": ("箱",),
+    "pompa": ("pump", "泵"), "pump": ("泵",),
+    "kipas": ("fan", "风扇"), "fan": ("风扇",),
+    "filter": ("filter", "滤"), "saringan": ("filter", "滤"),
+    "roda": ("wheel", "轮"), "wheel": ("轮",),
+    "bearing": ("bearing", "轴承"), "laher": ("bearing", "轴承"), "laker": ("bearing", "轴承"),
+    "per": ("spring", "弹簧"), "pegas": ("spring", "弹簧"), "spring": ("弹簧",),
+    "gigi": ("gear", "齿轮"), "gear": ("齿轮",),
+    "poros": ("shaft", "轴"), "as": ("shaft", "轴"), "shaft": ("轴",),
+    "tutup": ("cover", "cap", "盖"), "penutup": ("cover", "盖"), "cover": ("盖",),
+    "kunci": ("lock", "锁"), "lock": ("锁",),
+    "jok": ("seat", "座椅"), "kursi": ("seat", "座椅"),
+    "spion": ("mirror", "后视镜"), "tuas": ("lever", "杆"), "pedal": ("pedal", "踏板"),
+    "radiator": ("radiator", "散热器"), "kondensor": ("condenser", "冷凝器"),
+    "evaporator": ("evaporator", "蒸发器"), "blower": ("blower", "鼓风机"),
+    "tensioner": ("tensioner", "tension", "张紧"),
+    "alarm": ("alarm", "buzzer", "报警"), "buzzer": ("buzzer", "alarm", "蜂鸣"),
+    "metering": ("metering", "measuring", "计量"),
+    "gantungan": ("hanger", "bracket", "吊"),
+    "gate": ("gate", "tailgate", "板"), "bak": ("cargo", "body", "货箱"),
+    "mesin": ("engine", "发动机"), "engine": ("发动机",),
+    "kopling": ("clutch", "离合"), "clutch": ("离合",),
+    "rem": ("brake", "制动"), "brake": ("制动",),
+    "starter": ("starter", "起动"), "alternator": ("alternator", "generator", "发电机"),
+    "dinamo": ("alternator", "generator", "motor", "发电机"),
+    "injector": ("injector", "喷油器"), "nozzle": ("nozzle", "injector", "喷油"),
+    "turbo": ("turbocharger", "turbo", "增压"), "intercooler": ("intercooler", "中冷"),
+}
+
+
+def _token_query(kws: list[str]) -> list[tuple[str, list[tuple[str, ...]], list[tuple[str, ...]]]]:
+    """Tiap keyword MULTI-kata → (keyword asal, token WAJIB [(alias…)…],
+    token POSISI opsional [(alias…)…]). Keyword satu kata tak diproses —
+    jalur frasa sudah menanganinya."""
+    out = []
+    for k in kws:
+        toks = [t for t in re.split(r"[^0-9a-z\u2e80-\uffff/]+", (k or "").lower()) if t]
+        if len(toks) < 2:
+            continue
+        wajib: list[tuple[str, ...]] = []
+        ops: list[tuple[str, ...]] = []
+        for t in toks:
+            if t in _TOKEN_POSISI:
+                ops.append((t,) + _TOKEN_POSISI[t])
+            elif t in _TOKEN_STOP:
+                continue
+            elif t in _TOKEN_ALIAS:
+                wajib.append((t,) + _TOKEN_ALIAS[t])
+            elif len(t) >= 3 or any(ord(c) > 0x2E80 for c in t):
+                wajib.append((t,))
+        if wajib:
+            out.append((k, wajib, ops))
+    return out
+
+
+def _skor_token(hay: str, wajib: list[tuple[str, ...]], ops: list[tuple[str, ...]]) -> int:
+    """0 bila ada token wajib yang tak terwakili; selain itu kata-utuh +3 /
+    substring +1 per token, +1 per token posisi yang kena."""
+    total = 0
+    for grp in wajib:
+        hit = next((a for a in grp if a in hay), None)
+        if hit is None:
+            return 0
+        total += 3 if re.search(r"(?<![a-z0-9])" + re.escape(hit) + r"(?![a-z0-9])", hay) else 1
+    for grp in ops:
+        if any(a in hay for a in grp):
+            total += 1
+    return total
+
+
 def search_items_in_unit(rangka: str, keywords: list[str]) -> dict:
     """Cari kata kunci di SEMUA BARIS part list unit (nama EN + CN + PN) — jaring
     untuk baris yang luput dari home/match/part. Return bentuk sama dgn
@@ -2179,11 +2292,38 @@ def search_items_in_unit(rangka: str, keywords: list[str]) -> dict:
         if row.get("marketability_epc"):
             item["marketability_epc"] = row["marketability_epc"]
         skored.append((skor, len(row["nama"] or ""), item))
+    mode = "frasa"
+    if not skored:
+        # Frasa nihil → jaring ke-2: token (lihat _TOKEN_ALIAS di atas).
+        tq = _token_query(kws)
+        if tq:
+            for row in base["rows"]:
+                hay = f'{row["nama"]} {row["nama_cn"]} {row["pn"]}'.lower()
+                best, best_k = 0, None
+                for k, wajib, ops in tq:
+                    sk = _skor_token(hay, wajib, ops)
+                    if sk > best:
+                        best, best_k = sk, k
+                if not best:
+                    continue
+                key = (row["pn"], (row.get("dari_assembly") or {}).get("pn"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                item = {"pn": row["pn"], "nama": row["nama"], "nama_cn": row["nama_cn"],
+                        "qty": row.get("qty"), "kata_kunci": best_k,
+                        "dari_assembly": row.get("dari_assembly")}
+                if row.get("marketability_epc"):
+                    item["marketability_epc"] = row["marketability_epc"]
+                skored.append((best, len(row["nama"] or ""), item))
+            if skored:
+                mode = "token"
     # skor tertinggi dulu; lalu nama TERPENDEK (paling spesifik) dulu
     skored.sort(key=lambda x: (-x[0], x[1]))
     hasil = [s[2] for s in skored]
     return {"found": bool(hasil), "frame_number": base["frame_number"],
-            "jumlah": len(hasil), "hasil": hasil, "incomplete": base["incomplete"]}
+            "jumlah": len(hasil), "hasil": hasil, "incomplete": base["incomplete"],
+            "mode": mode}
 
 
 # ═══════════════════════════════════════════════════════════════════════

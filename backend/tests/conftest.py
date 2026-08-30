@@ -132,6 +132,21 @@ def _jangan_status_jual_sims_nyata(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _jangan_fallback_weichai_nyata(request, monkeypatch):
+    """cari_part_di_unit (2026-08-30) jatuh ke BOM mesin Weichai saat Atlas nihil
+    — panggilan JARINGAN via bridge SSO. Di tes lain dianggap 'bukan mesin
+    Weichai' (bentuk hasil nihil lama tak berubah); modul pengujinya menyalakan
+    ulang sendiri."""
+    try:
+        from app.services import ai_assistant as _ai
+        if request.module.__name__ != "test_cari_part_di_unit_token":
+            monkeypatch.setattr(_ai, "_cari_mesin_weichai_fallback",
+                                lambda rangka, terms: {"found": False, "status": "bukan_weichai"})
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _jangan_bridge_weichai_nyata(request, monkeypatch):
     """`fast_moving.build()` (2026-08-07) menambal lubang part MESIN dari EPC
     Weichai — itu panggilan JARINGAN via bridge SSO. Setiap test yang memanggil

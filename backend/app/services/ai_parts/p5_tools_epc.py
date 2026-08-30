@@ -1507,6 +1507,77 @@ def _atlas_modules_for(text: str) -> tuple[tuple, bool]:
     return ("CDQ", "QDQ"), True
 
 
+def _cari_mesin_weichai_fallback(rangka: str, terms: list[str]) -> dict:
+    """Jaring ke-3 cari_part_di_unit: BOM MESIN Weichai (audit ai_chat_log
+    2026-08-30). Parts Atlas Sinotruk berhenti di level engine assembly — part
+    mesin (tensioner, metering unit, sensor tekanan oli, injector) hidup di EPC
+    Weichai. Tanpa ini model meraba bom_dari_rangka/uraikan_assembly 8 ronde:
+    "Tensioner RJ371375" 3 giliran (akhirnya ketemu di Weichai), "metering unit"
+    6 giliran / 3 user semuanya nihil.
+
+    Return {found:True, hasil, engine} | {found:False, status:
+    'nihil' (BOM ada, tak cocok) | 'bukan_weichai' | 'gagal_cek', alasan}.
+    GAGAL-CEK ≠ TIDAK-ADA: status dibedakan supaya jawaban nihil tetap jujur."""
+    try:
+        res = epc_weichai.find_parts(rangka, terms)
+    except Exception:
+        logger.exception("fallback mesin Weichai gagal")
+        return {"found": False, "status": "gagal_cek", "alasan": "gangguan internal"}
+    if not isinstance(res, dict):
+        return {"found": False, "status": "gagal_cek", "alasan": "hasil tak dikenal"}
+    if res.get("found") and res.get("hasil"):
+        return res
+    if res.get("found"):
+        return {"found": False, "status": "nihil"}
+    reason = str(res.get("reason") or "")
+    if reason in ("no_link", "no_engine", "no_order", "input"):
+        return {"found": False, "status": "bukan_weichai"}
+    return {"found": False, "status": "gagal_cek", "alasan": reason or "api"}
+
+
+def _bentuk_hasil_weichai(wc: dict, rangka: str, frame: str, kata: str, kws: list[str],
+                          user: dict, note: str | None) -> dict:
+    """Hasil fallback Weichai dalam BENTUK cari_part_di_unit ('parts') supaya
+    lapisan hilir (proyeksi, salvage, memo) membacanya persis seperti hasil Atlas."""
+    hits = (wc.get("hasil") or [])[:40]
+    pns = [h["pn"] for h in hits]
+    local = part_index.rows_for_pns(pns)
+    boleh_harga = _boleh_harga(user)
+    parts: list[dict] = []
+    for h in hits:
+        lr = local.get(h["pn"], {})
+        row = {"part_number": h["pn"],
+               "nama": " ".join((lr.get("part_name") or h.get("nama") or "").split()),
+               "cocok_kata_kunci": None, "ada_di_inventori": bool(lr),
+               "di_dalam_assembly": h.get("group") or None}
+        if h.get("keterangan"):
+            row["keterangan"] = h["keterangan"]
+        if lr:
+            row["stok_total"] = lr.get("stok")
+            row["stok_per_gudang"] = lr.get("gudang") or {}
+            if boleh_harga:
+                row["harga_lokal"] = lr.get("harga")
+        parts.append(row)
+    if _is_pembeli(user):
+        for row in parts:
+            row.pop("stok_per_gudang", None)
+    eng = wc.get("engine") or {}
+    return {
+        "found": True, "frame_number": frame, "kata_kunci": kata,
+        "kata_kunci_dicari": kws[:8], "catatan_sinonim": note,
+        "jumlah_part": len(hits), "parts": parts,
+        "sumber_dipakai": "mesin_weichai",
+        "mesin": {"model_mesin": eng.get("nama"), "nomor_mesin": eng.get("nomor_mesin") or eng.get("model")},
+        "mode": "teliti (Atlas Sinotruk nihil → otomatis dicari di BOM mesin Weichai)",
+        "sumber": ("EPC Weichai resmi — BOM mesin PERSIS unit ini. Part ini TIDAK ada di "
+                   "Parts Atlas Sinotruk (sisi bodi/sasis), KETEMU di sisi mesin."),
+        "catatan": ("PN di 'parts' PERSIS untuk MESIN unit ini (EPC Weichai); "
+                    "'di_dalam_assembly' = group mesin tempatnya. Jawab sebagai DAFTAR ringkas "
+                    "(PN + nama + group + stok) dan sebutkan sumbernya EPC mesin Weichai. "
+                    "⛔ JANGAN mengarang PN."),
+    }
+
+
 def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
     """CARI PART DI SATU UNIT lewat PENCARIAN NAMA EPC per-kendaraan (match/part
     t=car) — JALUR UTAMA saat user menyebut nomor rangka + nama part.
@@ -1629,23 +1700,49 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
                                              "(cek VIN; hanya Sinotruk/HOWO/SITRAK)."}
         hasil = d.get("hasil") or []
     frame = d.get("frame_number") or rangka
+    mode_token = bool(hasil) and d.get("mode") == "token"
     if not hasil:
+        # Jaring ke-3: BOM mesin Weichai (lihat _cari_mesin_weichai_fallback).
+        note_syn = None
+        if matched_syn:
+            note_syn = (f"Istilah lapangan '{', '.join(dict.fromkeys(matched_syn))}' "
+                        f"diterjemahkan ke kata kunci katalog: "
+                        f"{', '.join(k for k in kws if k.lower() != kata.lower())}.")
+        wc = _cari_mesin_weichai_fallback(rangka, kws)
+        if wc.get("found"):
+            return _bentuk_hasil_weichai(wc, rangka, frame, kata, kws, user, note_syn)
+        wc_status = wc.get("status") or "gagal_cek"
         # UMPAN BALIK KAMUS: jalur per-VIN (jalur UTAMA) kini ikut menyuplai loop
         # belajar sinonim. Hanya bila istilah TAK dikenali kamus (yang dikenali
         # tapi 0 hasil = data unit memang tak punya, bukan celah kamus). Best-effort.
-        if not matched_syn:
+        # Sisi mesin yang GAGAL dicek bukan bukti celah kamus → tak dicatat.
+        if not matched_syn and wc_status != "gagal_cek":
             try:
                 search_log.record_miss(kata, "unit", "asisten_unit")
             except Exception:
                 pass
+        if wc_status == "gagal_cek":
+            sisi_mesin = (f"⚠️ sisi MESIN (EPC Weichai) BELUM BISA DICEK ({wc.get('alasan')}) — "
+                          "bila part ini part mesin, coba lagi nanti atau uraikan_assembly "
+                          "sumber='mesin'")
+        elif wc_status == "nihil":
+            sisi_mesin = "BOM mesin Weichai unit ini juga tak memuatnya"
+        else:
+            sisi_mesin = "unit ini bukan bermesin Weichai (sisi mesin tak berlaku)"
         return {
             "found": False, "frame_number": frame, "kata_kunci": kata,
             "kata_kunci_dicari": kws[:8],
             "sudah_mode_teliti": True,   # match + sisir seluruh pohon sama-sama nihil
-            "error": f"Tidak ada part '{kata}' di katalog EPC unit {frame}.",
+            "mesin_weichai": wc_status,
+            "error": f"Tidak ada part '{kata}' di katalog EPC unit {frame} ({sisi_mesin}).",
             "jawaban_wajib": ("Sampaikan JUJUR bahwa EPC unit ini tak punya part itu dengan "
-                              "istilah tsb (sudah disisir SELURUH baris katalog unit). ⛔ JANGAN "
-                              "mengarang PN. Boleh tawarkan: coba istilah lain / nama Inggris, "
+                              "istilah tsb (sudah disisir SELURUH baris katalog unit"
+                              + (" DAN BOM mesin Weichai" if wc_status == "nihil" else "")
+                              + "). ⛔ JANGAN mengarang PN. "
+                              + ("⛔ JANGAN menyimpulkan 'tidak ada' untuk sisi mesin — "
+                                 "sisi itu GAGAL dicek, bukan kosong. "
+                                 if wc_status == "gagal_cek" else "")
+                              + "Boleh tawarkan: coba istilah lain / nama Inggris, "
                               "atau cek kategori lewat bom_dari_rangka."),
         }
 
@@ -1706,6 +1803,11 @@ def _t_cari_part_di_unit(args: dict, user: dict) -> dict:
         "found": True, "frame_number": frame, "kata_kunci": kata,
         "kata_kunci_dicari": kws[:8], "catatan_sinonim": note,
         "jumlah_part": len(hasil), "parts": parts,
+        **({"cocok_per_token": True,
+            "catatan_token": ("Frasa utuh tak ketemu; hasil ini cocok per KATA (tiap kata "
+                              "kunci/aliasnya ada di nama part). Sebutkan ke user bahwa ini "
+                              "kecocokan per kata — periksa nama part-nya sesuai maksud.")}
+           if mode_token else {}),
         "mode": ("teliti (sisir SEMUA baris part list pohon unit"
                  + (", otomatis karena pencarian cepat nihil)" if auto_teliti
                     else ", indeks unit sudah siap — instan)" if index_ready
