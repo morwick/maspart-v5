@@ -188,7 +188,11 @@
     "grup": "mesin",
     "triggers": [
       "turbo",
-      "turbocharger"
+      "turbocharger",
+      "impeller turbo",
+      "kipas turbo",
+      "impeller blade turbo",
+      "turbo charger"
     ],
     "keywords": [
       "turbocharger",
@@ -1036,10 +1040,16 @@
       "kaki mesin",
       "karet mesin",
       "karet ganjel mesin",
-      "mounting mesin"
+      "mounting mesin",
+      "engine mounting depan",
+      "engine mounting belakang",
+      "mounting engine",
+      "dudukan engine"
     ],
     "keywords": [
-      "engine support"
+      "engine support",
+      "engine mounting",
+      "发动机支撑"
     ]
   },
   {
@@ -1575,10 +1585,21 @@
       "handle pintu",
       "gagang pintu",
       "door handle",
-      "hendel pintu"
+      "hendel pintu",
+      "handle luar pintu",
+      "handle luar",
+      "gagang luar pintu",
+      "handle dalam pintu",
+      "handle dalam",
+      "gagang dalam pintu",
+      "handle pintu luar",
+      "handle pintu dalam"
     ],
     "keywords": [
-      "door handle"
+      "door handle",
+      "outer handle",
+      "inner handle",
+      "把手"
     ]
   },
   {
@@ -1703,12 +1724,18 @@
     "triggers": [
       "kompresor ac",
       "ac compressor",
-      "kompresor ec"
+      "kompresor ec",
+      "kompressor ac",
+      "kompresor a/c",
+      "compressor ac",
+      "kompresor angin ac"
     ],
     "keywords": [
       "air conditioner compressor",
       "compressor",
-      "压缩机"
+      "压缩机",
+      "air condition compressor",
+      "空调压缩机"
     ]
   },
   {
@@ -2362,11 +2389,17 @@
       "puli tensioner",
       "setelan van belt",
       "stel belt",
-      "penegang belt"
+      "penegang belt",
+      "tensioner atas",
+      "automatic tensioner",
+      "tensioner otomatis",
+      "tensioner pulley"
     ],
     "keywords": [
       "tensioning pulley",
-      "tension screw"
+      "tension screw",
+      "tensioner",
+      "张紧"
     ]
   },
   {
@@ -2413,10 +2446,16 @@
     "triggers": [
       "expansion valve",
       "katup ekspansi",
-      "klep ekspansi ac"
+      "klep ekspansi ac",
+      "valve ac",
+      "katup ac",
+      "klep ac",
+      "ekspansi ac",
+      "expansion valve ac"
     ],
     "keywords": [
-      "expansion valve"
+      "expansion valve",
+      "膨胀阀"
     ]
   },
   {
@@ -2451,11 +2490,16 @@
       "buzzer mundur",
       "klakson mundur",
       "reversing buzzer",
-      "buzzer"
+      "buzzer",
+      "alarm mundur suara",
+      "voice alarm",
+      "suara mundur"
     ],
     "keywords": [
       "reversing buzzer",
-      "buzzer"
+      "buzzer",
+      "voice alarm",
+      "语音报警器"
     ]
   },
   {
@@ -4075,6 +4119,82 @@
     "keywords": [
       "wheel hub bearing",
       "wheel rim"
+    ]
+  },
+  {
+    "grup": "mesin",
+    "triggers": [
+      "metering unit",
+      "unit metering",
+      "fuel metering",
+      "metering valve",
+      "metering inlet",
+      "zme",
+      "katup metering"
+    ],
+    "keywords": [
+      "metering unit",
+      "计量单元"
+    ]
+  },
+  {
+    "grup": "ac",
+    "triggers": [
+      "housing ac",
+      "rumah ac",
+      "unit ac",
+      "ac assy",
+      "ac assembly",
+      "hvac",
+      "rumah blower",
+      "housing blower",
+      "blower housing",
+      "evaporator housing",
+      "rumah evaporator",
+      "ac kabin"
+    ],
+    "keywords": [
+      "air conditioner assembly",
+      "air conditioning system assembly",
+      "blower assembly",
+      "evaporator assembly",
+      "空调机总成"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "pin tail gate",
+      "pin tailgate",
+      "pengunci tail gate",
+      "pengunci tailgate",
+      "pin bak belakang",
+      "kunci bak belakang",
+      "pin pintu bak",
+      "pengunci pintu bak",
+      "pin pengunci bak"
+    ],
+    "keywords": [
+      "lock pin",
+      "tailgate",
+      "tail gate",
+      "rear board",
+      "锁销"
+    ]
+  },
+  {
+    "grup": "umum",
+    "triggers": [
+      "angsa",
+      "leher angsa",
+      "gooseneck",
+      "goose neck",
+      "gosnek"
+    ],
+    "keywords": [
+      "gooseneck",
+      "goose neck",
+      "鹅颈"
     ]
   }
 ]
