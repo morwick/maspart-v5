@@ -3917,6 +3917,47 @@ _CATATAN_AFTERMARKET = (
 )
 
 
+def _sisip_keluarga(out: dict, pn: str) -> None:
+    """Sisipkan KELUARGA PN dari katalog kita (varian pemasok /N, sub-rakitan
+    +NNN, prefix setara WG↔AZ) ke hasil pengganti_part.
+
+    Kenapa perlu: tabel supersession resmi menjawab "PN ini diganti nomor
+    berapa", TAPI user lapangan yang bertanya "interchange/persamaan" hampir
+    selalu memaksudkan "apa yang bisa saya pasang sebagai gantinya". Audit log
+    45 hari (2026-09-01) menemukan asisten menjawab yakin "tidak ada persamaan"
+    untuk PN yang katalog kita sendiri punya varian pemasoknya — mis.
+    WG9725191800 dijawab nihil padahal ada /1 dan /2. Field ini menutup celah
+    itu dengan data, bukan tebakan pola.
+
+    ⛔ TERPISAH TEGAS dari 'digantikan_oleh' (keputusan pabrik) dan
+    'padanan_aftermarket' (pihak ketiga) — tiga tingkat kepastian yang berbeda
+    tak boleh melebur jadi satu daftar."""
+    try:
+        kel = pn_keluarga.keluarga(pn)
+    except Exception:
+        logger.exception("pengganti_part: keluarga PN gagal dibaca")
+        return
+    if not kel.get("tersedia"):
+        # Indeks katalog belum siap — katakan, jangan diam. Diam di sini akan
+        # terbaca asisten sebagai "tidak ada keluarga".
+        out["keluarga_katalog"] = {
+            "dicek": False,
+            "catatan": ("Keluarga PN (varian pemasok/nomor setara) BELUM bisa "
+                        "diperiksa — ⛔ jangan simpulkan tidak ada."),
+        }
+        return
+    if not kel.get("jumlah") and not kel.get("prefix_ditolak"):
+        return
+    # Buang daftar KOSONG (hemat token), TAPI pertahankan `ada_di_katalog` walau
+    # False: "PN yang Anda sebut tak ada di katalog kami" adalah informasi yang
+    # user butuhkan, dan menyaringnya sebagai 'falsy' akan menghilangkannya.
+    _wajib = {"ada_di_katalog", "nama", "catatan"}
+    out["keluarga_katalog"] = {
+        k: v for k, v in kel.items()
+        if k not in ("tersedia", "part_number") and (v or k in _wajib)
+    }
+
+
 def _sisip_aftermarket(out: dict, pn: str) -> None:
     """Sisipkan PADANAN AFTERMARKET (pihak ketiga) ke hasil pengganti_part.
 
@@ -4085,9 +4126,28 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
             }
         else:
             out = {"found": False, "part_number": pn,
-                   "error": "Tidak ada data persamaan/pengganti untuk PN ini "
+                   "error": "Tidak ada data SUPERSESSION RESMI untuk PN ini "
                             "(sudah dicek SIMS Sinotruk & EPC Weichai)."}
         out["sumber_dicek"] = sumber_dicek
+        _sisip_keluarga(out, pn)
+        # Supersession resmi nihil ≠ tak ada padanan. Bila katalog kita sendiri
+        # memuat varian pemasok / nomor setara, jawaban "tidak ada persamaan"
+        # adalah SALAH — dan itulah yang terjadi di produksi sebelum ini.
+        _kel = out.get("keluarga_katalog") or {}
+        if _kel.get("varian_pemasok") or _kel.get("prefix_setara") or _kel.get("prefix_perlu_dicek"):
+            # Giliran ini PUNYA jawaban berguna → bukan kegagalan. Tanpa penandaan
+            # ini ia tetap tercatat 'pengganti_part:nf' (menyesatkan audit, yang
+            # justru memakai angka itu untuk memilih apa yang diperbaiki) DAN
+            # chat-loop menyuntikkan nota "lookup gagal" ke model — mendorongnya
+            # balik ke jawaban "tidak ada" yang baru saja kita cegah.
+            out["_err_kind"] = "ok"
+            out["error"] = (
+                out["error"]
+                + " ⛔ TAPI JANGAN menjawab 'tidak ada persamaan': katalog kita "
+                  "memuat KELUARGA PN untuk nomor ini (lihat 'keluarga_katalog') "
+                  "— varian pemasok dan/atau nomor setara. Sampaikan itu sebagai "
+                  "jawaban utamanya, dengan jujur menyebut bahwa sumbernya katalog "
+                  "(bukan tabel penggantian resmi pabrik).")
         _sisip_aftermarket(out, pn)
         # Status jual RESMI portal SIMS untuk PN yang ditanya. Ini jawaban yang
         # SAH untuk "part ini masih dijual/discontinued?" — ⛔ bukan marketability
@@ -4199,6 +4259,7 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
         "sumber_dicek": sumber_dicek,
         **_peringatan,
     }
+    _sisip_keluarga(hasil_akhir, pn)
     _sisip_aftermarket(hasil_akhir, pn)
     hasil_akhir["catatan"] = (
                    ("'digantikan_oleh' = PN PENGGANTI (part baru) — sarankan ini bila PN yang "
@@ -4210,7 +4271,12 @@ def _t_pengganti_part(args: dict, user: dict) -> dict:
                     "dasar sah untuk bilang part masih dijual / tidak) — bila field itu TIDAK "
                     "ADA, statusnya TAK DIKETAHUI: ⛔ JANGAN menyimpulkan 'discontinued'/"
                     "'stop produksi' dari mana pun. 'stok_dicek': false = stok belum bisa "
-                    "diperiksa, ⛔ jangan dibaca sebagai 'stok kosong'.")
+                    "diperiksa, ⛔ jangan dibaca sebagai 'stok kosong'. "
+                    "'keluarga_katalog' (bila ada) = TINGKAT KEPASTIAN KETIGA, di bawah "
+                    "supersession resmi: PN sekeluarga di katalog KITA SENDIRI (varian "
+                    "pemasok /1 /2, sub-rakitan +001, nomor setara WG↔AZ). Berguna justru "
+                    "saat supersession resmi kosong — ⛔ tapi JANGAN menyebutnya 'pengganti "
+                    "resmi'; baca 'catatan' di dalamnya untuk cara menyajikan tiap jenisnya.")
                    + _CATATAN_AFTERMARKET)
     return hasil_akhir
 
@@ -5735,7 +5801,7 @@ def _t_tipe_unit_shantui(args: dict, user: dict) -> dict:
     if not model:
         return {"error": "Sebutkan kode model Shantui, mis. 'SE75', 'SD22', 'L36'."}
     res = epc_shantui.variants(model)
-    if res.get("reason") in ("token_expired", "shantui_down"):
+    if res.get("gagal_dicek"):
         return res
     if not res.get("found"):
         return {"found": False, "model": model,
@@ -5767,7 +5833,7 @@ def _t_part_shantui(args: dict, user: dict) -> dict:
     if not subsistem:
         # tanpa subsistem: kembalikan DAFTAR assembly (ringkas) — hindari ratusan part.
         res = epc_shantui.top_assemblies(tipe)
-        if res.get("reason") in ("token_expired", "shantui_down"):
+        if res.get("gagal_dicek"):
             return res
         if not res.get("found"):
             return {"found": False, "tipe": tipe,
@@ -5785,7 +5851,7 @@ def _t_part_shantui(args: dict, user: dict) -> dict:
                 "YY). Untuk gambar exploded, pakai gambar_exploded_shantui."),
         }
     res = epc_shantui.part_list(tipe, subsistem)
-    if res.get("reason") in ("token_expired", "shantui_down"):
+    if res.get("gagal_dicek"):
         return res
     if not res.get("found"):
         return {"found": False, "tipe": tipe, "subsistem": subsistem,
@@ -5809,7 +5875,7 @@ def _t_cari_part_shantui(args: dict, user: dict) -> dict:
         return {"error": "Sebutkan nomor part Shantui yang dicari."}
     tipe = (args.get("tipe") or "").strip()
     res = epc_shantui.find_part(pn, tipe)
-    if res.get("reason") in ("token_expired", "shantui_down"):
+    if res.get("gagal_dicek"):
         return res
     if not res.get("found"):
         return {"found": False, "pn": pn, "lingkup": tipe or "global",
@@ -5839,7 +5905,7 @@ def _t_gambar_exploded_shantui(args: dict, user: dict) -> dict:
         balon_req = None
 
     d = epc_shantui.exploded_figures(tipe, pn, subsistem)
-    if d.get("reason") in ("token_expired", "shantui_down"):
+    if d.get("gagal_dicek"):
         return d
     if not d.get("found"):
         return {"found": False, "tipe": tipe,

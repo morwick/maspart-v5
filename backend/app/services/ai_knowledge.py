@@ -279,6 +279,11 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         },
         "prefix_pn": prefixes,
         "sub_prefix_pn": sub_rows,
+        # ANATOMI PN — arti akhiran /N & +NNN dan pasangan awalan yang setara,
+        # DIUKUR dari indeks katalog (bukan hafalan). Ditambahkan 2026-09-01
+        # setelah audit log menemukan asisten menjawab "tidak ada persamaan"
+        # untuk PN yang varian pemasoknya ada di katalog kita sendiri.
+        "anatomi_pn": _anatomi_pn(),
         "unit_vin": unit_vin,
         "gudang": gudang,
         "fault_codes": {"jumlah": fault_n, "jumlah_eol": eol_n,
@@ -289,6 +294,21 @@ def build(min_sub_count: int = 60, min_sub_share: float = 0.55,
         "maintenance_shantui": maintenance_by_jenis,
         "gearbox_repairkit": gearbox_models,
     }
+
+
+def _anatomi_pn() -> dict:
+    """Statistik keluarga PN dari indeks katalog (best-effort; gagal → {}).
+
+    Sengaja DIHITUNG, bukan ditulis tangan: begitu katalog tumbuh, angka
+    keandalan pasangan awalan ikut bergerak sendiri. Angka hafalan di prompt
+    akan membusuk diam-diam — dan asisten memakainya untuk memutuskan apakah
+    dua PN boleh disebut setara."""
+    try:
+        from . import pn_keluarga
+        return pn_keluarga.ringkas_untuk_pengetahuan() or {}
+    except Exception:
+        logger.exception("anatomi PN gagal dihitung")
+        return {}
 
 
 def _links_count() -> int:
@@ -412,6 +432,26 @@ def _render(d: dict, with_gudang: bool) -> str:
         kw = ", ".join((r.get("kata_nama_top") or [])[:4])
         lines.append(f"  - {r['prefix']}… ({r['jumlah_pn']} PN): {kt}"
                      + (f" — nama umum: {kw}" if kw else ""))
+    an = d.get("anatomi_pn") or {}
+    if an:
+        ps = an.get("prefix_setara") or []
+        lines.append("• ANATOMI PART NUMBER SINOTRUK (bentuk: DASAR [+NNN] [/N]):")
+        lines.append(
+            "  - '/1','/2' = VARIAN PEMASOK: nomor dasar SAMA, beda PABRIK PEMBUAT → "
+            "part sama & saling menggantikan. Sebut pemasoknya saat menawarkan.")
+        lines.append(
+            "  - '+001','+002' = SUB-RAKITAN: bagian BERBEDA dari satu rakitan — "
+            "⛔ BUKAN saling pengganti.")
+        if ps:
+            lines.append(
+                "  - AWALAN SETARA (penomoran ulang): inti angka sama, awalan beda = "
+                "sering part SAMA ("
+                + ", ".join(f"{r['pasangan']} {r['persen_nama_cocok']:.0f}%" for r in ps[:6])
+                + " bernama sama) — PETUNJUK saja, verifikasi lewat pengganti_part.")
+        lines.append(
+            "  - ⛔⛔ KECUALI awalan 'SP…' (SPDC/SPZC/SPLS/SPHG/SPYA/SPCY): di sana "
+            "angka = nomor urut pemasok, jadi angka sama pada awalan beda = part "
+            "BERBEDA TOTAL (0% dari ~450 pasang). JANGAN disetarakan.")
     subs = d.get("sub_prefix_pn") or []
     if subs:
         lines.append("• SUB-KELUARGA (prefix+4 digit, kategori dominan):")

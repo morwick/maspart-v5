@@ -9,7 +9,9 @@
  ],
  "cakupan": {
   "unit_katalog_bom": 40,
-  "pn_unik_bom": 18098
+  "pn_unik_bom": 18098,
+  "tautan_pengetahuan": 911,
+  "keluarga_part": 65
  },
  "prefix_pn": [
   {
@@ -589,6 +591,41 @@
    ]
   }
  ],
+ "anatomi_pn": {
+  "pn_punya_varian_pemasok": 883,
+  "prefix_setara": [
+   {
+    "pasangan": "AZ/WG",
+    "jumlah": 2230,
+    "jumlah_bernama": 955,
+    "persen_nama_cocok": 89.2
+   },
+   {
+    "pasangan": "FG/FZ",
+    "jumlah": 237,
+    "jumlah_bernama": 88,
+    "persen_nama_cocok": 79.5
+   },
+   {
+    "pasangan": "YG/YZ",
+    "jumlah": 201,
+    "jumlah_bernama": 67,
+    "persen_nama_cocok": 85.1
+   },
+   {
+    "pasangan": "Q/ZQ",
+    "jumlah": 117,
+    "jumlah_bernama": 117,
+    "persen_nama_cocok": 77.8
+   },
+   {
+    "pasangan": "LG/LZ",
+    "jumlah": 60,
+    "jumlah_bernama": 45,
+    "persen_nama_cocok": 86.7
+   }
+  ]
+ },
  "unit_vin": [
   {
    "model": "HOMAN 150HP 4X4",

@@ -1585,14 +1585,14 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "pengganti_part",
                 "description": (
-                    "PERSAMAAN/PENGGANTI (supersession) part — jawab 'PN ini diganti nomor berapa?', "
-                    "'part X sudah diskontinu, gantinya apa?', 'persamaan PN Y'. Cek DUA sumber resmi "
-                    "sekaligus (global by PN, tak perlu rangka): (1) SIMS Sinotruk/HOWO — tabel "
-                    "penggantian part SASIS/bodi (17rb+ relasi, dua-arah: PN lama→baru & sebaliknya); "
-                    "(2) EPC Weichai 替换/ECN untuk part MESIN. Mengembalikan 'digantikan_oleh' (PN "
-                    "pengganti baru) + 'menggantikan' (PN lama), disilang ke stok/harga lokal supaya "
-                    "tahu mana yang ready. Berlaku untuk PN SASIS Sinotruk (HD/WG/AZ/LZ…) MAUPUN PN "
-                    "mesin Weichai (numerik)."
+                    "PERSAMAAN/PENGGANTI/INTERCHANGE part (global by PN, tak perlu rangka) — "
+                    "jawab 'PN ini diganti nomor berapa?', 'persamaan/interchange PN Y?', "
+                    "'bisa pakai PN lain?', 'X bisa jadi pengganti Y?'. Dua sumber RESMI: "
+                    "SIMS Sinotruk (supersession sasis, 17rb+ relasi dua-arah) + EPC Weichai "
+                    "替换/ECN (mesin) → 'digantikan_oleh' + 'menggantikan', disilang stok/harga "
+                    "lokal. ⭐ PLUS 'keluarga_katalog' dari katalog kita: varian pemasok (/1 /2 "
+                    "= part sama, pabrik beda), sub-rakitan (+001), nomor setara (WG↔AZ dll). "
+                    "⛔ JANGAN jawab 'tidak ada persamaan' hanya karena supersession kosong."
                 ),
                 "parameters": {
                     "type": "object",

@@ -79,10 +79,16 @@ def test_pengganti_dedup(monkeypatch):
 
 
 def test_pengganti_kosong(monkeypatch):
+    """Dua sumber resmi nihil. Kalimatnya kini menyebut SUPERSESSION RESMI, bukan
+    'persamaan' — sengaja: 'tak ada supersession' adalah fakta yang bisa kita
+    buktikan, sedangkan 'tak ada persamaan' adalah klaim yang lebih luas dan
+    TERBUKTI sering salah (varian pemasok /1 /2 ada di katalog kita sendiri)."""
     monkeypatch.setattr(ai.sims, "get_part_equivalents", lambda pn: {"found": False})
     monkeypatch.setattr(ai.epc_weichai, "replace_part", lambda pn, rangka: {"found": False})
     r = ai._t_pengganti_part({"part_number": "XX"}, ADMIN)
-    assert not r["found"] and "persamaan" in r["error"].lower()
+    assert not r["found"]
+    assert "supersession resmi" in r["error"].lower()
+    assert "tidak ada data persamaan" not in r["error"].lower()
 
 
 def test_pengganti_butuh_pn():
@@ -290,3 +296,101 @@ def test_weichai_kosong_asli_tetap_bilang_tidak_ada(monkeypatch):
     assert r["found"] is False
     assert "reason" not in r
     assert "Tidak ada data pengganti" in r["message"]
+
+
+# ── KELUARGA KATALOG: 'tak ada supersession' ≠ 'tak ada persamaan' ───────────
+# Regresi kasus produksi 2026-08-29: WG9725191800 dijawab "tidak ada persamaan"
+# padahal katalog memuat varian pemasok /1 dan /2.
+
+def _keluarga_stub(monkeypatch, **isi):
+    dasar = {"tersedia": True, "part_number": "OLD1", "ada_di_katalog": True,
+             "nama": "Air filter assembly", "varian_pemasok": [], "sub_rakitan": [],
+             "rakitan_induk": [], "prefix_setara": [], "prefix_perlu_dicek": [],
+             "prefix_ditolak": [], "jumlah": 0, "catatan": "BUKAN supersession resmi"}
+    dasar.update(isi)
+    dasar["jumlah"] = sum(len(dasar[k]) for k in
+                          ("varian_pemasok", "sub_rakitan", "rakitan_induk",
+                           "prefix_setara", "prefix_perlu_dicek"))
+    monkeypatch.setattr(ai.pn_keluarga, "keluarga", lambda pn: dasar)
+
+
+def _dua_sumber_nihil(monkeypatch):
+    monkeypatch.setattr(ai.sims, "get_part_equivalents", lambda pn: {"found": False})
+    monkeypatch.setattr(ai.epc_weichai, "replace_part", lambda pn, rangka: {"found": False})
+
+
+def test_supersession_nihil_tapi_ada_varian_pemasok_dilarang_bilang_tak_ada(
+        monkeypatch, _no_katalog):
+    _dua_sumber_nihil(monkeypatch)
+    _keluarga_stub(monkeypatch, varian_pemasok=[
+        {"part_number": "OLD1/1", "nama": "Air filter assembly", "nama_cocok": True},
+        {"part_number": "OLD1/2", "nama": "Air filter assembly (Hebei Yili)",
+         "nama_cocok": True}])
+
+    r = ai._t_pengganti_part({"part_number": "OLD1"}, ADMIN)
+
+    assert r["found"] is False                     # supersession memang nihil
+    kel = r["keluarga_katalog"]
+    assert [x["part_number"] for x in kel["varian_pemasok"]] == ["OLD1/1", "OLD1/2"]
+    # Pesan error WAJIB mencegah kesimpulan "tidak ada persamaan".
+    assert "JANGAN menjawab 'tidak ada persamaan'" in r["error"]
+    # …dan giliran ini BUKAN kegagalan: ada jawaban berguna. 'nf' akan mengotori
+    # audit sekaligus memicu nota "lookup gagal" ke model.
+    assert ai._tool_fail_kind(r) == ""
+
+
+def test_keluarga_kosong_tidak_menambah_field_kosong(monkeypatch, _no_katalog):
+    _dua_sumber_nihil(monkeypatch)
+    _keluarga_stub(monkeypatch)
+    r = ai._t_pengganti_part({"part_number": "OLD1"}, ADMIN)
+    assert "keluarga_katalog" not in r
+    assert "JANGAN menjawab" not in r["error"]
+    assert ai._tool_fail_kind(r) == "nf"      # nihil sungguhan tetap 'nf'
+
+
+def test_sub_rakitan_saja_tidak_memicu_klaim_ada_persamaan(monkeypatch, _no_katalog):
+    """+001/+002 = lembar pegas berbeda. Mereka BUKAN persamaan, jadi tak boleh
+    memicu peringatan 'ada keluarga' yang mendorong model menyebut pengganti."""
+    _dua_sumber_nihil(monkeypatch)
+    _keluarga_stub(monkeypatch, sub_rakitan=[
+        {"part_number": "OLD1+002/1", "nama": "Leaf spring assembly", "bagian": "002"}])
+    r = ai._t_pengganti_part({"part_number": "OLD1"}, ADMIN)
+    assert "keluarga_katalog" in r                  # tetap dilaporkan (informatif)
+    assert "JANGAN menjawab 'tidak ada persamaan'" not in r["error"]
+
+
+def test_keluarga_gagal_dibaca_dinyatakan_bukan_disembunyikan(monkeypatch, _no_katalog):
+    """Indeks katalog dingin = BELUM dicek. Diam di sini akan terbaca model
+    sebagai 'tidak ada keluarga' — persis pola gagal-cek≠tidak-ada."""
+    _dua_sumber_nihil(monkeypatch)
+    monkeypatch.setattr(ai.pn_keluarga, "keluarga",
+                        lambda pn: {"tersedia": False, "alasan": "indeks dingin"})
+    r = ai._t_pengganti_part({"part_number": "OLD1"}, ADMIN)
+    assert r["keluarga_katalog"]["dicek"] is False
+
+
+def test_keluarga_meledak_tidak_menjatuhkan_tool(monkeypatch, _no_katalog):
+    _dua_sumber_nihil(monkeypatch)
+    def _boom(pn):
+        raise RuntimeError("indeks rusak")
+    monkeypatch.setattr(ai.pn_keluarga, "keluarga", _boom)
+    r = ai._t_pengganti_part({"part_number": "OLD1"}, ADMIN)
+    assert r["found"] is False and "keluarga_katalog" not in r
+
+
+def test_keluarga_ikut_saat_supersession_resmi_ADA(monkeypatch):
+    """PN bisa punya pengganti resmi DAN varian pemasok sekaligus; keduanya
+    berguna dan tak boleh saling meniadakan."""
+    monkeypatch.setattr(ai.sims, "get_part_equivalents", lambda pn: {
+        "found": True, "digantikan_oleh": [{"pn": "NEW1", "nama": "New One"}],
+        "menggantikan": []})
+    monkeypatch.setattr(ai.epc_weichai, "replace_part", lambda pn, rangka: {"found": False})
+    monkeypatch.setattr(ai.part_index, "rows_for_pns", lambda pns: {})
+    _keluarga_stub(monkeypatch, varian_pemasok=[
+        {"part_number": "OLD1/1", "nama": "Air filter assembly", "nama_cocok": True}])
+    r = ai._t_pengganti_part({"part_number": "OLD1"}, ADMIN)
+    assert r["found"] is True
+    assert [x["part_number"] for x in r["digantikan_oleh"]] == ["NEW1"]
+    assert r["keluarga_katalog"]["varian_pemasok"][0]["part_number"] == "OLD1/1"
+    # Tiga tingkat kepastian tak boleh melebur jadi satu daftar.
+    assert "OLD1/1" not in [x["part_number"] for x in r["digantikan_oleh"]]

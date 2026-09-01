@@ -41,7 +41,7 @@ from . import (abs_scr_codes, accurate, ai_belajar, ai_chat_log, ai_export, ai_k
                knowledge_links,
                maintenance_ref, maksud, manual_media,
                manual_teks, orders, part_index, part_taxonomy, pengetahuan,
-               pengetahuan_index, permintaan_tak_terlayani, pin_ecu, populasi,
+               pengetahuan_index, permintaan_tak_terlayani, pin_ecu, pn_keluarga, populasi,
                rak, repairkit, reservations, search_log, sims, sims_eol, sims_warranty, sinonim,
                skema_ref, telematics, warranty_kasus, weichai_replace, wiring_ref)
 
