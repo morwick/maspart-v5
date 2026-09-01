@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 export const metadata: Metadata = {
   title: "Unduh Aplikasi — MasPart",
@@ -6,13 +8,44 @@ export const metadata: Metadata = {
 };
 
 const APK_URL = "/maspart.apk";
-// Samakan dengan `version:` di pubspec.yaml aplikasi setiap kali merilis APK baru
-// — angka di sini ditulis tangan, jadi mudah tertinggal (sempat 2.0.0 saat
-// aplikasinya sudah 2.1.4). Varian yang dilayani: arm64-v8a (--split-per-abi).
-const APK_SIZE = "21 MB";
-const APP_VERSION = "2.2.4";
+
+/**
+ * Versi & ukuran APK — DIBACA, bukan diketik.
+ *
+ * Dulu keduanya konstanta tulis-tangan dan TERBUKTI melenceng dua kali (halaman
+ * masih 2.0.0 saat aplikasi 2.1.4; lalu 2.2.2 saat /api/app/meta sudah 2.2.3).
+ * Sumbernya sekarang:
+ *   - ukuran  → `public/maspart.apk` yang benar-benar dilayani (statSync);
+ *   - versi   → `public/maspart-apk.json`, dibangkitkan saat rilis dari
+ *               `pubspec.yaml` aplikasi (lihat deploy/coolify/rilis-apk.sh).
+ * Keduanya dibaca saat BUILD (komponen server). Bila berkasnya belum ada —
+ * mis. checkout bersih tanpa APK — kita tampilkan apa adanya tanpa mengarang:
+ * angka yang salah lebih buruk daripada angka yang absen.
+ */
+function apkInfo(): { versi: string | null; ukuran: string | null } {
+  const pub = join(process.cwd(), "public");
+  let versi: string | null = null;
+  let ukuran: string | null = null;
+  try {
+    const j = JSON.parse(readFileSync(join(pub, "maspart-apk.json"), "utf8"));
+    if (typeof j.versi === "string" && j.versi) versi = j.versi;
+  } catch {
+    /* belum dibangkitkan → jangan menebak */
+  }
+  try {
+    const mb = statSync(join(pub, "maspart.apk")).size / 1_000_000;
+    ukuran = `${mb.toFixed(1).replace(".", ",")} MB`;
+  } catch {
+    /* APK tak ada di checkout ini */
+  }
+  return { versi, ukuran };
+}
 
 export default function DownloadPage() {
+  const { versi, ukuran } = apkInfo();
+  const baris = ["Aplikasi Android", versi && `versi ${versi}`, ukuran]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <main
       style={{
@@ -51,7 +84,7 @@ export default function DownloadPage() {
             Spare Part Truck &amp; Alat Berat
           </p>
           <p style={{ fontSize: 12.5, color: "#9aa8a1", margin: "0 0 24px" }}>
-            Aplikasi Android · versi {APP_VERSION} · {APK_SIZE}
+            {baris}
           </p>
 
           <a
@@ -75,7 +108,7 @@ export default function DownloadPage() {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 3v12M7 11l5 5 5-5M5 21h14" />
             </svg>
-            Unduh APK ({APK_SIZE})
+            {ukuran ? `Unduh APK (${ukuran})` : "Unduh APK"}
           </a>
 
           <p style={{ fontSize: 11.5, color: "#9aa8a1", margin: "14px 0 0" }}>
