@@ -48,6 +48,16 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
+      // Engine 3D ThingView (±12,8 MB) hanya berubah saat deploy: biarkan browser
+      // menyimpannya, jangan revalidasi tiap kali halaman part dibuka. Viewer3D
+      // juga menyimpannya sendiri di Cache Storage (berlapis, karena bawaan Next
+      // untuk berkas public/ adalah `public, max-age=0`).
+      {
+        source: "/viewer3d/:path*",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" },
+        ],
+      },
       ...(isProd
         ? [{ source: "/part/:path*", headers: [{ key: "Content-Security-Policy", value: cspPart }] }]
         : []),
