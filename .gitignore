@@ -108,3 +108,4 @@ data/wiring/*.jpg
 
 # Engine 3D PTC ThingView (.wasm 12,8 MB) — dikirim scp lewat push.sh seperti .apk, BUKAN via git
 frontend/public/viewer3d/*.wasm
+frontend/public/maspart-apk.json
