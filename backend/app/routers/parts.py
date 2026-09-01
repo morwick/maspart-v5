@@ -274,9 +274,11 @@ def accurate_stock(
     pn: str = Query(..., min_length=1, description="Part Number persis untuk cek stok Accurate"),
     user: dict = Depends(get_current_user),
 ):
-    """Stok ERP Accurate untuk 1 Part Number (agregat+harga dari indeks sinkron
-    tiap 5 jam; rincian per-gudang live per-PN). Non-fatal: kegagalan sesi/koneksi
-    dikembalikan sebagai status, bukan error — frontend menampilkan seadanya."""
+    """Stok ERP Accurate untuk 1 Part Number: agregat + harga + rincian per-gudang,
+    SEMUANYA dari indeks bersama (tarikan terjadwal 3× sehari jam WIB 07/12/19,
+    dipersist ke disk). ⛔ TIDAK ada panggilan live per-PN. Non-fatal: kegagalan
+    sesi/koneksi dikembalikan sebagai status, bukan error — frontend menampilkan
+    seadanya."""
     if not accurate.available():
         return {"configured": False, "reason": "no_session"}
     try:

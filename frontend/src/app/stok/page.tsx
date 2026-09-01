@@ -26,8 +26,11 @@ export default function StokPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Rincian per gudang/cabang: dimuat ON-DEMAND saat baris diklik (1 panggilan
-  // kecil per-PN, cache 90 dtk di backend) — indeks 5 jam hanya berisi agregat.
+  // Rincian per gudang/cabang: dimuat ON-DEMAND saat baris diklik. Backend TIDAK
+  // menembak Accurate live per-PN — /api/parts/accurate-stock membaca INDEKS
+  // bersama (agregat + rincian per-gudang hasil enrichment) yang ditarik 3× sehari
+  // pada jam WIB tetap 07/12/19 lalu dipersist ke disk. On-demand di sini murni
+  // agar daftar tak mengirim ratusan rincian sekaligus, bukan karena mahal.
   const [openPn, setOpenPn] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, AccurateStock | "loading">>({});
 
@@ -105,7 +108,7 @@ export default function StokPage() {
   const fetchError = data && data.error;
 
   return (
-    <AppShell active="/stok" title="Stok" sub="Stok seluruh barang dari Accurate (sinkron tiap 5 jam)">
+    <AppShell active="/stok" title="Stok" sub="Stok seluruh barang dari Accurate (sinkron 3× sehari: 07.00, 12.00, 19.00 WIB)">
       <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-7">
         <div className="flex flex-wrap gap-2">
           <form
