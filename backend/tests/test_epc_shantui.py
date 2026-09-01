@@ -225,3 +225,122 @@ def test_exploded_shantui_gambar_punya_image_id_dan_kategori():
     g = r["gambar"][0]
     # _capture_meta memakai image_id + kategori → keduanya wajib ada
     assert g.get("image_id") and g.get("kategori")
+
+
+# ── Kelas unit NON-excavator (regresi produksi 2026-09-01) ───────────────────
+
+def test_model_dozer_berkode_huruf_tidak_dibuang_dari_pohon():
+    r"""SD22 ber-rootCode '16Y-00-00001' (angka+HURUF). Pola lama `^\d{4,6}-`
+    hanya cocok untuk kode excavator '60070-…', sehingga SELURUH bulldozer/
+    roller/loader/grader lenyap dari pohon model tanpa jejak error — dan
+    asisten menjawab 'katalog EPC Shantui tidak memuat tipe SD22'."""
+    v = sh.variants("SD22")
+    assert v["found"] is True
+    assert [t["tipe"] for t in v["tipe"]] == ["SD22"]
+    assert v["tipe"][0]["rootCode"] == "16Y-00-00001"
+
+
+def test_dozer_terdaftar_di_kategori_bulldozer():
+    lm = sh.list_models("bulldozer")
+    assert "SD22" in lm["tipe"]
+
+
+def test_kode_model_menerima_semua_bentuk_nyata_menolak_kode_kategori():
+    """Bentuk rootCode NYATA per pengukuran pohon 2026-08-13 — excavator berangka,
+    dozer/roller/loader/grader berhuruf, sebagian TANPA tanda hubung sama sekali."""
+    for kode in ("60070-00-00001", "16Y-00-00001", "23Y-00-00001",
+                 "RA10AB6A", "L36-B3", "DA17AB3A", "DH13-B3", "GA15BB6A"):
+        assert sh._kode_model(kode), kode
+    # Node KATEGORI (angka polos '1'..'15') tak boleh ikut terbaca sebagai model.
+    for kode in ("1", "2", "15", "11111111", "", "   "):
+        assert not sh._kode_model(kode), kode
+
+
+# ── Kegagalan tak terklasifikasi ≠ "tidak ada" ───────────────────────────────
+
+def test_kegagalan_api_ditandai_gagal_dicek(monkeypatch):
+    """`_mint_gagal` dulu memasang `gagal_dicek` HANYA untuk token/network.
+    Sisa sebab ('api' = kode balasan tak sukses) lolos tanpa bendera, lalu
+    pemanggil menjatuhkannya ke jalur 'tidak ada'."""
+    g = sh._mint_gagal("api", "SD22")
+    assert g["gagal_dicek"] is True
+    assert "BELUM DIKETAHUI" in g["message"]
+
+
+def test_tool_meneruskan_kegagalan_api_bukan_menyebut_tak_ada(monkeypatch):
+    monkeypatch.setattr(sh, "_get", lambda *a, **k: {"_err": "api", "code": 500})
+    monkeypatch.setattr(sh, "_tree_cache", {})
+    r = ai._t_tipe_unit_shantui({"model": "SD22"}, U)
+    assert r.get("gagal_dicek") is True
+    # ⛔ jangan pernah menyarankan "coba kode model lain" untuk kegagalan infra:
+    # itu menyuruh user meragukan nomor modelnya sendiri.
+    assert "Coba kode model lain" not in str(r)
+
+
+def test_kegagalan_dicek_dihitung_err_bukan_nf():
+    assert ai._tool_fail_kind({"found": False, "gagal_dicek": True,
+                               "message": "Gagal mengambil data EPC Shantui"}) == "err"
+
+
+
+
+def test_walk_pohon_menangkap_model_berkode_huruf_semua_kategori(monkeypatch):
+    """Kelas unit yang dulu HILANG total dari pohon (193 model, ukur 2026-08-13):
+    roller/loader/grader/dozer memakai rootCode berawalan HURUF, sebagian tanpa
+    tanda hubung sama sekali."""
+    pohon = [
+        {"id": 3, "code": "2", "name": "挖掘机", "children": [
+            {"id": 1, "code": "60070-00-00001", "name": "SE75-9"}]},
+        {"id": 1, "code": "1", "name": "推土机", "children": [
+            {"id": 2, "code": "16Y-00-00001", "name": "SD22"},
+            {"id": 3, "code": "DA17AB3A", "name": "DH17C"}]},
+        {"id": 7, "code": "4", "name": "压路机", "children": [
+            {"id": 4, "code": "RA10AB6A", "name": "SR10-B6"}]},
+        {"id": 5, "code": "3", "name": "装载机", "children": [
+            {"id": 5, "code": "L36-B3", "name": "SL36W-B3"}]},
+        {"id": 9, "code": "5", "name": "平地机", "children": [
+            {"id": 6, "code": "GA15BB6A", "name": "SG15-B6"}]},
+    ]
+    monkeypatch.setattr(sh, "_get", lambda path, params=None, timeout=25.0, _retry=True:
+                        {"data": pohon} if path == "/product/all" else {"_err": "api"})
+    sh._tree_cache.clear()
+    semua = sh.list_models("")
+    assert {"SE75-9", "SD22", "DH17C", "SR10-B6", "SL36W-B3", "SG15-B6"} <= set(semua["tipe"])
+    # dan tiap kategori tetap terlabeli benar (bukan tercecer ke kategori lain)
+    assert sh.list_models("roller")["tipe"] == ["SR10-B6"]
+    assert sh.list_models("grader")["tipe"] == ["SG15-B6"]
+    sh._tree_cache.clear()
+
+
+# ── Nomor seri / PIN Shantui (regresi produksi 2026-09-01) ───────────────────
+
+def test_nomor_seri_dozer_dikenali_lewat_nama_model_di_dalamnya():
+    """User menempel 'CHSD22AFKN1024321' (serial dozer). Itu BUKAN kode model,
+    tapi memuat namanya. Sebelumnya asisten menyerah lalu menebak dari katalog
+    per-model unit LAIN yang kebetulan ada di konteks."""
+    v = sh.variants("CHSD22AFKN1024321")
+    assert v["found"] is True and v.get("dari_nomor_seri") is True
+    assert [t["tipe"] for t in v["tipe"]] == ["SD22"]
+    assert "NOMOR SERI" in v["catatan"]
+
+
+def test_kode_model_biasa_tidak_ditandai_dari_nomor_seri():
+    v = sh.variants("SD22")
+    assert v["found"] is True and not v.get("dari_nomor_seri")
+
+
+def test_nomor_seri_tak_dikenal_tetap_jujur_nihil():
+    v = sh.variants("XX9988776655")
+    assert v["found"] is False and "Tidak ada tipe unit Shantui" in v["message"]
+
+
+def test_model_bernama_pendek_tidak_menyambar_nomor_acak(monkeypatch):
+    """Model 'L36' (3 char) tak boleh 'cocok' hanya karena huruf-angkanya
+    kebetulan muncul di sebuah nomor seri panjang."""
+    monkeypatch.setattr(sh, "_get", lambda path, params=None, timeout=25.0, _retry=True:
+                        {"data": [{"id": 1, "code": "3", "name": "装载机", "children": [
+                            {"id": 9, "code": "L36-B3", "name": "L36"}]}]}
+                        if path == "/product/all" else {"_err": "api"})
+    sh._tree_cache.clear()
+    assert sh.variants("ZZL3600998877")["found"] is False
+    sh._tree_cache.clear()

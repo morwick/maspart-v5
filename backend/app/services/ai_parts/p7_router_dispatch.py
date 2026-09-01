@@ -799,6 +799,14 @@ def _tool_fail_kind(result) -> str:
     # pada kalimat prosa (_FAIL_INFRA_MARKERS): itu rapuh & sulit dites.
     if result.get("_cek_tak_lengkap"):
         return "err"
+    # `gagal_dicek` = bendera yang dipasang SUMBERnya (mis. epc_shantui._mint_gagal)
+    # untuk bilang "kami gagal bertanya", bukan "pabrik menjawab tidak ada".
+    # Tanpa cabang ini ia jatuh ke tebakan-prosa di bawah — yang membacanya dari
+    # `error`/`pesan` saja, padahal jalur Shantui menaruh kalimatnya di `message`.
+    # Hasilnya di produksi: 9 kegagalan tipe_unit_shantui tercatat 'nf' dan
+    # asisten menyimpulkan model SD22 tak ada di katalog Shantui.
+    if result.get("gagal_dicek"):
+        return "err"
     for k in ("found", "ditemukan", "tersedia"):
         if result.get(k) is False:
             teks = " ".join(str(result.get(mk) or "") for mk in _FAIL_MSG_KEYS).lower()

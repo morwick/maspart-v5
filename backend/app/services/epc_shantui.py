@@ -76,6 +76,26 @@ KATEGORI = {
 }
 _ALL_PRODUCT_CODES = [str(i) for i in range(1, 17)]
 
+
+def _kode_model(code: str) -> bool:
+    r"""Apakah `code` sebuah kode MODEL (bukan node kategori)?
+
+    ⛔⛔ Dulu ini regex `^\d{4,6}-` — pola rootCode EXCAVATOR ('60070-00-00001')
+    saja. Kelas unit lain memakai bentuk yang sama sekali berbeda dan karenanya
+    dibuang DIAM-DIAM dari pohon model: '16Y-00-00001' (dozer SD22), 'RA10AB6A'
+    (roller, TANPA tanda hubung), 'L36-B3' (loader), 'DA17AB3A'/'DH13-B3'
+    (dozer), 'GA15BB6A' (grader). Pengukuran 2026-08-13: pohon mentah 332 model /
+    14 kategori, setelah filter tersisa 139 → **193 model tak bisa disentuh**
+    keempat tool Shantui. Gejalanya menyesatkan karena tak ada error sama sekali:
+    asisten hanya menjawab "tipe itu tidak ada di katalog EPC Shantui" (kejadian
+    nyata: 'kunci/ignition SD22', 1 Sep 2026, dua kali kepada admin).
+
+    Predikatnya kini SIFAT NEGATIF, bukan pola positif yang selalu ketinggalan:
+    model = punya kode, dan kodenya BUKAN kode kategori. Kode kategori satu-satunya
+    bentuk yang perlu dikecualikan — angka polos '1'..'15' (lihat KATEGORI)."""
+    c = (code or "").strip().upper()
+    return bool(c) and c not in KATEGORI and not c.isdigit()
+
 # Kode subsistem (segmen YY di '600XX-YY-NNNNN') → label EN. Dipakai memfilter/menamai
 # assembly (nama aslinya Mandarin). Diverifikasi pada SE75 (excavator).
 SUBSISTEM = {
@@ -228,8 +248,9 @@ def _model_tree() -> dict:
             for c in kids:
                 walk(c, code, kn)
             return
-        # node model: punya id + rootCode berpola '600..'
-        if n.get("id") and re.match(r"^\d{4,6}-", code):
+        # node model = punya id + kode yang bukan kode kategori (lihat _kode_model;
+        # pola lama hanya mengenali excavator → 193 model kelas lain hilang diam-diam).
+        if n.get("id") and _kode_model(code):
             models.append({"id": n.get("id"), "rootCode": code,
                            "nama": n.get("name") or n.get("title") or "",
                            "kategori": kat_name, "kategori_code": kat_code,
@@ -277,6 +298,31 @@ def variants(query: str) -> dict:
         out["catatan"] = (f"{len(prefixnum)} tipe mengandung '{query}' TAPI angka setelahnya "
                           f"lanjut (mis. {prefixnum[0]['tipe']}) → model BERBEDA, bukan varian.")
     if not out["found"]:
+        # ── FALLBACK: query itu NOMOR SERI, bukan kode model ────────────────
+        # Kasus produksi 1 Sep 2026: user menempel 'CHSD22AFKN1024321' (serial
+        # dozer Shantui). Tak ada model bernama itu → asisten jatuh ke tebakan
+        # dan akhirnya menyerah, padahal nomor itu MEMUAT nama modelnya (SD22).
+        # Dibalik: cari model yang NAMANYA muncul sebagai substring di dalam
+        # query. ⛔ Digerbangi >=4 karakter supaya model bernama pendek ('L36')
+        # tak menyambar sembarang nomor. Yang TERPANJANG diurutkan duluan:
+        # 'SD22F' lebih spesifik dari 'SD22' bila keduanya sama-sama cocok.
+        dalam = []
+        for m in tree["data"]:
+            n = re.sub(r"[\s_-]", "", (m["nama"] or "").upper())
+            if len(n) >= 4 and n in re.sub(r"[\s_-]", "", q):
+                dalam.append({"tipe": m["nama"], "rootCode": m["rootCode"],
+                              "rootId": m["id"], "kategori": m["kategori"],
+                              "cocok_dari": "nama model ditemukan DI DALAM nomor seri"})
+        if dalam:
+            dalam.sort(key=lambda r: (-len(r["tipe"]), r["tipe"]))
+            out.update(found=True, tipe=dalam, jumlah=len(dalam),
+                       dari_nomor_seri=True,
+                       catatan=("'" + str(query) + "' dikenali sebagai NOMOR SERI/PIN, bukan "
+                                "kode model: nama model di bawah ditemukan DI DALAM nomor itu. "
+                                "⚠️ Ini identifikasi MODEL, bukan BOM per-unit — Shantui tak "
+                                "memberi katalog per-PIN untuk akun kita, jadi sampaikan bahwa "
+                                "part-nya level MODEL dan mungkin beda antar unit."))
+            return out
         out["message"] = f"Tidak ada tipe unit Shantui yang cocok '{query}'."
     return out
 
@@ -616,8 +662,19 @@ def _mint_gagal(reason: str, konteks: str = "") -> dict:
         return {"found": False, "reason": "shantui_down", "gagal_dicek": True,
                 "message": ("Server EPC Shantui sedang tidak menjawab. Coba lagi nanti. "
                             "⛔ Status data belum diketahui — bukan berarti tak ada.")}
-    return {"found": False, "reason": reason,
-            "message": f"Gagal mengambil data EPC Shantui{(' untuk ' + konteks) if konteks else ''}."}
+    # SISA reason ('api' dari kode balasan tak sukses, 'bad_json', 'not_found'
+    # internal, dsb). ⛔⛔ Dulu cabang ini TIDAK memasang `gagal_dicek`, sehingga
+    # pemanggilnya — yang menyaring dengan MENYEBUT reason satu per satu — tak
+    # mengenalinya sebagai kegagalan dan menjatuhkannya ke jalur "tidak ada".
+    # Akibat nyata di produksi (log 1 Sep 2026): pertanyaan 'kunci/ignition SD22'
+    # dijawab "katalog EPC Shantui tidak memuat tipe SD22" — klaim tentang DUNIA
+    # yang lahir dari kegagalan panggilan. 'api' = kita GAGAL bertanya, bukan
+    # pabrik menjawab 'tidak ada'.
+    return {"found": False, "reason": reason, "gagal_dicek": True,
+            "message": (f"Gagal mengambil data EPC Shantui"
+                        f"{(' untuk ' + konteks) if konteks else ''} (sebab: {reason}). "
+                        "⛔ Status data BELUM DIKETAHUI — jangan simpulkan tipe/part "
+                        "itu tidak ada di katalog Shantui.")}
 
 
 def circuit_state() -> dict:
