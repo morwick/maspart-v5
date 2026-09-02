@@ -58,13 +58,15 @@ def test_kolom_session_belum_ada_tetap_tercatat(kirim):
     rekam, state = kirim
     state["tolak"] = {"session_id"}
     assert _log(session_id="conv-123-abc") is True
-    assert len(rekam) == 5
-    assert "session_id" in rekam[0] and "diulang" in rekam[0]
-    assert "session_id" in rekam[1] and "diulang" not in rekam[1] and "model_ms" in rekam[1]
-    assert "session_id" in rekam[2] and "model_ms" not in rekam[2]
-    assert "session_id" in rekam[3] and "guard_kinds" not in rekam[3]
-    assert "session_id" not in rekam[4]          # tingkat yang akhirnya lolos
-    assert rekam[4]["tools_failed"] is None or "tools_failed" in rekam[4]
+    # 031 → 030 → 029 → 026 → 025 semuanya membawa session_id → ditolak; 023 lolos.
+    assert len(rekam) == 6
+    assert "session_id" in rekam[0] and "diulang" in rekam[0] and "pikir_chars" in rekam[0]
+    assert "session_id" in rekam[1] and "diulang" in rekam[1] and "pikir_chars" not in rekam[1]
+    assert "session_id" in rekam[2] and "diulang" not in rekam[2] and "model_ms" in rekam[2]
+    assert "session_id" in rekam[3] and "model_ms" not in rekam[3]
+    assert "session_id" in rekam[4] and "guard_kinds" not in rekam[4]
+    assert "session_id" not in rekam[5]          # tingkat yang akhirnya lolos
+    assert rekam[5]["tools_failed"] is None or "tools_failed" in rekam[5]
 
 
 def test_kolom_guard_kinds_belum_ada_tetap_tercatat(kirim):
@@ -73,10 +75,11 @@ def test_kolom_guard_kinds_belum_ada_tetap_tercatat(kirim):
     rekam, state = kirim
     state["tolak"] = {"guard_kinds"}
     assert _log(session_id="c-1", guard_kinds=["dtc"]) is True
-    assert len(rekam) == 4
+    # 031 → 030 → 029 → 026 membawa guard_kinds → ditolak; 025 lolos.
+    assert len(rekam) == 5
     assert rekam[0]["guard_kinds"] == "dtc"
-    assert "guard_kinds" not in rekam[3]
-    assert rekam[3]["session_id"] == "c-1"       # kolom lain TIDAK ikut hilang
+    assert "guard_kinds" not in rekam[4]
+    assert rekam[4]["session_id"] == "c-1"       # kolom lain TIDAK ikut hilang
 
 
 def test_guard_kinds_tercatat_sebagai_daftar_koma(kirim):

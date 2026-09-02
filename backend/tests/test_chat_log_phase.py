@@ -104,8 +104,9 @@ def test_log_turn_fallback_tanpa_kolom_fase(monkeypatch):
     """PostgREST menolak (400) payload yang memuat model_ms → turun sampai lolos;
     barisnya tetap masuk, LENGKAP dengan kolom lama (guard_kinds dst).
 
-    Sejak migrations/030 (diulang) tangganya bertambah satu anak, dan DUA tingkat
-    teratas sama-sama membawa model_ms — jadi keduanya ditolak sebelum lolos."""
+    Sejak migrations/030 (diulang) dan 031 (telemetri per panggilan) tangganya
+    bertambah dua anak, dan TIGA tingkat teratas sama-sama membawa model_ms —
+    jadi ketiganya ditolak sebelum lolos."""
     payloads = []
 
     class _R:
@@ -126,13 +127,14 @@ def test_log_turn_fallback_tanpa_kolom_fase(monkeypatch):
                         guard_kinds=["dtc"], model_ms=800, tools_ms=200, ttft_ms=0)
 
     assert ok is True
-    assert len(payloads) == 3
+    assert len(payloads) == 4
     assert payloads[0]["model_ms"] == 800 and payloads[0]["tools_ms"] == 200
-    assert "diulang" in payloads[0]               # tingkat terkaya (030)
-    assert "diulang" not in payloads[1] and payloads[1]["model_ms"] == 800
-    assert "model_ms" not in payloads[2]          # tingkat yang akhirnya lolos
-    assert payloads[2]["guard_kinds"] == "dtc"    # kolom lama TIDAK ikut hilang
-    assert payloads[2]["session_id"] == "c-1"
+    assert "pikir_chars" in payloads[0] and "diulang" in payloads[0]   # terkaya (031)
+    assert "pikir_chars" not in payloads[1] and "diulang" in payloads[1]  # 030
+    assert "diulang" not in payloads[2] and payloads[2]["model_ms"] == 800  # 029
+    assert "model_ms" not in payloads[3]          # tingkat yang akhirnya lolos
+    assert payloads[3]["guard_kinds"] == "dtc"    # kolom lama TIDAK ikut hilang
+    assert payloads[3]["session_id"] == "c-1"
 
 
 def test_log_turn_skema_baru_sekali_kirim(monkeypatch):
@@ -179,8 +181,8 @@ def test_memo_tangga_melompati_tingkat_yang_ditolak(monkeypatch):
                  latency_ms=1, guard_hit=False, tool_failed=False, reply_len=1,
                  outcome="ok", model_ms=5)
     assert _LOG_TURN_ASLI(**dasar) is True
-    # DUA tingkat teratas membawa model_ms (030 di atas 029) → dua-duanya ditolak.
-    assert len(payloads) == 3
+    # TIGA tingkat teratas membawa model_ms (031, 030, 029) → ketiganya ditolak.
+    assert len(payloads) == 4
     payloads.clear()
     assert _LOG_TURN_ASLI(**dasar) is True
     assert len(payloads) == 1                     # langsung ke tingkat yang jalan
@@ -265,13 +267,14 @@ def test_list_logs_minta_diulang_dulu_lalu_jatuh_ke_full(monkeypatch):
 
     def get(url, headers=None, params=None, timeout=None):
         dilihat.append(params["select"])
-        if params["select"].endswith(",diulang"):
-            return _R(False, None)          # migrasi 030 belum dijalankan
+        if ",diulang" in params["select"]:
+            return _R(False, None)          # migrasi 030 (dan 031) belum dijalankan
         return _R(True, [{"id": 1}])
 
     monkeypatch.setattr(cl.requests, "get", get)
     assert cl.list_logs(5) == [{"id": 1}]
-    assert dilihat[0] == cl._SELECT_DIULANG and dilihat[1] == cl._SELECT_FULL
+    # 031 (audit) dicoba dulu, lalu 030, lalu 029 (FULL) yang akhirnya lolos.
+    assert dilihat[:3] == [cl._SELECT_AUDIT, cl._SELECT_DIULANG, cl._SELECT_FULL]
 
 
 def test_summary_menghitung_diulang_bila_kolom_ada(monkeypatch):

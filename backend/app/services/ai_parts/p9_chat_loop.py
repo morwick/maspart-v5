@@ -264,15 +264,43 @@ def _add_tools_ms(tok: dict, t_mulai: float) -> None:
     tok["tools_ms"] = int(tok.get("tools_ms") or 0) + int((time.monotonic() - t_mulai) * 1000)
 
 
+def _pikir_chars(content: str) -> int:
+    """Panjang (char) blok nalar [PIKIR]…[/PIKIR] dalam satu balasan model; blok
+    yang tak ditutup dihitung sampai akhir teks. Telemetri (migrations/031):
+    output p50 1.354 token/giliran, ±86% di antaranya nalar + JSON tool — tanpa
+    angka per panggilan, diet nalar tak bisa diukur efeknya."""
+    s = str(content or "")
+    if not s:
+        return 0
+    n = sum(len(m.group(0)) for m in _REASON_RE.finditer(s))
+    sisa = _REASON_RE.sub("", s)
+    m = _REASON_OPEN_RE.search(sisa)
+    if m:
+        n += len(sisa) - m.start()
+    return n
+
+
 def _add_usage(tot: dict, data: dict) -> None:
     """Akumulasi field `usage` respons DeepSeek ke penghitung giliran — satu giliran
     chat = beberapa panggilan API (ronde tool/retry/final); biaya sebenarnya =
-    jumlahnya. prompt_cache_hit_tokens = bagian input yang kena cache (≈1/10 harga)."""
+    jumlahnya. prompt_cache_hit_tokens = bagian input yang kena cache (≈1/10 harga).
+
+    Juga mencatat RINCIAN PER PANGGILAN (tot['detail'] = ['in/hit', …]) dan total
+    char nalar [PIKIR] (tot['pikir']): angka per giliran menyembunyikan panggilan
+    mana yang cache-miss dan seberapa panjang model bernalar di tiap ronde."""
     u = (data or {}).get("usage") or {}
+    pin = int(u.get("prompt_tokens") or 0)
+    hit = int(u.get("prompt_cache_hit_tokens") or 0)
     tot["calls"] += 1
-    tot["in"] += int(u.get("prompt_tokens") or 0)
+    tot["in"] += pin
     tot["out"] += int(u.get("completion_tokens") or 0)
-    tot["cache"] += int(u.get("prompt_cache_hit_tokens") or 0)
+    tot["cache"] += hit
+    tot.setdefault("detail", []).append(f"{pin}/{hit}")
+    try:
+        isi = (((data or {}).get("choices") or [{}])[0].get("message") or {}).get("content")
+    except Exception:  # pragma: no cover — bentuk respons aneh ≠ telemetri jatuh
+        isi = ""
+    tot["pikir"] = int(tot.get("pikir") or 0) + _pikir_chars(isi)
 
 
 # Plafon char per pesan riwayat — SERAGAM untuk semua posisi, dengan sengaja.
@@ -2045,6 +2073,19 @@ def _plafon_tool(name: str) -> int:
     return _MAX_CALLS_PER_TOOL_BERAT if name in _TOOL_BERAT else _MAX_CALLS_PER_TOOL
 
 
+def _tool_arg_digest(name: str, args: dict) -> str:
+    """'nama#8hex' — sidik jari argumen PILIHAN MODEL (kunci yang sama dengan rem
+    panggilan identik), untuk kolom `tools_args` (migrations/031). Dengan ini
+    'follow-up memanggil ulang tool yang sama' bisa dibedakan dari 'memanggil
+    tool yang sama dengan argumen BERBEDA' — dulu hanya nama tool yang tercatat.
+    Sidik jari saja (bukan argumennya) agar kolom tetap kecil."""
+    import hashlib
+    key = _tool_call_key(name, args)
+    if key is None:
+        return f"{name}#?"
+    return f"{name}#{hashlib.sha1(key[1].encode('utf-8')).hexdigest()[:8]}"
+
+
 def _tool_call_key(name: str, args: dict) -> tuple | None:
     """Kunci identitas panggilan tool per-giliran. Kunci server-side berawalan
     '_' DIKELUARKAN (_grounded = set yang TUMBUH tiap ronde & tak ter-JSON;
@@ -2515,6 +2556,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                             if (m or {}).get("role") == "user"), "")
 
     tools_used: list[str] = []
+    tools_args: list[str] = []        # sejajar tools_used: 'nama#digest' (telemetri 031)
     repairkit_models: list[str] = []  # model transmisi yg dibahas → tombol unduh Excel di UI
     banding_exports: list[dict] = []  # perbandingan rangka → kartu unduh Excel di UI
     excel_exports: list[dict] = []    # buat_excel (export generik) → kartu unduh di UI
@@ -3007,7 +3049,12 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 model_ms=_tok["model_ms"], tools_ms=_tok["tools_ms"],
                 ttft_ms=_tok["ttft_ms"],
                 # Sinyal mutu IMPLISIT (migrations/030) — lihat _pertanyaan_diulang.
-                diulang=_pertanyaan_diulang(_pertanyaan, history))
+                diulang=_pertanyaan_diulang(_pertanyaan, history),
+                # Telemetri per panggilan (migrations/031): panjang nalar, rincian
+                # in/hit tiap panggilan API, sidik jari argumen tool.
+                pikir_chars=int(_tok.get("pikir") or 0),
+                calls_detail=";".join(_tok.get("detail") or []),
+                tools_args=list(tools_args))
         except Exception:
             # Telemetri best-effort: tak boleh menjatuhkan jawaban, tapi seluruh
             # audit mutu bertumpu padanya → kegagalan harus tercatat.
@@ -3063,7 +3110,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     # klien (ttft_ms tetap 0 bila giliran ini tak di-stream / drafnya tak pernah
     # lolos gerbang [PIKIR]).
     _tok = {"in": 0, "out": 0, "cache": 0, "calls": 0,
-            "model_ms": 0, "tools_ms": 0, "ttft_ms": 0}
+            "model_ms": 0, "tools_ms": 0, "ttft_ms": 0,
+            "pikir": 0, "detail": []}     # telemetri per panggilan (031)
     _MAX_ITERS = _MAX_TOOL_ROUNDS + _MAX_EMPTY_RETRIES + _MAX_GUARD_RETRIES + 4
     #            (+1 koreksi klaim-Excel; +1 koreksi EPC-first; +2 pagar lama)
 
@@ -3170,6 +3218,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                                             user, sheet_id)
                     _add_tools_ms(_tok, _t_tools)
                     tools_used.append(name)
+                    tools_args.append(_tool_arg_digest(name, lc_args))
                     _dump = _dump_tool(result, name)
                     _res_pns = _extract_pns(_dump)
                     grounded |= _res_pns
@@ -3459,6 +3508,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
                 continue
             tools_used.append(name)
+            tools_args.append(_tool_arg_digest(name, args))
             # tanya_user: kartu pertanyaan. Ambil yang PERTAMA saja — dua kartu
             # dalam satu giliran akan menumpuk di layar user.
             if isinstance(result, dict) and result.get("_tanya") and kartu_tanya is None:

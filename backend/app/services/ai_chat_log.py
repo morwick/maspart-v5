@@ -121,7 +121,9 @@ def log_turn(*, username: str | None, role: str | None, question: str,
              session_id: str = "",
              guard_kinds: list[str] | None = None,
              model_ms: int = 0, tools_ms: int = 0, ttft_ms: int = 0,
-             diulang: bool = False) -> bool:
+             diulang: bool = False,
+             pikir_chars: int = 0, calls_detail: str = "",
+             tools_args: list[str] | None = None) -> bool:
     """Simpan satu baris observabilitas. Best-effort: False bila gagal/tabel absen,
     TAK melempar (pemanggil membungkus lagi, tapi tetap aman di sini).
 
@@ -172,12 +174,23 @@ def log_turn(*, username: str | None, role: str | None, question: str,
     with_fase = {**with_guard, "model_ms": int(model_ms or 0),
                  "tools_ms": int(tools_ms or 0), "ttft_ms": int(ttft_ms or 0)}
     full = {**with_fase, "diulang": bool(diulang)}
-    # 8 tingkat berjenjang: +diulang (030) → +fase ms (029) → +guard_kinds (026)
-    # → +session_id (025) → +tools_failed (023) → reply (022) → token (021) →
-    # base. Kolom absen (migrasi belum jalan) bikin PostgREST balas 400 → coba
-    # tingkat berikutnya (log tetap tercatat, degradasi bertahap).
-    tangga = (full, with_fase, with_guard, with_session, with_failed, with_reply,
-              {**base, **tok}, base)
+    # Telemetri PER PANGGILAN (migrations/031): `pikir_chars` = total char blok
+    # nalar [PIKIR] seluruh panggilan giliran ini; `calls_detail` = 'in/hit' tiap
+    # panggilan API (urut) — hit/miss per giliran menyembunyikan panggilan mana
+    # yang miss; `tools_args` = 'nama#digest' sejajar `tools` — tanpa sidik jari
+    # argumen, "follow-up memanggil ulang tool yang sama" tak bisa dibedakan dari
+    # panggilan dengan argumen berbeda.
+    args_ = tools_args or []
+    audit = {**full, "pikir_chars": int(pikir_chars or 0),
+             "calls_detail": (str(calls_detail)[:_CALLS_DETAIL_CAP] or None),
+             "tools_args": (", ".join(args_)[:_TOOLS_ARGS_CAP] if args_ else None)}
+    # 9 tingkat berjenjang: +telemetri per panggilan (031) → +diulang (030) →
+    # +fase ms (029) → +guard_kinds (026) → +session_id (025) → +tools_failed
+    # (023) → reply (022) → token (021) → base. Kolom absen (migrasi belum
+    # jalan) bikin PostgREST balas 400 → coba tingkat berikutnya (log tetap
+    # tercatat, degradasi bertahap).
+    tangga = (audit, full, with_fase, with_guard, with_session, with_failed,
+              with_reply, {**base, **tok}, base)
     # MEMO tingkat: bila migrasi tertinggal, tingkat teratas ditolak SETIAP
     # giliran — itu 1-2 POST sia-sia per giliran chat (masing-masing sampai
     # _TIMEOUT detik). Karena itu tingkat yang TERAKHIR DITERIMA diingat dan
@@ -237,14 +250,19 @@ _SELECT_FULL = _SELECT_GUARD + ",model_ms,tools_ms,ttft_ms"
 # berhenti di 029 → PostgREST tak pernah mengembalikan kolomnya → summary()
 # selalu 0 walau migrasi sudah jalan. Tier baca wajib ikut naik tiap migrasi.
 _SELECT_DIULANG = _SELECT_FULL + ",diulang"
+# migrations/031 — telemetri per panggilan (nalar, in/hit per panggilan, digest argumen).
+_SELECT_AUDIT = _SELECT_DIULANG + ",pikir_chars,calls_detail,tools_args"
+_CALLS_DETAIL_CAP = 400    # ±30 panggilan 'in/hit' — plafon _MAX_ITERS jauh di bawah itu
+_TOOLS_ARGS_CAP = 2000     # ±80 entri 'nama#digest' — plafon eksekusi/giliran = 30
 
 
 def list_logs(limit: int = 200) -> list[dict]:
     """Baris observabilitas terbaru dulu (untuk halaman admin). Kolom terkaya dicoba
     dulu (diulang=030, fase ms=029, guard_kinds=026, session_id=025, tools_failed=023,
     reply=022, token=021); skema lama → fallback ke select yang lebih ramping."""
-    for sel in (_SELECT_DIULANG, _SELECT_FULL, _SELECT_GUARD, _SELECT_SESSION,
-                _SELECT_FAILED, _SELECT_REPLY, _SELECT_TOKENS, _SELECT_BASE):
+    for sel in (_SELECT_AUDIT, _SELECT_DIULANG, _SELECT_FULL, _SELECT_GUARD,
+                _SELECT_SESSION, _SELECT_FAILED, _SELECT_REPLY, _SELECT_TOKENS,
+                _SELECT_BASE):
         try:
             r = requests.get(
                 _rest_url("ai_chat_log"),
