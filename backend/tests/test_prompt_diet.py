@@ -133,6 +133,10 @@ def test_kamus_subset_ikut_pesan_ekor(monkeypatch):
     # baris '- trigger → keyword') tidak boleh ada di sana.
     header = "[KAMUS ISTILAH GILIRAN INI] (Indonesia → kata kunci katalog"
     assert header not in msgs[0]["content"]
-    dyn = [m for m in msgs[1:] if m["role"] == "system"
+    # Zona dinamis = [CATATAN SISTEM] yang digabung ke pesan USER terakhir
+    # (bukan pesan system kedua — itu diangkat DeepSeek ke puncak prompt dan
+    # mematikan cache spec tool).
+    dyn = [m for m in msgs[1:] if m["role"] == "user"
            and header in (m.get("content") or "")]
     assert dyn and "clutch disc" in dyn[0]["content"]
+    assert not any(m["role"] == "system" for m in msgs[1:])

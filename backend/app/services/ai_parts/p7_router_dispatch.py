@@ -652,6 +652,14 @@ def _dump_tool(result, name: str = "") -> str:
 
 _TOOL_TRIM_KEEP_LAST = 2   # ronde tool TERAKHIR yang isinya dibiarkan UTUH
 _TRIM_DIGEST_CAP = 200     # panjang maks INTISARI di dalam stub (char)
+# Anggaran TOTAL char hasil tool (semua ronde) yang boleh menumpuk di messages
+# sebelum ronde lama diciutkan. ±130 rb char ≈ 40 rb token; bersama prefix
+# tetap ±50 rb token + riwayat + jawaban 8 rb masih jauh di bawah konteks
+# 128 rb. Di bawah anggaran ini menciutkan justru MERUGIKAN: mengubah pesan
+# lama = seluruh pesan sesudahnya (hasil ronde-ronde berikutnya, yang sudah
+# ter-cache) dibayar penuh lagi — lebih mahal dari token cache-hit yang
+# dihemat. Lihat _trim_old_tool_messages.
+_TRIM_BUDGET_CHARS = 130_000
 
 
 def _digest_tool_content(name: str, content: str) -> str:
@@ -704,11 +712,20 @@ def _digest_tool_content(name: str, content: str) -> str:
 
 
 def _trim_old_tool_messages(messages: list[dict], tool_msg_idx: list[dict],
-                            cur_round: int, keep_last: int = _TOOL_TRIM_KEEP_LAST) -> None:
+                            cur_round: int, keep_last: int = _TOOL_TRIM_KEEP_LAST,
+                            budget_chars: int | None = None) -> None:
     """Ciutkan CONTENT pesan HASIL TOOL dari ronde LAMA (≤ cur_round - keep_last) jadi
     stub pendek — `messages` dikirim ulang UTUH tiap panggilan API, jadi hasil tool yang
-    menumpuk lintas ronde membengkakkan token input (biaya kuadratik). Dipakai pada
-    RANTAI panjang (banding/katalog 5-8 ronde) yang paling rawan tembus limit konteks.
+    menumpuk lintas ronde bisa menembus limit konteks pada RANTAI panjang
+    (banding/katalog 5-8 ronde).
+
+    `budget_chars` (opsional; chat loop mengirim _TRIM_BUDGET_CHARS): penciutan
+    HANYA dilakukan bila total char hasil tool yang masih utuh melampaui anggaran,
+    dan berhenti begitu kembali di bawahnya (ronde tertua dulu). Alasannya
+    prompt-cache: token yang sudah ter-cache dibayar ≈1/10 harga, sedangkan
+    MENGUBAH pesan lama membuat semua pesan sesudahnya (hasil ronde berikutnya)
+    dibayar penuh lagi — pada giliran 3-4 ronde biasa itu rugi bersih. Tanpa
+    argumen ini (None) perilakunya seperti semula: semua ronde lama diciutkan.
 
     AMAN: grounding/PN/metadata sudah ditangkap ke state samping (`grounded`,
     `_capture_meta`, `_track_pn_source`) saat hasil di-append — trimming tak
@@ -719,19 +736,30 @@ def _trim_old_tool_messages(messages: list[dict], tool_msg_idx: list[dict],
     batas = cur_round - keep_last
     if batas < 1:
         return
+    total = 0
+    if budget_chars is not None:
+        total = sum(len(messages[e["i"]].get("content") or "")
+                    for e in tool_msg_idx
+                    if not e.get("stubbed") and 0 <= e["i"] < len(messages))
+        if total <= budget_chars:
+            return
     for e in tool_msg_idx:
         if e.get("stubbed") or e["round"] > batas:
             continue
         i = e["i"]
         if 0 <= i < len(messages):
             nama = e.get("name") or "tool"
-            inti = _digest_tool_content(nama, messages[i].get("content") or "")
+            lama = messages[i].get("content") or ""
+            inti = _digest_tool_content(nama, lama)
             messages[i]["content"] = (
                 f"[hasil {nama} (ronde {e['round']}) sudah dipakai — diringkas "
                 "untuk hemat konteks"
                 + (f"; intisari: {inti}" if inti else "")
                 + ". Panggil ulang tool bila butuh rinciannya]")
+            total -= len(lama) - len(messages[i]["content"])
         e["stubbed"] = True
+        if budget_chars is not None and total <= budget_chars:
+            break
 
 
 # Marker string error yang menandakan gangguan INFRA (bukan lookup nihil jujur).

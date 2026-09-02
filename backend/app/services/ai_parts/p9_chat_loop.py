@@ -275,27 +275,48 @@ def _add_usage(tot: dict, data: dict) -> None:
     tot["cache"] += int(u.get("prompt_cache_hit_tokens") or 0)
 
 
-_HIST_RECENT_FULL = 6      # pesan terbaru yang dikirim utuh (rujukan follow-up)
-_HIST_CHARS_RECENT = 4000
-_HIST_CHARS_OLD = 1500     # pesan lama dipangkas lebih ketat — hemat token
+# Plafon char per pesan riwayat — SERAGAM untuk semua posisi, dengan sengaja.
+# Dulu bertingkat (6 pesan terbaru 4.000, yang lebih lama 1.500): tiap giliran
+# baru, dua pesan "turun kelas" dan TEKSNYA BERUBAH (4.000 → 1.500) — padahal
+# prompt-cache DeepSeek bekerja per PREFIX byte-identik: satu pesan yang berubah
+# di tengah membuat seluruh pesan sesudahnya cache-miss (dibayar penuh, ±10×
+# harga cache-hit). Pesan yang sudah masuk riwayat kini dirender persis sama di
+# setiap giliran berikutnya; yang bertambah hanya EKOR. Token riwayat lama yang
+# ikut terkirim memang lebih banyak, tapi kena cache — jauh lebih murah daripada
+# pemangkasan yang justru mematikan cache-nya.
+_HIST_CHARS = 4000
+# Jendela riwayat bergeser per BLOK, bukan per pesan (lihat _sanitize_history).
+_HIST_BLOK = 6
+# Penanda pesan lama terpangkas — TANPA ANGKA dengan sengaja: "17 pesan dipangkas"
+# berubah tiap giliran dan ikut mematikan cache (ia menempel di pesan PERTAMA).
+_HIST_NOTE_PANGKAS = ("(catatan sistem: pesan-pesan lebih lama telah dipangkas dari "
+                      "riwayat — bila jawabanmu bergantung pada sesuatu yang dibahas "
+                      "sebelum ini, minta user menegaskannya ulang)\n")
 
 
 def _sanitize_history(history: list[dict]) -> list[dict]:
     """Ambil hanya peran user/assistant dgn konten teks, batasi panjang.
-    Pemangkasan BERTINGKAT: N pesan terbaru dikirim panjang (rujukan follow-up
-    'itu/yang tadi'), pesan lebih lama dipangkas ketat — konteks tetap ada,
-    token jauh lebih hemat pada obrolan panjang."""
+
+    RENDER STABIL (prompt-cache): sebuah pesan yang sudah pernah dikirim harus
+    dikirim dengan teks PERSIS sama di giliran-giliran berikutnya — plafon
+    seragam (_HIST_CHARS) dan jendela yang bergeser per BLOK: saat riwayat
+    melewati _MAX_HISTORY, pesan tertua dibuang sekaligus kelipatan _HIST_BLOK,
+    sehingga awal jendela tetap di tempat selama beberapa giliran (bukan maju
+    satu pesan tiap giliran = prefix berubah tiap giliran = cache-miss seluruh
+    riwayat). Jendela berisi _MAX_HISTORY-_HIST_BLOK+1 … _MAX_HISTORY pesan."""
     out: list[dict] = []
     for m in history or []:
         role = m.get("role")
         content = (m.get("content") or "").strip()
         if role in ("user", "assistant") and content:
             out.append({"role": role, "content": content})
-    dibuang = max(0, len(out) - _MAX_HISTORY)
-    out = out[-_MAX_HISTORY:]
-    cut = max(0, len(out) - _HIST_RECENT_FULL)
+    dibuang = 0
+    if len(out) > _MAX_HISTORY:
+        lebih = len(out) - _MAX_HISTORY
+        dibuang = -(-lebih // _HIST_BLOK) * _HIST_BLOK      # ceil ke kelipatan blok
+        out = out[dibuang:]
     for i, m in enumerate(out):
-        cap = _HIST_CHARS_OLD if i < cut else _HIST_CHARS_RECENT
+        cap = _HIST_CHARS
         if len(m["content"]) > cap:
             if i == len(out) - 1:
                 # Pesan TERAKHIR (biasanya pertanyaan user turn ini): potong di
@@ -312,17 +333,13 @@ def _sanitize_history(history: list[dict]) -> list[dict]:
                                 "Excel bila perlu)")
             else:
                 m["content"] = m["content"][:cap] + " …(dipangkas)"
-    # Obrolan panjang: pesan ke-17 ke belakang HILANG TOTAL. Tanpa penanda, model
-    # membaca sisanya seolah itu awal percakapan — lalu menjawab yakin padahal
-    # premisnya (rangka, unit, keluhan awal) sudah terpotong. Penanda ini membuat
+    # Obrolan panjang: pesan tertua HILANG TOTAL. Tanpa penanda, model membaca
+    # sisanya seolah itu awal percakapan — lalu menjawab yakin padahal premisnya
+    # (rangka, unit, keluhan awal) sudah terpotong. Penanda ini membuat
     # ketidaktahuan itu EKSPLISIT: model boleh bertanya ulang, bukan mengarang.
     # Isi yang hilang sendiri diselamatkan memori sesi (ai_session), bukan di sini.
     if dibuang and out:
-        out[0] = {**out[0],
-                  "content": (f"(catatan sistem: {dibuang} pesan lebih lama telah "
-                              "dipangkas dari riwayat — bila jawabanmu bergantung "
-                              "pada sesuatu yang dibahas sebelum ini, minta user "
-                              "menegaskannya ulang)\n" + out[0]["content"])}
+        out[0] = {**out[0], "content": _HIST_NOTE_PANGKAS + out[0]["content"]}
     return out
 
 
@@ -613,6 +630,97 @@ def _user_context_line(user: dict) -> str:
 
 _FAKTA_BLOK_CAP = 1200   # plafon karakter seksi FAKTA TERVERIFIKASI
 
+# ── Slot FIGURE gambar teknis terakhir (balon → PN) ──────────────────────────
+# Rujukan nomor balon di pesan user (dicocokkan pada teks UPPERCASE). Angka
+# dibatasi ≤3 digit agar PN numerik ('no 612630010054') tak ikut terjaring.
+_BALON_RUJUK_RE = re.compile(
+    r"\b(?:NO|NOMOR|NMR|BALON|BALLOON|NUMBER|ITEM)\.?\s*\d{1,3}(?!\d)")
+_FIGUR_MAX_BALON = 40      # sejalan dgn potongan 'daftar_balon_gambar' di tool
+_FIGUR_NAMA_CAP = 40       # panjang nama part per baris
+
+
+def _figur_dari_hasil(name: str, args: dict, result: dict) -> dict:
+    """Slot figur dari hasil tool bergambar: {'figure', 'ctx', 'total',
+    'balon': [[balon, pn, nama], …]} atau {} bila hasil tak membawa daftar
+    balon. Bentuk 'daftar_balon_gambar' seragam di semua tool exploded
+    (p5/p6/shantui): baris {'balon','pn','nama'}."""
+    if not isinstance(result, dict):
+        return {}
+    daftar = result.get("daftar_balon_gambar")
+    if not isinstance(daftar, list) or not daftar:
+        return {}
+    baris: list[list] = []
+    for it in daftar[:_FIGUR_MAX_BALON]:
+        if not isinstance(it, dict):
+            continue
+        b = str(it.get("balon") or "").strip()
+        pn = str(it.get("pn") or "").strip().upper()
+        if not b or not pn:
+            continue
+        nm = " ".join(str(it.get("nama") or "").split())[:_FIGUR_NAMA_CAP]
+        baris.append([b, pn, nm])
+    if not baris:
+        return {}
+    cak = result.get("daftar_balon_cakupan") or {}
+    total = cak.get("total_item_figure") if isinstance(cak, dict) else None
+    return {"figure": str(result.get("daftar_balon_figure") or "")[:80],
+            "ctx": _fakta_ctx(name, args),
+            "total": int(total) if isinstance(total, int) else None,
+            "balon": baris}
+
+
+def _blok_balon_figur(figur: dict) -> str:
+    """Baris KONTEKS AKTIF: daftar balon→PN figure terakhir + cara memakainya."""
+    baris = [b for b in (figur.get("balon") or [])
+             if isinstance(b, (list, tuple)) and len(b) >= 2]
+    isi = "; ".join(f"{b[0]}={b[1]}" + (f" {b[2]}" if len(b) > 2 and b[2] else "")
+                    for b in baris)
+    total = figur.get("total")
+    cakupan = (f"{len(baris)} dari {total} balon figure" if total and total > len(baris)
+               else f"{len(baris)} balon")
+    return (
+        f"- BALON GAMBAR TEKNIS TERAKHIR yang user lihat (figure '{figur.get('figure') or '?'}'"
+        f", {figur.get('ctx') or '?'}; {cakupan} terdaftar): {isi}. "
+        "Bila user bertanya 'no N itu apa / PN-nya berapa', JAWAB LANGSUNG dari daftar "
+        "ini (PN + nama) tanpa memanggil ulang tool pencarian; boleh panggil tool gambar "
+        "exploded dgn balon=N hanya untuk MENYOROT balonnya. Balon yang TIDAK ada di "
+        "daftar → periksa lewat tool (uraikan_assembly / gambar exploded balon=N), "
+        "JANGAN menebak."
+    )
+
+# ── Penyisipan konteks dinamis: DIGABUNG ke pesan user terakhir ──────────────
+# ⛔⛔ JANGAN kembalikan ke pesan `role:system` terpisah. Template chat DeepSeek
+# MENGANGKAT semua pesan system — di posisi mana pun — ke puncak prompt, digabung
+# dengan system prompt utama, SEBELUM definisi tool. Jadi blok konteks yang
+# berubah tiap giliran (username, PN/rangka aktif, fakta memo, kamus subset)
+# berdiri persis di depan ±100 rb char spec tool dan seluruh riwayat → semuanya
+# cache-miss tiap giliran. Terukur di ai_chat_log (841 giliran, 3 Agu–2 Sep
+# 2026): panggilan PERTAMA tiap giliran hanya kena cache ±20 rb token (= system
+# prompt saja) dari ±47 rb, walau giliran sebelumnya baru 1 menit lalu dengan
+# peran sama; cache-miss p50 29 rb token/giliran, 20% dari input tapi mayoritas
+# tagihan (harga miss ≈10× hit). Digabung ke pesan user, prefix
+# [system][tools][riwayat] tetap byte-identik antar giliran.
+#
+# Sengaja DIGABUNG ke pesan user terakhir, bukan pesan `role:user` terpisah:
+# dua pesan user beruntun ditolak sebagian model DeepSeek (deepseek-reasoner
+# lama: 400 "successive user messages"), dan model produksi tak bisa diuji
+# offline — menggabung tak punya risiko itu sama sekali.
+_CTX_BUKA = ("[CATATAN SISTEM — konteks giliran ini untuk asisten; BUKAN bagian "
+             "dari ucapan user: jangan dikutip atau dibalas, pakai sebagai rujukan]")
+_CTX_TUTUP = "[/CATATAN SISTEM]"
+
+
+def _sisip_konteks(messages: list[dict], ctx: str) -> None:
+    """Sisipkan blok konteks dinamis ke `messages` (in-place) sebagai PEMBUKA
+    pesan user terakhir. Bila pesan terakhir bukan user (riwayat klien aneh),
+    jadi pesan user tersendiri — tak pernah pesan system (lihat catatan di atas)."""
+    blok = f"{_CTX_BUKA}\n{ctx}\n{_CTX_TUTUP}"
+    if messages and messages[-1].get("role") == "user":
+        asli = messages[-1].get("content") or ""
+        messages[-1] = {**messages[-1], "content": f"{blok}\n\n{asli}"}
+    else:
+        messages.append({"role": "user", "content": blok})
+
 
 def _active_context_block(history: list[dict], memo: dict | None = None,
                           user: dict | None = None) -> str:
@@ -748,6 +856,12 @@ def _active_context_block(history: list[dict], memo: dict | None = None,
             "pertama'), pakai detail_klaim/riwayat_klaim untuk WO ini — JANGAN minta "
             "user mengulang nomor WO."
         )
+    # Balon gambar teknis TERAKHIR — HANYA saat pesan user merujuk nomor balon
+    # ('no 41 apa', 'part no 17', 'no 4 dan 5 PN-nya'); di giliran lain daftar
+    # ini (sampai 40 baris) hanya membebani prompt.
+    figur = memo.get("figur") or {}
+    if figur and figur.get("balon") and _BALON_RUJUK_RE.search(last_user_up):
+        lines.append(_blok_balon_figur(figur))
     fakta = [f for f in (memo.get("fakta") or []) if f]
     if fakta:
         blok, n = [], 0
@@ -1511,9 +1625,33 @@ def _mentioned_part_pns(reply: str, grounded: set[str], limit: int = 6) -> list[
     return found[:limit]
 
 
+def _pns_jawaban(text: str) -> set[str]:
+    """Token PN di JAWABAN model untuk keperluan GUARD.
+
+    Seperti _extract_pns, minus token murni-digit yang merupakan POTONGAN PN
+    alfanumerik di teks yang sama: _PN_NUMERIC_RE menangkap '1642110019' dari
+    'WG1642110019 ' (diikuti spasi/akhir kalimat; diikuti titik tidak). Dalam
+    satu giliran itu tak terasa — dump tool meng-ground kedua bentuknya — tapi
+    PN dari MEMORI SESI hanya tersimpan bentuk utuhnya (_extract_pns_urut sudah
+    membuang potongan), sehingga follow-up sah 'Balon 41 = WG1642110019 — …'
+    dicap karangan (guard PN) DAN dianggap PN baru tanpa cek EPC (guard
+    EPC-FIRST) lalu disamarkan. Aturannya disamakan dengan _extract_pns_urut /
+    _mentioned_part_pns. Grounding dari DUMP tetap memakai _extract_pns
+    (lebih longgar = lebih banyak yang sah; aman)."""
+    pns = _extract_pns(text)
+    alnum = [p for p in pns if not p.isdigit()]
+    return {p for p in pns if not (p.isdigit() and any(p in a for a in alnum))}
+
+
 def _ungrounded_pns(reply: str, grounded: set[str]) -> list[str]:
-    """PN di jawaban yang TIDAK ada di data mana pun (grounded) → dugaan karangan."""
-    return sorted(p for p in _extract_pns(reply) if p and p not in grounded)
+    """PN di jawaban yang TIDAK ada di data mana pun (grounded) → dugaan karangan.
+    Token murni-digit yang merupakan potongan PN alfanumerik yang SUDAH grounded
+    juga tidak dicurigai (model menulis angkanya saja)."""
+    pns = _pns_jawaban(reply)
+    alnum_g = [str(g) for g in grounded if g and not str(g).isdigit()]
+    return sorted(p for p in pns
+                  if p and p not in grounded
+                  and not (p.isdigit() and any(p in a for a in alnum_g)))
 
 
 # ── Guard anti-halusinasi ANGKA (stok/harga) ────────────────────────────────
@@ -2141,7 +2279,7 @@ def _sanitize_ungrounded(reply: str, bad: list[str]) -> str:
     - Bila SEMUA PN di jawaban ternyata karangan → jawaban ini tak punya data nyata:
       ganti TOTAL dengan pesan jujur 'tidak ditemukan' (jangan tampilkan tabel palsu).
     - Bila hanya SEBAGIAN karangan → samarkan yang palsu, pertahankan yang nyata."""
-    all_pns = _extract_pns(reply)
+    all_pns = _pns_jawaban(reply)
     bad_set = {b.upper() for b in bad}
     if all_pns and all_pns <= bad_set:
         return _NOT_FOUND_REPLY
@@ -2365,8 +2503,10 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     # Identitas user (username + gudang cabang) SELALU ikut di sini — sengaja BUKAN
     # di system prompt utama, agar prompt utama identik antar-user & kena prompt-cache.
     ctx = _user_context_line(user) + (("\n" + ctx) if ctx else "")
-    pos = len(messages) - 1 if messages[-1].get("role") == "user" else len(messages)
-    messages.insert(pos, {"role": "system", "content": ctx})
+    # Digabung ke pesan USER terakhir — bukan pesan system kedua (lihat
+    # _sisip_konteks: pesan system di mana pun diangkat ke puncak prompt oleh
+    # template DeepSeek dan mematikan cache spec tool + riwayat).
+    _sisip_konteks(messages, ctx)
 
     # Pertanyaan user giliran ini — dipakai penjaga istilah lapangan di
     # _run_tool (kata kunci karangan model ditimpa istilah mentah user).
@@ -2507,6 +2647,12 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     # ini MEMPERKETAT model ancaman forgery, bukan melonggarkannya.
     if memo:
         grounded |= set(memo.get("pn") or {})
+        # PN di daftar balon figure terakhir ikut sah: ia berasal dari hasil
+        # tool (bukan ucapan model) dan disajikan ke model lewat KONTEKS AKTIF —
+        # tanpa ini jawaban 'balon 41 = WG…' dari daftar itu disamarkan guard.
+        grounded |= {str(b[1]).strip().upper()
+                     for b in ((memo.get("figur") or {}).get("balon") or [])
+                     if isinstance(b, (list, tuple)) and len(b) > 1 and b[1]}
         # nums memo sudah disaring UMUR oleh ai_session (hanya < _FRESH_SEC):
         # harga/stok >5 jam tak lagi meng-ground klaim baru — model dipaksa
         # verifikasi ulang via tool, bukan mengutip angka basi dengan yakin.
@@ -2564,6 +2710,15 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     _memo_pn_verified: set[str] = {
         p for p, t in ((memo or {}).get("pn") or {}).items()
         if t in _EPC_VIN_PART_TOOLS or t in _KLAIM_TOOLS}
+    # PN di daftar balon FIGURE terakhir: bila figure itu diambil untuk sebuah
+    # rangka (ctx = nomor rangka), balon→PN-nya adalah data EPC per-VIN — jawaban
+    # 'balon 41 = WG…' dari daftar itu tak boleh memaksa ekskursi EPC baru
+    # (kasus produksi: 1-5 ronde gambar_exploded/uraikan_assembly diulang).
+    _figur_memo = (memo or {}).get("figur") or {}
+    if _figur_memo.get("balon") and _rangka_candidates(
+            str(_figur_memo.get("ctx") or "").upper()):
+        _memo_pn_verified |= {str(b[1]).upper() for b in _figur_memo["balon"]
+                              if isinstance(b, (list, tuple)) and len(b) > 1 and b[1]}
     if _memo_pn_verified:
         _recent_rangka_toks: set[str] = set()
         for _c in _recent_up:
@@ -2712,6 +2867,10 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     memo_mesin: list[str] = []
     memo_wo: list[str] = []       # dari ARGUMEN tool klaim yang sukses (bukan regex tabel)
     memo_unit: list[str] = []     # MODEL/unit aktif dari argumen 'unit' tool sukses
+    # Figure gambar teknis TERAKHIR yang tampil (balon → PN/nama) — untuk
+    # follow-up 'no 41 apa?' tanpa memanggil ulang tool. Diisi dict kosong =
+    # tak ada; dimutasi in-place (bukan rebind) agar tak butuh nonlocal.
+    memo_figur: dict = {}
     _MEMO_PN_PER_TOOL = 200   # BOM besar tak boleh membengkakkan memo tanpa batas
 
     def _track_memori(name: str, args: dict, res: dict, res_pns: set[str],
@@ -2756,6 +2915,16 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         _u = str((args or {}).get("unit") or "").strip()
         if _u and _u.upper() not in {x.upper() for x in memo_unit}:
             memo_unit.append(_u)
+        # Slot FIGURE gambar teknis: daftar balon→PN figure yang baru tampil.
+        # Bukti log (Agu 2026): follow-up 'No 41 apa' / 'No 4 dan 5 apa part
+        # numbernya' memaksa gambar_exploded+uraikan_assembly dipanggil ulang
+        # (1-5 ronde, 27-40 rb token) dan beberapa kali dijawab 'pemetaan tak
+        # ikut' — padahal daftar itu ADA di hasil tool giliran sebelumnya,
+        # lalu dibuang bersama seluruh pesan tool. Figure TERBARU menang.
+        _fig = _figur_dari_hasil(name, args, res)
+        if _fig:
+            memo_figur.clear()
+            memo_figur.update(_fig)
 
     def _track_pn_source(name: str, res: dict, res_pns: set[str]) -> None:
         nonlocal epc_vin_used
@@ -2800,7 +2969,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         _wo_user = _recent_wo(history, user_only=True)
         if memori_aktif and (memo_pn or memo_nums or memo_fakta
                              or memo_rangka or memo_mesin or memo_wo
-                             or memo_unit or _rangka_user or _wo_user):
+                             or memo_unit or memo_figur
+                             or _rangka_user or _wo_user):
             try:
                 ai_session.merge(user.get("username", ""), conversation_id,
                                  rangka=memo_rangka or _rangka_user,
@@ -2808,7 +2978,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                                  wo=memo_wo + [w for w in _wo_user
                                                if w not in memo_wo],
                                  unit=memo_unit, pn=memo_pn,
-                                 nums=memo_nums, fakta=memo_fakta)
+                                 nums=memo_nums, fakta=memo_fakta,
+                                 figur=memo_figur or None)
             except Exception:  # pragma: no cover
                 logger.exception("gagal menyimpan memori sesi (dilewati)")
         try:
@@ -2865,7 +3036,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             _suspect_pool |= hist_suspect
         _suspect = _suspect_pool - epc_vin_pns
         if _suspect and (epc_vin_used or (user_rangka_recent and hist_suspect)):
-            _subst = _drop_unit_tokens([p for p in _extract_pns(reply) if p in _suspect])
+            _subst = _drop_unit_tokens([p for p in _pns_jawaban(reply) if p in _suspect])
             if _subst:
                 reply = _annotate_subst(reply, _subst)
         _keras = _claimed_nums_keras(reply)
@@ -2920,7 +3091,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         _iters += 1
         tools_habis = tool_rounds >= _MAX_TOOL_ROUNDS
         # Pangkas isi hasil tool ronde LAMA sebelum kirim ulang messages (hemat token).
-        _trim_old_tool_messages(messages, _tool_msg_idx, tool_rounds)
+        _trim_old_tool_messages(messages, _tool_msg_idx, tool_rounds,
+                                budget_chars=_TRIM_BUDGET_CHARS)
         # Ronde tool habis / retry jawaban-langsung → jangan tawarkan tool lagi, paksa
         # jawaban final dgn budget output lebih besar (nalar atas hasil besar bisa panjang).
         if tools_habis or force_direct:
@@ -2969,6 +3141,17 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     if _lbl not in _lbl_seen:
                         _lbl_seen.append(_lbl)
                         _emit(on_progress, _lbl)
+                # Semua hasil tool bocor RONDE ini dikumpulkan ke SATU pesan
+                # `role:user` (bukan system, bukan satu pesan per tool):
+                # role:tool mustahil tanpa tool_call_id (tool ini BOCOR sbg teks,
+                # tak lewat API tool_calls); role:system diangkat template DeepSeek
+                # ke puncak prompt → cache spec tool + riwayat mati untuk sisa
+                # giliran (lihat _sisip_konteks); dan beberapa pesan user beruntun
+                # ditolak sebagian model — maka SATU pesan. Teksnya sendiri sudah
+                # menegaskan ini hasil sistem, bukan ucapan user.
+                _bocor_blok: list[str] = []
+                _bocor_gagal: list[tuple] = []
+                _bocor_nama = ""
                 for lc in leaked:
                     name = lc["name"]
                     lc_args = dict(lc["arguments"] or {})
@@ -2996,20 +3179,12 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     _track_memori(name, lc["arguments"] or {}, result, _res_pns, _dump)
                     _capture_meta(name, lc["arguments"] or {}, result)
                     _catat_salvage(name, lc["arguments"] or {}, result)
-                    messages.append({
-                        # role:system (bukan user) — ini hasil tool yg disuntik sistem,
-                        # bukan ucapan user; role:tool mustahil tanpa tool_call_id (tool
-                        # ini BOCOR sbg teks, tak lewat API tool_calls). _trim_old_tool_
-                        # messages meng-address by-index → aman role apa pun.
-                        "role": "system",
-                        "content": (
-                            f"[HASIL TOOL {name}] (sistem sudah MENJALANKAN tool ini — "
-                            "JANGAN tulis pemanggilan tool sebagai teks; pakai hasil ini "
-                            "untuk menjawab):\n"
-                            + _cap_tool_content(_dump, _cap_ronde(len(leaked)))
-                        ),
-                    })
-                    _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds, "name": name})
+                    _bocor_nama = _bocor_nama or name
+                    _bocor_blok.append(
+                        f"[HASIL TOOL {name}] (sistem sudah MENJALANKAN tool ini — "
+                        "JANGAN tulis pemanggilan tool sebagai teks; pakai hasil ini "
+                        "untuk menjawab):\n"
+                        + _cap_tool_content(_dump, _cap_ronde(len(leaked))))
                     _kind = _tool_fail_kind(result)
                     if name == "ajarkan_pengetahuan" and not _kind:
                         ajar_tool_ok = True
@@ -3021,12 +3196,15 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                         # "brake" = ditolak rem, BUKAN pernyataan soal datanya →
                         # jangan suntik nota "lookup gagal"; pesan `dibatasi`
                         # sudah menjelaskan sendiri & menunjuk tool massal.
-                        if _kind != "brake" and not lookup_gagal:
-                            lookup_gagal = True
-                            # Nota BER-RINCIAN (tool + argumen kunci) — model tahu
-                            # persis lookup MANA yang gagal, bukan menebak.
-                            messages.append({"role": "user",
-                                             "content": _lookup_gagal_note([(name, lc_args)])})
+                        if _kind != "brake":
+                            _bocor_gagal.append((name, lc_args))
+                if _bocor_gagal:
+                    # Nota BER-RINCIAN (tool + argumen kunci) — model tahu persis
+                    # lookup MANA yang gagal, bukan menebak. Ikut di pesan yang sama.
+                    _bocor_blok.append(_lookup_gagal_note(_bocor_gagal))
+                messages.append({"role": "user", "content": "\n\n".join(_bocor_blok)})
+                _tool_msg_idx.append({"i": len(messages) - 1, "round": tool_rounds,
+                                      "name": _bocor_nama or "tool"})
                 continue
 
             reply = _strip_reasoning(content)
@@ -3103,7 +3281,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             # (sekali). Token rangka & kode unit tak dihitung sebagai PN; PN dari
             # tool garansi/klaim (`klaim_pns`) juga tidak — sudah resmi per-unit.
             if user_rangka_recent and not rangka_tool_attempted and not epc_first_retried:
-                _pn_reply = [p for p in _drop_unit_tokens(list(_extract_pns(reply)))
+                _pn_reply = [p for p in _drop_unit_tokens(list(_pns_jawaban(reply)))
                              if p not in _rangka_tokens and p not in klaim_pns
                              and p not in _memo_pn_verified
                              and p not in _user_pns_last]
@@ -3130,7 +3308,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 _suspect_pool |= hist_suspect
             _suspect = _suspect_pool - epc_vin_pns
             if _suspect and (epc_vin_used or (user_rangka_recent and hist_suspect)):
-                subst = _drop_unit_tokens([p for p in _extract_pns(reply) if p in _suspect])
+                subst = _drop_unit_tokens([p for p in _pns_jawaban(reply) if p in _suspect])
             # GUARD ANGKA: klaim stok/harga/spesifikasi yang tak ada di hasil tool
             # MAUPUN riwayat → dugaan karangan. Kini juga menyala di follow-up
             # tanpa tool (angka riwayat asisten sudah diground di atas → angka
@@ -3329,19 +3507,22 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                     _rem_ronde.append((name, args))
                 tool_gagal_pernah = True
                 _catat_tool_gagal(tools_failed, name, _kind)
+        # Nota sistem ronde ini (lookup gagal / rem / tanya ditahan) dikumpulkan
+        # lalu dikirim sebagai SATU pesan user — bukan beberapa pesan user
+        # beruntun (ditolak sebagian model DeepSeek).
+        _nota_ronde: list[str] = []
         if lookup_gagal:
             # Ingatkan SEKALI per turn (setelah batch tool) agar model tak mengarang
             # angka utk lookup yang gagal — BER-RINCIAN (tool + argumen kunci)
             # supaya jelas lookup mana yang gagal. Reset flag agar tak menumpuk.
-            messages.append({"role": "user",
-                             "content": _lookup_gagal_note(_gagal_ronde)})
+            _nota_ronde.append(_lookup_gagal_note(_gagal_ronde))
             lookup_gagal = False
         if _rem_ronde:
             # Penolakan rem naik ke tingkat PERCAKAPAN (lihat _rem_note): sebagai
             # field di dalam satu hasil tool, ia terbukti terlewat — dan yang
             # terlewat bukan detail kecil, melainkan fakta bahwa item itu BELUM
             # DICEK. Guard-nya dicatat agar frekuensinya terlihat di panel admin.
-            messages.append({"role": "user", "content": _rem_note(_rem_ronde)})
+            _nota_ronde.append(_rem_note(_rem_ronde))
             _catat_guard("rem")
 
         if kartu_tanya:
@@ -3352,7 +3533,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 # giliran ini tetap menghasilkan JAWABAN.
                 logger.info("tanya_user ditahan (baru saja bertanya) user=%s",
                             user.get("username") or "?")
-                messages.append({"role": "user", "content": _TANYA_LANJUT_NOTE})
+                _nota_ronde.append(_TANYA_LANJUT_NOTE)
             else:
                 # Bertanya = AKHIR giliran. Berhenti SEBELUM _post_chat berikutnya:
                 # tak ada gunanya menyuruh model menulis jawaban atas pertanyaannya
@@ -3366,6 +3547,8 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 if tanya_pengantar:
                     _teks = f"{tanya_pengantar}\n\n{_teks}"
                 return _finalize(_teks, part_pns=[], pertanyaan=kartu_tanya)
+        if _nota_ronde:
+            messages.append({"role": "user", "content": "\n\n".join(_nota_ronde)})
         # Hasil tool sudah masuk → panggilan berikut kemungkinan menulis jawaban.
         _emit(on_progress, "Menyusun jawaban…")
 
@@ -3406,7 +3589,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     if ((user_dtc_tokens and not dtc_tool_attempted
            and any(t in reply.upper() for t in user_dtc_tokens))
           or (user_rangka_recent and not rangka_tool_attempted
-              and [p for p in _drop_unit_tokens(list(_extract_pns(reply)))
+              and [p for p in _drop_unit_tokens(list(_pns_jawaban(reply)))
                    if p not in klaim_pns and p not in _memo_pn_verified
                    and p not in _user_pns_last])):
         reply += ("\n\n⚠️ Jawaban ini belum sempat diverifikasi penuh ke database/EPC "

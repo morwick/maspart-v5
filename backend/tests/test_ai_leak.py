@@ -52,9 +52,12 @@ def test_strip_teks_bersih_tidak_berubah():
     assert ai._strip_tool_markup(s) == s
 
 
-# ── P9.3: hasil tool BOCOR disuntik sebagai role:system (bukan user) ──────────
+# ── P9.3: hasil tool BOCOR disuntik sebagai SATU pesan role:user per ronde ────
+# (dulu role:system — tapi pesan system di posisi mana pun diangkat template
+# DeepSeek ke puncak prompt dan mematikan cache spec tool + riwayat untuk sisa
+# giliran; role:tool mustahil tanpa tool_call_id).
 
-def test_hasil_tool_bocor_disuntik_sebagai_system(monkeypatch):
+def test_hasil_tool_bocor_disuntik_sebagai_user_satu_pesan(monkeypatch):
     monkeypatch.setattr(ai, "_system_prompt", lambda user: "sys")
     monkeypatch.setattr(ai, "_tool_specs", lambda user, sheet_id="": [])
     monkeypatch.setattr(ai, "_unit_name_tokens", lambda: set())
@@ -80,6 +83,6 @@ def test_hasil_tool_bocor_disuntik_sebagai_system(monkeypatch):
     ai.chat({"username": "t", "role": "user"}, [{"role": "user", "content": "unit apa saja?"}])
 
     hasil = [m for m in seen["msgs"] if "[HASIL TOOL" in (m.get("content") or "")]
-    assert hasil and all(m["role"] == "system" for m in hasil)       # disuntik sbg system
-    assert not any(m["role"] == "user" and "[HASIL TOOL" in (m.get("content") or "")
-                   for m in seen["msgs"])
+    assert len(hasil) == 1 and hasil[0]["role"] == "user"           # SATU pesan user
+    assert "sistem sudah MENJALANKAN tool ini" in hasil[0]["content"]
+    assert [m["role"] for m in seen["msgs"]].count("system") == 1   # hanya prompt utama

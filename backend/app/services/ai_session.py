@@ -61,6 +61,7 @@ _CAP_UNIT = 2          # nama MODEL/unit aktif (tanpa VIN) — dari argumen tool
 _CAP_PN = 200          # BOM satu unit bisa ratusan baris; 200×~30B = 6 KB/sesi
 _CAP_NUMS = 120
 _CAP_FAKTA = 12
+_CAP_FIGUR_BALON = 40  # baris balon→PN figure gambar teknis TERAKHIR (satu figure)
 
 _lock = threading.Lock()
 _stash: dict[str, dict] = {}
@@ -150,14 +151,44 @@ def get(username: str, conv_id: str) -> dict | None:
             # meng-ground klaim baru. Fakta basi tetap dikembalikan terpisah
             # (fakta_lama) supaya pemakai bisa menampilkannya BERLABEL.
             "nums": nums_segar, "fakta": fakta_segar, "fakta_lama": fakta_lama,
+            # Figure gambar teknis terakhir (balon→PN). Tak ber-umur: pemetaan
+            # balon ke PN pada sebuah figure tidak basi seperti stok/harga.
+            "figur": _salin_figur(e.get("figur")),
         }
 
 
+def _salin_figur(f) -> dict:
+    """Salinan dalam slot figur (list balon disalin baris per baris)."""
+    if not isinstance(f, dict) or not f.get("balon"):
+        return {}
+    return {**f, "balon": [list(b) for b in f.get("balon") or []]}
+
+
+def _rapikan_figur(f) -> dict | None:
+    """Validasi/potong slot figur dari pemanggil: {'figure','ctx','total',
+    'balon': [[balon, pn, nama], …]}. None bila tak layak simpan."""
+    if not isinstance(f, dict):
+        return None
+    baris = []
+    for b in (f.get("balon") or [])[:_CAP_FIGUR_BALON]:
+        if isinstance(b, (list, tuple)) and len(b) >= 2 and str(b[0]).strip() and str(b[1]).strip():
+            baris.append([str(b[0]).strip(), str(b[1]).strip().upper(),
+                          str(b[2]).strip() if len(b) > 2 and b[2] else ""])
+    if not baris:
+        return None
+    total = f.get("total")
+    return {"figure": str(f.get("figure") or "")[:80], "ctx": str(f.get("ctx") or "")[:40],
+            "total": int(total) if isinstance(total, int) and not isinstance(total, bool) else None,
+            "balon": baris}
+
+
 def merge(username: str, conv_id: str, *, rangka=(), mesin=(), wo=(),
-          unit=(), pn=None, nums=(), fakta=()) -> bool:
+          unit=(), pn=None, nums=(), fakta=(), figur=None) -> bool:
     """Tambahkan hasil satu giliran ke memo. Best-effort: False bila memori sesi
     tak aktif (conversation_id tak sah). `pn` boleh mapping {PN: label} atau
-    iterable PN. Tidak melempar — pemanggil ada di jalur jawaban user."""
+    iterable PN. `figur` (opsional) = figure gambar teknis terbaru; MENGGANTI
+    yang lama (hanya satu figure disimpan — yang terakhir dilihat user).
+    Tidak melempar — pemanggil ada di jalur jawaban user."""
     k = _key(username, conv_id)
     if not k:
         return False
@@ -184,6 +215,9 @@ def merge(username: str, conv_id: str, *, rangka=(), mesin=(), wo=(),
             if p not in gabung_pn:
                 gabung_pn[p] = v
         e["pn"] = dict(list(gabung_pn.items())[:_CAP_PN])
+        _fig = _rapikan_figur(figur)
+        if _fig:
+            e["figur"] = _fig
         e["at"] = now
         e["user"] = (username or "").strip().lower()
 

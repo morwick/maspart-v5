@@ -124,8 +124,11 @@ def test_blok_fakta_muncul_di_pesan_system_dinamis(monkeypatch):
     calls = _stub_model(monkeypatch, "Baik.")
     ai.chat(USER, [{"role": "user", "content": "lanjut"}], conversation_id=CONV)
     sysmsg = [m["content"] for m in calls["messages"] if m["role"] == "system"]
-    assert sysmsg[0] == "system uji"          # prompt utama tetap paling depan & utuh
-    ekor = "\n".join(sysmsg[1:])
+    # prompt utama tetap paling depan & utuh — dan SATU-SATUNYA pesan system;
+    # konteks dinamis digabung ke pesan user terakhir (prompt-cache, lihat
+    # _sisip_konteks).
+    assert sysmsg == ["system uji"]
+    ekor = calls["messages"][-1]["content"]
     assert "FAKTA TERVERIFIKASI" in ekor
     assert PN_EPC in ekor
     assert "RT108966" in ekor

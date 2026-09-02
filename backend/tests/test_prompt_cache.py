@@ -2,8 +2,14 @@
 satu peran — cache hanya kena pada prefix yang sama persis, dan dulu baris
 'Username:' di puncak prompt membuat ~28rb token cache-miss untuk TIAP user.
 
-Identitas user (username + gudang cabang) tidak boleh hilang: ia pindah ke pesan
-system [PENGGUNA] kecil menjelang akhir percakapan (murah, di luar prefix besar).
+Identitas user (username + gudang cabang) tidak boleh hilang: ia pindah ke baris
+[PENGGUNA] di dalam [CATATAN SISTEM] yang DIGABUNG ke pesan user terakhir.
+
+⛔ BUKAN pesan `role:system` kedua: template DeepSeek mengangkat SEMUA pesan
+system ke puncak prompt (sebelum spec tool), jadi pesan system yang berubah tiap
+giliran mematikan cache spec tool + riwayat — terukur di produksi (Agu 2026):
+panggilan pertama tiap giliran hanya kena cache ±20 rb dari ±47 rb token.
+Kontrak: tepat SATU pesan system per permintaan.
 """
 from app.services import ai_assistant as A
 
@@ -59,29 +65,45 @@ def _capture_messages(monkeypatch, user):
     return sent["messages"]
 
 
-def test_username_disuntik_sebagai_system_terpisah_sebelum_pesan_user_terakhir(monkeypatch):
+def test_username_di_catatan_sistem_pesan_user_terakhir(monkeypatch):
     monkeypatch.setattr(A, "_branch_scope", lambda u: "01.Jakarta")
     msgs = _capture_messages(monkeypatch, CABANG)
 
     assert msgs[0]["role"] == "system"
     assert "cab-jambi-77" not in msgs[0]["content"]              # prompt utama bersih
+    # Tepat SATU pesan system: pesan system kedua diangkat DeepSeek ke puncak
+    # prompt & mematikan cache spec tool (lihat docstring modul).
+    assert [m["role"] for m in msgs].count("system") == 1
 
-    idx = [i for i, m in enumerate(msgs)
-           if m["role"] == "system" and "[PENGGUNA] Username: cab-jambi-77." in (m["content"] or "")]
-    assert idx, "baris identitas user hilang dari percakapan"
-    assert "CABANG gudang: 01.Jakarta" in msgs[idx[0]]["content"]
-    # Tepat sebelum pesan user terakhir → dekat pertanyaan, di luar prefix besar.
-    assert idx[0] == len(msgs) - 2
-    assert msgs[-1]["role"] == "user"
+    akhir = msgs[-1]
+    assert akhir["role"] == "user"
+    assert akhir["content"].startswith(A._CTX_BUKA)
+    assert "[PENGGUNA] Username: cab-jambi-77." in akhir["content"]
+    assert "CABANG gudang: 01.Jakarta" in akhir["content"]
+    # Pertanyaan user asli tetap utuh di UJUNG, sesudah penutup catatan.
+    assert akhir["content"].endswith(A._CTX_TUTUP + "\n\nhalo")
 
 
 def test_prefix_pesan_identik_antar_user(monkeypatch):
-    """Yang dilihat DeepSeek: pesan pertama (prompt raksasa) sama byte-per-byte
-    untuk dua pembeli berbeda → prefix cache dibagi bersama."""
+    """Yang dilihat DeepSeek: seluruh prefix (semua pesan kecuali pesan user
+    terakhir) sama byte-per-byte untuk dua pembeli berbeda → prefix cache
+    dibagi bersama; yang berbeda hanya EKOR."""
     monkeypatch.setattr(A, "_branch_scope", lambda u: None)
     a = _capture_messages(monkeypatch, PEMBELI_A)
     b = _capture_messages(monkeypatch, PEMBELI_B)
 
-    assert a[0] == b[0]
-    assert "[PENGGUNA] Username: budi." in a[-2]["content"]
-    assert "[PENGGUNA] Username: sari." in b[-2]["content"]
+    assert a[:-1] == b[:-1]
+    assert "[PENGGUNA] Username: budi." in a[-1]["content"]
+    assert "[PENGGUNA] Username: sari." in b[-1]["content"]
+
+
+def test_pesan_terakhir_bukan_user_pun_tak_jadi_system(monkeypatch):
+    """Riwayat klien yang berakhir di asisten: konteks jadi pesan USER
+    tersendiri — tak pernah pesan system kedua."""
+    monkeypatch.setattr(A, "_branch_scope", lambda u: None)
+    msgs = [{"role": "user", "content": "halo"},
+            {"role": "assistant", "content": "Ada yang bisa dibantu?"}]
+    A._sisip_konteks(msgs, "[PENGGUNA] Username: budi.")
+    assert [m["role"] for m in msgs] == ["user", "assistant", "user"]
+    assert msgs[-1]["content"].startswith(A._CTX_BUKA)
+    assert msgs[-1]["content"].endswith(A._CTX_TUTUP)
