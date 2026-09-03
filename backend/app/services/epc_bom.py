@@ -1544,12 +1544,23 @@ _ASM_BUDGET = 700          # plafon node walk (unit tipikal ~70-300 node)
 _ASM_WORKERS = 10
 _asm_nodes_cache = CacheTTL("epc_bom.asm_nodes", _ASM_TTL, 128)  # frame -> {at, root_id, nodes}
 _asm_lock = threading.Lock()
+# Lock WALK per-frame — sepupu _items_build_locks di bawah, dan alasannya sama.
+# Cache walk baru terisi SETELAH walk selesai (±30 dtk), jadi tanpa lock ini dua
+# peminta yang datang dalam rentang itu — lazim: thread prefetch chat + tool EPC
+# di ronde pertama — masing-masing menjalankan walk PENUH untuk frame yang sama:
+# 2× ~118 panggilan pohon + 2× _atlas_root (9,8 dtk sekali jalan), dan ~20 koneksi
+# serentak ke server EPC yang justru memperlambat keduanya.
+_asm_build_locks = CacheTTL("epc_bom.asm_build_locks", 3600.0, 512)
+_asm_build_guard = threading.Lock()
 
 
 def _walk_all_nodes(rangka: str) -> dict:
     """Walk SELURUH node pohon unit (paralel, budget, cache per frame). Kembalikan
     {found, root_id, nodes:[norm_cat...]} — tiap node punya id/part_list_id/code/
-    nama/nama_cn/leaf. Node ber-part_list_id valid = bisa diurai jadi komponen."""
+    nama/nama_cn/leaf. Node ber-part_list_id valid = bisa diurai jadi komponen.
+
+    Peminta KEDUA untuk frame yang sama MENUNGGU walk yang sedang berjalan lalu
+    memakai hasilnya, bukan menjalankan walk kedua."""
     frame = _frame(rangka)
     if not frame:
         return {"found": False, "frame_number": "", "_err": "input"}
@@ -1557,7 +1568,22 @@ def _walk_all_nodes(rangka: str) -> dict:
         c = _asm_nodes_cache.get(frame)
         if c and (time.monotonic() - c["at"] < _ASM_TTL):
             return c["val"]
-    r = _atlas_root(frame)
+    with _asm_build_guard:
+        block = _asm_build_locks.setdefault(frame, threading.Lock())
+    with block:
+        # Walk lain baru saja selesai selagi kita antre → pakai hasilnya.
+        with _asm_lock:
+            c = _asm_nodes_cache.get(frame)
+            if c and (time.monotonic() - c["at"] < _ASM_TTL):
+                return c["val"]
+        return _walk_all_nodes_bangun(frame)
+
+
+def _walk_all_nodes_bangun(frame: str) -> dict:
+    """Badan walk sebenarnya — dipanggil HANYA dari dalam lock per-frame."""
+    # Versi ber-cache: root sama dipakai berulang oleh walk, reverse, dan build
+    # indeks item; satu panggilan root terukur 9,8 dtk (2026-09-03).
+    r = _atlas_root_cached(frame)
     if "_err" in r:
         return {"found": False, "frame_number": frame, "_err": r["_err"]}
     rid = r["rootId"]
@@ -1888,8 +1914,13 @@ def atlas_find_in_tree(rangka: str, keywords: list[str], max_nodes: int = 12) ->
 # di figure 'MC07H High-pressure common rail' tak pernah muncul di match (yang
 # keluar hanya 'ECU bracket' sasis), padahal reverse by-PN menemukannya. Web EPC
 # menemukannya karena mencari di POHON unit. Jalur ini meniru itu: buka SEMUA part
-# list unit (ratusan; ~30-60 dtk pertama kali) lalu cari di barisnya — hasilnya
-# di-cache per frame supaya pencarian berikutnya instan.
+# list unit (ratusan) lalu cari di barisnya — hasilnya di-cache per frame supaya
+# pencarian berikutnya instan. Biaya panggilan PERTAMA per unit diukur ulang
+# 2026-09-03 (LZZ8CUWD9TB112414, 465 node / 459 part list): root 9,8 dtk + walk
+# 29,7 dtk + buka item 135,9 dtk = 165,6 dtk dengan 8 worker; dengan
+# _ITEMS_WORKERS=16 fase item turun ke ~70 dtk. Angka "~30-60 dtk" yang tertulis
+# di sini sebelumnya sudah lama tak sesuai, dan angka itulah yang dipakai saat
+# menyetel watchdog tool 90 dtk — akibatnya panggilan pertama SELALU timeout.
 # ⚠️ Entri TERBESAR di modul ini (SELURUH baris BOM satu unit). Plafon sengaja
 # ketat: ada cache DISK 7 hari di bawah, jadi entri yang dibuang dibaca ulang dari
 # file — bukan dibangun ulang lewat ratusan panggilan EPC.
@@ -1902,6 +1933,19 @@ _ITEMS_PARTIAL_TTL = 3600                # cache DISK build PARSIAL — pendek, 
 # kedua MENUNGGU build yang sama, bukan menembak 388 panggilan EPC dobel.
 _items_build_locks = CacheTTL("epc_bom.items_build_locks", 3600.0, 512)
 _items_build_guard = threading.Lock()
+# Paralelisme membuka part list. Fase ini MENDOMINASI build dingin: 459 part list
+# × 2,4-3,1 dtk/panggilan (LZZ8CUWD9TB112414, diukur 2026-09-03 — bukan 1,5-1,8
+# dtk seperti yang ditulis komentar lama di _ATLAS_WORKERS).
+# Diukur langsung, unit & jumlah panggilan sama persis:
+#     8 worker  → 135,9 dtk (latensi 2,37 dtk/call)
+#    16 worker  →  90,0 dtk (latensi 3,13 dtk/call — server EPC kebetulan 32%
+#                  lebih lambat saat itu; pada latensi run pertama ≈ 68 dtk)
+# Kedua run keluar tepat di 8,0× dan 16,0× throughput satu koneksi, jadi POOL
+# INI memang satu-satunya pembatas — bukan server EPC.
+# Menaikkannya AMAN untuk server EPC justru karena _asm_build_locks: walk dobel
+# yang dulu jalan diam-diam (2× 10 worker) sudah hilang, jadi puncak koneksi
+# serentak ke EPC dari satu unit TIDAK lebih tinggi dari sebelumnya.
+_ITEMS_WORKERS = 16
 
 
 def _items_disk_path(frame: str) -> Path:
@@ -1986,9 +2030,10 @@ def _all_items(rangka: str, _paksa: bool = False) -> dict:
 
     Tiga lapis: RAM (1 jam) → DISK (7 hari; katalog per-VIN praktis statis —
     konfigurasi unit tak berubah setelah diproduksi) → build (sisir ~ratusan part
-    list, ±1 mnt, sekali per unit per TTL disk). Build LENGKAP dipersist 7 hari;
-    build PARSIAL (ada node gagal) dipersist 1 jam saja — cukup menahan rebuild
-    56-84 dtk berulang, tapi tetap dibangun ulang agar cakupan menyusul lengkap."""
+    list, ±1,5-2 mnt dingin, sekali per unit per TTL disk). Build LENGKAP
+    dipersist 7 hari; build PARSIAL (ada node gagal) dipersist 1 jam saja — cukup
+    menahan rebuild berulang, tapi tetap dibangun ulang agar cakupan menyusul
+    lengkap."""
     frame_pre = _frame(rangka)
     if frame_pre and not _paksa:
         with _items_all_lock:
@@ -2042,7 +2087,7 @@ def _all_items(rangka: str, _paksa: bool = False) -> dict:
                     rows.append(row)
 
         if nodes:
-            with ThreadPoolExecutor(max_workers=8) as ex:
+            with ThreadPoolExecutor(max_workers=_ITEMS_WORKERS) as ex:
                 list(ex.map(_open, nodes))
         incomplete = bool(walk.get("incomplete") or errbox[0])
         with _items_all_lock:

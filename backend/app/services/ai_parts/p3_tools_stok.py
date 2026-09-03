@@ -838,6 +838,24 @@ def _sisip_varian_pemasok(out: dict, pn: str, user: dict, **kw) -> dict:
     return out
 
 
+def _aman_detail(label: str, pn: str, fn):
+    """Jalankan satu langkah PENGAYAAN detail_part; gagal → dicatat & dilewati.
+
+    Audit ai_chat_log 2026-09-04: `detail_part:err` 11× dalam 21 hari untuk PN
+    yang SAH (stok & harga ada; tak bisa direproduksi di laptop maupun
+    container). Satu langkah pengayaan yang meledak membuat _run_tool membuang
+    SELURUH hasil, lalu model menjawab "gangguan sistem" untuk part yang datanya
+    ada. Pengayaan (varian pemasok, tautan pengetahuan, silang Accurate) itu
+    pelengkap — inti jawaban (nama/stok/harga) tak boleh ikut hilang karenanya.
+    Jejak lengkapnya tetap ke log + jurnal crash (_catat_crash_tool)."""
+    try:
+        return fn()
+    except Exception as e:
+        logger.exception("detail_part: pengayaan '%s' gagal (%s) — dilewati", label, pn)
+        _catat_crash_tool(f"detail_part/{label}", {"part_number": pn}, e)
+        return None
+
+
 def _t_detail_part(args: dict, user: dict) -> dict:
     # BANYAK PN → delegasikan ke jalur massal yang SUDAH ada & teruji, bukan
     # fan-out per-PN: _t_cek_massal_part membaca indeks stok/harga SEKALI untuk
@@ -857,10 +875,7 @@ def _t_detail_part(args: dict, user: dict) -> dict:
         # (Cek katalog pemaaf sudah dilalui → label 'di luar katalog' kini akurat.)
         acc = None
         if accurate.available():
-            try:
-                acc = accurate.stock_full(pn)
-            except accurate.AccurateError:
-                acc = None
+            acc = _aman_detail("stok Accurate", pn, lambda: accurate.stock_full(pn))
         if acc:
             out = {
                 "found": True, "part_number": pn, "part_name": acc.get("name") or "",
@@ -881,7 +896,8 @@ def _t_detail_part(args: dict, user: dict) -> dict:
             if _rg:
                 out["rak_gudang"] = _rg
             # Barang non-katalog pun bisa punya kartu saudara per pemasok.
-            _sisip_varian_pemasok(out, pn, user, dengan_stok=not _is_pembeli(user))
+            _aman_detail("varian pemasok", pn, lambda: _sisip_varian_pemasok(
+                out, pn, user, dengan_stok=not _is_pembeli(user)))
             return _hide_gudang_for_buyer(out, user)
         try:
             search_log.record_miss(pn, "pn", "detail_part")
@@ -940,10 +956,7 @@ def _t_detail_part(args: dict, user: dict) -> dict:
     # Stok per-gudang hanya utk non-pembeli (pembeli pakai stok lokal terscope); HARGA
     # jual dari Accurate berlaku utk semua (menutup celah part tanpa harga → tak bisa dibeli).
     if accurate.available():
-        try:
-            acc = accurate.stock_full(pn)
-        except accurate.AccurateError:
-            acc = None
+        acc = _aman_detail("stok Accurate", pn, lambda: accurate.stock_full(pn))
         if acc:
             if user.get("role") != "pembeli":
                 result["stok_total"] = f"{acc['available_to_sell']:.0f} {acc['unit']}".strip()
@@ -962,7 +975,8 @@ def _t_detail_part(args: dict, user: dict) -> dict:
         # KELUARGA VARIAN PEMASOK: stok_total/harga_lokal di atas hanya mewakili
         # SATU kartu — sesudahnya wajib disodorkan kartu saudaranya, kalau tidak
         # model menjawab "stok 2 pc" untuk part yang sebenarnya menumpuk 1.553 pc.
-        _sisip_varian_pemasok(result, pn, user, dengan_stok=user.get("role") != "pembeli")
+        _aman_detail("varian pemasok", pn, lambda: _sisip_varian_pemasok(
+            result, pn, user, dengan_stok=user.get("role") != "pembeli"))
     # Spesifikasi fisik resmi dari SIMS: berat (untuk ongkir) + dimensi + satuan +
     # merek. Non-fatal: bila SIMS tak punya data / down, detail tetap tampil.
     try:
@@ -1004,8 +1018,9 @@ def _t_detail_part(args: dict, user: dict) -> dict:
         pass
     # Tautan pengetahuan lintas-store utk PN ini (manual/jadwal/filter/repairkit/
     # DTC yang menyebutnya) — jembatan part → pengetahuan.
-    result = _sisip_terkait(result, knowledge_links.entitas(pn=pn),
-                            "catalog_bom", user)
+    _ents = _aman_detail("tautan pengetahuan", pn,
+                         lambda: knowledge_links.entitas(pn=pn)) or []
+    result = _sisip_terkait(result, _ents, "catalog_bom", user)
     return result
 
 

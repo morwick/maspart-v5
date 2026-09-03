@@ -461,7 +461,8 @@
       "spider kopel",
       "salib",
       "salib kopel",
-      "cross kopel"
+      "cross kopel",
+      "kepala kambing"
     ],
     "keywords": [
       "universal joint",
@@ -1044,7 +1045,11 @@
       "engine mounting depan",
       "engine mounting belakang",
       "mounting engine",
-      "dudukan engine"
+      "dudukan engine",
+      "bangku mesin",
+      "bangku engine",
+      "bangku mesin belakang",
+      "bangku mesin depan"
     ],
     "keywords": [
       "engine support",
@@ -4196,5 +4201,106 @@
       "goose neck",
       "鹅颈"
     ]
+  },
+  {
+    "grup": "kemudi",
+    "triggers": [
+      "drag link",
+      "draglink",
+      "drag-link",
+      "drug link",
+      "stang drag link"
+    ],
+    "keywords": [
+      "straight steering pull rod",
+      "steering straight rod",
+      "drag link",
+      "直拉杆"
+    ]
+  },
+  {
+    "grup": "rem",
+    "triggers": [
+      "draier",
+      "draer",
+      "drayer",
+      "air dryer",
+      "dryer angin",
+      "apu",
+      "air processing unit"
+    ],
+    "keywords": [
+      "air dryer",
+      "drying tank",
+      "air processing unit",
+      "APU",
+      "干燥器",
+      "空气处理单元"
+    ]
+  },
+  {
+    "grup": "body",
+    "triggers": [
+      "pipi kabin",
+      "pipi",
+      "pipi depan",
+      "pipi belakang"
+    ],
+    "keywords": [
+      "fender",
+      "front fender",
+      "rear fender",
+      "翼子板"
+    ]
+  },
+  {
+    "grup": "filter",
+    "triggers": [
+      "pre cleaner",
+      "precleaner",
+      "pre-cleaner",
+      "pra saringan",
+      "pre filter udara"
+    ],
+    "keywords": [
+      "prefilter",
+      "pre-filter",
+      "pre filter",
+      "air pre-cleaner",
+      "预滤器"
+    ]
+  },
+  {
+    "grup": "filter",
+    "triggers": [
+      "oil bath",
+      "oil bath filter",
+      "filter oil bath",
+      "saringan rendam oli",
+      "filter udara rendam oli"
+    ],
+    "keywords": [
+      "oil bath air filter",
+      "oil-bath",
+      "oil bath",
+      "油浴式空气滤清器"
+    ]
+  },
+  {
+    "grup": "suspensi",
+    "triggers": [
+      "bogie",
+      "bogi",
+      "boggie",
+      "as bogie",
+      "seal bogie",
+      "poros bogie"
+    ],
+    "keywords": [
+      "balance shaft",
+      "平衡轴",
+      "balance shaft oil seal",
+      "sealing ring of balance shaft"
+    ]
   }
-]
+]

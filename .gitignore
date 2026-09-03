@@ -35,6 +35,8 @@ data/shantui_captcha.png
 # Kredensial + checkpoint scraper stok Weichai (rahasia — JANGAN di-commit)
 data/weichai_stock_cred.json
 data/weichai_stock.json.part
+# jurnal crash tool asisten (ditulis server, per-lingkungan)
+data/logs/
 
 # Output rekonsiliasi katalog↔EPC (laporan, regeneratable)
 reconcile_*.csv

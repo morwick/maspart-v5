@@ -305,10 +305,13 @@ def test_walk_pohon_menangkap_model_berkode_huruf_semua_kategori(monkeypatch):
                         {"data": pohon} if path == "/product/all" else {"_err": "api"})
     sh._tree_cache.clear()
     semua = sh.list_models("")
-    assert {"SE75-9", "SD22", "DH17C", "SR10-B6", "SL36W-B3", "SG15-B6"} <= set(semua["tipe"])
+    # Sejak 2026-09-04 tipe ditampilkan sebagai LABEL (kode + nama bila nama tak
+    # memuat kodenya — 'L36-B3 SL36W-B3'); nama pasaran tetap ada di dalamnya.
+    for nama in ("SE75-9", "SD22", "DH17C", "SR10-B6", "SL36W-B3", "SG15-B6"):
+        assert any(nama in t for t in semua["tipe"]), nama
     # dan tiap kategori tetap terlabeli benar (bukan tercecer ke kategori lain)
-    assert sh.list_models("roller")["tipe"] == ["SR10-B6"]
-    assert sh.list_models("grader")["tipe"] == ["SG15-B6"]
+    assert sh.list_models("roller")["tipe"] == ["RA10AB6A SR10-B6"]
+    assert sh.list_models("grader")["tipe"] == ["GA15BB6A SG15-B6"]
     sh._tree_cache.clear()
 
 
@@ -344,3 +347,76 @@ def test_model_bernama_pendek_tidak_menyambar_nomor_acak(monkeypatch):
     sh._tree_cache.clear()
     assert sh.variants("ZZL3600998877")["found"] is False
     sh._tree_cache.clear()
+
+
+# ── name Mandarin TANPA kode model (87% pohon asli, ukur 2026-09-04) ────────
+
+_POHON_ASLI = [
+    {"id": 1, "code": "1", "name": "推土机", "children": [
+        # persis node produksi: kode = 'SD22', name = deskripsi Mandarin
+        {"id": 1534951, "code": "SD22", "name": "液力推土机", "machineType": ""},
+        {"id": 1534960, "code": "SD22F", "name": "液力推土机/森林型", "machineType": ""},
+        {"id": 1534970, "code": "DH46-C6", "name": "全液压推土机", "machineType": ""},
+    ]},
+    {"id": 7, "code": "4", "name": "压路机", "children": [
+        {"id": 1328661, "code": "RA10AB6A", "name": "SR10-B6单钢轮压路机", "machineType": "SR10-B6"},
+    ]},
+    {"id": 3, "code": "2", "name": "挖掘机", "children": [
+        {"id": 964047, "code": "60070-00-00001", "name": "SE75-9", "machineType": None},
+    ]},
+]
+
+
+@pytest.fixture
+def _pohon_asli(monkeypatch):
+    monkeypatch.setattr(sh, "_get", lambda path, params=None, timeout=25.0, _retry=True:
+                        {"data": _POHON_ASLI} if path == "/product/all" else {"_err": "api"})
+    sh._tree_cache.clear()
+    yield
+    sh._tree_cache.clear()
+
+
+def test_label_model_menyertakan_kode_bila_nama_tak_memuatnya():
+    assert sh._label_model("SD22", "液力推土机") == "SD22 液力推土机"
+    assert sh._label_model("RA10AB6A", "SR10-B6单钢轮压路机", "SR10-B6") == "RA10AB6A SR10-B6单钢轮压路机"
+    assert sh._label_model("GA15BB6A", "SG15-B6 平地机", "SG15-B6") == "GA15BB6A SG15-B6 平地机"
+    # rootCode teknis excavator TIDAK diawali; nama yang sudah memuat kode utuh
+    assert sh._label_model("60070-00-00001", "SE75-9") == "SE75-9"
+    assert sh._label_model("L36-B3", "3吨液力装载机|L36-B3|国二") == "3吨液力装载机|L36-B3|国二"
+
+
+def test_variants_kode_dozer_dengan_nama_mandarin(_pohon_asli):
+    v = sh.variants("SD22")
+    assert v["found"] is True and not v.get("dari_nomor_seri")
+    tipe = {t["tipe"]: t["rootCode"] for t in v["tipe"]}
+    assert tipe == {"SD22 液力推土机": "SD22", "SD22F 液力推土机/森林型": "SD22F"}
+    # excavator lama tetap tampil apa adanya
+    assert [t["tipe"] for t in sh.variants("SE75")["tipe"]] == ["SE75-9"]
+
+
+def test_variants_roller_lewat_machine_type(_pohon_asli):
+    v = sh.variants("SR10")
+    assert v["found"] and v["tipe"][0]["rootCode"] == "RA10AB6A"
+    assert "SR10-B6" in v["tipe"][0]["tipe"]
+
+
+def test_nomor_seri_cocok_lewat_kode_bukan_nama(_pohon_asli):
+    v = sh.variants("CHSD22AFKN1024321")
+    assert v["found"] is True and v.get("dari_nomor_seri") is True
+    # SD22F (lebih panjang) tak ikut: 'SD22F' tak ada di dalam nomor seri
+    assert [t["rootCode"] for t in v["tipe"]] == ["SD22"]
+    assert "SD22" in v["tipe"][0]["cocok_dari"]
+
+
+def test_resolve_menerima_kode_label_atau_machine_type(_pohon_asli):
+    assert sh._resolve("SD22")["rootCode"] == "SD22"
+    assert sh._resolve("SD22 液力推土机")["rootCode"] == "SD22"
+    assert sh._resolve("液力推土机")["rootCode"] == "SD22"      # nama Mandarin persis
+    assert sh._resolve("SR10-B6")["rootCode"] == "RA10AB6A"
+    assert sh._resolve("RA10AB6A")["rootCode"] == "RA10AB6A"
+    assert sh._resolve("SE75-9")["rootCode"] == "60070-00-00001"
+
+
+def test_list_models_bulldozer_berlabel_kode(_pohon_asli):
+    lm = sh.list_models("bulldozer")
+    assert "SD22 液力推土机" in lm["tipe"] and "DH46-C6 全液压推土机" in lm["tipe"]

@@ -413,6 +413,48 @@ def _paksa_istilah_kamus(name: str, args: dict, question: str) -> str:
             "istilahnya dari kamus, ⛔ JANGAN memakai tafsiran sendiri.")
 
 
+# ── Jurnal CRASH tool (persisten di volume data) ─────────────────────────────
+# Audit ai_chat_log 2026-09-04: `detail_part:err` 11× dalam 21 hari untuk PN
+# yang SAH (jawaban lalu bilang "gangguan sistem"), TAK bisa direproduksi di
+# laptop maupun di container, dan traceback-nya sudah lenyap — log container
+# terhapus tiap recreate, sementara ai_chat_log hanya menyimpan 'nama:err'.
+# Jurnal ini menaruh ringkasan tiap crash tool ke DISK (data/logs, volume yang
+# selamat dari recreate) supaya kejadian berikutnya bisa DIBACA, bukan ditebak.
+# Best-effort, kecil (dipangkas separuh saat melewati plafon), tanpa argumen
+# mentah (hanya nilai kunci via _lookup_gagal_arg).
+_CRASH_JURNAL_NAMA = "ai_tool_crash.jsonl"
+_CRASH_JURNAL_MAKS_BYTE = 512 * 1024
+_crash_jurnal_lock = threading.Lock()
+
+
+def _crash_jurnal_path() -> Path:
+    return get_settings().data_path / "logs" / _CRASH_JURNAL_NAMA
+
+
+def _catat_crash_tool(name: str, args, exc: BaseException) -> None:
+    """Tulis satu baris JSON per crash tool. Tak pernah melempar."""
+    try:
+        import traceback as _tb
+        p = _crash_jurnal_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        row = {
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "tool": name,
+            "exc": f"{type(exc).__name__}: {str(exc)[:200]}",
+            "args": _lookup_gagal_arg(args if isinstance(args, dict) else {}),
+            "tb": "".join(_tb.format_exception(type(exc), exc, exc.__traceback__,
+                                                limit=8))[-1500:],
+        }
+        with _crash_jurnal_lock:
+            if p.exists() and p.stat().st_size > _CRASH_JURNAL_MAKS_BYTE:
+                sisa = p.read_bytes()[-_CRASH_JURNAL_MAKS_BYTE // 2:]
+                p.write_bytes(sisa[sisa.find(b"\n") + 1:])
+            with p.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:  # pragma: no cover — jurnal tak boleh menambah kegagalan
+        pass
+
+
 def _run_tool(name: str, args: dict, user: dict, sheet_id: str = "") -> dict:
     fn = _DISPATCH.get(name)
     if not fn:
@@ -447,10 +489,11 @@ def _run_tool(name: str, args: dict, user: dict, sheet_id: str = "") -> dict:
     catatan_istilah = _paksa_istilah_kamus(name, args, question)
     try:
         res = fn(args, user)
-    except Exception:  # pragma: no cover
+    except Exception as e:  # pragma: no cover
         # Detail exception hanya ke log server — JANGAN bocorkan pesan internal
         # (path/stack/URL) ke model/user.
         logger.exception("tool %s gagal", name)
+        _catat_crash_tool(name, args, e)
         return {"error": f"tool '{name}' gagal dijalankan (gangguan internal — "
                          "sampaikan jujur ke user, jangan mengarang data)."}
     # PENJAGA HARGA TERPUSAT (defense in depth): buang SEMUA field harga bila user

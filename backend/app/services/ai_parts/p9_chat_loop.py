@@ -620,11 +620,17 @@ def _prefetch_epc_rangka(history: list[dict]) -> None:
 
     def _warm(rangka: str) -> None:
         try:
+            # Indeks ITEM lengkap unit = TIANG TERPANJANG (terukur 165,6 dtk pada
+            # unit dingin, ratusan panggilan EPC; persist disk 7 hari) → dinyalakan
+            # PALING DULU. Dulu ia dipanggil terakhir, di belakang lookup +
+            # loading_list yang sendirian makan 20-30 dtk, sehingga build baru
+            # MULAI saat filter_unit/cari_part_di_unit sudah lama menunggu — dan
+            # tool itu lalu membangun indeksnya sendiri (walk dobel).
+            # Aman ditaruh di depan: warm_items_index memakai thread sendiri &
+            # langsung kembali, jadi lookup/loading_list tak tertunda sedetik pun.
+            epc_bom.warm_items_index(rangka)
             epc.lookup(rangka)
             epc_bom.loading_list(rangka)
-            # Indeks ITEM lengkap unit (±1 mnt, persist disk 7 hari) ikut dibangun
-            # sejak rangka pertama disebut → sisiran teliti nanti tinggal pakai.
-            epc_bom.warm_items_index(rangka)
         except Exception:  # pragma: no cover — murni best-effort
             pass
 
@@ -1886,6 +1892,23 @@ _BUKAN_PN_RE = (
     # WAJIB setelah 4 digit (PN palsu 'ZZ9999999888777' tetap tertangkap).
     re.compile(r"^ZZ\d{4}[A-Z]\d{3,4}[A-Z][A-Z0-9]{0,3}$"),
 )
+# Token 'ANGKA-KATA' dari NAMA part, bukan PN. Audit ai_chat_log 2026-09-04:
+# jawaban BENAR untuk 'WG9000360417' dirusak — nama katalognya
+# 'C - APU (Silver pot / 4-circuit / 10-8.5)' ditulis model sebagai '4-CIRCUIT',
+# lolos _PN_TOKEN_RE (ada huruf, ada angka, ≥7 char) dan tak ada di dump
+# byte-per-byte → disamarkan '⟨PN tak terverifikasi⟩' + peringatan di atas
+# jawaban. Ciri yang membedakannya dari PN nyata: digit SEDIKIT (≤3) DAN ada
+# potongan huruf utuh ≥4 di antara pemisah ('CIRCUIT', 'PIECE', 'TYPE'). PN
+# katalog nyata ber-huruf panjang ('2BBYLD-M5X6', 'GB9163-GE30ES-2RS') punya
+# digit di dalam potongan hurufnya atau digit ≥4 — tetap dijaga.
+_KATA_DALAM_TOKEN_RE = re.compile(r"(?:^|[.\-])[A-Z]{4,}(?:$|[.\-])")
+_TOKEN_DIGIT_MAKS_KATA = 3
+
+
+def _token_angka_kata(p: str) -> bool:
+    """True bila token mirip-PN sebenarnya potongan NAMA ('4-CIRCUIT')."""
+    return (sum(ch.isdigit() for ch in p) <= _TOKEN_DIGIT_MAKS_KATA
+            and _KATA_DALAM_TOKEN_RE.search(p) is not None)
 
 
 def _drop_unit_tokens(bad: list[str]) -> list[str]:
@@ -1899,6 +1922,8 @@ def _drop_unit_tokens(bad: list[str]) -> list[str]:
         if p in unit_toks:
             continue
         if any(rx.match(p) for rx in _BUKAN_PN_RE):
+            continue
+        if _token_angka_kata(p):
             continue
         # Klitik Indonesia menempel di kode unit ('NX360-mu', 'SITRAK-nya') ikut
         # tertangkap regex mirip-PN (kasus nyata: 'unit NX360-mu' disamarkan guard).
@@ -2048,10 +2073,26 @@ _MAX_TOOL_EXEC_TURN = 30
 # jadi panggilan ulang di ronde berikut langsung dapat hasilnya.
 _TOOL_TIMEOUT_S = 90.0
 _TOOL_TIMEOUT_BERAT_S = 180.0    # render figure / unduh PDF / walk katalog
+# Tool yang bergantung pada INDEKS ITEM unit EPC (`epc_bom._all_items`): build
+# DINGIN satu unit = 1 walk pohon + SATU panggilan per part list. Diukur pada
+# LZZ8CUWD9TB112414 (2026-09-03): 465 node / 459 part list → root 9,8 dtk +
+# walk 29,7 dtk + buka item 135,9 dtk = 165,6 dtk. Di atas 90 dtk, jadi
+# panggilan PERTAMA untuk unit baru DIJAMIN divonis timeout, lalu model
+# mengulang — 90 dtk + satu ronde model terbuang, dan ronde ulangnya pun
+# mengulang taruhan yang sama (giliran nyata 351 dtk, 2026-09-03).
+# Sengaja SET TERPISAH dari _TOOL_BERAT: yang dibutuhkan hanya batas waktu yang
+# jujur, BUKAN plafon panggilan 4 — `cari_part_di_unit` normal dipanggil banyak
+# kali dengan kata kunci berbeda dalam satu giliran (plafon ketat di tool ini
+# persis yang bikin negatif palsu, lihat _MAX_CALLS_PER_TOOL di atas).
+_TOOL_WALK_UNIT = frozenset({
+    "filter_unit", "cari_part_di_unit", "uraikan_assembly",
+})
 
 
 def _tool_timeout(name: str) -> float:
-    return _TOOL_TIMEOUT_BERAT_S if name in _TOOL_BERAT else _TOOL_TIMEOUT_S
+    if name in _TOOL_BERAT or name in _TOOL_WALK_UNIT:
+        return _TOOL_TIMEOUT_BERAT_S
+    return _TOOL_TIMEOUT_S
 
 
 def _hasil_tool_timeout(name: str, detik: float) -> dict:
@@ -2060,6 +2101,80 @@ def _hasil_tool_timeout(name: str, detik: float) -> dict:
                       "lambat / tak menjawab) — datanya BELUM DICEK, bukan tidak ada. "
                       "Sampaikan jujur ke user & sarankan coba lagi sebentar; ⛔ JANGAN "
                       "menyimpulkan 'tidak ditemukan'.")}
+
+
+# ── Anggaran WALL-CLOCK satu giliran ─────────────────────────────────────
+# Pagar per-tool (_TOOL_TIMEOUT_*) dan per-ronde (_MAX_TOOL_ROUNDS) sudah ada,
+# tapi HASIL KALINYA tak pernah dibatasi: 8 ronde × 180 dtk = 24 menit, dan user
+# hanya melihat angka detik terus berjalan. Giliran nyata terburuk yang tercatat
+# 351 dtk (2026-09-03) — dan itu masih dengan plafon 90 dtk.
+# Lewat anggaran → ronde tool DITUTUP (model dipaksa menjawab dari yang sudah
+# ada), dan user diberi tahu apa adanya lewat _anggaran_note.
+# 240 dtk dipilih supaya jalur SAH terberat tetap muat: build indeks unit dingin
+# ±110 dtk (root 10 + walk 30 + item 70 setelah _ITEMS_WORKERS=16) + 2-3 ronde
+# model. Jadi pagar ini menggigit hanya pada giliran patologis, bukan normal.
+_TURN_WALL_BUDGET_S = 240.0
+# Tool yang start saat anggaran hampir habis tetap diberi jendela minimum —
+# tanpa lantai ini `min(batas, sisa)` bisa jadi 0,3 dtk dan setiap tool murah
+# (yang biasanya 1-2 dtk) ikut divonis gagal-cek tanpa alasan.
+_TOOL_WAIT_MIN_S = 15.0
+
+
+def _batas_tunggu_tool(name: str, sisa: float) -> float:
+    """Berapa lama pemanggil menunggu satu eksekusi tool.
+
+    Dua pagar, dan URUTANNYA penting:
+      `min(_tool_timeout, max(lantai, sisa))` — BUKAN `max(lantai, min(...))`.
+    Bentuk kedua membuat lantai MENGALAHKAN batas waktu tool itu sendiri: tool
+    yang sengaja dibatasi 0,2 dtk malah ditunggu 15 dtk (tertangkap
+    `test_tool_menggantung_dijawab_gagal_cek`). Batas tool adalah plafon keras;
+    lantai hanya melindungi dari `sisa` yang tinggal remah."""
+    return min(_tool_timeout(name), max(_TOOL_WAIT_MIN_S, sisa))
+
+
+def _anggaran_note(detik: float) -> str:
+    """Catatan ke USER (bukan ke model) saat anggaran waktu giliran tercapai.
+
+    Sepola dengan _rem_tertunda_note: ditempel ke teks jawaban, BUKAN disuntikkan
+    sebagai pesan system di ekor percakapan — pesan system dinamis di ujung
+    diangkat DeepSeek ke depan dan mematikan prompt-cache seluruh giliran."""
+    return ("\n\n⚠️ Catatan sistem: batas waktu satu giliran "
+            f"({int(detik)} detik) tercapai, jadi pengecekan dihentikan dan "
+            "jawaban di atas disusun dari data yang SEMPAT terkumpul. Bila ada "
+            "yang dinyatakan tidak ada/tidak ditemukan, jangan dianggap final — "
+            "tanyakan lagi (biasanya jauh lebih cepat karena datanya sudah "
+            "tersimpan).")
+
+
+# ── Nasihat RONDE: berhenti menebak istilah, jawab dengan yang ada ──────────
+# Audit ai_chat_log 2026-09-04 (442 giliran/21 hari): SEMUA giliran 7–8 ronde
+# (97–219 dtk, 9–16 panggilan tool) berpola sama — hasil tool ADA tapi tak
+# memuat kata yang diharapkan, lalu model mencoba istilah/tool lain berulang
+# ("front steel bushing": 8× cari_part + 4× turunan_assembly = 212 dtk, jawaban
+# akhirnya tetap "tidak memuat"). Prompt PRINSIP KERJA ("teruslah bekerja, coba
+# sudut lain") mendorongnya; plafon ronde 8 & anggaran 240 dtk hanya menghentikan
+# di ujung. Nota ini turun di TENGAH: setelah ronde ke-_RONDE_NUDGE model diminta
+# menyimpulkan dari yang ada & bertanya ke user, kecuali masih ada langkah yang
+# jelas hasilnya. Sekali per giliran, sebagai pesan user (bukan system — lihat
+# _sisip_konteks soal prompt-cache).
+_RONDE_NUDGE = 4
+
+
+def _ronde_note(ronde: int, maks: int) -> str:
+    return (
+        f"[CATATAN SISTEM] Ini sudah ronde tool ke-{ronde} dari maksimal {maks} pada "
+        "giliran ini dan user terus menunggu. Bila yang dicari belum juga ketemu setelah "
+        "beberapa istilah/tool berbeda, kemungkinan besar data itu memang TIDAK tercatat "
+        "dengan istilah tersebut — ⛔ JANGAN terus menebak istilah baru. Sekarang: "
+        "(1) sampaikan yang SUDAH ketemu, (2) sebutkan jujur yang belum ketemu beserta apa "
+        "saja yang sudah dicoba, (3) tanyakan ke user hal yang bisa mempersempit "
+        "(posisi/sisi, nama lain/istilah Inggris, nomor rangka) bila belum ada. Lanjutkan "
+        "tool HANYA bila masih ada langkah yang JELAS hasilnya (mis. daftar PN user yang "
+        "belum dicek, satu tool spesifik yang belum dicoba) — bukan untuk mencoba "
+        "variasi kata."
+    )
+
+
 _NOTE_ULANG = ("⛔ PANGGILAN IDENTIK DIABAIKAN: tool ini sudah dipanggil dengan "
                "argumen PERSIS sama giliran ini — hasil di atas adalah hasil "
                "sebelumnya (tidak dijalankan ulang; mengulanginya TIDAK akan "
@@ -2439,6 +2554,12 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     Return {"reply": str, "tools_used": [nama, ...]}.
     """
     _t0 = time.monotonic()
+
+    def _sisa_anggaran() -> float:
+        """Detik tersisa dari anggaran wall-clock giliran ini (bisa negatif)."""
+        return _TURN_WALL_BUDGET_S - (time.monotonic() - _t0)
+
+    anggaran_habis = False       # dipakai _finalize utk memberi tahu user
     history = list(history or [])
     # Pertanyaan user terakhir (untuk observabilitas — dipotong saat disimpan).
     _pertanyaan = next((m.get("content") or "" for m in reversed(history)
@@ -2718,6 +2839,7 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     ajar_claim_retried = False   # klaim 'sudah saya catat' tanpa tool ajar → 1x koreksi
     ajar_tool_ok = False         # ajarkan_pengetahuan BERHASIL dijalankan turn ini
     lookup_gagal = False  # ada tool lookup yang error/tak ketemu → jangan mengarang angka
+    ronde_dinasihati = False  # nota _ronde_note sudah dikirim (sekali per giliran)
     tool_gagal_pernah = False  # untuk observabilitas: pernahkah ada tool gagal turn ini
     tools_failed: list[str] = []  # nama tool yang GAGAL turn ini (observabilitas per-tool)
     # Kolam SALVAGE: hasil tool yang BERHASIL, disimpan terpisah dari `messages`.
@@ -2885,7 +3007,10 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                 selesai.set()
 
         threading.Thread(target=_kerja, name=f"tool-{name}", daemon=True).start()
-        batas = _tool_timeout(name)
+        # Menunggu paling lama SISA anggaran giliran — tanpa ini satu tool yang
+        # start di detik 239 masih boleh menahan 180 dtk lagi dan anggaran
+        # 240 dtk tak membatasi apa pun.
+        batas = _batas_tunggu_tool(name, _sisa_anggaran())
         if not selesai.wait(batas):
             logger.warning("tool %s melewati batas %.0f dtk — dijawab gagal-cek, "
                            "thread dibiarkan selesai", name, batas)
@@ -3000,6 +3125,11 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
         # Kartu pertanyaan dilewati: di sana tak ada klaim data untuk dikoreksi.
         if _rem_tertunda and not pertanyaan:
             reply = (reply or "") + _rem_tertunda_note(_rem_tertunda.values())
+        # Ronde tool ditutup karena WAKTU, bukan karena datanya sudah lengkap →
+        # user berhak tahu jawaban ini mungkin sebagian. Sama seperti nota rem di
+        # atas: kartu pertanyaan dilewati (tak ada klaim data untuk dikoreksi).
+        if anggaran_habis and not pertanyaan:
+            reply = (reply or "") + _anggaran_note(_TURN_WALL_BUDGET_S)
         # Memori sesi: simpan HANYA yang terbukti dari hasil tool giliran ini.
         # Teks jawaban model sengaja TIDAK ikut — kalau ucapan model bisa
         # meng-ground dirinya sendiri di giliran berikutnya, guard anti-karangan
@@ -3137,7 +3267,12 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
     _emit(on_progress, "Memproses pertanyaan…")
     while _iters < _MAX_ITERS:
         _iters += 1
-        tools_habis = tool_rounds >= _MAX_TOOL_ROUNDS
+        if not anggaran_habis and _sisa_anggaran() <= 0:
+            anggaran_habis = True
+            logger.warning("anggaran waktu giliran %.0f dtk habis setelah %d ronde "
+                           "tool — ronde ditutup, model dipaksa menjawab",
+                           _TURN_WALL_BUDGET_S, tool_rounds)
+        tools_habis = tool_rounds >= _MAX_TOOL_ROUNDS or anggaran_habis
         # Pangkas isi hasil tool ronde LAMA sebelum kirim ulang messages (hemat token).
         _trim_old_tool_messages(messages, _tool_msg_idx, tool_rounds,
                                 budget_chars=_TRIM_BUDGET_CHARS)
@@ -3574,6 +3709,10 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
             # DICEK. Guard-nya dicatat agar frekuensinya terlihat di panel admin.
             _nota_ronde.append(_rem_note(_rem_ronde))
             _catat_guard("rem")
+        if tool_rounds >= _RONDE_NUDGE and not ronde_dinasihati:
+            # Lihat _ronde_note: rem di TENGAH giliran, sebelum plafon ronde.
+            ronde_dinasihati = True
+            _nota_ronde.append(_ronde_note(tool_rounds, _MAX_TOOL_ROUNDS))
 
         if kartu_tanya:
             _k_tanya = _tanya_kunci(user, conversation_id)
@@ -3646,3 +3785,46 @@ def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
                   "— mohon tanyakan ulang untuk kepastian.")
     return _finalize(reply, outcome=_sv_outcome)
 
+
+# ── Giliran yang MELEDAK tetap tercatat di observabilitas ───────────────────
+# _finalize hanya dipanggil di titik return; exception apa pun di tengah chat()
+# (bug tool yang diangkat _run_tool_turn, cacat riwayat, dll.) membuat giliran
+# itu LENYAP dari ai_chat_log — router hanya mengirim 'Asisten AI gagal
+# merespons' ke klien. Audit 2026-09-04 menemukan jejaknya: jawaban 'seal bogie'
+# membahas pertanyaan 'brake crank shaft' yang tak pernah tercatat sebagai
+# giliran, padahal ada di riwayat klien. Pembungkus ini mencatat baris
+# outcome='error' (pesan exception dipotong, tanpa stack) lalu mengangkat
+# ulang exception-nya — perilaku ke klien TIDAK berubah.
+_chat_inti = chat
+
+
+def chat(user: dict, history: list[dict], sheet_id: str = "", on_progress=None,
+         conversation_id: str = "", on_delta=None) -> dict:
+    _t_mulai = time.monotonic()
+    try:
+        return _chat_inti(user, history, sheet_id=sheet_id, on_progress=on_progress,
+                          conversation_id=conversation_id, on_delta=on_delta)
+    except AINotConfigured:
+        raise
+    except Exception as e:
+        try:
+            _q = next((str((m or {}).get("content") or "")
+                       for m in reversed(history or [])
+                       if (m or {}).get("role") == "user"), "")
+            ai_chat_log.log_turn_async(
+                username=(user or {}).get("username"), role=(user or {}).get("role"),
+                question=_q, tools_used=[], rounds=0,
+                latency_ms=int((time.monotonic() - _t_mulai) * 1000),
+                guard_hit=False, tool_failed=True, reply_len=0, outcome="error",
+                reply=f"[EXCEPTION] {type(e).__name__}: {str(e)[:300]}",
+                tools_failed=[], session_id=conversation_id or "")
+        except Exception:  # pragma: no cover — pencatatan tak boleh menutupi error asli
+            pass
+        raise
+
+
+chat.__doc__ = _chat_inti.__doc__
+# `inspect.getsource(ai.chat)` dipakai ±4 tes (kartu unduh / _capture_meta)
+# untuk memastikan tool tertentu ditangani — inspect mengikuti __wrapped__,
+# jadi yang terbaca tetap badan chat() yang asli, bukan pembungkus ini.
+chat.__wrapped__ = _chat_inti

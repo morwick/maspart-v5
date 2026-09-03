@@ -220,6 +220,48 @@ def _norm(s: str) -> str:
     return re.sub(r"[\s\-_]", "", (s or "").upper())
 
 
+# Kode model yang "manusiawi" (huruf lalu angka: SD22, L36-B3, RA10AB6A, GA15BB6A)
+# vs rootCode teknis excavator ('60070-00-00001') yang tak pernah diucapkan user.
+_KODE_MANUSIAWI_RE = re.compile(r"^[A-Z]{1,3}\d")
+
+
+def _label_model(code: str, nama: str, mesin: str | None = None) -> str:
+    """Nama tipe yang DITAMPILKAN & DICARI — memuat kode model bila `name` tak memuatnya.
+
+    Pengukuran 2026-09-04 pada pohon asli (415 model): **363 model (87%)** punya
+    `name` Mandarin TANPA kode modelnya — dozer SD22 = {code:'SD22',
+    name:'液力推土机'}, roller {code:'RA10AB6A', name:'SR10-B6单钢轮压路机',
+    machineType:'SR10-B6'}, grader {code:'GA15BB6A', name:'SG15-B6 平地机'}.
+    Hanya excavator yang `name`-nya kode pasaran ('SE75-9') dengan `code`
+    rootCode teknis. variants()/_resolve() dulu mencocokkan `name` SAJA →
+    'SD22' dijawab "tak ada di katalog Shantui" walau node-nya ADA (kejadian
+    produksi 1 Sep 2026, dua kali ke admin — dan perbaikan _kode_model
+    sebelumnya tak menolong karena masalahnya di pencocokan, bukan di walk).
+    Label = kode (bila manusiawi & belum ada di nama) + machineType (bila belum
+    ada) + nama; rootCode teknis excavator tak diawali (test & tampilan lama
+    'SE75-9' tetap)."""
+    nm = (nama or "").strip()
+    c = (code or "").strip()
+    mt = (mesin or "").strip()
+    bagian: list[str] = []
+    if c and _KODE_MANUSIAWI_RE.match(c.upper()) and _norm(c) not in _norm(nm):
+        bagian.append(c)
+    if mt and _norm(mt) not in _norm(nm) and _norm(mt) != _norm(c):
+        bagian.append(mt)
+    bagian.append(nm or c)
+    return " ".join(bagian)
+
+
+def _identitas_model(m: dict) -> list[str]:
+    """Semua sebutan sah satu model: label, nama, kode, machineType (non-kosong)."""
+    out: list[str] = []
+    for s in (m.get("label"), m.get("nama"), m.get("rootCode"), m.get("mesin")):
+        s = (s or "").strip()
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
 def _model_tree() -> dict:
     """product/all?type=model → pohon penuh (kategori→children=model). Cache ringkas
     {'kategori': [...node model...]} per kategori-code. {'_err':..} bila gagal."""
@@ -251,8 +293,10 @@ def _model_tree() -> dict:
         # node model = punya id + kode yang bukan kode kategori (lihat _kode_model;
         # pola lama hanya mengenali excavator → 193 model kelas lain hilang diam-diam).
         if n.get("id") and _kode_model(code):
-            models.append({"id": n.get("id"), "rootCode": code,
-                           "nama": n.get("name") or n.get("title") or "",
+            nm = n.get("name") or n.get("title") or ""
+            mt = str(n.get("machineType") or "").strip()
+            models.append({"id": n.get("id"), "rootCode": code, "nama": nm,
+                           "mesin": mt, "label": _label_model(code, nm, mt),
                            "kategori": kat_name, "kategori_code": kat_code,
                            "leaf": n.get("leaf")})
         for c in kids:
@@ -278,7 +322,10 @@ def variants(query: str) -> dict:
         return _mint_gagal(tree["_err"])
     exact, prefixnum = [], []
     for m in tree["data"]:
-        nm = m["nama"]
+        # Label memuat kode + machineType + nama (lihat _label_model) — 'SD22'
+        # cocok ke node {code:'SD22', name:'液力推土机'}, 'SR10' ke roller
+        # {code:'RA10AB6A', machineType:'SR10-B6'}.
+        nm = m["label"]
         n = re.sub(r"[\s_]", "", nm.upper())
         if q not in n:
             continue
@@ -307,14 +354,22 @@ def variants(query: str) -> dict:
         # tak menyambar sembarang nomor. Yang TERPANJANG diurutkan duluan:
         # 'SD22F' lebih spesifik dari 'SD22' bila keduanya sama-sama cocok.
         dalam = []
+        qq = re.sub(r"[\s_-]", "", q)
         for m in tree["data"]:
-            n = re.sub(r"[\s_-]", "", (m["nama"] or "").upper())
-            if len(n) >= 4 and n in re.sub(r"[\s_-]", "", q):
-                dalam.append({"tipe": m["nama"], "rootCode": m["rootCode"],
+            # Kode/machineType/nama mana pun yang muncul di dalam nomor seri.
+            # 'CHSD22AFKN1024321' memuat kode 'SD22' — nama node-nya sendiri
+            # Mandarin ('液力推土机'), jadi mencocokkan nama saja tak pernah kena.
+            cocok = [s for s in (m["rootCode"], m.get("mesin") or "", m["nama"])
+                     if len(re.sub(r"[\s_-]", "", s.upper())) >= 4
+                     and re.sub(r"[\s_-]", "", s.upper()) in qq]
+            if cocok:
+                dalam.append({"tipe": m["label"], "rootCode": m["rootCode"],
                               "rootId": m["id"], "kategori": m["kategori"],
-                              "cocok_dari": "nama model ditemukan DI DALAM nomor seri"})
+                              "cocok_dari": "kode model ditemukan DI DALAM nomor seri: "
+                                            + max(cocok, key=len),
+                              "_len": max(len(s) for s in cocok)})
         if dalam:
-            dalam.sort(key=lambda r: (-len(r["tipe"]), r["tipe"]))
+            dalam.sort(key=lambda r: (-r.pop("_len"), r["tipe"]))
             out.update(found=True, tipe=dalam, jumlah=len(dalam),
                        dari_nomor_seri=True,
                        catatan=("'" + str(query) + "' dikenali sebagai NOMOR SERI/PIN, bukan "
@@ -337,7 +392,7 @@ def list_models(kategori: str = "") -> dict:
     rows = tree["data"]
     if kat:
         rows = [m for m in rows if kat in (m["kategori"] or "").lower()]
-    names = sorted({m["nama"] for m in rows})
+    names = sorted({m["label"] for m in rows})
     return {"found": bool(names), "kategori": kategori or "semua", "jumlah": len(names),
             "tipe": names}
 
@@ -350,13 +405,14 @@ def _resolve(tipe: str) -> dict | None:
     tn = _norm(tipe)
     best = None
     for m in tree["data"]:
-        n = _norm(m["nama"])
-        if n == tn:
-            return {"rootId": m["id"], "rootCode": m["rootCode"],
-                    "nama": m["nama"], "kategori": m["kategori"]}
-        if tn and tn in n and best is None:
-            best = {"rootId": m["id"], "rootCode": m["rootCode"],
-                    "nama": m["nama"], "kategori": m["kategori"]}
+        node = {"rootId": m["id"], "rootCode": m["rootCode"], "nama": m["nama"],
+                "label": m.get("label") or m["nama"], "kategori": m["kategori"]}
+        # EKSAK ke sebutan mana pun: label ('SD22 液力推土机'), nama, kode ('SD22'),
+        # machineType ('SR10-B6') — model boleh mengoper balik salah satunya.
+        if tn and tn in {_norm(s) for s in _identitas_model(m)}:
+            return node
+        if tn and tn in _norm(node["label"]) and best is None:
+            best = node
     return best
 
 
@@ -408,7 +464,8 @@ def top_assemblies(tipe: str) -> dict:
                         "id": m.get("id"), "leaf": m.get("leaf")})
         with _lock:
             _asm_cache[rid] = {"at": time.monotonic(), "assemblies": asm}
-    return {"found": True, "tipe": node["nama"], "rootCode": node["rootCode"],
+    return {"found": True, "tipe": node.get("label") or node["nama"],
+            "rootCode": node["rootCode"],
             "kategori": node["kategori"], "jumlah": len(asm), "assembly": asm}
 
 

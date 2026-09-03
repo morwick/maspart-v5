@@ -150,7 +150,10 @@ def test_foto_hanya_saat_diminta():
 
     prompt = A._system_prompt({"username": "budi", "role": "pembeli"})
     assert "HANYA saat user MEMINTANYA" in prompt
-    assert "foto tidak pernah tampil otomatis" in prompt
+    # Dipadatkan 2026-09-04 (anggaran prompt 60.000 char): larangan menawarkan
+    # foto atas inisiatif sendiri tetap ada, kalimat 'tak pernah tampil
+    # otomatis' dilebur ke sana.
+    assert "jangan menawarkannya sendiri" in prompt
 
 
 def test_tool_terdaftar_dan_gambar_inline():

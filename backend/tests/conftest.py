@@ -147,6 +147,18 @@ def _jangan_fallback_weichai_nyata(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _jurnal_crash_tool_ke_tmp(tmp_path, monkeypatch):
+    """_run_tool (2026-09-04) menulis jurnal crash tool ke data/logs/ — tes yang
+    sengaja membuat tool meledak tak boleh menyampah di direktori data repo."""
+    try:
+        from app.services import ai_assistant as _ai
+        monkeypatch.setattr(_ai, "_crash_jurnal_path",
+                            lambda: tmp_path / "logs" / "ai_tool_crash.jsonl")
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _jangan_bridge_weichai_nyata(request, monkeypatch):
     """`fast_moving.build()` (2026-08-07) menambal lubang part MESIN dari EPC
     Weichai — itu panggilan JARINGAN via bridge SSO. Setiap test yang memanggil
