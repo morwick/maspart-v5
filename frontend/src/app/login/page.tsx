@@ -4,12 +4,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { checkHealth, login } from "@/lib/api";
 import { landingPath, saveSession, takeLogoutReason } from "@/lib/auth";
+import LoginBackdrop from "@/components/LoginBackdrop";
 
-// Tiga langkah alur kerja — ditampilkan di panel merek (desktop).
-const STEPS: [string, string, string][] = [
-  ["01", "Cari part", "Nama, part number, foto, atau nomor rangka unit."],
-  ["02", "Cek stok & harga", "Ketersediaan per gudang dan perbandingan harga."],
-  ["03", "Pesan & lacak", "Dari keranjang sampai barang sampai di cabang."],
+// Sumber data yang menopang halaman-halaman di balik pintu ini. Dipakai
+// menggantikan daftar langkah 01/02/03: langkahnya sudah jelas dari menunya
+// sendiri, sedangkan ini yang tak terlihat dari luar.
+const FAKTA: [string, string][] = [
+  ["stok", "indeks Accurate"],
+  ["katalog", "EPC live"],
+  ["foto part", "SIMS"],
 ];
 
 const HEALTH_TEXT = {
@@ -70,8 +73,7 @@ export default function LoginPage() {
     >
       {/* ── Panel merek — kolom kiri di desktop, hero atas di HP ── */}
       <section className="login-pane flex flex-col justify-between px-6 pt-7 pb-[30px] md:px-16 md:py-14">
-        <div className="login-blob login-blob-1" />
-        <div className="login-blob login-blob-2" />
+        <LoginBackdrop />
 
         <div className="relative flex items-center gap-2.5">
           <div
@@ -103,34 +105,18 @@ export default function LoginPage() {
 
           {/* HP: satu kalimat ringkas — layarnya tak cukup untuk 3 langkah. */}
           <p
-            className="mt-2 md:hidden"
+            className="mt-2"
             style={{ fontSize: 13.5, lineHeight: 1.5, color: "rgba(255,255,255,.8)" }}
           >
-            Cari part, cek stok &amp; harga, pesan dan lacak sampai cabang.
+            Sinotruk HOWO &middot; mesin Weichai &middot; alat berat Shantui
           </p>
 
-          {/* Desktop: 3 langkah bernomor. */}
-          <div
-            className="mt-9 hidden md:block"
-            style={{ borderTop: "1px solid rgba(255,255,255,.18)" }}
-          >
-            {STEPS.map(([no, judul, isi]) => (
-              <div key={no} className="login-step">
-                <span className="login-step-no">{no}</span>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>{judul}</div>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      lineHeight: 1.5,
-                      color: "rgba(255,255,255,.78)",
-                      marginTop: 2,
-                    }}
-                  >
-                    {isi}
-                  </div>
-                </div>
-              </div>
+          {/* Desktop: sumber data di balik pintu ini. */}
+          <div className="login-facts mono hidden md:flex">
+            {FAKTA.map(([label, nilai]) => (
+              <span key={label}>
+                {label} <b>{nilai}</b>
+              </span>
             ))}
           </div>
         </div>
