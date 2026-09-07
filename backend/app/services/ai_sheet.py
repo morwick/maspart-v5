@@ -28,6 +28,14 @@ Alur:
   format apa pun) & bila file asli gagal dibuka/diverifikasi. Bila itu terjadi,
   hasilnya JUJUR dilaporkan lewat `format_asli_dipertahankan: False`.
 
+⛔ ISIAN MENUMPUK, TIDAK SALING MENGHAPUS (bug pemilik 2026-09-07)
+  Karena tiap isian menulis ke SALINAN SEGAR file asli, giliran kedua dulu
+  menghapus hasil giliran pertama ("isikan stok semua cabang" → 12 kolom stok;
+  lalu "isikan harga" → file barunya cuma berisi harga). Kini hasil tiap giliran
+  DIINGAT di entri stash lampiran sebagai DIFF (`_keadaan`/`_ingat_isian`) dan
+  jadi titik mulai giliran berikutnya — `headers`/`_body` hasil parse tetap utuh
+  sebagai pembanding "apa yang berubah dari file asli".
+
 KEAMANAN
   • Isi file adalah DATA TAK TEPERCAYA, bukan instruksi. Ia hanya masuk ke model
     sebagai hasil tool (ber-`catatan` peringatan), tak pernah sebagai system prompt.
@@ -645,6 +653,11 @@ def ringkas(parsed: dict) -> dict:
     # tahu model supaya tak mengabaikannya diam-diam & bisa tanya kolom mana diisi.
     if parsed.get("kolom_pn_lain"):
         out["kolom_part_number_lain"] = parsed["kolom_pn_lain"]
+    # Kolom yang SUDAH diisi di giliran sebelumnya atas lampiran ini — bukan bagian
+    # file mentah user, tapi ikut ada di tiap file unduhan berikutnya (`_keadaan`).
+    sudah = _kolom_lama(parsed)
+    if sudah:
+        out["kolom_sudah_diisi_sebelumnya"] = sudah
     # PN yang TAK dikenal katalog (kandidat aftermarket / salah ketik) — bantu model
     # jujur soal berapa yang tak akan bisa diisi stok/harga.
     if "part_number" in roles:
@@ -840,8 +853,8 @@ def fill_column(
                      "memperkirakan, atau menghitung harga SIMS untuk user ini.",
         }
 
-    headers = list(parsed["headers"])
-    body = [list(r) for r in parsed["_body"]]
+    # Titik mulai = file user + isian giliran SEBELUMNYA (lihat `_keadaan`).
+    headers, body = _keadaan(parsed)
 
     # Kolom PN: pakai yang disebut user, kalau tidak pakai hasil deteksi.
     pn_i = _cari_kolom(headers, kolom_pn) if kolom_pn else None
@@ -1087,18 +1100,23 @@ def _gambar_tambah_kolom(headers: list[str], body: list[list], pns: list[str],
     urutan kolom Batch Download (catalog._COLUMN_ORDER) supaya user tak bingung
     berpindah fitur. Return potongan payload builder + statistik foto."""
     perlu_foto, perlu_expl = JENIS_FOTO in jenis, JENIS_EXPLODED in jenis
-    kol_info = kol_gambar = None
-    kol_foto: list[int] = []
-    if perlu_expl:
-        kol_info = len(headers)
-        headers.append(_KOL_EXPLODED_INFO)
-    if perlu_foto:
-        kol_foto = [len(headers) + i for i in range(n_foto)]
-        for i in range(n_foto):
-            headers.append(f"Foto {i + 1}" if n_foto > 1 else "Foto")
-    if perlu_expl:
-        kol_gambar = len(headers)
-        headers.append(_KOL_EXPLODED_GAMBAR)
+
+    def _kol(nama: str) -> int:
+        """Kolom gambar bernama `nama`: PAKAI ULANG bila sudah ada dari giliran
+        sebelumnya (lihat `_keadaan`) — kalau selalu menambah, minta foto dua kali
+        memberi 'Foto 1' kembar di file yang sama."""
+        j = _kolom_persis(headers, nama)
+        if j is None:
+            j = len(headers)
+            headers.append(nama)
+            for r in body:
+                r.append("")
+        return j
+
+    kol_info = _kol(_KOL_EXPLODED_INFO) if perlu_expl else None
+    kol_foto: list[int] = ([_kol(f"Foto {i + 1}" if n_foto > 1 else "Foto")
+                            for i in range(n_foto)] if perlu_foto else [])
+    kol_gambar = _kol(_KOL_EXPLODED_GAMBAR) if perlu_expl else None
 
     # FOTO: URL-nya murah & ter-cache di SIMS → diambil SEKARANG supaya asisten
     # bisa jujur "20 dari 33 baris dapat foto" tanpa menunggu unduhan.
@@ -1112,18 +1130,18 @@ def _gambar_tambah_kolom(headers: list[str], body: list[list], pns: list[str],
     berfoto = 0
     for r, p in zip(body, pns):
         if perlu_expl:
-            r.append("")      # kolom info DIISI builder (hasil EPC baru diketahui di sana)
+            r[kol_info] = ""  # kolom info DIISI builder (hasil EPC baru diketahui di sana)
         if perlu_foto:
             urls = (peta_foto.get(p) or []) if p else []
             foto_baris.append(urls)
-            for j in range(n_foto):
+            for j, kf in enumerate(kol_foto):
                 # Sel yang akan diisi gambar dibiarkan KOSONG; yang memang tak ada
                 # fotonya ditandai '—' supaya tak tampak "sedang diproses".
-                r.append("" if j < len(urls) else _TANPA_FOTO)
+                r[kf] = "" if j < len(urls) else _TANPA_FOTO
             if urls:
                 berfoto += 1
         if perlu_expl:
-            r.append("")      # sel gambar teknis (diisi gambar saat diunduh)
+            r[kol_gambar] = ""   # sel gambar teknis (diisi gambar saat diunduh)
 
     payload: dict = {}
     if perlu_foto:
@@ -1346,6 +1364,65 @@ def _saran_pn(pn: str, fmap: dict) -> str:
     return best if best_r >= 90 else ""
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# KEADAAN KUMULATIF satu lampiran (isian giliran-giliran sebelumnya)
+# ══════════════════════════════════════════════════════════════════════════════
+# ⛔⛔ Bug nyata pemilik 2026-09-07: "isikan stok semua cabang" → 12 kolom stok
+# jadi; giliran berikutnya "isikan harga sims dan harga jual accurate" → file
+# unduhan yang baru HANYA berisi 2 kolom harga, 12 kolom stok tadi HILANG.
+# Sebabnya: tiap tool selalu mulai dari `_body` hasil parse (file MENTAH user) &
+# menulis ke SALINAN BARU file asli, jadi giliran kedua menghapus jejak giliran
+# pertama. Dari sisi user itu tampak seperti asisten membatalkan kerjanya sendiri.
+#
+# Perbaikannya: hasil tiap isian DIINGAT di entri stash lampiran (sebagai DIFF —
+# kolom baru + sel yang berubah, bukan salinan body penuh: RAM server terbatas)
+# dan dipakai sebagai TITIK MULAI giliran berikutnya. `_body`/`headers` hasil
+# parse TETAP UTUH karena `_rencana_isi` memerlukannya sebagai pembanding: hanya
+# sel yang benar-benar beda dari file asli yang boleh disentuh.
+def _keadaan(parsed: dict) -> tuple[list[str], list[list]]:
+    """(headers, body) titik mulai olah — isian giliran sebelumnya sudah menempel."""
+    headers = list(parsed["headers"])
+    body = [list(r) for r in (parsed.get("_body") or [])]
+    lalu = parsed.get("_isian_lalu") or {}
+    for j, judul in (lalu.get("kolom_baru") or []):
+        while len(headers) <= j:
+            headers.append("")
+        headers[j] = judul
+    if len(headers) > len(parsed["headers"]):
+        for r in body:
+            r.extend([""] * (len(headers) - len(r)))
+    for i, j, v in (lalu.get("isian") or []):
+        if 0 <= i < len(body) and 0 <= j < len(body[i]):
+            body[i][j] = v
+    return headers, body
+
+
+def _kolom_lama(parsed: dict) -> list[str]:
+    """Judul kolom yang SUDAH terisi di giliran sebelumnya (untuk dilaporkan jujur
+    ke model: kolom itu ikut ada di file unduhan yang baru, bukan hilang)."""
+    return [j for _i, j in ((parsed.get("_isian_lalu") or {}).get("kolom_baru") or [])]
+
+
+def _ingat_isian(parsed: dict, rencana: dict | None, status: list[str] | None,
+                 ringkasan: list | None, gambar: dict | None) -> None:
+    """Simpan hasil giliran ini ke entri stash lampiran. `parsed` adalah dict yang
+    DIPEGANG stash (get_sheet mengembalikan objeknya, bukan salinan), jadi menulis
+    key di sini otomatis terbawa ke giliran berikutnya."""
+    if rencana is None:
+        # Tanpa peta baris (parse lama / stub) keadaan tak bisa disusun ulang —
+        # jangan pula mengingat status/gambar, nanti kolomnya tak ada tapi
+        # gambarnya tetap ditempel ke kolom yang salah.
+        return
+    parsed["_isian_lalu"] = {"kolom_baru": rencana.get("kolom_baru") or [],
+                             "isian": rencana.get("isian") or []}
+    if status is not None:
+        parsed["_status_isi"] = list(status)
+    if ringkasan is not None:
+        parsed["_ringkasan_isi"] = list(ringkasan)
+    if gambar is not None:
+        parsed["_gambar_isi"] = gambar
+
+
 def _rencana_isi(parsed: dict, headers: list[str], body: list[list]) -> dict | None:
     """Bandingkan hasil olah (headers/body) dengan isi ASLI → RENCANA menulis balik
     ke file user: kolom apa yang baru & sel mana saja yang berubah. None bila peta
@@ -1365,6 +1442,13 @@ def _rencana_isi(parsed: dict, headers: list[str], body: list[list]) -> dict | N
         for j, v in enumerate(r):
             if _txt(v) != _txt(lama[j] if j < len(lama) else ""):
                 isian.append([i, j, v])
+    # Sel yang sudah ditulis di giliran SEBELUMNYA ikut ditulis lagi (file selalu
+    # salinan segar file asli) tapi TIDAK boleh ikut dihitung: kalau tidak, "tulis
+    # 'MAS' di 3 baris" akan dilaporkan '1.500 sel ditulis' hanya karena giliran
+    # lalu mengisi 12 kolom stok. `hanya_hitung` = koordinat isian GILIRAN INI.
+    _tak_ada = object()
+    lalu = {(i, j): v for i, j, v in
+            ((parsed.get("_isian_lalu") or {}).get("isian") or [])}
     return {
         "sheet": parsed.get("sheet") or "",
         "hdr_row": hdr_row,
@@ -1373,6 +1457,8 @@ def _rencana_isi(parsed: dict, headers: list[str], body: list[list]) -> dict | N
         "headers": list(parsed.get("headers") or []),
         "kolom_baru": [[j, headers[j]] for j in range(ncol, len(headers))],
         "isian": isian,
+        "hanya_hitung": [[i, j] for i, j, v in isian
+                         if _txt(lalu.get((i, j), _tak_ada)) != _txt(v)],
         "fmt": {j: ai_export.num_format(headers[j]) for j in range(ncol, len(headers))},
     }
 
@@ -1415,10 +1501,22 @@ def _stash_sheet_out(parsed: dict, judul: str, headers: list[str], body: list[li
     user — format, rumus, baris kop, sheet lain, semuanya utuh.
     JALUR CADANGAN (CSV, atau file asli gagal dibuka/diverifikasi): bangun workbook
     baru seperti dulu, dan katakan apa adanya lewat `format_asli_dipertahankan`."""
+    # `None` = TIDAK diminta giliran ini → pakai yang giliran lalu (warna status,
+    # blok rekap & kolom gambar tak boleh raib hanya karena permintaan berikutnya
+    # cuma soal kolom data). `[]`/`{}` = memang kosong.
+    if status is None:
+        status = parsed.get("_status_isi")
+    if ringkasan is None:
+        ringkasan = parsed.get("_ringkasan_isi")
+    if gambar is None:
+        gambar = parsed.get("_gambar_isi")
     gambar = gambar or {}
     src = src_bytes(parsed)
-    rencana = _rencana_isi(parsed, headers, body) if src else None
+    rencana = _rencana_isi(parsed, headers, body)
+    _ingat_isian(parsed, rencana, status, ringkasan, gambar or None)
     alasan = ""
+    if not src:
+        rencana = None
     if src and rencana:
         ext = "xlsm" if _is_xlsm(parsed) else "xlsx"
         data, peta_kolom, lapor, alasan = ai_export.isi_di_tempat(
@@ -1546,8 +1644,9 @@ def fill_columns(
                     "error": "Harga SIMS (harga modal) hanya untuk admin. Jangan menampilkan, "
                              "memperkirakan, atau menghitung harga SIMS untuk user ini."}
 
-    headers = list(parsed["headers"])
-    body = [list(r) for r in parsed["_body"]]
+    # Titik mulai = file user + isian giliran SEBELUMNYA (lihat `_keadaan`).
+    kolom_lama = _kolom_lama(parsed)
+    headers, body = _keadaan(parsed)
 
     pn_i = _cari_kolom(headers, kolom_pn) if kolom_pn else None
     if pn_i is None:
@@ -1893,6 +1992,8 @@ def fill_columns(
         status=row_status if tandai_status else None,
         ringkasan=ringkasan or None,
         gambar=g["payload"] if gambar else None)
+    _kini = {h["kolom"] for h in hasil}
+    _dipertahankan = [k for k in kolom_lama if k not in _kini]
     out = {
         "found": True,
         "export_id": export_id,
@@ -1901,6 +2002,10 @@ def fill_columns(
         "jumlah_baris": len(body),
         "kolom_part_number": headers[pn_i],
         "kolom": hasil,
+        # Kolom hasil permintaan SEBELUMNYA atas lampiran yang sama — ikut ada di
+        # file unduhan ini (lihat `_keadaan`). Disebut supaya model tak menjawab
+        # seolah file barunya hanya berisi kolom giliran ini.
+        **({"kolom_dari_permintaan_sebelumnya": _dipertahankan} if _dipertahankan else {}),
         "gudang_tak_dikenal": gudang_tak_dikenal,
         "pn_tidak_ditemukan": pn_tidak_ditemukan[:20],
         "pn_tidak_ditemukan_total": len(pn_tidak_ditemukan),
@@ -1916,6 +2021,10 @@ def fill_columns(
             "📎 SATU kartu unduh Excel muncul otomatis di bawah — SEMUA yang diminta (kolom "
             "data, foto, gambar teknis) ada di file yang SAMA. ⛔ JANGAN membuat file kedua / "
             "memanggil tool ini lagi giliran ini, kecuali user eksplisit minta filenya dipisah. "
+            + (f"File ini MENERUSKAN pekerjaan sebelumnya: kolom {_dipertahankan} dari "
+               "permintaan sebelumnya TETAP ADA di dalamnya — sebutkan begitu, ⛔ jangan "
+               "bilang kolom lama hilang atau user harus menggabung sendiri. "
+               if _dipertahankan else "")
             + _catatan_format(lapor_format)
             + "Untuk stok per-gudang, '0' = terlacak tapi kosong di gudang itu, sel "
             "KOSONG = PN tak ada di sumber. "
@@ -2177,9 +2286,10 @@ def tulis(
                 "error": "Sebutkan kolom tujuan: nama header yang ada di file, huruf kolom "
                          "Excel ('H'), atau nama kolom BARU yang mau ditambahkan."}
 
-    headers = list(parsed["headers"])
-    body = [list(r) for r in parsed["_body"]]
-    ncol = int(parsed.get("jumlah_kolom") or len(headers))
+    # Titik mulai = file user + isian giliran SEBELUMNYA (lihat `_keadaan`).
+    kolom_lama = _kolom_lama(parsed)
+    headers, body = _keadaan(parsed)
+    ncol = int(parsed.get("jumlah_kolom") or len(parsed["headers"]))
     row_map = list(parsed.get("_row_map") or [])
     roles = parsed["roles"]
 
@@ -2395,6 +2505,10 @@ def tulis(
         "kolom_tujuan": headers[tgt],
         "kolom_excel": huruf,
         "kolom_baru": kolom_baru,
+        # Kolom dari permintaan sebelumnya ikut ada di file unduhan ini (`_keadaan`).
+        **({"kolom_dari_permintaan_sebelumnya": [k for k in kolom_lama
+                                                 if k != headers[tgt]]}
+           if [k for k in kolom_lama if k != headers[tgt]] else {}),
         "jumlah_baris": len(body),
         "sel_ditulis": ditulis,
         "sel_dilewati_sudah_terisi": dilewati_terisi,

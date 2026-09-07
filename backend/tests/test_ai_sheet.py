@@ -988,3 +988,94 @@ def test_chat_lampiran_proaktif_panggil_ringkasan(monkeypatch, katalog):
     monkeypatch.setattr(ai, "_post_chat", fake_post)
     out = ai.chat(USER, [{"role": "user", "content": "tolong bantu file ini"}], sheet_id=sid)
     assert "sheet_ringkasan" in out["tools_used"]
+
+
+# ── KUMULATIF: permintaan berikutnya TIDAK menghapus kolom sebelumnya ─────────
+# Bug nyata pemilik 2026-09-07: "isikan stok semua cabang" → 12 kolom stok jadi;
+# lalu "isikan harga sims dan harga jual accurate" → file barunya HANYA berisi 2
+# kolom harga, kolom stok tadi hilang. Tiap tool dulu selalu mulai dari file
+# MENTAH user & menulis ke salinan baru, jadi giliran kedua menghapus giliran
+# pertama.
+
+def _baca_hasil(export_id):
+    from openpyxl import load_workbook
+
+    from app.services import ai_export
+    data, _ = ai_export.generic_excel(export_id)
+    ws = load_workbook(io.BytesIO(data)).active
+    return [list(r) for r in ws.iter_rows(values_only=True)]
+
+
+def test_isi_kedua_tidak_menghapus_kolom_giliran_pertama(gudang_stok, monkeypatch):
+    monkeypatch.setattr(ai_sheet.harga, "batch_harga", lambda pns, **k: {
+        "rate": 2200.0, "count": len(pns), "found": 1,
+        "results": [{"pn": "WG9925520270", "cny": 700, "idr": 1540000, "status": "ok"}],
+    })
+    sid = _sheet_pn(ADMIN)
+    r1 = ai_sheet.fill_columns(sid, ADMIN, [
+        {"isi": "stok", "gudang": "Jakarta"},
+        {"isi": "stok", "gudang": "Pekanbaru"},
+    ])
+    assert r1["found"] and r1["format_asli_dipertahankan"] is True
+    assert "kolom_dari_permintaan_sebelumnya" not in r1     # giliran pertama
+
+    r2 = ai_sheet.fill_columns(sid, ADMIN, [
+        {"isi": "harga_accurate"},
+        {"isi": "harga_sims"},
+    ], can_sims=True)
+    assert r2["found"]
+    baris = _baca_hasil(r2["export_id"])
+    assert baris[0] == ["Part Number", "Stok JAKARTA", "Stok PEKANBARU",
+                        "Harga", "Harga SIMS (CNY)"]
+    # Nilai stok giliran PERTAMA masih ada, bukan sekadar judul kolomnya.
+    assert baris[1][:3] == ["WG9925520270", 8, 4]
+    assert baris[2][:3] == ["AZ9925520271", 3, 0]
+    # Model diberi tahu kolom warisan itu supaya tak bilang "harus digabung sendiri".
+    assert r2["kolom_dari_permintaan_sebelumnya"] == ["Stok JAKARTA", "Stok PEKANBARU"]
+    assert "MENERUSKAN" in r2["catatan"]
+    # Kolom yang diisi ULANG dilaporkan sebagai kolom giliran ini, bukan warisan.
+    assert [c["kolom"] for c in r2["kolom"]] == ["Harga", "Harga SIMS (CNY)"]
+
+
+def test_isi_ulang_kolom_sama_tidak_bikin_kolom_kembar(gudang_stok):
+    sid = _sheet_pn(USER)
+    ai_sheet.fill_columns(sid, USER, [{"isi": "stok", "gudang": "Jakarta"}])
+    r = ai_sheet.fill_columns(sid, USER, [{"isi": "stok", "gudang": "Jakarta"}])
+    assert _baca_hasil(r["export_id"])[0] == ["Part Number", "Stok JAKARTA"]
+    assert r.get("kolom_dari_permintaan_sebelumnya") is None
+
+
+def test_sheet_tulis_setelah_isi_kolom_pertahankan_keduanya(gudang_stok):
+    """`sheet_tulis` (dikte user) & `sheet_isi_kolom` menumpuk di file yang SAMA —
+    dan angka 'sel_ditulis' tetap angka permintaan giliran ini, bukan akumulasi."""
+    sid = _sheet_pn(USER)
+    ai_sheet.fill_columns(sid, USER, [{"isi": "stok", "gudang": "Jakarta"}])
+    r = ai_sheet.tulis(sid, USER, kolom="Supplier", nilai_semua="MAS")
+    assert r["found"] and r["sel_ditulis"] == 3          # 3 baris, BUKAN 3+3 stok
+    baris = _baca_hasil(r["export_id"])
+    assert baris[0] == ["Part Number", "Stok JAKARTA", "Supplier"]
+    assert baris[1] == ["WG9925520270", 8, "MAS"]
+    assert r["kolom_dari_permintaan_sebelumnya"] == ["Stok JAKARTA"]
+
+
+def test_warna_status_bertahan_di_permintaan_berikutnya(gudang_stok):
+    """Warna READY/KOSONG dari giliran lalu tak boleh luntur hanya karena
+    permintaan berikutnya cuma soal kolom harga."""
+    sid = _sheet_pn(USER)
+    r1 = ai_sheet.fill_columns(sid, USER, [{"isi": "stok", "gudang": "Jakarta"}],
+                               tandai_status=True)
+    assert r1["found"] and r1["status_ringkas"]["hijau"] == 2
+    r2 = ai_sheet.fill_columns(sid, USER, [{"isi": "harga_accurate"}])
+    baris = _baca_hasil(r2["export_id"])
+    assert baris[0] == ["Part Number", "Stok JAKARTA", "Status", "Keterangan", "Harga"]
+    assert baris[1][2] == "READY"
+    assert "status_ringkas" not in r2      # tak diminta ulang → tak diklaim ulang
+
+
+def test_ringkasan_sebut_kolom_yang_sudah_diisi(gudang_stok):
+    sid = _sheet_pn(USER)
+    assert "kolom_sudah_diisi_sebelumnya" not in ai_sheet.ringkas(
+        ai_sheet.get_sheet(sid, USER["username"]))
+    ai_sheet.fill_columns(sid, USER, [{"isi": "stok", "gudang": "Jakarta"}])
+    out = ai_sheet.ringkas(ai_sheet.get_sheet(sid, USER["username"]))
+    assert out["kolom_sudah_diisi_sebelumnya"] == ["Stok JAKARTA"]

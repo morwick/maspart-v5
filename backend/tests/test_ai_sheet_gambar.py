@@ -264,3 +264,51 @@ def test_gambar_saja_tak_mengklaim_pn_hilang(sheet, monkeypatch):
     assert out["found"] is True
     assert out["pn_tidak_ditemukan"] == [] and out["pn_tidak_ditemukan_total"] == 0
     assert "sumber" not in out                      # tak ada sumber data yang dipakai
+
+
+# ── Kolom foto BERTAHAN di permintaan berikutnya (bug pemilik 2026-09-07) ─────
+
+def _xlsx_pn() -> bytes:
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Part No."])
+    ws.append([PN_ADA])
+    ws.append([PN_TAK])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_kolom_foto_tetap_ada_saat_giliran_berikut_isi_stok(monkeypatch):
+    """Minta foto, lalu minta stok: file terbaru harus berisi KEDUANYA — kolom
+    fotonya tetap ada DAN gambarnya tetap ditempel saat diunduh."""
+    monkeypatch.setattr(ai_sheet.part_index, "search_exact_pns", lambda pns: [
+        {"part_number": PN_ADA, "part_name": "Wheel hub", "stok": "5",
+         "harga": "Rp 100.000", "gudang": {"JAKARTA": 5}}])
+    monkeypatch.setattr(ai_sheet.part_index, "gudang_names", lambda: ["JAKARTA"])
+    monkeypatch.setattr(ai_sheet.part_index, "_pn_flat_map", lambda: {})
+
+    p = ai_sheet.parse_upload(_xlsx_pn(), "recom.xlsx")
+    sid = ai_sheet.put_sheet(USER["username"], p)
+    r1 = ai_sheet.fill_gambar(sid, USER, ["foto"])
+    assert r1["found"] and r1["baris_berfoto"] == 1
+
+    r2 = ai_sheet.fill_columns(sid, USER, [{"isi": "stok", "gudang": "Jakarta"}])
+    assert r2["found"]
+    b = ai_export._stash[r2["export_id"]]["builder"]
+    # Masih builder gambar (foto giliran lalu tak dibuang) + kolom stok baru.
+    assert b["kind"] == "sheet_gambar_isi"
+    assert b["kol_foto"] and b["foto"][0] == FOTO[PN_ADA]
+    assert r2["kolom_dari_permintaan_sebelumnya"] == ["Foto 1", "Foto 2"]
+    assert [c["kolom"] for c in r2["kolom"]] == ["Stok JAKARTA"]
+
+
+def test_minta_foto_dua_kali_tidak_bikin_kolom_foto_kembar(monkeypatch):
+    monkeypatch.setattr(ai_sheet.part_index, "_pn_flat_map", lambda: {})
+    p = ai_sheet.parse_upload(_xlsx_pn(), "recom.xlsx")
+    sid = ai_sheet.put_sheet(USER["username"], p)
+    ai_sheet.fill_gambar(sid, USER, ["foto"])
+    r = ai_sheet.fill_gambar(sid, USER, ["foto"])
+    b = ai_export._stash[r["export_id"]]["builder"]
+    assert b["kol_foto"] == [1, 2]          # bukan [3, 4] di sebelah yang lama

@@ -2550,8 +2550,9 @@ def _t_sheet_jadi_penawaran(args: dict, user: dict) -> dict:
     if not parsed:
         return {"found": False, "error": "Tidak ada file Excel terlampir (atau kedaluwarsa). "
                                          "Minta user mengunggahnya."}
-    headers = list(parsed["headers"])
-    body = [list(r) for r in parsed["_body"]]
+    # Titik mulai = file user + isian giliran SEBELUMNYA (ai_sheet._keadaan): tanpa
+    # ini kolom yang sudah diisi permintaan lalu HILANG dari file unduhan baru.
+    headers, body = ai_sheet._keadaan(parsed)
     roles = parsed["roles"]
 
     pn_i = ai_sheet._cari_kolom(headers, (args.get("kolom_pn") or "").strip())
@@ -2907,8 +2908,9 @@ def _t_sheet_isi_part_number(args: dict, user: dict) -> dict:
                 "error": "Sebutkan nomor rangka/VIN unitnya — Part Number diambil dari BOM unit "
                          "itu. Tanpa rangka, satu nama bisa cocok ke banyak PN (ambigu)."}
 
-    headers = list(parsed["headers"])
-    body = [list(r) for r in parsed["_body"]]
+    # Titik mulai = file user + isian giliran SEBELUMNYA (ai_sheet._keadaan): tanpa
+    # ini kolom yang sudah diisi permintaan lalu HILANG dari file unduhan baru.
+    headers, body = ai_sheet._keadaan(parsed)
 
     # Kolom NAMA sumber: pakai yang disebut user, kalau tidak pakai deteksi peran.
     kolom_nama = (args.get("kolom_nama") or "").strip()
@@ -3030,8 +3032,9 @@ def _t_sheet_cek_qty(args: dict, user: dict) -> dict:
         return {"found": False,
                 "error": "Sebutkan nomor rangka/VIN unitnya — jumlah (qty) diambil dari BOM unit itu."}
 
-    headers = list(parsed["headers"])
-    body = [list(r) for r in parsed["_body"]]
+    # Titik mulai = file user + isian giliran SEBELUMNYA (ai_sheet._keadaan): tanpa
+    # ini kolom yang sudah diisi permintaan lalu HILANG dari file unduhan baru.
+    headers, body = ai_sheet._keadaan(parsed)
     roles = parsed["roles"]
 
     kolom_pn = (args.get("kolom_pn") or "").strip()

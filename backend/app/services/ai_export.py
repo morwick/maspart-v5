@@ -863,21 +863,32 @@ def isi_di_tempat(src: bytes, rencana: dict, status: list[str] | None = None,
         fmt = {int(k): v for k, v in (rencana.get("fmt") or {}).items()}
         lapor = {"sel_diisi": 0, "sel_dilewati_rumus": 0,
                  "sel_dilewati_sudah_terisi": 0, "sel_dilewati_merge": 0}
+        # `hanya_hitung` (opsional) = koordinat isian GILIRAN INI. Isian giliran
+        # sebelumnya tetap DITULIS — file ini selalu salinan segar file asli, jadi
+        # tanpa itu kolom lama raib — tapi tak boleh ikut dihitung, supaya angka
+        # yang dilaporkan ke user tetap angka permintaannya sendiri.
+        hitung = rencana.get("hanya_hitung")
+        hitung = None if hitung is None else {(int(a), int(b)) for a, b in hitung}
+
+        def _catat(kunci: str, i: int, j: int) -> None:
+            if hitung is None or (i, j) in hitung:
+                lapor[kunci] += 1
+
         for i, j, val in (rencana.get("isian") or []):
             if i >= len(row_map) or j not in peta_kolom:
                 continue
             r, c = row_map[i], peta_kolom[j]
             sel = ws.cell(row=r, column=c)
             if not _bisa_tulis(sel):
-                lapor["sel_dilewati_merge"] += 1
+                _catat("sel_dilewati_merge", i, j)
                 continue
             if j < ncol:                       # ── kolom MILIK user: hati-hati ──
                 lama = sel.value
                 if isinstance(lama, str) and lama.startswith("="):
-                    lapor["sel_dilewati_rumus"] += 1
+                    _catat("sel_dilewati_rumus", i, j)
                     continue
                 if (val is None or val == "") and lama is not None and str(lama).strip() != "":
-                    lapor["sel_dilewati_sudah_terisi"] += 1
+                    _catat("sel_dilewati_sudah_terisi", i, j)
                     continue
             else:                              # ── kolom BARU: warisi gaya baris ──
                 tetangga = _sel_ada(ws, r, ncol)
@@ -892,7 +903,7 @@ def isi_di_tempat(src: bytes, rencana: dict, status: list[str] | None = None,
                 angka = (isinstance(sel.value, (int, float)) and not isinstance(sel.value, bool)) \
                     or isinstance(val, Rumus)
                 sel.number_format = fmt.get(j, _FMT_DEFAULT) if angka else "General"
-            lapor["sel_diisi"] += 1
+            _catat("sel_diisi", i, j)
 
         # WARNA status HANYA di kolom yang kita tambahkan — sel milik user tak
         # pernah dicat ulang. Statusnya tetap terbaca karena dwi-encode (ada kolom
