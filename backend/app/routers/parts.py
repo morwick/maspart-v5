@@ -31,9 +31,9 @@ from ..schemas import (
     PartPhotos,
     SearchResponse,
 )
-from ..services import (accurate, ai_export, catalog, compare, epc_bom, exploded_view, gudang,
-                        image_search, part_index, permissions, reservations, search_log, sims,
-                        weichai_stock)
+from ..services import (accurate, ai_export, catalog, compare, epc_bom, exploded_view,
+                        foto_blacklist, gudang, image_search, part_index, permissions,
+                        reservations, search_log, sims, weichai_stock)
 from ..services.supabase_client import fetch_part_photos, get_user_gudang
 
 _MAX_IMAGE_BYTES = 15 * 1024 * 1024  # 15 MB
@@ -774,13 +774,33 @@ def photos(
 ):
     # Utamakan SIMS; kalau kosong, pakai foto yang sudah terindeks di galeri
     # Cari-by-Foto (part_image_index); terakhir fallback ke tabel part_photos.
-    sims_urls = sims.get_images(pn, force_refresh=refresh)
-    if sims_urls:
-        return PartPhotos(part_number=pn.strip(), photos=sims_urls, source="sims")
-    idx_urls = image_search.indexed_urls(pn)
-    if idx_urls:
-        return PartPhotos(part_number=pn.strip(), photos=idx_urls, source="image_index")
-    return PartPhotos(part_number=pn.strip(), photos=fetch_part_photos(pn), source="part_photos")
+    #
+    # Setiap sumber disaring daftar-hitam: SIMS kadang menempelkan foto part
+    # SAUDARA ke sebuah PN (mis. foto dekrup di PN kampas kopling), dan galeri
+    # lokal menyalinnya apa adanya. Menyaring per sumber — bukan sekali di akhir
+    # — supaya sumber yang isinya habis tersaring JATUH ke sumber berikutnya,
+    # bukan menampilkan "tidak ada gambar" padahal foto benar tersedia di bawahnya.
+    # `dibuang` sengaja SET, bukan penghitung: galeri lokal berisi URL SIMS yang
+    # sama persis, jadi menjumlah per sumber akan menghitung foto yang sama dua kali.
+    dibuang: set[str] = set()
+
+    def _saring(urls: list[str]) -> list[str]:
+        sisa = foto_blacklist.filter_urls(pn, urls)
+        dibuang.update(set(urls or []) - set(sisa))
+        return sisa
+
+    sims_bersih = _saring(sims.get_images(pn, force_refresh=refresh))
+    if sims_bersih:
+        return PartPhotos(part_number=pn.strip(), photos=sims_bersih, source="sims",
+                          tersembunyi=len(dibuang))
+
+    idx_bersih = _saring(image_search.indexed_urls(pn))
+    if idx_bersih:
+        return PartPhotos(part_number=pn.strip(), photos=idx_bersih, source="image_index",
+                          tersembunyi=len(dibuang))
+
+    return PartPhotos(part_number=pn.strip(), photos=_saring(fetch_part_photos(pn)),
+                      source="part_photos", tersembunyi=len(dibuang))
 
 
 @router.get("/spec")

@@ -56,6 +56,10 @@ class PartPhotos(BaseModel):
     part_number: str
     photos: list[str] = []
     source: str = ""  # "sims" | "part_photos" | ""
+    # Jumlah foto yang DISARING daftar-hitam (foto terbukti bukan part ini).
+    # Hanya dipakai klien untuk memberi tahu admin bahwa ada yang disembunyikan
+    # dan bisa dipulihkan; akun biasa cukup melihat sisanya.
+    tersembunyi: int = 0
 
 
 class ImageMatch(BaseModel):

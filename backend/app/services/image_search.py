@@ -24,7 +24,7 @@ from pathlib import Path
 import requests
 
 from ..core.config import get_settings
-from . import part_index as _part_index, sims
+from . import foto_blacklist, part_index as _part_index, sims
 
 try:
     import numpy as np
@@ -375,7 +375,7 @@ def preload_local_index() -> None:
 # Peta PN→URL foto utk etalase pembeli — build SEKALI per isi galeri (kunci cache
 # = jumlah baris; galeri hanya bertambah lewat append). Jangan panggil
 # indexed_urls() per-PN utk ribuan produk: itu scan seluruh meta tiap panggilan.
-_photo_map_cache: dict = {"n": -1, "map": {}}
+_photo_map_cache: dict = {"n": -1, "bl": -1, "map": {}}
 
 
 def photo_url_map() -> dict[str, str]:
@@ -386,16 +386,20 @@ def photo_url_map() -> dict[str, str]:
         return {}
     meta = _local_meta or []
     c = _photo_map_cache
-    if c["n"] != len(meta):
+    # Kunci cache ikut versi daftar-hitam: tanpa itu etalase tetap memajang foto
+    # yang baru saja ditandai salah (jumlah baris galeri tak berubah saat blacklist).
+    bl = foto_blacklist.versi()
+    if c["n"] != len(meta) or c["bl"] != bl:
         m: dict[str, str] = {}
         for pn, url in meta:
-            if not url:
+            if not url or foto_blacklist.diblokir(pn, url):
                 continue
             key = pn.strip().upper()
             cur = m.get(key)
             if cur is None or (cur.startswith(_LEARNED_SCHEME) and url.startswith("http")):
                 m[key] = url
         c["n"] = len(meta)
+        c["bl"] = bl
         c["map"] = m
     return c["map"]
 
@@ -558,10 +562,16 @@ def _local_search(query_vec: list[float], distance_threshold: float, fetch_count
 
 def _fetch_candidates(query_vec: list[float], distance_threshold: float, fetch_count: int) -> list[dict]:
     """Ambil kandidat foto termirip. Utamakan galeri lokal (CSV); fallback ke RPC
-    Supabase hanya bila file lokal tidak ada."""
+    Supabase hanya bila file lokal tidak ada.
+
+    Hasil disaring daftar-hitam foto: baris yang fotonya terbukti bukan milik PN
+    itu (mis. SIMS menempelkan foto part saudara) TIDAK boleh ikut memberi suara —
+    tanpa ini, memotret part X akan terus mengarah ke PN Y yang salah.
+    """
     if local_index_available():
         try:
-            return _local_search(query_vec, distance_threshold, fetch_count)
+            return foto_blacklist.filter_rows(
+                _local_search(query_vec, distance_threshold, fetch_count))
         except Exception as e:
             print(f"[image_search] pencarian lokal gagal, fallback ke RPC: {e}")
 
@@ -577,7 +587,7 @@ def _fetch_candidates(query_vec: list[float], distance_threshold: float, fetch_c
         # pgvector cold-start: kadang 200 + kosong di call pertama → retry sekali
         if rows or attempt >= SEARCH_RPC_RETRIES:
             break
-    return rows
+    return foto_blacklist.filter_rows(rows)
 
 
 # ── Search (agregasi per PN — identik image_search.py) ───────────────
@@ -763,7 +773,12 @@ def index_count() -> int:
 
 def indexed_urls(pn: str) -> list[str]:
     """URL foto SIMS yang tersimpan di index Cari-by-Foto (part_image_index).
-    Utamakan galeri lokal (CSV); fallback ke query Supabase."""
+    Utamakan galeri lokal (CSV); fallback ke query Supabase.
+
+    TIDAK menyaring daftar-hitam — pemanggil yang menampilkan ke pengguna
+    (`/api/parts/photos`) menyaring sendiri, sedangkan `index_part` justru butuh
+    daftar UTUH supaya foto yang sudah ada tak diunduh & di-embed ulang.
+    """
     if local_index_available():
         key = (pn or "").strip().upper()
         return sorted({url for (p, url) in _local_meta if url and p.strip().upper() == key})

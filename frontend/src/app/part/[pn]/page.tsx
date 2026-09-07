@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import ImageLightbox from "@/components/ImageLightbox";
 import Viewer3D from "@/components/Viewer3D";
-import { ApiError, cekPartDiUnit, deleteRakFoto, getAccurateStock, getPart3d, getPartExploded, getPartExplodedFigure, getPartPhotos, getPartSpec, getPartVarian, getBuyerLocations, getRakForPart, getWeichaiStock, part3dFileUrl, partImageUrl, saveRak, searchParts, uploadRakFoto, type AccurateStock, type BuyerLocation, type CekUnitResult, type Part3d, type PartExplodedFigure, type PartResult, type PartSpec, type PartVarian, type PartVarianItem, type RakInfo, type WeichaiStock } from "@/lib/api";
+import { ApiError, cekPartDiUnit, deleteRakFoto, getAccurateStock, getPart3d, getPartExploded, getPartExplodedFigure, getPartPhotos, getPartSpec, getPartVarian, getBuyerLocations, getRakForPart, getWeichaiStock, part3dFileUrl, partImageUrl, pulihkanFoto, saveRak, searchParts, tandaiFotoSalah, uploadRakFoto, type AccurateStock, type BuyerLocation, type CekUnitResult, type Part3d, type PartExplodedFigure, type PartResult, type PartSpec, type PartVarian, type PartVarianItem, type RakInfo, type WeichaiStock } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
 import { ensurePerms } from "@/lib/perms";
 import { addToCart, hasPrice, hasWeight } from "@/lib/cart";
@@ -73,6 +73,11 @@ export default function PartDetailPage() {
   const [rakOpen, setRakOpen] = useState<string | null>(null);
   const [kelola, setKelola] = useState<string[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
+  // Daftar-hitam foto (admin): berapa foto part ini yang disembunyikan karena
+  // terbukti bukan miliknya, + kunci tombol selama permintaan berjalan.
+  const [fotoTersembunyi, setFotoTersembunyi] = useState(0);
+  const [fotoBusy, setFotoBusy] = useState(false);
+  const [fotoErr, setFotoErr] = useState("");
 
   useEffect(() => {
     const b = getUser()?.role === "pembeli";
@@ -138,6 +143,55 @@ export default function PartDetailPage() {
     void muatRak();
   }, [muatRak]);
 
+  // ── Foto salah (admin) ────────────────────────────────────────────
+  // SIMS kadang menempelkan foto part SAUDARA ke sebuah PN (mis. foto dekrup
+  // di PN kampas kopling), dan galeri Cari-by-Foto menyalinnya apa adanya.
+  // Menandai foto salah membuangnya dari halaman ini, dari etalase, DAN dari
+  // pemungutan suara Cari by Foto — tanpa menghapus baris galeri, jadi bisa
+  // dipulihkan bila ternyata keliru.
+  const muatFoto = useCallback(async () => {
+    const t = getToken();
+    if (!pn || !t) return;
+    const r = await getPartPhotos(pn, t);
+    setPhotos(r.photos);
+    setPhotoSource(r.source);
+    setFotoTersembunyi(r.tersembunyi ?? 0);
+  }, [pn]);
+
+  const tandaiFoto = useCallback(
+    async (url: string) => {
+      const t = getToken();
+      if (!t || fotoBusy) return;
+      if (!window.confirm(`Sembunyikan foto ini dari ${pn}?\n\nFoto juga berhenti dipakai "Cari by Foto". Bisa dipulihkan lagi.`)) return;
+      setFotoBusy(true);
+      setFotoErr("");
+      try {
+        await tandaiFotoSalah(t, pn, { urls: [url] });
+        await muatFoto();
+      } catch (e) {
+        setFotoErr(e instanceof Error ? e.message : "Gagal menandai foto.");
+      } finally {
+        setFotoBusy(false);
+      }
+    },
+    [pn, fotoBusy, muatFoto],
+  );
+
+  const pulihkanSemuaFoto = useCallback(async () => {
+    const t = getToken();
+    if (!t || fotoBusy) return;
+    setFotoBusy(true);
+    setFotoErr("");
+    try {
+      await pulihkanFoto(t, pn);
+      await muatFoto();
+    } catch (e) {
+      setFotoErr(e instanceof Error ? e.message : "Gagal memulihkan foto.");
+    } finally {
+      setFotoBusy(false);
+    }
+  }, [pn, fotoBusy, muatFoto]);
+
   useEffect(() => {
     const token = getToken();
     if (!token) {
@@ -168,6 +222,7 @@ export default function PartDetailPage() {
         if (!active) return;
         setPhotos(r.photos);
         setPhotoSource(r.source);
+        setFotoTersembunyi(r.tersembunyi ?? 0);
       })
       .catch(() => active && setPhotos([]))
       .finally(() => active && setLoadingPhotos(false));
@@ -422,20 +477,57 @@ export default function PartDetailPage() {
                 ) : photos.length > 0 ? (
                   <div className="grid grid-cols-2 gap-2">
                     {photos.map((url, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => setLightbox(url)}
-                        className="overflow-hidden"
-                        style={{ cursor: "zoom-in", borderRadius: 8, border: "1px solid var(--ink-200)", background: "var(--paper)" }}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={partImageUrl(url)} alt={`${main.part_number} ${i + 1}`} loading="lazy" className="w-full" style={{ aspectRatio: "1", objectFit: "contain" }} />
-                      </button>
+                      // Pembungkus relatif: tombol "foto salah" admin melayang di
+                      // sudut, jadi TIDAK boleh jadi <button> di dalam <button>.
+                      <div key={i} style={{ position: "relative" }}>
+                        <button
+                          type="button"
+                          onClick={() => setLightbox(url)}
+                          className="overflow-hidden w-full"
+                          style={{ cursor: "zoom-in", borderRadius: 8, border: "1px solid var(--ink-200)", background: "var(--paper)" }}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={partImageUrl(url)} alt={`${main.part_number} ${i + 1}`} loading="lazy" className="w-full" style={{ aspectRatio: "1", objectFit: "contain" }} />
+                        </button>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            disabled={fotoBusy}
+                            onClick={() => void tandaiFoto(url)}
+                            title="Foto ini bukan part tersebut — sembunyikan dari halaman & Cari by Foto"
+                            style={{
+                              position: "absolute", top: 6, right: 6, zIndex: 1,
+                              fontSize: 11, lineHeight: 1, padding: "5px 8px", borderRadius: 6,
+                              border: "1px solid var(--ink-200)", background: "var(--paper)",
+                              color: "var(--danger-600)", cursor: fotoBusy ? "wait" : "pointer",
+                              opacity: fotoBusy ? 0.6 : 0.92,
+                            }}
+                          >
+                            ✕ salah
+                          </button>
+                        )}
+                      </div>
                     ))}
                   </div>
                 ) : (
                   <div className="img-ph" style={{ height: 220 }}>Tidak ada gambar</div>
+                )}
+                {isAdmin && fotoTersembunyi > 0 && (
+                  <div className="mt-2 flex items-center gap-2" style={{ fontSize: 11.5, color: "var(--ink-500)" }}>
+                    {fotoTersembunyi} foto disembunyikan (bukan part ini)
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={fotoBusy}
+                      onClick={() => void pulihkanSemuaFoto()}
+                      style={{ fontSize: 11.5, padding: "2px 8px" }}
+                    >
+                      Pulihkan
+                    </button>
+                  </div>
+                )}
+                {fotoErr && (
+                  <div className="mt-2" style={{ fontSize: 11.5, color: "var(--danger-600)" }}>{fotoErr}</div>
                 )}
               </section>
 

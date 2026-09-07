@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from ..core.config import get_settings
 from ..core.security import hash_password
 from ..deps import require_admin
-from ..services import accurate, ai_chat_log, ai_sinonim_learn, app_config, cache_util, catalog_bom, customer_map, gudang, gudang_config, harga, image_search, login_history, maksud, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, rak, reservations, search_log, session_policy, sinonim
+from ..services import accurate, ai_chat_log, ai_sinonim_learn, app_config, cache_util, catalog_bom, customer_map, foto_blacklist, gudang, gudang_config, harga, image_search, login_history, maksud, orders, part_index, pengetahuan, pengetahuan_extract, pengetahuan_index, permissions, populasi, presence, rak, reservations, search_log, session_policy, sinonim
 # vin_ocr hanya menarik stdlib di tingkat modul (cv2/rapidocr di-impor MALAS di
 # dalam fungsi) — aman diimpor di sini, tak menambah RSS server. ⛔ Jangan
 # memindahkan impor cv2/onnxruntime ke tingkat modul: +120-160 MB permanen.
@@ -645,6 +645,62 @@ def index_reload_gallery(_admin: dict = Depends(require_admin)):
     """Muat ulang galeri Cari-by-Foto dari file CSV (setelah CSV diperbarui),
     tanpa perlu restart server."""
     return image_search.reload_local_index()
+
+
+# ── Daftar-hitam foto (foto yang terbukti bukan part itu) ────────────
+class FotoSalahRequest(BaseModel):
+    pn: str
+    urls: list[str] = []
+    semua: bool = False          # true = sembunyikan SELURUH foto PN ini
+    catatan: str = ""
+
+
+class FotoPulihRequest(BaseModel):
+    pn: str
+    urls: list[str] = []         # kosong = pulihkan semua foto PN itu
+
+
+@router.get("/foto-blacklist")
+def foto_blacklist_list(
+    pn: str = Query("", description="Kosongkan untuk melihat seluruh daftar."),
+    _admin: dict = Depends(require_admin),
+):
+    """Foto yang disembunyikan karena bukan milik part-nya. Dengan `pn` →
+    entri satu part saja (dipakai halaman Detail Part untuk tombol Pulihkan)."""
+    if pn.strip():
+        return {"pn": pn.strip().upper(), "entri": foto_blacklist.entri(pn)}
+    return {"total_pn": len(foto_blacklist.load()),
+            "total_foto": foto_blacklist.jumlah_foto(),
+            "daftar": foto_blacklist.daftar()}
+
+
+@router.post("/foto-blacklist")
+def foto_blacklist_tambah(body: FotoSalahRequest, admin: dict = Depends(require_admin)):
+    """Tandai foto SALAH: langsung hilang dari Detail Part, etalase, DAN berhenti
+    ikut memberi suara di Cari by Foto. Reversibel lewat /pulihkan — baris galeri
+    (beserta embedding-nya) tidak dihapus."""
+    try:
+        return foto_blacklist.tambah(
+            body.pn, body.urls, semua=body.semua, catatan=body.catatan,
+            oleh=admin.get("username", "admin"),
+        )
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+
+
+@router.post("/foto-blacklist/pulihkan")
+def foto_blacklist_pulihkan(body: FotoPulihRequest, _admin: dict = Depends(require_admin)):
+    """Tampilkan lagi foto yang sempat ditandai salah."""
+    try:
+        return foto_blacklist.pulihkan(body.pn, body.urls)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+
+
+@router.post("/foto-blacklist/reload")
+def foto_blacklist_reload(_admin: dict = Depends(require_admin)):
+    """Baca ulang foto_blacklist.json dari disk (sesudah file di-scp), tanpa restart."""
+    return foto_blacklist.reload()
 
 
 @router.get("/catalog-bom/status")

@@ -1194,6 +1194,29 @@ Test: `test_ai_speed_guard.py` (8) + `test_ai_knowledge.py` diperbarui; total su
 Hasil diagregasi per `part_number` + confidence boost. Foto part di-proxy via
 `/api/parts/image-proxy` & sumber SIMS (`services/sims.py`).
 
+#### 3.5.6a Daftar-hitam foto (`services/foto_blacklist.py`)
+
+SIMS kadang menempelkan foto part **saudara** ke sebuah PN — kejadian nyata
+2026-09-07: `AZ992216002101` (离合器从动盘总成, kampas kopling) diberi 8 foto
+**dekrup** (离合器压盘总成, label cor `WG9?25160021/1`). `fetch_sims_images` mem-query
+`partCode` apa adanya (tanpa fuzzy), dan galeri Cari-by-Foto menyalinnya persis —
+jadi ini murni data pemasok, bukan salah pencocokan kita.
+
+Dampaknya dua: halaman part salah gambar, DAN 8 embedding dekrup berlabel PN
+kampas ikut memberi suara di Cari by Foto (memotret dekrup → PN kampas).
+
+- File `<DATA_DIR>/foto_blacklist.json` — `{PN: {semua, urls, catatan, oleh, pada}}`.
+  `semua: true` menyembunyikan seluruh foto PN itu (termasuk yang belum pernah muncul).
+- Disaring di **dua** tempat: `GET /api/parts/photos` (per sumber, supaya SIMS yang
+  habis tersaring JATUH ke galeri — bukan "tidak ada gambar") dan
+  `image_search._fetch_candidates` + `photo_url_map` (etalase).
+- Admin: tombol **✕ salah** di tiap foto halaman Detail Part (web & APK) →
+  `POST /api/admin/foto-blacklist`; baris "N foto disembunyikan · Pulihkan" →
+  `POST /api/admin/foto-blacklist/pulihkan`. `GET` untuk melihat daftar,
+  `POST /reload` sesudah file di-scp.
+- ⛔ Sengaja **tidak** menghapus baris CSV galeri: keputusan admin bisa keliru dan
+  embedding mahal dihitung ulang. Menyaring reversibel, menghapus tidak.
+
 ### 3.5.7 E-commerce (orders/pembayaran/ongkir/chat)
 
 - **Ongkir**: RajaOngkir/Komerce (`services/shipping.py`). **Pembayaran**: Payment API
@@ -1219,7 +1242,7 @@ Hasil diagregasi per `part_number` + confidence boost. Foto part di-proxy via
 | **geo** `/api/geo` | `GET /reverse·/search` |
 | **ai** `/api/ai` | `GET /status`, `POST /chat`, `POST /feedback`, `GET /feedback` (admin), `POST /feedback/{id}/resolve` (admin), `GET /banding-rangka/export`, `GET /excel/{export_id}` (export dinamis + katalog bergambar §3.5.5h) |
 | **repairkit** `/api/repairkit` | `GET /transmisi`, `GET /transmisi/export` |
-| **admin** `/api/admin` | users, perms, gudang, `upload/{kind}`, `upload-catalog`, monitoring, sales, photos, `index*` (reload galeri/bulk), `catalog-bom/status·rebuild` |
+| **admin** `/api/admin` | users, perms, gudang, `upload/{kind}`, `upload-catalog`, monitoring, sales, photos, `index*` (reload galeri/bulk), `catalog-bom/status·rebuild`, `foto-blacklist` + `/pulihkan·/reload` (foto salah tempel SIMS, §3.5.6a) |
 | **meta** | `GET /health` |
 
 ### 3.5.9 Peta halaman frontend (Next.js App Router, `frontend/src/app/`)

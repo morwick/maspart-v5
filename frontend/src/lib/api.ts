@@ -796,7 +796,13 @@ export function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export type PartPhotos = { part_number: string; photos: string[]; source: string };
+export type PartPhotos = {
+  part_number: string;
+  photos: string[];
+  source: string;
+  /** Jumlah foto yang disaring daftar-hitam (hanya ditampilkan ke admin). */
+  tersembunyi?: number;
+};
 
 export async function getPartPhotos(pn: string, token: string): Promise<PartPhotos> {
   const res = await fetch(`${API_BASE}/api/parts/photos?pn=${encodeURIComponent(pn)}`, {
@@ -1146,6 +1152,57 @@ export async function rebuildCatalogBom(token: string): Promise<CatalogBomRebuil
   const res = await fetch(`${API_BASE}/api/admin/catalog-bom/rebuild`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+// ── Daftar-hitam foto (admin) ───────────────────────────────────────
+/** Entri daftar-hitam satu PN — `semua` menyembunyikan seluruh fotonya. */
+export type FotoBlacklistEntri = {
+  semua?: boolean;
+  urls?: string[];
+  catatan?: string;
+  oleh?: string;
+  pada?: string;
+};
+
+export async function getFotoBlacklist(
+  token: string,
+  pn: string,
+): Promise<{ pn: string; entri: FotoBlacklistEntri }> {
+  const res = await fetch(`${API_BASE}/api/admin/foto-blacklist?pn=${encodeURIComponent(pn)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+/** Tandai foto salah. `semua: true` menyembunyikan seluruh foto PN itu. */
+export async function tandaiFotoSalah(
+  token: string,
+  pn: string,
+  opts: { urls?: string[]; semua?: boolean; catatan?: string } = {},
+): Promise<FotoBlacklistEntri & { pn: string }> {
+  const res = await fetch(`${API_BASE}/api/admin/foto-blacklist`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ pn, urls: opts.urls ?? [], semua: !!opts.semua, catatan: opts.catatan ?? "" }),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+/** Pulihkan foto yang ditandai salah. `urls` kosong = pulihkan semuanya. */
+export async function pulihkanFoto(
+  token: string,
+  pn: string,
+  urls: string[] = [],
+): Promise<{ ok: boolean; pn: string; dipulihkan: number; sisa: number }> {
+  const res = await fetch(`${API_BASE}/api/admin/foto-blacklist/pulihkan`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ pn, urls }),
   });
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
