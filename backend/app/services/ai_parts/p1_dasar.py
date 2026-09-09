@@ -33,7 +33,7 @@ from ..core.config import get_settings
 from .cache_util import CacheTTL
 from . import (abs_scr_codes, accurate, ai_belajar, ai_chat_log, ai_export, ai_knowledge,
                ai_session, ai_sheet,
-               catalog_bom, dtc_codes,
+               catalog_bom, diagnosa_terpandu, dtc_codes,
                dtc_diagnosa, eol_dtc, epc, epc_bom, epc_manual, epc_shantui, epc_weichai,
                exploded_view,
                fault_codes, fault_pdf, filter_crossref, filter_ref,
@@ -43,7 +43,8 @@ from . import (abs_scr_codes, accurate, ai_belajar, ai_chat_log, ai_export, ai_k
                manual_teks, orders, part_index, part_taxonomy, pengetahuan,
                pengetahuan_index, permintaan_tak_terlayani, pin_ecu, pn_keluarga, populasi,
                rak, repairkit, reservations, search_log, sims, sims_eol, sims_warranty, sinonim,
-               skema_ref, telematics, warranty_kasus, weichai_replace, wiring_ref)
+               skema_ref, telematics, warranty_kasus, warranty_profil, weichai_replace,
+               wiring_ref)
 
 logger = logging.getLogger("maspart.ai")
 

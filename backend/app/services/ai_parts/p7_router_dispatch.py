@@ -240,6 +240,8 @@ _DISPATCH = {
     "excel_riwayat_klaim": _t_excel_riwayat_klaim,
     "rekap_klaim": _t_rekap_klaim,
     "kasus_serupa": _t_kasus_serupa,
+    "diagnosa_terpandu": _t_diagnosa_terpandu,
+    "part_klaim_terkait": _t_part_klaim_terkait,
     "lihat_unit_armada": _t_lihat_unit_armada,
     "terakhir_online": _t_terakhir_online,
     "ganti_nama_unit": _t_ganti_nama_unit,

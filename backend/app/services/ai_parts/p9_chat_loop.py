@@ -2483,6 +2483,8 @@ _TOOL_LABEL = {
     "excel_riwayat_klaim": "Menyiapkan Excel riwayat klaim",
     "rekap_klaim": "Merekap klaim garansi",
     "kasus_serupa": "Mencari kasus perbaikan serupa",
+    "diagnosa_terpandu": "Mempersempit penyebab gejala",
+    "part_klaim_terkait": "Membaca profil klaim part",
     "lihat_unit_armada": "Melacak posisi armada",
     "terakhir_online": "Mengecek unit terakhir online",
     "ganti_nama_unit": "Mengganti nama unit",

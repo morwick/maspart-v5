@@ -250,13 +250,10 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "rem ABS/ESP/EBS, EV (BMS/VCU/MCU), BCM, airbag (ACU), radar/kamera ADAS, "
                     "SCR/AdBlue, dll — filter dengan 'unit' bila user menyebutnya. Termasuk tabel "
                     "rem ABS WABCO (SPN/FMI + Blink Code + langkah perbaikan) & SCR gas 国V (kode P) "
-                    "— pakai unit='ABS' atau 'SCR'. ⛔ Untuk "
-                    "KELUHAN/GEJALA bebas tanpa kode (mis. 'RPM tidak mau naik', 'asap hitam') "
-                    "→ pakai tool `diagnosa` (asisten perbaikan resmi Sinotruk yang menalar). "
-                    "URUTAN BAKU bila KODE-nya diketahui (termasuk 'apa penyebab kode X'): "
-                    "cari_kode_kesalahan DULU — instan & sudah memuat penyebab + langkah "
-                    "perbaikan resmi; `diagnosa` (20–90 dtk) hanya bila kamus lokal nihil "
-                    "atau user minta penalaran lebih dalam."
+                    "— pakai unit='ABS' atau 'SCR'. ⛔ KELUHAN/GEJALA tanpa kode → "
+                    "diagnosa_terpandu. URUTAN BAKU bila KODE diketahui: cari_kode_kesalahan "
+                    "DULU; `diagnosa` (20–90 dtk) hanya bila kamus lokal nihil atau user minta "
+                    "penalaran lebih dalam."
                 ),
                 "parameters": {
                     "type": "object",
@@ -307,28 +304,21 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "cari_manual",
                 "description": (
-                    "Cari ISI MANUAL teknik resmi (prosa & tabel) — untuk pertanyaan "
-                    "'CARA/BAGAIMANA', arti indikator, nilai/kalibrasi, atau LANGKAH "
-                    "troubleshooting sebuah GEJALA (bukan kode error). Dua sumber: "
-                    "(1) manual servis ECU Bosch mesin MC — kartu gangguan per-gejala "
-                    "(kondisi pemicu, kemungkinan penyebab, langkah pemeriksaan kabel/"
-                    "konektor, tes setelah perbaikan); (2) manual instrumen TFT NanoBCU "
-                    "— panel/dashboard, arti lampu indikator, tabel nilai sensor (rpm/"
-                    "suhu air/tekanan oli), kalibrasi, kasus gangguan panel. Jawaban = "
-                    "isi manual (⚠️ teks aslinya BAHASA CHINA — TERJEMAHKAN ke Indonesia "
-                    "saat menjawab; jangan ubah angka/kode/pin) + gambar halaman tampil "
-                    "INLINE + kartu PDF sumber. Pakai utk 'cara servis panel tft', 'arti "
-                    "lampu X di dashboard', 'nilai sensor tekanan oli', 'cara cek gejala "
-                    "cruise control macet'. Untuk KODE error SPN/FMI/P pakai cari_kode_kesalahan; "
-                    "utk diagram/pin pakai diagram_wiring; untuk DIAGNOSA penyebab & langkah "
-                    "PERBAIKAN gejala kompleks (asisten pabrik) pakai diagnosa."
+                    "Cari ISI MANUAL teknik resmi (prosa & tabel): 'CARA/BAGAIMANA', arti "
+                    "indikator, nilai/kalibrasi, langkah troubleshooting gejala (bukan kode). "
+                    "Sumber: manual servis ECU Bosch mesin MC (kartu gangguan per-gejala) & "
+                    "manual instrumen TFT NanoBCU (panel, lampu indikator, tabel nilai sensor, "
+                    "kalibrasi). Jawaban = isi manual (⚠️ aslinya BAHASA CHINA — TERJEMAHKAN; "
+                    "jangan ubah angka/kode/pin) + gambar halaman INLINE + kartu PDF. Kode "
+                    "SPN/FMI/P → cari_kode_kesalahan; diagram/pin → diagram_wiring; gejala "
+                    "kompleks → diagnosa_terpandu/diagnosa."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "topik": {
                             "type": "string",
-                            "description": "Topik/gejala dalam Bahasa Indonesia, mis. 'lampu indikator panel tft', 'nilai sensor tekanan oli', 'cruise control tombol macet', 'kalibrasi jarum rpm'.",
+                            "description": "Topik/gejala Bahasa Indonesia, mis. 'lampu indikator panel tft', 'nilai sensor tekanan oli'.",
                         },
                     },
                     "required": ["topik"],
@@ -425,24 +415,13 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "diagnosa",
                 "description": (
-                    "⭐ DIAGNOSA KERUSAKAN — pakai untuk 'kenapa …', 'bagaimana cara "
-                    "memperbaiki', atau KELUHAN/GEJALA truk ('RPM terkunci 1500', "
-                    "'rem angin lemah', 'asap hitam'). "
-                    "URUTAN BAKU bila KODE-nya diketahui (termasuk 'apa penyebab kode X'): "
-                    "cari_kode_kesalahan DULU — instan & sudah memuat penyebab + langkah "
-                    "perbaikan resmi; tool ini (20–90 dtk) hanya bila kamus lokal nihil "
-                    "atau user minta penalaran lebih dalam. "
-                    "Menggabungkan ASISTEN PERBAIKAN RESMI "
-                    "SINOTRUK (SIMS EOL AI: manual perbaikan pabrik + kasus kerusakan nyata) "
-                    "dengan kamus DTC lokal (arti kode + lampu MIL/SVS). Jawabannya memuat "
-                    "definisi kerusakan, kemungkinan penyebab, dan langkah pemeriksaan. "
-                    "⏳ Butuh 20–90 detik (pabrik menalar) — WAJAR; jangan ulangi panggilan. "
-                    "⚠️ Bila SIMS menyatakan pengetahuannya belum memuat topik itu, sampaikan "
-                    "JUJUR — ⛔ JANGAN mengarang penyebab/langkah dari pengetahuan umum. "
-                    "Bila jawabannya menyebut komponen yang perlu diganti DAN user menyebut "
-                    "nomor rangka, lanjutkan dengan cari_part_di_unit → PN + stok + harga. "
-                    "(Untuk ISI MANUAL statis — arti lampu indikator, nilai/kalibrasi sensor, "
-                    "tabel, langkah baca-manual — pakai cari_manual, BUKAN diagnosa.)"
+                    "⭐ DIAGNOSA PABRIK (SIMS EOL AI: manual perbaikan + kasus nyata; 20–90 dtk) "
+                    "+ kamus DTC lokal. URUTAN BAKU: KODE → cari_kode_kesalahan DULU; "
+                    "KELUHAN/GEJALA → diagnosa_terpandu dulu; tool ini hanya bila kamus lokal "
+                    "nihil atau user minta penalaran lebih dalam. Jangan ulangi panggilan. "
+                    "⚠️ Bila SIMS bilang topiknya belum ada → JUJUR, "
+                    "⛔ jangan mengarang. Isi manual statis (lampu indikator, nilai sensor) → "
+                    "cari_manual."
                 ),
                 "parameters": {
                     "type": "object",
@@ -452,6 +431,54 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                         "fmi": {"type": "integer", "description": "FMI bila disebut user."},
                         "keluhan": {"type": "string", "description": "Gejala/keluhan apa adanya dari user (mis. 'mesin RPM terkunci di 1500, tidak bisa naik')."},
                     },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "diagnosa_terpandu",
+                "description": (
+                    "⭐ WAWANCARA GEJALA — panggil PERTAMA untuk keluhan lapangan TANPA kode "
+                    "('mesin ngempos di tanjakan', 'kolong bunyi duk'). Mengenali sistem, lalu "
+                    "(1) bila kabur → KARTU 1–3 "
+                    "pertanyaan pilihan, giliran BERAKHIR (jangan tanya_user, jangan jawab "
+                    "sendiri); (2) setelah user menjawab (atau '(lewati)'), panggil LAGI dengan "
+                    "keluhan SAMA + jawaban = teks user → penyebab BERPERINGKAT + langkah cek + "
+                    "bukti klaim garansi (jumlah, km median, mode rusak, part yang diganti "
+                    "bersamaan) + kode & rujukan manual. Kode P0xxx/SPN → "
+                    "cari_kode_kesalahan; penalaran pabrik → diagnosa. ⛔ Jangan tambah penyebab "
+                    "di luar hasil."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "keluhan": {"type": "string", "description": "Keluhan apa adanya, SAMA di panggilan pertama & kedua."},
+                        "jawaban": {"type": "string", "description": "Teks jawaban user atas kartu (apa adanya, boleh multi-baris). Kosong di panggilan pertama."},
+                        "sistem": {"type": "string", "description": "Opsional: mesin | angin_rem | transmisi_kopling | suspensi_sasis | gardan_penggerak | kelistrikan | kemudi | kabin_ac | scr_urea."},
+                        "langsung": {"type": "boolean", "description": "true = tanpa kartu, langsung peringkat dengan asumsi."},
+                    },
+                    "required": ["keluhan"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "part_klaim_terkait",
+                "description": (
+                    "PROFIL KERUSAKAN part dari klaim garansi nyata: 'part X sering rusak "
+                    "kenapa', 'rusak di km berapa', 'kalau ganti X sekalian apa'. Per komponen: "
+                    "jumlah klaim, mode rusak, km median & rentang, PN yang pernah dipasang, part "
+                    "LAIN yang diganti dalam klaim yang sama (persen). Bukan stok/harga "
+                    "(cari_part), bukan kasus per WO (kasus_serupa)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "part": {"type": "string", "description": "Nama part/komponen atau satu PN."},
+                    },
+                    "required": ["part"],
                 },
             },
         },
@@ -725,17 +752,13 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     "bernomor yang bisa diklik (user juga tetap bisa mengetik bebas). "
                     "⚠️ Memanggil tool ini MENGAKHIRI giliranmu: jangan digabung "
                     "dengan tool lain, dan jangan menulis jawaban setelahnya.\n"
-                    "PAKAI bila jawabanmu akan BERBEDA ARAH tergantung info yang "
-                    "belum kamu punya DAN info itu tak bisa didapat dari tool — mis. "
-                    "posisi (depan/belakang), unit yang mana, tujuan (cuma tanya vs "
-                    "mau beli), atau gejala mana yang dialami.\n"
-                    "⛔ JANGAN dipakai: (1) untuk hal yang bisa dicari sendiri lewat "
-                    "tool (stok/harga/BOM/kode kesalahan) — kerjakan dulu; (2) sebelum "
-                    "mencoba satu tool pun, kecuali data wajibnya memang belum ada "
-                    "(mis. part per-unit tanpa nomor rangka); (3) dua giliran "
-                    "berturut-turut; (4) untuk hal yang tak mengubah tindakanmu. "
-                    "Bertanya BUKAN pengganti bekerja — kalau ragu tapi masih ada "
-                    "yang bisa dicoba, coba dulu.\n"
+                    "PAKAI bila jawabanmu BERBEDA ARAH tergantung info yang belum ada DAN "
+                    "tak bisa didapat dari tool — posisi (depan/belakang), unit yang mana, "
+                    "tujuan (tanya vs beli). Gejala → diagnosa_terpandu, bukan ini.\n"
+                    "⛔ JANGAN: (1) untuk hal yang bisa dicari lewat tool (stok/harga/BOM/"
+                    "kode) — kerjakan dulu; (2) sebelum mencoba satu tool pun, kecuali data "
+                    "wajibnya belum ada (part per-unit tanpa rangka); (3) dua giliran "
+                    "berturut-turut; (4) untuk hal yang tak mengubah tindakanmu.\n"
                     "⛔ JANGAN membuat opsi 'Lainnya'/'Lewati'/'Terserah' — tampilan "
                     "sudah menyediakannya."
                 ),
@@ -1935,17 +1958,12 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "kasus_serupa",
                 "description": (
-                    "⭐ KELUHAN → PART yang NYATA-NYATA dipasang, dari 1.785 klaim "
-                    "garansi armada sendiri (klaim dibatalkan sudah dibuang). PANGGIL "
-                    "saat user menyebut GEJALA/KERUSAKAN dan ingin tahu part apa yang "
-                    "biasanya diganti: 'dudukan karet suspensi patah ganti apa', 'aki "
-                    "soak', 'rem blong', 'stabilizer patah'. Balasan: part_disarankan "
-                    "(PN, berapa KALI dipasang, KM saat rusak biasanya, mode kegagalan, "
-                    "harga CNY), mode gagal tersering, biaya median, dan contoh WO nyata. "
-                    "Ini BUKTI LAPANGAN, bukan katalog — beda dari cari_part (katalog) "
-                    "dan part_fast_moving (laris jualan per model). Bisa juga diisi PN "
-                    "langsung untuk melihat riwayat kerusakan part itu. ⚠️ Tetap cocokkan "
-                    "ke unit/VIN sebelum memesan."
+                    "⭐ KELUHAN → PART yang NYATA dipasang, dari 1.785 klaim garansi armada "
+                    "(klaim batal dibuang): 'dudukan karet suspensi patah ganti apa', 'aki soak'. "
+                    "Balasan: part_disarankan (PN, kali dipasang, km saat rusak, mode kegagalan, "
+                    "harga CNY), mode gagal tersering, biaya median, contoh WO nyata. Bukti "
+                    "lapangan, bukan katalog (cari_part) / laris (part_fast_moving). Boleh diisi "
+                    "PN. ⚠️ Tetap cocokkan ke unit/VIN sebelum memesan."
                 ),
                 "parameters": {
                     "type": "object",

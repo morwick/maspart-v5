@@ -2828,3 +2828,51 @@ def _t_kasus_serupa(args: dict, user: dict) -> dict:
                             "BUKAN bukti tidak ada kasus serupa; sampaikan apa adanya.")}
 
 
+# ── Diagnosa terpandu (wawancara gejala) + profil klaim per komponen ─────────
+def _t_diagnosa_terpandu(args: dict, user: dict) -> dict:
+    """Keluhan kabur → 1–3 pertanyaan pilihan (kartu) → penyebab berperingkat
+    + langkah cek + bukti klaim garansi + kode kesalahan terkait.
+
+    Mesinnya di `app.services.diagnosa_terpandu` (pohon gejala kurasi +
+    bukti data). Stateless: giliran kedua model mengirim `keluhan` yang sama +
+    `jawaban` (teks jawaban kartu). Kartu memakai sentinel `_tanya` yang sama
+    dengan tanya_user (chat loop mengakhiri giliran), `_tanya_bebas_pagar`
+    karena modul punya pagar tanya-ulang sendiri per (user, keluhan, sistem).
+    `kasus_contoh` ber-nomor WO hanya untuk akun bergerbang garansi; agregat
+    (jumlah, km median, mode rusak) aman lintas peran — tanpa WO/rangka/biaya."""
+    keluhan = (args.get("keluhan") or args.get("gejala") or args.get("query") or "").strip()
+    if not keluhan:
+        return {"found": False, "catatan": "Sebutkan keluhan / gejalanya dulu."}
+    jawaban = args.get("jawaban")
+    if isinstance(jawaban, (dict, list)):
+        jawaban = diagnosa_terpandu._teks_jawaban(jawaban)
+    langsung = bool(args.get("langsung"))
+    try:
+        return diagnosa_terpandu.jalankan(
+            keluhan, jawaban, args.get("sistem"),
+            username=str(user.get("username") or ""),
+            boleh_klaim=_can_garansi(user), langsung=langsung)
+    except Exception:
+        logger.exception("diagnosa_terpandu gagal")
+        return {"found": False, "_cek_tak_lengkap": True,
+                "catatan": ("Mesin diagnosa terpandu GAGAL di server — ini gangguan, bukan "
+                            "bukti tak ada penyebab. Lanjutkan dengan diagnosa/cari_kode_kesalahan "
+                            "dan sampaikan apa adanya.")}
+
+
+def _t_part_klaim_terkait(args: dict, user: dict) -> dict:
+    """Part/komponen → profil klaim garansi armada: berapa klaim, mode rusak,
+    km median, dan part yang NYATA diganti bersamaan (dari klaim yang sama).
+    Agregat tanpa WO/rangka/biaya → aman lintas peran."""
+    part = (args.get("part") or args.get("pn") or args.get("nama") or args.get("query") or "").strip()
+    if not part:
+        return {"found": False, "catatan": "Sebutkan nama part atau PN-nya dulu."}
+    try:
+        return warranty_profil.profil(part)
+    except Exception:
+        logger.exception("part_klaim_terkait gagal")
+        return {"found": False, "_cek_tak_lengkap": True,
+                "catatan": ("Dataset klaim TAK TERBACA di server — gangguan, bukan bukti "
+                            "part ini tak pernah rusak.")}
+
+
