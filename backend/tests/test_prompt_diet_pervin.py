@@ -159,7 +159,11 @@ def test_plafon_ukuran_prompt():
     specs = A._saring_pervin(A._tool_specs(U), _pesan("kampas rem SJ346500"))
     js = json.dumps(specs, ensure_ascii=False)
     assert len(sp) <= 60_000, f"system prompt membengkak: {len(sp):,} char"
-    assert len(js) <= 105_000, f"spec tool membengkak: {len(js):,} char"
+    # 2026-09-10 105.000 → 108.000: KEPUTUSAN SADAR (bukan efek samping).
+    # +3 tool telematics (set_vin_unit, keluarkan_unit_fleet,
+    # audit_fleet_unit) = +3.158 char; sudah diimbangi dengan merampingkan
+    # deskripsi & parameter 11 spec telematics (−1.600), sisa +1.547.
+    assert len(js) <= 108_000, f"spec tool membengkak: {len(js):,} char"
 
 
 def test_diet_benar_benar_menghemat():

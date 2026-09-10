@@ -109,8 +109,13 @@ def _get_token(force: bool = False) -> str:
         return _token
 
 
-def _post(path: str, data: dict) -> dict | list | None:
-    """POST form-urlencoded + retry sekali saat token basi (code≠200/HTTP≥400)."""
+def _post(path: str, data: dict, penuh: bool = False) -> dict | list | None:
+    """POST form-urlencoded + retry sekali saat token basi (code≠200/HTTP≥400).
+
+    `penuh=True` → kembalikan BODY UTUH (berisi `code`) alih-alih `data` saja.
+    Dipakai endpoint TULIS yang sukses tanpa field `data` (unassignCars): di
+    sana `data is None` berarti "tak ada isi", BUKAN gagal — kalau dibaca
+    seperti biasa, operasi yang berhasil akan dilaporkan gagal."""
     def _once() -> requests.Response:
         return requests.post(f"{_BASE}{path}", data=data,
                              headers={"Authorization": _get_token(),
@@ -133,6 +138,8 @@ def _post(path: str, data: dict) -> dict | list | None:
             logger.info("telematics %s -> code %s (%s)", path, body.get("code"),
                         body.get("message"))
             return None
+        if penuh:
+            return body if isinstance(body, dict) else None
         return body.get("data") if isinstance(body, dict) else body
     except requests.RequestException as e:
         logger.info("telematics %s gagal: %s", path, e)
@@ -206,6 +213,52 @@ def _semua_records(page_size: int = 50, maks_halaman: int = 20) -> list[dict]:
 def _fleet_names(rec: dict) -> list[str]:
     return [o.get("organizationName") for o in (rec.get("organizations") or [])
             if o.get("organizationName")]
+
+
+def _kunci_unit(rec: dict) -> list[str]:
+    """SEMUA identifier yang mungkin dipakai user untuk menyebut satu unit.
+
+    User menyebut unit dengan apa saja: frame 8 karakter, VIN 17 karakter, plat
+    yang dipasang sebagai nama, bahkan serial kotak GPS. Identifier itu tersebar
+    di field yang berbeda (`cjh`, `vin`, `kdVin`, `carNumber`, `sbhList`), jadi
+    mencari hanya di satu-dua field membuat unit yang ADA dilaporkan "tidak ada".
+    VIN dummy pabrik dibuang — kalau tidak, satu kata kunci itu cocok ke ratusan
+    unit sekaligus."""
+    kunci = [rec.get("cjh"), rec.get("vin"), rec.get("kdVin"), rec.get("carNumber")]
+    kunci += list(rec.get("sbhList") or [])
+    out = []
+    for k in kunci:
+        s = str(k or "").strip().upper()
+        if s and s != _DUMMY_VIN and s not in out:
+            out.append(s)
+    return out
+
+
+def vin_asli(rec: dict) -> str | None:
+    """VIN unit yang BENAR — `kdVin` lebih dulu, baru `vin`.
+
+    ⚠️ Field `vin` di server TERKUNCI ke default firmware (SLGV…888) selamanya;
+    VIN sungguhan yang diisi operator masuk ke `kdVin`. Karena itu VIN yang sudah
+    diisi tetap terlihat kosong bila hanya `vin` yang dibaca — jangan lapor "VIN
+    belum diisi" sebelum `kdVin` dicek."""
+    for kandidat in (rec.get("kdVin"), rec.get("vin")):
+        v = str(kandidat or "").strip().upper()
+        if v and v != _DUMMY_VIN:
+            return v
+    return None
+
+
+def peta_link(lat, lng) -> str | None:
+    """Koordinat → link Google Maps. Field alamat dari portal sering setengah
+    jadi ('Kabupaten Bengkalis, ') atau kosong, jadi link ini yang membuat posisi
+    bisa dicek sendiri oleh user."""
+    try:
+        la, ln = float(lat), float(lng)
+    except (TypeError, ValueError):
+        return None
+    if la == 0 and ln == 0:
+        return None
+    return f"https://www.google.com/maps?q={la},{ln}"
 
 
 def _nama_unit(rec: dict) -> str:
@@ -323,16 +376,57 @@ def fleet_breakdown(recs: list[dict]) -> list[dict]:
             for k, v in sorted(hit.items(), key=lambda kv: -kv[1])]
 
 
-def cari_unit(cjh_atau_nama: str) -> dict | None:
-    """Cari SATU unit dari cjh/vin/carNumber (untuk ganti nama)."""
-    q = (cjh_atau_nama or "").strip().lower()
+def cari_unit(cjh_atau_nama: str, recs: list[dict] | None = None) -> dict | None:
+    """Cari SATU unit dari frame/VIN/kdVin/nama/serial GPS.
+
+    Dua babak: COCOK PERSIS dulu di seluruh armada, baru cocok SEBAGIAN. Tanpa
+    pemisahan itu, mengetik frame lengkap bisa mendarat di unit lain yang
+    kebetulan memuat potongannya — yang cocok persis harus selalu menang.
+    `recs` boleh dioper bila pemanggil sudah menarik daftar unit (hemat satu
+    kali tarik data ke portal)."""
+    q = (cjh_atau_nama or "").strip().upper()
     if not q:
         return None
-    for r in _semua_records():
-        if q in (r.get("cjh") or "").lower() or q in (r.get("vin") or "").lower() \
-                or q == (r.get("carNumber") or "").lower():
+    recs = _semua_records() if recs is None else recs
+    for r in recs:
+        if q in _kunci_unit(r):
+            return r
+    for r in recs:
+        if any(q in k for k in _kunci_unit(r)):
             return r
     return None
+
+
+def cari_mirip(q: str, recs: list[dict] | None = None, batas: int = 6) -> dict:
+    """Tetangga terdekat saat unit TIDAK ketemu.
+
+    "Tidak ada" itu jawaban mahal: user biasanya salah menyebut AWALAN pabrik
+    sementara ekor nomornya benar, jadi pencocokan 6 karakter terakhir sering
+    menemukan unit yang sebetulnya dimaksud. Rentang prefix ikut disertakan
+    supaya user tahu formatnya wajar atau tidak — mis. awalan 'TJ' ada 116 unit,
+    dari TJ458590 sampai TJ524659."""
+    q = (q or "").strip().upper()
+    if len(q) < 4:
+        return {}
+    recs = _semua_records() if recs is None else recs
+    ekor = q[-6:]
+    mirip: list[dict] = []
+    for r in recs:
+        for k in _kunci_unit(r):
+            if ekor in k:
+                mirip.append({"frame": r.get("cjh"), "nama": _nama_unit(r),
+                              "cocok_pada": k})
+                break
+        if len(mirip) >= batas:
+            break
+    out: dict = {"mirip": mirip}
+    awalan = q[:2]
+    sekeluarga = sorted(str(r.get("cjh") or "").upper() for r in recs
+                        if str(r.get("cjh") or "").upper().startswith(awalan))
+    if sekeluarga:
+        out["prefix"] = {"awalan": awalan, "jumlah": len(sekeluarga),
+                         "dari": sekeluarga[0], "sampai": sekeluarga[-1]}
+    return out
 
 
 def ganti_nama(cjh: str, nama: str) -> dict | None:
@@ -340,6 +434,58 @@ def ganti_nama(cjh: str, nama: str) -> dict | None:
     d = _post("/api/vehicleManage/updateCarNumber",
               {"cjh": cjh, "carNumber": nama})
     return d if isinstance(d, dict) else None
+
+
+def cari_unit_lengkap(q: str) -> tuple[dict | None, dict]:
+    """(unit, tetangga_terdekat) dalam SATU tarikan data.
+
+    Dipisah dari `cari_unit` supaya jalur "tidak ketemu" tidak menarik seluruh
+    armada dua kali: kalau unitnya ketemu, tetangga tak dihitung sama sekali."""
+    recs = _semua_records()
+    rec = cari_unit(q, recs)
+    return rec, ({} if rec else cari_mirip(q, recs))
+
+
+def set_vin(cjh: str, kd_vin: str) -> dict | None:
+    """⚠️ WRITE: isi/override VIN unit (updateKdVin).
+
+    Nilai masuk ke field `kdVin` — `vin` di server tetap default firmware dan
+    itu NORMAL, bukan tanda gagal (verifikasi lewat `vin_asli`). Perangkat harus
+    ONLINE: unit yang mati membalas kode gagal atau menggantung sampai timeout."""
+    d = _post("/api/vehicleManage/updateKdVin",
+              {"cjh": str(cjh).strip(), "kdVin": str(kd_vin).strip().upper()},
+              penuh=True)
+    return d if isinstance(d, dict) else None
+
+
+def keluarkan_dari_fleet(cjh_list) -> bool:
+    """⚠️ WRITE: batalkan alokasi unit (unassignCars) → unit kembali ke kolam
+    'belum dialokasikan'.
+
+    Ini UNDO dari `masukkan_ke_fleet`, dipakai saat unit salah masuk cabang.
+    Sukses ditandai `code` 200: endpoint ini tidak membalas field `data`, jadi
+    body dibaca utuh (`penuh=True`) — kalau tidak, yang berhasil malah terbaca
+    gagal."""
+    cjh = cjh_list if isinstance(cjh_list, str) else ",".join(
+        str(c).strip().upper() for c in cjh_list if str(c or "").strip())
+    if not cjh:
+        return False
+    b = _post("/api/organization/unassignCars", {"cjhList": cjh}, penuh=True)
+    return isinstance(b, dict) and b.get("code") == 200
+
+
+def atur_org_unit(perubahan: list[dict]) -> bool:
+    """⚠️ WRITE: TAMBAH/HAPUS keanggotaan organisasi banyak unit sekaligus
+    (updateMultiVehicleMultiOrg). Body = array
+    [{cjh, delOrgId: [...], addOrgId: [...]}].
+
+    Beda dari `masukkan_ke_fleet` yang MEMINDAHKAN unit ke satu fleet tujuan:
+    di sini keanggotaan lama dipertahankan (`delOrgId` kosong) dan induk yang
+    hilang ditambahkan. Satu panggilan untuk semua unit, bukan N panggilan."""
+    if not perubahan:
+        return False
+    b = _post_json("/api/organization/updateMultiVehicleMultiOrg", perubahan)
+    return isinstance(b, dict) and b.get("code") == 200
 
 
 def _org_tree() -> dict | None:
@@ -472,7 +618,11 @@ def rangkum_unit(rec: dict, loc: dict | None = None) -> dict:
     """Satu unit → bentuk sajian asisten (statis + status GPS bila ada)."""
     out = {
         "frame": rec.get("cjh"),
-        "vin": None if rec.get("vin") == _DUMMY_VIN else rec.get("vin"),
+        # ⚠️ `vin_asli` membaca kdVin DULU: VIN yang diisi operator masuk ke
+        # sana, sedangkan field `vin` terkunci ke default firmware selamanya.
+        # Membaca `vin` saja membuat unit yang VIN-nya SUDAH diisi tetap
+        # dilaporkan kosong.
+        "vin": vin_asli(rec),
         "nama": (rec.get("carNumber") or "").strip() or None,
         "fleet": _fleet_names(rec),
         "model": rec.get("model"),
@@ -495,8 +645,15 @@ def rangkum_unit(rec: dict, loc: dict | None = None) -> dict:
             "rusak": loc.get("isFaulty"),
             "terakhir_online": ts or None,
             "terakhir_online_lalu": label_umur(umur_jam(ts)) if ts else None,
+            # `peta` = link Google Maps siap klik. Alamat dari portal sering
+            # setengah jadi ("Kabupaten Bengkalis, ") atau kosong, jadi tanpa
+            # link ini koordinatnya tak bisa dicek sendiri oleh user.
             "posisi": ({"lat": loc.get("lat"), "lng": loc.get("lng"),
-                        "waktu": ts}
+                        "waktu": ts,
+                        "alamat": (str(loc.get("address")
+                                       or loc.get("lastlocation") or "").strip()
+                                   or None),
+                        "peta": peta_link(loc.get("lat"), loc.get("lng"))}
                        if loc.get("lat") not in (None, 0) else None),
         })
     return out

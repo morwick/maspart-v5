@@ -29,6 +29,14 @@ _HASIL = {
 
 @pytest.fixture
 def dunia(monkeypatch):
+    # Izin kolom dipatok EKSPLISIT. Sebelumnya fixture ini membiarkan
+    # `boleh_harga(STAF)` jatuh ke cache izin global ber-TTL: saat cache masih
+    # hangat dari test lain, staf tak punya col_harga (lulus); begitu TTL habis
+    # di tengah suite panjang, perms kosong = fail-open → staf melihat harga dan
+    # test_harga_disembunyikan_dari_staf GAGAL. Flaky bergantung URUTAN & DURASI
+    # suite, bukan bergantung kode yang diuji.
+    monkeypatch.setattr("app.services.permissions.effective",
+                        lambda kind, u, r: (["col_stok"] if kind == "column" else []))
     monkeypatch.setattr(ai.epc_bom, "assembly_components_global",
                         lambda pn, **kw: dict(_HASIL))
     monkeypatch.setattr(ai.part_index, "rows_for_pns", lambda pns: {

@@ -2132,27 +2132,23 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                 },
             },
         })
+    # Telematics/GPS armada — BACA. Gerbang Menu Control 'ai_telematic'
+    # (admin selalu; staf bila dicentang; pembeli tak pernah).
+    if _can_telematik(user):
         specs.append({
             "type": "function",
             "function": {
                 "name": "lihat_unit_armada",
                 "description": (
-                    "⭐ LACAK ARMADA via GPS/TELEMATICS (Sinotruk Fleet Service): posisi & "
-                    "status real-time (Jalan/Berhenti/Offline), km, level BBM, flag RUSAK. "
-                    "Tiga mode: (1) param 'unit' = SATU unit dari frame/VIN → detail + "
-                    "NAMA/label-nya (pakai untuk 'cek nama unit X', 'unit X di fleet "
-                    "mana'); (2) tanpa filter = ringkasan armada (total, online%, per FLEET, "
-                    "jumlah rusak); (3) filter 'fleet'/'status'/'hanya_rusak'. ⛔ Data GPS "
-                    "live — BUKAN spesifikasi katalog (cek_kendaraan) & BUKAN populasi "
-                    "(cek_populasi)."
+                    "⭐ LACAK ARMADA via GPS/TELEMATICS (Sinotruk): posisi & status real-time (Jalan/Berhenti/Offline), km, BBM, flag RUSAK, link peta. Tiga mode: 'unit' = SATU unit dicari dari frame/VIN/kdVin/nama-plat/serial GPS → detail + NAMA-nya; tanpa filter = ringkasan armada (total, per FLEET, jumlah rusak); filter 'fleet'/'status'/'hanya_rusak'. ⛔ Data GPS live — BUKAN spesifikasi katalog (cek_kendaraan) & BUKAN populasi (cek_populasi). ⛔ Unit tak ketemu ≠ pasti tak ada: bisa terdaftar di akun/dealer lain."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "unit": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Opsional: frame/VIN unit (mis. SJ398956). ARRAY = banyak unit SEKALIGUS, maks 30 — jangan panggil berulang."},
-                        "fleet": {"type": "string", "description": "Opsional: nama fleet/organisasi (mis. MAS, JNT). Kosong = semua."},
-                        "status": {"type": "string", "description": "Opsional filter status: jalan / berhenti / offline."},
-                        "hanya_rusak": {"type": "boolean", "description": "Opsional: hanya unit yang ditandai rusak."},
+                        "unit": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Opsional: frame/VIN/plat/serial GPS. ARRAY = maks 30 unit sekaligus."},
+                        "fleet": {"type": "string", "description": "Opsional: nama fleet. Kosong = semua."},
+                        "status": {"type": "string", "description": "Opsional: jalan / berhenti / offline."},
+                        "hanya_rusak": {"type": "boolean", "description": "Opsional: hanya unit bertanda rusak."},
                     },
                 },
             },
@@ -2162,15 +2158,12 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "excel_unit_armada",
                 "description": (
-                    "EXPORT EXCEL daftar unit armada (semua unit atau per fleet) — LENGKAP "
-                    "dengan Frame, VIN, model, engine, gearbox, km, fleet, status GPS, BBM, "
-                    "flag rusak. Pakai saat user minta 'excel semua unit' / 'daftar unit "
-                    "per fleet dalam Excel'. Kolom Fleet membedakan bila tanpa filter."
+                    "EXPORT EXCEL daftar unit armada (semua atau per fleet) — Frame, VIN, model, engine, gearbox, km, fleet, status GPS, BBM, flag rusak. Untuk 'excel semua unit' / 'daftar unit per fleet dalam Excel'."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "fleet": {"type": "string", "description": "Opsional: nama fleet. Kosong = semua unit (kolom Fleet membedakan)."},
+                        "fleet": {"type": "string", "description": "Opsional: nama fleet. Kosong = semua (kolom Fleet membedakan)."},
                     },
                 },
             },
@@ -2180,22 +2173,14 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "terakhir_online",
                 "description": (
-                    "⭐ KAPAN UNIT TERAKHIR ONLINE / kirim data GPS. Dua mode: (1) param "
-                    "'unit' (frame/VIN) = SATU unit → jam terakhir kirim data + jedanya "
-                    "('3 jam lalu'), status, alamat lokasi terakhir, kecepatan/rpm/suhu "
-                    "air, jam mesin, km & BBM, kekuatan sinyal GSM + jumlah satelit; "
-                    "(2) TANPA 'unit' = seluruh armada DIURUT dari yang PALING LAMA tak "
-                    "mengirim data — untuk 'unit mana yang GPS-nya mati', 'unit yang "
-                    "lama tidak online'. Saring dengan 'lebih_dari_hari' (mis. 7 = yang "
-                    "sudah >7 hari diam) dan/atau 'fleet'. ⛔ Unit tanpa stempel waktu "
-                    "= TIDAK TERBACA, bukan 'baru online' — sebutkan apa adanya."
+                    "⭐ KAPAN UNIT TERAKHIR ONLINE / kirim data GPS. Dua mode: 'unit' = satu unit → jam terakhir + jedanya ('3 jam lalu'), status, alamat + link peta, kecepatan/rpm/suhu, jam mesin, km & BBM, sinyal GSM + satelit; TANPA 'unit' = seluruh armada DIURUT dari yang PALING LAMA diam — untuk 'unit mana yang GPS-nya mati'. Saring dengan 'lebih_dari_hari' dan/atau 'fleet'. ⛔ Unit tanpa stempel waktu = TIDAK TERBACA, bukan 'baru online'. ⛔ status 'offline' tetap punya posisi & jam terakhir — sebutkan apa adanya."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "unit": {"type": "string", "description": "Opsional: frame/VIN satu unit. Kosong = seluruh armada."},
-                        "fleet": {"type": "string", "description": "Opsional (mode armada): saring per nama fleet."},
-                        "lebih_dari_hari": {"type": "number", "description": "Opsional (mode armada): hanya unit yang sudah diam lebih dari N hari."},
+                        "fleet": {"type": "string", "description": "Opsional (mode armada): saring per fleet."},
+                        "lebih_dari_hari": {"type": "number", "description": "Opsional: hanya unit yang diam lebih dari N hari."},
                     },
                 },
             },
@@ -2203,26 +2188,71 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         specs.append({
             "type": "function",
             "function": {
-                "name": "ganti_nama_unit",
+                "name": "daftar_fleet",
                 "description": (
-                    "⚠️ UBAH NAMA/LABEL unit di server Sinotruk (OPERASI TULIS, PERMANEN). "
-                    "WAJIB 2 langkah: panggil DULU tanpa konfirmasi → tampilkan pratinjau "
-                    "(nama lama→baru) dan MINTA PERSETUJUAN user; hanya setelah user setuju "
-                    "panggil lagi dengan konfirmasi=true untuk eksekusi. ⛔ JANGAN pernah "
-                    "langsung konfirmasi=true tanpa user menyetujui."
+                    "DAFTAR FLEET/ORGANISASI di telematics — nama, fleet induk, jumlah unit, dari pohon resmi server (termasuk fleet KOSONG yang tak muncul di lihat_unit_armada). ⭐ Panggil DULU sebelum masukkan_unit_fleet bila nama fleet belum pasti ada. ⛔ JANGAN mengarang nama fleet."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "cjh": {"type": "string", "description": "Frame/cjh (atau VIN) unit yang diganti namanya. Untuk BANYAK unit pakai 'daftar'."},
-                        "nama_baru": {"type": "string", "description": "Nama/label baru untuk unit."},
-                        "daftar": {"type": "array",
-                                   "items": {"type": "object",
-                                             "properties": {"cjh": {"type": "string"},
-                                                            "nama_baru": {"type": "string"}},
-                                             "required": ["cjh", "nama_baru"]},
-                                   "description": "BANYAK unit sekaligus (maks 50): [{cjh, nama_baru}, …]. Pratinjau & konfirmasi berlaku untuk SELURUH daftar — jangan panggil berulang."},
-                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau. Default false = pratinjau."},
+                        "cari": {"type": "string", "description": "Opsional: saring nama fleet. Kosong = semua."},
+                    },
+                },
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "audit_fleet_unit",
+                "description": (
+                    "AUDIT KERAPIAN fleet: cari unit yang jadi anggota CABANG tapi TIDAK ikut fleet INDUKNYA (mis. masuk BANDUNG tapi bukan anggota JNT/MAS). Untuk 'cek kerapian fleet', 'rapikan struktur fleet'. ⛔ Jumlah unit per cabang TETAP BENAR walau timpang (roll-up), jadi ini tak terlihat dari daftar biasa — tapi penyaringan per induk melewatkan unit. 'perbaiki'=true MENAMBAH induk yang hilang (keanggotaan cabang tidak dihapus); itu operasi tulis → ⚠️ TULIS 2 langkah: tanpa konfirmasi = PRATINJAU + minta persetujuan user; konfirmasi=true HANYA setelah user setuju."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fleet": {"type": "string", "description": "Opsional: batasi audit ke satu fleet/cabang."},
+                        "perbaiki": {"type": "boolean", "description": "true = tambahkan fleet induk yang hilang (TULIS)."},
+                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user setuju pratinjau."},
+                    },
+                },
+            },
+        })
+    # Telematics — TULIS ke server Sinotruk (permanen, tanpa undo di sana).
+    # Gerbang TERPISAH 'ai_telematic_tulis': akun yang cuma perlu melacak
+    # unit tidak ikut memegang kunci untuk mengubah data pabrik.
+    if _can_telematik_tulis(user):
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "ganti_nama_unit",
+                "description": (
+                    "⚠️ UBAH NAMA/LABEL unit di server Sinotruk (PERMANEN). ⚠️ TULIS 2 langkah: tanpa konfirmasi = PRATINJAU + minta persetujuan user; konfirmasi=true HANYA setelah user setuju. Banyak unit sekaligus lewat 'daftar' [{cjh, nama_baru}] — jangan panggil berulang."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cjh": {"type": "string", "description": "Frame/cjh (atau VIN) unit. Banyak unit: pakai 'daftar'."},
+                        "nama_baru": {"type": "string", "description": "Nama/label baru."},
+                        "daftar": {"type": "array", "items": {"type": "object", "properties": {"cjh": {"type": "string"}, "nama_baru": {"type": "string"}}, "required": ["cjh", "nama_baru"]}, "description": "Maks 50 pasang; pratinjau & konfirmasi berlaku untuk SELURUH daftar."},
+                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user setuju pratinjau."},
+                    },
+                },
+            },
+        })
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": "set_vin_unit",
+                "description": (
+                    "⚠️ ISI/PERBAIKI VIN unit di telematics (PERMANEN). Untuk unit yang baru dipasang GPS: VIN-nya masih bawaan pabrik sehingga unit sulit dicari. ⚠️ TULIS 2 langkah: tanpa konfirmasi = PRATINJAU + minta persetujuan user; konfirmasi=true HANYA setelah user setuju. ⛔ Perangkat GPS harus ONLINE — unit mati menolak/timeout. ⛔ Saat dicek ulang VIN muncul di field kdVin; field 'vin' tetap SLGV…888 bawaan firmware dan itu NORMAL, bukan gagal."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "unit": {"type": "string", "description": "Frame/cjh unit. Banyak unit: pakai 'daftar'."},
+                        "vin": {"type": "string", "description": "VIN penuh 17 karakter."},
+                        "daftar": {"type": "array", "items": {"type": "object", "properties": {"unit": {"type": "string"}, "vin": {"type": "string"}}, "required": ["unit", "vin"]}, "description": "Maks 50 pasang; pratinjau & konfirmasi untuk SELURUH daftar."},
+                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user setuju pratinjau."},
                     },
                 },
             },
@@ -2232,22 +2262,16 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "daftarkan_unit",
                 "description": (
-                    "⚠️ DAFTARKAN/MASUKKAN unit BARU ke telematics/GPS Sinotruk (OPERASI "
-                    "TULIS, PERMANEN — menambah data). Butuh VIN penuh + SERIAL perangkat "
-                    "GPS (sbh) yang terpasang di unit. WAJIB 2 langkah: panggil DULU tanpa "
-                    "konfirmasi → pratinjau (VIN, frame, serial, apakah sudah terdaftar) & "
-                    "MINTA PERSETUJUAN; setelah user setuju baru konfirmasi=true. ⛔ Serial "
-                    "GPS tak bisa ditebak — harus dari user. Untuk BANYAK unit sekaligus "
-                    "dari Excel pakai sheet_daftar_unit."
+                    "⚠️ DAFTARKAN unit BARU ke telematics/GPS (PERMANEN, menambah data). Butuh VIN penuh + SERIAL perangkat GPS (sbh). ⚠️ TULIS 2 langkah: tanpa konfirmasi = PRATINJAU + minta persetujuan user; konfirmasi=true HANYA setelah user setuju. ⛔ Serial GPS tak bisa ditebak — harus dari user. Banyak unit dari Excel: sheet_daftar_unit."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "vin": {"type": "string", "description": "VIN penuh 17 karakter unit baru."},
-                        "sbh": {"type": "string", "description": "Serial perangkat GPS (sbh) yang terpasang di unit."},
+                        "sbh": {"type": "string", "description": "Serial perangkat GPS yang terpasang."},
                         "km": {"type": "integer", "description": "Kilometer saat pendaftaran (default 0)."},
-                        "euro2": {"type": "boolean", "description": "true bila unit Euro 2 (default false)."},
-                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau."},
+                        "euro2": {"type": "boolean", "description": "true bila unit Euro 2."},
+                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user setuju pratinjau."},
                     },
                     "required": ["vin", "sbh"],
                 },
@@ -2258,18 +2282,14 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "masukkan_unit_fleet",
                 "description": (
-                    "⚠️ MASUKKAN/PINDAHKAN unit ke FLEET (organisasi) di telematics Sinotruk "
-                    "(OPERASI TULIS). Butuh unit (frame/VIN) + nama fleet tujuan. WAJIB 2 "
-                    "langkah: tanpa konfirmasi → pratinjau (fleet sekarang → fleet tujuan) & "
-                    "MINTA PERSETUJUAN; setelah user setuju baru konfirmasi=true. Untuk "
-                    "BANYAK unit dari Excel pakai sheet_masukkan_fleet."
+                    "⚠️ MASUKKAN/PINDAHKAN unit ke FLEET (organisasi). Butuh unit (frame/VIN) + nama fleet tujuan. ⚠️ TULIS 2 langkah: tanpa konfirmasi = PRATINJAU + minta persetujuan user; konfirmasi=true HANYA setelah user setuju. Banyak unit dari Excel: sheet_masukkan_fleet."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "unit": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Frame/cjh atau VIN unit. ARRAY = banyak unit ke fleet yang SAMA, maks 50; pratinjau & konfirmasi berlaku untuk seluruh daftar — jangan panggil berulang."},
-                        "fleet": {"type": "string", "description": "Nama fleet/organisasi tujuan (mis. JNT, PALEMBANG)."},
-                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau."},
+                        "unit": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Frame/cjh atau VIN. ARRAY = maks 50 unit ke fleet yang SAMA."},
+                        "fleet": {"type": "string", "description": "Nama fleet/organisasi tujuan."},
+                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user setuju pratinjau."},
                     },
                     "required": ["unit", "fleet"],
                 },
@@ -2278,22 +2298,17 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
         specs.append({
             "type": "function",
             "function": {
-                "name": "daftar_fleet",
+                "name": "keluarkan_unit_fleet",
                 "description": (
-                    "DAFTAR FLEET/ORGANISASI yang TERSEDIA di telematics Sinotruk — nama, "
-                    "fleet induk (sarang), dan jumlah unit tiap fleet, dari pohon resmi "
-                    "server. Pakai untuk 'fleet apa saja yang ada', 'ada organisasi apa "
-                    "di GPS', 'unit ini mau dimasukkan ke fleet mana saja pilihannya'. "
-                    "⭐ Panggil ini DULU sebelum masukkan_unit_fleet/sheet_masukkan_fleet "
-                    "bila user menyebut nama fleet yang belum pasti ada. ⛔ Beda dari "
-                    "lihat_unit_armada (itu unit + GPS live; fleet kosong tak muncul di "
-                    "sana). ⛔ JANGAN mengarang nama fleet — sebut hanya yang ada di hasil."
+                    "⚠️ KELUARKAN unit dari fleet — BATALKAN alokasi (UNDO dari masukkan_unit_fleet). Unit kembali ke daftar 'belum dialokasikan', TIDAK dihapus dan tetap terlacak GPS. Untuk unit yang telanjur masuk cabang salah. ⚠️ TULIS 2 langkah: tanpa konfirmasi = PRATINJAU + minta persetujuan user; konfirmasi=true HANYA setelah user setuju. ⭐ Untuk MEMINDAH ke fleet lain jangan pakai ini — cukup masukkan_unit_fleet ke tujuan."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "cari": {"type": "string", "description": "Opsional: saring nama fleet yang mengandung teks ini. Kosong = semua."},
+                        "unit": {"type": ["string", "array"], "items": {"type": "string"}, "description": "Frame/cjh atau VIN. ARRAY = maks 50 unit."},
+                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user setuju pratinjau."},
                     },
+                    "required": ["unit"],
                 },
             },
         })
@@ -2302,19 +2317,14 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
             "function": {
                 "name": "buat_fleet",
                 "description": (
-                    "⚠️ BUAT FLEET/organisasi BARU di telematics Sinotruk (OPERASI TULIS, "
-                    "menambah struktur). Butuh nama fleet; opsional 'induk' (fleet induk, "
-                    "default organisasi utama). WAJIB 2 langkah: tanpa konfirmasi → "
-                    "pratinjau (nama + induk + apakah sudah ada) & MINTA PERSETUJUAN; "
-                    "setelah user setuju baru konfirmasi=true. Setelah fleet dibuat, unit "
-                    "dimasukkan lewat masukkan_unit_fleet."
+                    "⚠️ BUAT FLEET/organisasi BARU di telematics. Butuh nama; opsional 'induk' (default organisasi utama). ⚠️ TULIS 2 langkah: tanpa konfirmasi = PRATINJAU + minta persetujuan user; konfirmasi=true HANYA setelah user setuju. Setelah dibuat, unit dimasukkan lewat masukkan_unit_fleet."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "nama": {"type": "string", "description": "Nama fleet baru."},
-                        "induk": {"type": "string", "description": "Opsional: nama fleet induk. Kosong = organisasi utama (akar)."},
-                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user menyetujui pratinjau."},
+                        "induk": {"type": "string", "description": "Opsional: fleet induk. Kosong = organisasi utama."},
+                        "konfirmasi": {"type": "boolean", "description": "true HANYA setelah user setuju pratinjau."},
                     },
                     "required": ["nama"],
                 },
@@ -3179,9 +3189,9 @@ def _tool_specs(user: dict, sheet_id: str = "") -> list[dict]:
                     },
                 },
             })
-        # Isi nama unit MASSAL ke telematics dari Excel (frame → nama). ADMIN-ONLY
-        # + operasi TULIS 2 langkah (pratinjau lalu konfirmasi).
-        if _is_admin(user):
+        # Isi nama unit MASSAL ke telematics dari Excel (frame → nama).
+        # Gerbang 'ai_telematic_tulis' (Menu Control) + TULIS 2 langkah.
+        if _can_telematik_tulis(user):
             specs.append({
                 "type": "function",
                 "function": {

@@ -4338,11 +4338,21 @@ _EXCEL_MAX_ROWS = 1000
 
 # ═══════════════════════════════════════════════════════════════════════
 #  TELEMATICS / GPS ARMADA (Sinotruk Fleet Service) — 2026-07-22
-#  ⛔ ADMIN-ONLY (bukan key Menu Control — sesuai permintaan pemilik, tak bisa
-#  didelegasikan). Data GPS real-time, BUKAN spesifikasi EPC / populasi.
-#  ganti_nama_unit = satu-satunya operasi TULIS: wajib konfirmasi 2 langkah.
+#  Data GPS real-time, BUKAN spesifikasi EPC / populasi.
+#
+#  Gerbang (diubah 2026-09-10 atas permintaan pemilik; sebelumnya `_is_admin`
+#  murni "tak bisa didelegasikan"): kini DUA key Menu Control tab Asisten AI —
+#    _can_telematik       → 'ai_telematic'        : LIHAT (lacak, fleet, Excel)
+#    _can_telematik_tulis → 'ai_telematic_tulis'  : UBAH data di server pabrik
+#  Admin tetap dapat keduanya otomatis; pembeli tak pernah (boleh_ai
+#  fail-closed). Dipisah karena operasi tulis PERMANEN dan portal Sinotruk tak
+#  punya undo — kecuali keluarkan_unit_fleet yang memang UNDO alokasi.
+#  Semua operasi TULIS wajib konfirmasi 2 langkah (pratinjau → konfirmasi=true).
 # ═══════════════════════════════════════════════════════════════════════
-_TELE_DENIED = {"error": "Fitur pelacakan armada hanya untuk admin."}
+_TELE_DENIED = {"error": "Fitur pelacakan armada (telematics/GPS) belum diaktifkan untuk akun ini. Admin bisa memberikannya di Menu Control → tab Asisten AI → 'Telematics/GPS Armada (lihat)'."}
+# Gerbang TULIS terpisah: melihat posisi unit beda kelas dari mengubah
+# data di server pabrik yang tak punya undo.
+_TELE_DENIED_TULIS = {"error": "Akun ini boleh MELIHAT armada tapi tidak boleh MENGUBAH data telematics. Admin bisa memberikannya di Menu Control → tab Asisten AI → 'Telematics — Ubah Data Unit'."}
 _TELE_OFF = {"error": "Koneksi telematics belum dikonfigurasi di server "
                       "(kredensial TELEMATICS_* belum diisi)."}
 _TELE_MAX_TABEL = 60   # baris unit yang disajikan ke model (Excel = lengkap)
@@ -4351,7 +4361,7 @@ _TELE_MAX_TABEL = 60   # baris unit yang disajikan ke model (Excel = lengkap)
 def _t_lihat_unit_armada(args: dict, user: dict) -> dict:
     """Daftar/ringkasan unit armada + status GPS live. Mencakup: SATU unit
     (param `unit` = frame/VIN → termasuk NAMANYA), semua unit, atau per fleet."""
-    if not _is_admin(user):
+    if not _can_telematik(user):
         return dict(_TELE_DENIED)
     if not telematics.available():
         return dict(_TELE_OFF)
@@ -4367,12 +4377,27 @@ def _t_lihat_unit_armada(args: dict, user: dict) -> dict:
     target = (args.get("unit") or args.get("frame") or args.get("cjh")
               or args.get("vin") or "").strip()
     if target:
-        rec = telematics.cari_unit(target)
+        # "Tidak ada" = jawaban mahal → sekalian bawa tetangga terdekatnya.
+        # Pencarian sudah lintas-field (frame/VIN/kdVin/nama/serial GPS), jadi
+        # kalau tetap nihil kemungkinan besar salah ketik AWALAN pabrik.
+        rec, dekat = telematics.cari_unit_lengkap(target)
         if not rec:
             return {"found": False, "dicari": target,
-                    "catatan": (f"Unit '{target}' tidak ditemukan di daftar telematics/GPS. "
-                                "Sampaikan jujur; unit mungkin belum dipasang perangkat GPS. "
-                                "Jangan mengarang nama/status.")}
+                    "mungkin_maksud": (dekat.get("mirip") or []) or None,
+                    "rentang_awalan": dekat.get("prefix"),
+                    "catatan": (
+                        f"Unit '{target}' tidak ditemukan di telematics — sudah dicari di "
+                        "frame, VIN, kdVin, nama/plat, DAN serial perangkat GPS. "
+                        + ("Ada unit dengan ekor nomor yang sama di 'mungkin_maksud' — "
+                           "tawarkan itu sebagai kemungkinan salah ketik, jangan langsung "
+                           "dianggap unit yang dicari. " if dekat.get("mirip") else "")
+                        + ("'rentang_awalan' menunjukkan nomor yang ADA untuk awalan itu. "
+                           if dekat.get("prefix") else "")
+                        + "⛔ 'Tidak ada di sini' HANYA berarti tak terlihat dari akun "
+                          "telematics kita — unit bisa saja terdaftar di dealer/akun lain "
+                          "atau perangkatnya belum pernah online. Sampaikan dua kemungkinan "
+                          "itu, jangan bilang unitnya pasti tidak ada. Jangan mengarang "
+                          "nama/status.")}
         loc = telematics.lokasi_semua()
         u = telematics.rangkum_unit(rec, loc.get(rec.get("cjh")))
         return {
@@ -4431,7 +4456,7 @@ def _t_terakhir_online(args: dict, user: dict) -> dict:
     """KAPAN TERAKHIR ONLINE unit. Satu unit → telemetri terbaru dari perangkat
     GPS-nya (queryVehicleNewestInfo); tanpa unit → armada diurut dari yang
     PALING LAMA tak mengirim data."""
-    if not _is_admin(user):
+    if not _can_telematik(user):
         return dict(_TELE_DENIED)
     if not telematics.available():
         return dict(_TELE_OFF)
@@ -4439,11 +4464,15 @@ def _t_terakhir_online(args: dict, user: dict) -> dict:
               or args.get("vin") or "").strip()
 
     if target:
-        rec = telematics.cari_unit(target)
+        rec, dekat = telematics.cari_unit_lengkap(target)
         if not rec:
             return {"found": False, "dicari": target,
-                    "catatan": (f"Unit '{target}' tidak ada di telematics. Sampaikan "
-                                "jujur; jangan mengarang waktu online.")}
+                    "mungkin_maksud": (dekat.get("mirip") or []) or None,
+                    "rentang_awalan": dekat.get("prefix"),
+                    "catatan": (f"Unit '{target}' tidak ada di telematics (dicari di frame, "
+                                "VIN, kdVin, nama/plat, dan serial GPS). Sampaikan jujur; "
+                                "jangan mengarang waktu online. Bila 'mungkin_maksud' terisi, "
+                                "tawarkan sebagai kemungkinan salah ketik.")}
         cjh = rec.get("cjh")
         sbh = telematics.sbh_dari_rec(rec)
         info = telematics.info_terbaru([sbh])[:1] if sbh else []
@@ -4471,8 +4500,14 @@ def _t_terakhir_online(args: dict, user: dict) -> dict:
             "terakhir_online_lalu": telematics.label_umur(jam),
             "waktu_can": d.get("canTime"),
             "waktu_gps": d.get("gpsTime"),
+            "vin": telematics.vin_asli(rec),
             "lokasi_terakhir": d.get("lastlocation"),
-            "posisi": ({"lat": d.get("lat"), "lng": d.get("lng")}
+            # Link peta ikut disajikan: alamat dari portal sering terpotong
+            # ("Kabupaten Bengkalis, ") atau kosong, dan koordinat telanjang tak
+            # bisa dicek user. Posisi tetap ada walau status 'offline' —
+            # offline ≠ tanpa data.
+            "posisi": ({"lat": d.get("lat"), "lng": d.get("lng"),
+                        "peta": telematics.peta_link(d.get("lat"), d.get("lng"))}
                        if d.get("lat") not in (None, 0) else None),
             "kecepatan_kmh": d.get("speed"),
             "rpm": d.get("rpm"),
@@ -4554,8 +4589,8 @@ def _t_ganti_nama_unit(args: dict, user: dict) -> dict:
     jadi tak bisa lewat _batch_wrap yang menyebar SATU field. Bentuknya array of
     object supaya pasangan tak pernah bisa bergeser — dua array sejajar
     (cjh[] + nama_baru[]) akan salah-pasang diam-diam bila panjangnya beda."""
-    if not _is_admin(user):
-        return dict(_TELE_DENIED)
+    if not _can_telematik_tulis(user):
+        return dict(_TELE_DENIED_TULIS)
     if not telematics.available():
         return dict(_TELE_OFF)
     _daftar = args.get("daftar")
@@ -4615,7 +4650,7 @@ def _t_ganti_nama_unit(args: dict, user: dict) -> dict:
 
 def _t_excel_unit_armada(args: dict, user: dict) -> dict:
     """EXPORT EXCEL daftar unit armada (semua / per fleet) dibangun DI SERVER."""
-    if not _is_admin(user):
+    if not _can_telematik(user):
         return dict(_TELE_DENIED)
     if not telematics.available():
         return dict(_TELE_OFF)
@@ -4657,8 +4692,8 @@ _TELE_MAX_RENAME = 500     # pagar batas baris rename massal per giliran
 def _t_sheet_isi_nama_telematik(args: dict, user: dict) -> dict:
     """Isi NAMA unit MASSAL ke telematics dari Excel (frame→nama). ADMIN-ONLY,
     TULIS 2 langkah (pratinjau lalu konfirmasi)."""
-    if not _is_admin(user):
-        return dict(_TELE_DENIED)
+    if not _can_telematik_tulis(user):
+        return dict(_TELE_DENIED_TULIS)
     if not telematics.available():
         return dict(_TELE_OFF)
     parsed = ai_sheet.get_sheet(args.get("_sheet_id", ""), user.get("username", ""))
@@ -4764,8 +4799,8 @@ def _t_sheet_isi_nama_telematik(args: dict, user: dict) -> dict:
 
 def _t_daftarkan_unit(args: dict, user: dict) -> dict:
     """⚠️ WRITE (2 langkah): DAFTARKAN unit baru ke telematics (VIN + serial GPS)."""
-    if not _is_admin(user):
-        return dict(_TELE_DENIED)
+    if not _can_telematik_tulis(user):
+        return dict(_TELE_DENIED_TULIS)
     if not telematics.available():
         return dict(_TELE_OFF)
     vin = (args.get("vin") or args.get("rangka") or "").strip().upper()
@@ -4813,8 +4848,8 @@ def _t_daftarkan_unit(args: dict, user: dict) -> dict:
 
 def _t_sheet_daftar_unit(args: dict, user: dict) -> dict:
     """⚠️ WRITE (2 langkah): DAFTARKAN unit MASSAL dari Excel (VIN + serial GPS)."""
-    if not _is_admin(user):
-        return dict(_TELE_DENIED)
+    if not _can_telematik_tulis(user):
+        return dict(_TELE_DENIED_TULIS)
     if not telematics.available():
         return dict(_TELE_OFF)
     parsed = ai_sheet.get_sheet(args.get("_sheet_id", ""), user.get("username", ""))
@@ -4914,7 +4949,7 @@ def _org_ids(rec: dict) -> list[int]:
 def _t_daftar_fleet(args: dict, user: dict) -> dict:
     """Daftar FLEET/organisasi yang tersedia di telematics (pohon resmi
     queryOrganization) — termasuk fleet yang BELUM berisi unit."""
-    if not _is_admin(user):
+    if not _can_telematik(user):
         return dict(_TELE_DENIED)
     if not telematics.available():
         return dict(_TELE_OFF)
@@ -4950,8 +4985,8 @@ def _t_daftar_fleet(args: dict, user: dict) -> dict:
 
 def _t_buat_fleet(args: dict, user: dict) -> dict:
     """⚠️ WRITE (2 langkah): buat FLEET/organisasi baru di telematics."""
-    if not _is_admin(user):
-        return dict(_TELE_DENIED)
+    if not _can_telematik_tulis(user):
+        return dict(_TELE_DENIED_TULIS)
     if not telematics.available():
         return dict(_TELE_OFF)
     nama = (args.get("nama") or args.get("fleet") or "").strip()
@@ -5004,8 +5039,8 @@ def _t_masukkan_unit_fleet(args: dict, user: dict) -> dict:
     membuat 3 unit = 6 panggilan → asisten melaporkan "ketiga unit BELUM
     dipindahkan" padahal user sudah setuju. Batching menghapus sebabnya: berapa
     pun unitnya tetap 2 panggilan (pratinjau + konfirmasi)."""
-    if not _is_admin(user):
-        return dict(_TELE_DENIED)
+    if not _can_telematik_tulis(user):
+        return dict(_TELE_DENIED_TULIS)
     if not telematics.available():
         return dict(_TELE_OFF)
     _b = _batch_wrap(_t_masukkan_unit_fleet, args, user, "unit", maks=50, upper=True,
@@ -5047,10 +5082,234 @@ def _t_masukkan_unit_fleet(args: dict, user: dict) -> dict:
             "catatan": f"✅ Unit {cjh} berhasil dimasukkan ke fleet '{tgt['nama']}'."}
 
 
+def _t_keluarkan_unit_fleet(args: dict, user: dict) -> dict:
+    """⚠️ WRITE (2 langkah): KELUARKAN unit dari fleet — batalkan alokasi.
+
+    Ini UNDO dari masukkan_unit_fleet (unassignCars): unit kembali ke kolam
+    'belum dialokasikan', tidak dihapus dari telematics. Dipakai saat unit
+    telanjur masuk cabang yang salah."""
+    if not _can_telematik_tulis(user):
+        return dict(_TELE_DENIED_TULIS)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    _b = _batch_wrap(_t_keluarkan_unit_fleet, args, user, "unit", maks=50, upper=True,
+                     min_len=4, alias=("cjh", "vin"), paralel=False)
+    if _b is not None:
+        return _b
+    unit = (args.get("unit") or args.get("cjh") or args.get("vin") or "").strip()
+    if not unit:
+        return {"error": "Sebutkan unit (frame/VIN) yang mau dikeluarkan dari fleet."}
+    rec = telematics.cari_unit(unit)
+    if not rec:
+        return {"found": False, "catatan": f"Unit '{unit}' tidak ditemukan di telematics."}
+    cjh = rec.get("cjh")
+    org_lama = telematics._fleet_names(rec)
+
+    if not args.get("konfirmasi"):
+        return {"perlu_konfirmasi": True,
+                "pratinjau": {"unit": cjh, "model": rec.get("model"),
+                              "fleet_sekarang": org_lama or ["(belum dialokasikan)"],
+                              "sesudah": "(belum dialokasikan)"},
+                "catatan": (f"⚠️ KONFIRMASI DULU ke user: keluarkan unit {cjh} dari fleet "
+                            f"{org_lama or '(sudah tidak di fleet mana pun)'}? Unit TIDAK "
+                            "dihapus — hanya kembali ke daftar 'belum dialokasikan', dan "
+                            "bisa dimasukkan lagi lewat masukkan_unit_fleet. Bila setuju, "
+                            "panggil keluarkan_unit_fleet lagi dengan konfirmasi=true.")}
+    if not org_lama:
+        return {"found": True, "berhasil": True, "unit": cjh, "tidak_perlu": True,
+                "catatan": f"Unit {cjh} memang sudah tidak berada di fleet mana pun — "
+                           "tidak ada yang diubah."}
+    ok = telematics.keluarkan_dari_fleet([cjh])
+    if not ok:
+        return {"found": False,
+                "catatan": f"Gagal mengeluarkan unit {cjh} dari fleet (server menolak/"
+                           "timeout). Sampaikan jujur, jangan klaim berhasil."}
+    return {"found": True, "berhasil": True, "unit": cjh, "fleet_lama": org_lama,
+            "catatan": f"✅ Unit {cjh} dikeluarkan dari fleet {org_lama} — sekarang "
+                       "berstatus belum dialokasikan."}
+
+
+def _t_set_vin_unit(args: dict, user: dict) -> dict:
+    """⚠️ WRITE (2 langkah): isi/perbaiki VIN unit di telematics (updateKdVin).
+
+    Berpasangan seperti ganti_nama_unit (unit ↔ VIN-nya), jadi batch-nya array
+    of object — dua array sejajar akan salah-pasang diam-diam bila panjangnya
+    beda."""
+    if not _can_telematik_tulis(user):
+        return dict(_TELE_DENIED_TULIS)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    _daftar = args.get("daftar")
+    if isinstance(_daftar, (list, tuple)) and len(_daftar) > 1:
+        pasangan: list[tuple[str, str]] = []
+        for d in _daftar[:50]:
+            if not isinstance(d, dict):
+                continue
+            c = str(d.get("unit") or d.get("cjh") or "").strip().upper()
+            v = str(d.get("vin") or d.get("vin_baru") or "").strip().upper()
+            if c and v and (c, v) not in pasangan:
+                pasangan.append((c, v))
+        if not pasangan:
+            return {"error": "Isi 'daftar' harus [{unit, vin}, …]."}
+        sisa = {k: v for k, v in args.items()
+                if k not in ("daftar", "unit", "cjh", "vin", "vin_baru")}
+        hasil = [_t_set_vin_unit({**sisa, "unit": c, "vin": v}, user)
+                 for c, v in pasangan]
+        return _gabung_hasil("unit", [c for c, _ in pasangan], hasil)
+    if isinstance(_daftar, (list, tuple)) and len(_daftar) == 1 and isinstance(_daftar[0], dict):
+        args = {**args, **{k: v for k, v in _daftar[0].items() if k in ("unit", "cjh", "vin")}}
+    target = (args.get("unit") or args.get("cjh") or "").strip()
+    vin_baru = (args.get("vin") or args.get("vin_baru") or "").strip().upper()
+    if not target or not vin_baru:
+        return {"error": "Sebutkan unit (frame) DAN VIN yang mau diisikan."}
+    if len(vin_baru) != 17:
+        return {"error": f"VIN '{vin_baru}' bukan 17 karakter — VIN unit selalu 17. "
+                         "Minta user mengecek ulang, jangan dipaksakan."}
+    rec = telematics.cari_unit(target)
+    if not rec:
+        return {"found": False,
+                "catatan": f"Unit '{target}' tidak ditemukan di telematics. Cek ulang frame."}
+    cjh = rec.get("cjh")
+    vin_lama = telematics.vin_asli(rec)
+
+    if not args.get("konfirmasi"):
+        return {"perlu_konfirmasi": True,
+                "pratinjau": {"unit": cjh, "model": rec.get("model"),
+                              "vin_sekarang": vin_lama or "(belum diisi)",
+                              "vin_baru": vin_baru,
+                              "sudah_sama": vin_lama == vin_baru},
+                "catatan": ((f"Unit {cjh} VIN-nya SUDAH {vin_baru} — tidak perlu diubah. "
+                             "Sampaikan itu, jangan tetap menulis."
+                             if vin_lama == vin_baru else
+                             f"⚠️ KONFIRMASI DULU ke user: isi VIN unit {cjh} "
+                             f"({rec.get('model')}) dari '{vin_lama or 'kosong'}' menjadi "
+                             f"'{vin_baru}'? Ini menulis permanen ke server Sinotruk.")
+                            + " Bila setuju, panggil set_vin_unit lagi dengan "
+                              "konfirmasi=true. ⚠️ Perangkat GPS unit harus ONLINE — "
+                              "unit yang mati akan menolak/timeout.")}
+    if vin_lama == vin_baru:
+        return {"found": True, "berhasil": True, "unit": cjh, "vin": vin_baru,
+                "tidak_perlu": True,
+                "catatan": f"VIN unit {cjh} memang sudah {vin_baru} — tidak ada yang ditulis."}
+    hasil = telematics.set_vin(cjh, vin_baru)
+    if hasil is None:
+        return {"found": False,
+                "catatan": f"Gagal mengisi VIN unit {cjh} — server menolak/timeout. "
+                           "Penyebab paling sering: perangkat GPS unit sedang OFFLINE. "
+                           "Sampaikan jujur, jangan klaim berhasil; tawarkan ulangi nanti."}
+    return {"found": True, "berhasil": True, "unit": cjh,
+            "vin_lama": vin_lama, "vin_baru": vin_baru,
+            "catatan": (f"✅ VIN unit {cjh} diisi menjadi {vin_baru}. ⚠️ Saat dicek ulang, "
+                        "VIN ini muncul di field kdVin — field 'vin' bawaan firmware TETAP "
+                        "SLGV…888 dan itu normal, bukan tanda gagal.")}
+
+
+def _t_audit_fleet_unit(args: dict, user: dict) -> dict:
+    """AUDIT keanggotaan fleet: unit yang nyantol di cabang TANPA ikut fleet
+    induknya.
+
+    Portal membolehkan unit jadi anggota cabang saja (mis. cuma [BANDUNG]) tanpa
+    anggota induknya (JNT, MAS). Jumlah unit per cabang tetap benar karena
+    roll-up, jadi kelihatan wajar — tapi penyaringan berbasis keanggotaan induk
+    jadi meleset diam-diam. `perbaiki=true` menambahkan induk yang hilang
+    (keanggotaan cabang TIDAK dihapus) — itu operasi TULIS, gerbangnya
+    ai_telematic_tulis + konfirmasi."""
+    if not _can_telematik(user):
+        return dict(_TELE_DENIED)
+    if not telematics.available():
+        return dict(_TELE_OFF)
+    fleets = telematics.daftar_fleet()
+    if not fleets:
+        return {"error": "Telematics tidak merespons — coba lagi sebentar lagi."}
+    induk_dari = {f["id"]: f.get("parent_id") for f in fleets}
+    nama_dari = {f["id"]: f.get("nama") for f in fleets}
+
+    def _leluhur(oid: int) -> list[int]:
+        """Rantai induk SAMPAI akar pohon. Berhenti begitu keluar dari pohon
+        (parent_id bisa menunjuk org di luar jangkauan akun kita)."""
+        out, cur = [], induk_dari.get(oid)
+        while cur in nama_dari and cur not in out and len(out) < 20:
+            out.append(cur)
+            cur = induk_dari.get(cur)
+        return out
+
+    saring = (args.get("fleet") or "").strip().lower()
+    d = telematics.semua_unit()
+    if d is None:
+        return {"error": "Telematics tidak merespons — coba lagi sebentar lagi."}
+    recs = d.get("records") or []
+
+    timpang, tanpa_fleet = [], []
+    for r in recs:
+        ids = {o.get("id") for o in (r.get("organizations") or []) if o.get("id")}
+        if not ids:
+            tanpa_fleet.append(telematics._nama_unit(r))
+            continue
+        kurang: list[int] = []
+        for oid in sorted(ids):          # urut → keluaran & addOrgId stabil
+            for a in _leluhur(oid):
+                if a not in ids and a not in kurang:
+                    kurang.append(a)
+        if not kurang:
+            continue
+        if saring and not any(saring in (nama_dari.get(i) or "").lower() for i in ids | set(kurang)):
+            continue
+        timpang.append({
+            "unit": r.get("cjh"), "nama": (r.get("carNumber") or "").strip() or None,
+            "fleet_sekarang": [nama_dari.get(i) or i for i in sorted(ids)],
+            "induk_hilang": [nama_dari.get(i) or i for i in kurang],
+            "_add": kurang,
+        })
+
+    if not timpang:
+        return {"found": True, "rapi": True, "total_unit_dicek": len(recs),
+                "unit_tanpa_fleet": len(tanpa_fleet),
+                "catatan": ("✅ Semua unit sudah jadi anggota fleet induknya — tidak ada "
+                            "yang perlu dirapikan."
+                            + (f" ({len(tanpa_fleet)} unit belum dialokasikan ke fleet mana "
+                               "pun — itu keadaan lain, bukan kesalahan struktur.)"
+                               if tanpa_fleet else ""))}
+
+    ringkas = [{k: v for k, v in b.items() if k != "_add"} for b in timpang]
+    if not args.get("perbaiki"):
+        return {"found": True, "rapi": False, "total_unit_dicek": len(recs),
+                "jumlah_timpang": len(timpang), "unit": ringkas[:_TELE_MAX_TABEL],
+                "unit_tanpa_fleet": len(tanpa_fleet),
+                "catatan": (f"{len(timpang)} unit jadi anggota cabang TANPA ikut fleet "
+                            "induknya. Dampaknya: jumlah unit per cabang tetap benar "
+                            "(roll-up), tapi penyaringan berbasis keanggotaan induk akan "
+                            "melewatkan unit ini. Untuk merapikan, tawarkan panggil ulang "
+                            "dengan perbaiki=true — induk yang hilang DITAMBAHKAN, "
+                            "keanggotaan cabang tidak dihapus.")}
+
+    # ── perbaiki=true → operasi TULIS: gerbang tulis + konfirmasi 2 langkah ──
+    if not _can_telematik_tulis(user):
+        return dict(_TELE_DENIED_TULIS)
+    if not args.get("konfirmasi"):
+        return {"perlu_konfirmasi": True, "jumlah_timpang": len(timpang),
+                "pratinjau": ringkas[:_TELE_MAX_TABEL],
+                "catatan": (f"⚠️ KONFIRMASI DULU ke user: tambahkan fleet induk yang hilang "
+                            f"ke {len(timpang)} unit? Keanggotaan cabang yang sekarang TIDAK "
+                            "dihapus — hanya ditambah induknya. Bila setuju, panggil "
+                            "audit_fleet_unit lagi dengan perbaiki=true DAN konfirmasi=true.")}
+    perubahan = [{"cjh": b["unit"], "delOrgId": [], "addOrgId": b["_add"]}
+                 for b in timpang if b.get("unit")]
+    ok = telematics.atur_org_unit(perubahan)
+    if not ok:
+        return {"found": False,
+                "catatan": "Gagal merapikan keanggotaan fleet (server menolak/timeout). "
+                           "Sampaikan jujur — jangan klaim sudah rapi."}
+    return {"found": True, "berhasil": True, "jumlah_diperbaiki": len(perubahan),
+            "unit": ringkas[:_TELE_MAX_TABEL],
+            "catatan": (f"✅ {len(perubahan)} unit ditambahkan ke fleet induknya. "
+                        "Sarankan cek ulang dengan audit_fleet_unit (tanpa perbaiki) — "
+                        "jumlah unit per cabang seharusnya TIDAK berubah.")}
+
+
 def _t_sheet_masukkan_fleet(args: dict, user: dict) -> dict:
     """⚠️ WRITE (2 langkah): masukkan unit ke fleet MASSAL dari Excel (unit → fleet)."""
-    if not _is_admin(user):
-        return dict(_TELE_DENIED)
+    if not _can_telematik_tulis(user):
+        return dict(_TELE_DENIED_TULIS)
     if not telematics.available():
         return dict(_TELE_OFF)
     parsed = ai_sheet.get_sheet(args.get("_sheet_id", ""), user.get("username", ""))

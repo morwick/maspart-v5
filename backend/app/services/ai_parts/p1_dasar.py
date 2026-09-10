@@ -167,6 +167,27 @@ def _can_mengajar(user: dict) -> bool:
     return _is_admin(user) or _boleh_ai(user, "ai_mengajar")
 
 
+def _can_telematik(user: dict) -> bool:
+    """LIHAT telematics/GPS armada (lihat_unit_armada, terakhir_online,
+    daftar_fleet, excel_unit_armada, audit_fleet_unit): admin selalu; staf bila
+    dicentang 'ai_telematic'; pembeli TIDAK PERNAH (boleh_ai fail-closed).
+
+    ⚠️ Dulu (2026-07-22) gerbangnya `_is_admin` murni "tak bisa didelegasikan".
+    Pemilik mengubah aturannya 2026-09-10: kemampuan ini boleh diberikan per
+    akun lewat Menu Control tab Asisten AI."""
+    return _is_admin(user) or _boleh_ai(user, "ai_telematic")
+
+
+def _can_telematik_tulis(user: dict) -> bool:
+    """UBAH data di server telematics Sinotruk (ganti nama, isi VIN, daftarkan
+    unit, masuk/keluar fleet, buat fleet): admin selalu; staf bila dicentang
+    'ai_telematic_tulis'. Key TERPISAH dari `ai_telematic` — melihat posisi unit
+    beda kelas dari menulis ke sistem pabrik yang tak punya undo. Centang tulis
+    TIDAK otomatis memberi lihat & sebaliknya; admin mencentang keduanya bila
+    memang mau memberi akses penuh."""
+    return _is_admin(user) or _boleh_ai(user, "ai_telematic_tulis")
+
+
 def _boleh_isi_stok_harga(args: dict, user: dict) -> bool:
     """Katalog: stok & harga hanya DIISI bila ADMIN yang secara eksplisit meminta.
     User non-admin TIDAK pernah bisa (walau model mengirim flag-nya)."""

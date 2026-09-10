@@ -288,7 +288,11 @@ def test_spec_TIDAK_membengkak_setelah_menambah_array():
     """Array menambah deskripsi; larangan prosa yang terbukti GAGAL harus dibuang
     untuk membayarnya. Kalau angka ini jebol, prosa lamanya belum dihapus."""
     js = json.dumps(A._tool_specs(ADMIN, ""), ensure_ascii=False)
-    assert len(js) <= 105_000, f"spec tool membengkak: {len(js):,} char"
+    # 2026-09-10 105.000 → 108.000: KEPUTUSAN SADAR (bukan efek samping).
+    # +3 tool telematics (set_vin_unit, keluarkan_unit_fleet,
+    # audit_fleet_unit) = +3.158 char; sudah diimbangi dengan merampingkan
+    # deskripsi & parameter 11 spec telematics (−1.600), sisa +1.547.
+    assert len(js) <= 108_000, f"spec tool membengkak: {len(js):,} char"
 
 
 def test_larangan_prosa_yang_terbukti_gagal_sudah_dibuang():

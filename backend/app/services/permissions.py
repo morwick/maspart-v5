@@ -89,6 +89,17 @@ ASISTEN_KEYS: dict[str, str] = {
     # dibaca SEMUA user lewat cari_pengetahuan, jadi ini kemampuan MENULIS ke
     # pengetahuan bersama — bukan sekadar membaca data sensitif.
     "ai_mengajar": "Mengajari Pengetahuan (chat)",
+    # Telematics/GPS armada Sinotruk. Dipecah DUA: melihat vs mengubah.
+    # 2026-07-22 fitur ini admin-only keras (permintaan pemilik saat itu);
+    # 2026-09-10 pemilik minta bisa didelegasikan lewat Menu Control.
+    # `ai_telematic` = BACA (posisi unit, kapan terakhir online, daftar fleet,
+    # Excel armada) — aman untuk operator/mandor cabang.
+    # `ai_telematic_tulis` = TULIS ke server Sinotruk (ganti nama, isi VIN,
+    # daftarkan unit, pindah/keluarkan fleet, buat fleet). Dipisah karena
+    # operasinya PERMANEN di sistem pabrik dan tak ada tombol undo di sana —
+    # yang butuh sekadar melacak unit tak perlu ikut memegang kuncinya.
+    "ai_telematic": "Telematics/GPS Armada (lihat)",
+    "ai_telematic_tulis": "Telematics — Ubah Data Unit",
 }
 
 # Fitur HALAMAN yang elevated (bukan kemampuan Asisten AI) — tab "Fitur" di Menu

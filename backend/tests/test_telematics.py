@@ -164,8 +164,8 @@ def test_lihat_unit_lookup_satu_unit_nama(tele_on, monkeypatch):
     lihat_unit_armada tak punya lookup per-frame (cuma daftar cap-60). Param
     'unit' menjawab nama unit spesifik."""
     rec = {**_UNIT2, "cjh": "SJ398956", "carNumber": "JNT-B 9526 UEY"}
-    monkeypatch.setattr(ai.telematics, "cari_unit",
-                        lambda q: rec if q == "SJ398956" else None)
+    monkeypatch.setattr(ai.telematics, "cari_unit_lengkap",
+                        lambda q: (rec, {}) if q == "SJ398956" else (None, {}))
     r = ai._t_lihat_unit_armada({"unit": "SJ398956"}, ADMIN)
     assert r["found"] is True
     assert r["nama"] == "JNT-B 9526 UEY"
@@ -174,9 +174,25 @@ def test_lihat_unit_lookup_satu_unit_nama(tele_on, monkeypatch):
 
 
 def test_lihat_unit_lookup_tak_ada_jujur(tele_on, monkeypatch):
-    monkeypatch.setattr(ai.telematics, "cari_unit", lambda q: None)
+    monkeypatch.setattr(ai.telematics, "cari_unit_lengkap", lambda q: (None, {}))
     r = ai._t_lihat_unit_armada({"unit": "XX000000"}, ADMIN)
     assert r["found"] is False and "tidak ditemukan" in r["catatan"].lower()
+    # Nihil TIDAK boleh dibaca "unitnya pasti tak ada": bisa saja terdaftar di
+    # akun/dealer lain atau perangkatnya belum pernah online.
+    assert "dealer/akun lain" in r["catatan"]
+
+
+def test_lihat_unit_tak_ada_tawarkan_tetangga(tele_on, monkeypatch):
+    """Salah ketik AWALAN (ekor nomor benar) tak boleh berakhir 'tidak ada'
+    telanjang — tetangga terdekat + rentang prefix ikut disajikan."""
+    dekat = {"mirip": [{"frame": "TJ503158", "nama": "JNT - B 9830 UEY",
+                        "cocok_pada": "TJ503158"}],
+             "prefix": {"awalan": "TX", "jumlah": 0, "dari": "", "sampai": ""}}
+    monkeypatch.setattr(ai.telematics, "cari_unit_lengkap", lambda q: (None, dekat))
+    r = ai._t_lihat_unit_armada({"unit": "TX503158"}, ADMIN)
+    assert r["found"] is False
+    assert r["mungkin_maksud"][0]["frame"] == "TJ503158"
+    assert "salah ketik" in r["catatan"].lower()
 
 
 # ── tool: ganti_nama_unit (2 langkah) ────────────────────────────────
@@ -765,6 +781,9 @@ def online_on(monkeypatch):
     monkeypatch.setattr(ai.telematics, "available", lambda: True)
     monkeypatch.setattr(ai.telematics, "cari_unit",
                         lambda q: unit_sbh if "531850" in str(q) else None)
+    monkeypatch.setattr(ai.telematics, "cari_unit_lengkap",
+                        lambda q: ((unit_sbh, {}) if "531850" in str(q)
+                                   else (None, {})))
     monkeypatch.setattr(ai.telematics, "info_terbaru", lambda s: [{
         "sbh": "80741646", "status": "running", "speed": 27.0, "rpm": 1235.0,
         "waterTemperature": 85.0, "engineTime": 4506.9, "totalMileage": 141032.3,
@@ -842,3 +861,368 @@ def test_spec_terakhir_online_admin_only():
     na = {s["function"]["name"] for s in ai._tool_specs(ADMIN, "")}
     ns = {s["function"]["name"] for s in ai._tool_specs(STAF, "")}
     assert "terakhir_online" in na and "terakhir_online" not in ns
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  2026-09-10 — skill telematic bisa DIDELEGASIKAN + 5 tambalan
+#  Gerbang lama `_is_admin` murni diganti DUA key Menu Control:
+#  ai_telematic (lihat) & ai_telematic_tulis (ubah). Yang dikunci di sini:
+#  centang MEMBERI, tanpa centang staf tak dapat, pembeli tak pernah, dan
+#  centang LIHAT tidak diam-diam ikut memberi kuasa MENULIS.
+# ═════════════════════════════════════════════════════════════════════
+LIHAT = {"username": "mandor", "role": "user"}       # grant ai_telematic
+TULIS = {"username": "kepala", "role": "user"}       # + ai_telematic_tulis
+
+_GRANT_TELE = {"mandor": ["ai_telematic"],
+               "kepala": ["ai_telematic", "ai_telematic_tulis"]}
+
+
+@pytest.fixture
+def grant_tele(monkeypatch):
+    monkeypatch.setattr("app.services.permissions.effective",
+                        lambda kind, u, r: (_GRANT_TELE.get(u, [])
+                                            if kind == "asisten" else []))
+
+
+def test_gerbang_lihat_diberikan_lewat_menu_control(grant_tele, tele_on):
+    """Staf yang dicentang 'ai_telematic' bisa melacak armada; yang tidak,
+    tidak. Dulu ini admin-only keras."""
+    assert ai._t_lihat_unit_armada({}, LIHAT)["found"] is True
+    assert "error" in ai._t_lihat_unit_armada({}, STAF)
+    assert "error" in ai._t_lihat_unit_armada({}, PEMBELI)   # pembeli tak pernah
+
+
+def test_gerbang_lihat_tidak_ikut_memberi_tulis(grant_tele, rename_on):
+    """⛔ Inti pemisahan: boleh MELIHAT ≠ boleh MENGUBAH data pabrik."""
+    r = ai._t_ganti_nama_unit({"cjh": "PC531850", "nama_baru": "X"}, LIHAT)
+    assert "error" in r and "MENGUBAH" in r["error"]
+    assert rename_on["n"] == 0
+    r2 = ai._t_ganti_nama_unit({"cjh": "PC531850", "nama_baru": "X"}, TULIS)
+    assert r2["perlu_konfirmasi"] is True                    # yang dicentang boleh
+
+
+def test_spec_telematics_ikut_gerbang(grant_tele):
+    n_lihat = {s["function"]["name"] for s in ai._tool_specs(LIHAT, "")}
+    n_tulis = {s["function"]["name"] for s in ai._tool_specs(TULIS, "")}
+    n_polos = {s["function"]["name"] for s in ai._tool_specs(STAF, "")}
+    assert "lihat_unit_armada" in n_lihat and "terakhir_online" in n_lihat
+    assert "ganti_nama_unit" not in n_lihat                  # spec tulis disembunyikan
+    assert "set_vin_unit" not in n_lihat
+    assert {"ganti_nama_unit", "set_vin_unit", "keluarkan_unit_fleet"} <= n_tulis
+    # Tanpa centang apa pun: TIDAK satu pun tool telematics ditawarkan.
+    TELE = {"lihat_unit_armada", "terakhir_online", "excel_unit_armada",
+            "daftar_fleet", "audit_fleet_unit", "ganti_nama_unit", "set_vin_unit",
+            "daftarkan_unit", "masukkan_unit_fleet", "keluarkan_unit_fleet",
+            "buat_fleet"}
+    assert not (TELE & n_polos)
+
+
+def test_key_terdaftar_di_menu_control():
+    """Key harus ADA di registry — kalau tidak, admin tak pernah bisa
+    mencentangnya dan fitur ini mati diam-diam."""
+    from app.services import permissions as perm
+    assert "ai_telematic" in perm.ASISTEN_KEYS
+    assert "ai_telematic_tulis" in perm.ASISTEN_KEYS
+    assert "ai_telematic" in perm.KINDS["asisten"]["all"]
+
+
+# ── service: VIN asli ada di kdVin, bukan vin ────────────────────────
+def test_vin_asli_baca_kdvin_dulu():
+    """⛔ Field `vin` terkunci ke default firmware selamanya; VIN yang diisi
+    operator masuk ke kdVin. Membaca `vin` saja = lapor 'VIN kosong' padahal
+    sudah diisi."""
+    assert t.vin_asli({"vin": "SLGV0123456789888",
+                       "kdVin": "LZZ1BLMJ3SJ465047"}) == "LZZ1BLMJ3SJ465047"
+    assert t.vin_asli({"vin": "LZZ7CLXB5PC531850", "kdVin": ""}) == "LZZ7CLXB5PC531850"
+    assert t.vin_asli({"vin": "SLGV0123456789888", "kdVin": "SLGV0123456789888"}) is None
+
+
+def test_rangkum_unit_pakai_kdvin_dan_link_peta():
+    u = t.rangkum_unit({**_UNIT, "vin": "SLGV0123456789888",
+                        "kdVin": "LZZ1BLMJ3SJ465047"}, dict(_LOC))
+    assert u["vin"] == "LZZ1BLMJ3SJ465047"
+    assert u["posisi"]["peta"] == "https://www.google.com/maps?q=-3.69,121.05"
+
+
+def test_peta_link_abaikan_koordinat_kosong():
+    assert t.peta_link(0, 0) is None and t.peta_link(None, None) is None
+
+
+# ── service: cari unit lintas-field & tetangga terdekat ──────────────
+_ARMADA = [
+    {"cjh": "TJ503158", "vin": "SLGV0123456789888", "kdVin": "LZZ1BLMJ3SJ503158",
+     "carNumber": "JNT - B 9830 UEY", "sbhList": ["80741646"]},
+    {"cjh": "TJ458590", "vin": "LZZ7CLXB5TJ458590", "carNumber": "", "sbhList": []},
+    {"cjh": "PC531850", "vin": "LZZ7CLXB5PC531850", "carNumber": "Truk A"},
+]
+
+
+def test_cari_unit_lintas_field():
+    """Identifier bisa nyangkut di kdVin, nama/plat, atau serial GPS — mencari
+    di cjh/vin saja membuat unit yang ADA dilaporkan tidak ada."""
+    assert t.cari_unit("LZZ1BLMJ3SJ503158", _ARMADA)["cjh"] == "TJ503158"
+    assert t.cari_unit("JNT - B 9830 UEY", _ARMADA)["cjh"] == "TJ503158"
+    assert t.cari_unit("80741646", _ARMADA)["cjh"] == "TJ503158"      # serial GPS
+    assert t.cari_unit("503158", _ARMADA)["cjh"] == "TJ503158"        # sebagian
+
+
+def test_cari_unit_cocok_persis_menang():
+    """Cocok PERSIS harus menang atas cocok sebagian — kalau tidak, frame
+    lengkap bisa mendarat di unit lain yang kebetulan memuat potongannya."""
+    armada = [{"cjh": "AA111111", "carNumber": "PC531850 cadangan"},
+              {"cjh": "PC531850", "carNumber": "Truk A"}]
+    assert t.cari_unit("PC531850", armada)["cjh"] == "PC531850"
+
+
+def test_cari_unit_abaikan_vin_dummy():
+    """VIN dummy pabrik dipakai banyak unit — kalau ikut dicari, satu kata
+    kunci cocok ke ratusan unit sekaligus."""
+    assert t.cari_unit("SLGV0123456789888", _ARMADA) is None
+
+
+def test_cari_mirip_tawarkan_tetangga_dan_rentang_prefix():
+    d = t.cari_mirip("TX503158", _ARMADA)
+    assert d["mirip"][0]["frame"] == "TJ503158"      # ekor sama, awalan salah
+    # Awalan 'TX' tak dipakai unit mana pun → jangan mengarang rentang prefix.
+    assert "prefix" not in d
+
+
+def test_cari_mirip_rentang_prefix_nyata():
+    d = t.cari_mirip("TJ999999", _ARMADA)
+    assert d["prefix"] == {"awalan": "TJ", "jumlah": 2,
+                           "dari": "TJ458590", "sampai": "TJ503158"}
+
+
+def test_cari_unit_lengkap_satu_tarikan(monkeypatch):
+    panggil = {"n": 0}
+
+    def fake_recs(*a, **k):
+        panggil["n"] += 1
+        return _ARMADA
+    monkeypatch.setattr(t, "_semua_records", fake_recs)
+    rec, dekat = t.cari_unit_lengkap("TX503158")
+    assert rec is None and dekat["mirip"][0]["frame"] == "TJ503158"
+    assert panggil["n"] == 1                         # bukan dua kali tarik armada
+
+
+# ── tool: set_vin_unit (2 langkah) ───────────────────────────────────
+@pytest.fixture
+def vin_on(monkeypatch):
+    rec = {**_UNIT, "vin": "SLGV0123456789888", "kdVin": ""}
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.telematics, "cari_unit", lambda q, recs=None: dict(rec))
+    tulis = []
+    monkeypatch.setattr(ai.telematics, "set_vin",
+                        lambda cjh, vin: (tulis.append((cjh, vin)) or {"code": 200}))
+    return tulis
+
+
+def test_set_vin_langkah1_pratinjau_tak_menulis(vin_on):
+    r = ai._t_set_vin_unit({"unit": "PC531850", "vin": "LZZ1BLMJ3SJ465047"}, ADMIN)
+    assert r["perlu_konfirmasi"] is True
+    assert r["pratinjau"]["vin_sekarang"] == "(belum diisi)"
+    assert vin_on == []
+
+
+def test_set_vin_langkah2_eksekusi(vin_on):
+    r = ai._t_set_vin_unit({"unit": "PC531850", "vin": "LZZ1BLMJ3SJ465047",
+                            "konfirmasi": True}, ADMIN)
+    assert r["berhasil"] is True and vin_on == [("PC531850", "LZZ1BLMJ3SJ465047")]
+    # Jawaban wajib menjelaskan kdVin — kalau tidak, verifikasi berikutnya
+    # akan dibaca "gagal" karena field `vin` tetap SLGV…888.
+    assert "kdVin" in r["catatan"]
+
+
+def test_set_vin_tolak_panjang_salah(vin_on):
+    r = ai._t_set_vin_unit({"unit": "PC531850", "vin": "LZZ123", "konfirmasi": True}, ADMIN)
+    assert "error" in r and vin_on == []
+
+
+def test_set_vin_sudah_sama_tak_menulis(monkeypatch, vin_on):
+    monkeypatch.setattr(ai.telematics, "cari_unit",
+                        lambda q, recs=None: {**_UNIT, "kdVin": "LZZ1BLMJ3SJ465047"})
+    r = ai._t_set_vin_unit({"unit": "PC531850", "vin": "LZZ1BLMJ3SJ465047",
+                            "konfirmasi": True}, ADMIN)
+    assert r.get("tidak_perlu") is True and vin_on == []
+
+
+def test_set_vin_gagal_dilaporkan_jujur(monkeypatch, vin_on):
+    monkeypatch.setattr(ai.telematics, "set_vin", lambda c, v: None)
+    r = ai._t_set_vin_unit({"unit": "PC531850", "vin": "LZZ1BLMJ3SJ465047",
+                            "konfirmasi": True}, ADMIN)
+    assert r["found"] is False and "OFFLINE" in r["catatan"]
+
+
+def test_set_vin_butuh_gerbang_tulis(grant_tele, vin_on):
+    assert "error" in ai._t_set_vin_unit(
+        {"unit": "PC531850", "vin": "LZZ1BLMJ3SJ465047", "konfirmasi": True}, LIHAT)
+    assert vin_on == []
+
+
+# ── tool: keluarkan_unit_fleet (UNDO alokasi, 2 langkah) ─────────────
+@pytest.fixture
+def keluar_on(monkeypatch):
+    rec = {**_UNIT, "cjh": "NJ248278",
+           "organizations": [{"id": 2313, "organizationName": "MITRAANGKUTAN"}]}
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.telematics, "cari_unit", lambda q, recs=None: dict(rec))
+    tulis = []
+    monkeypatch.setattr(ai.telematics, "keluarkan_dari_fleet",
+                        lambda cjh: (tulis.append(list(cjh)) or True))
+    return tulis
+
+
+def test_keluarkan_langkah1_pratinjau_tak_menulis(keluar_on):
+    r = ai._t_keluarkan_unit_fleet({"unit": "NJ248278"}, ADMIN)
+    assert r["perlu_konfirmasi"] is True
+    assert r["pratinjau"]["fleet_sekarang"] == ["MITRAANGKUTAN"]
+    assert keluar_on == []
+
+
+def test_keluarkan_langkah2_eksekusi(keluar_on):
+    r = ai._t_keluarkan_unit_fleet({"unit": "NJ248278", "konfirmasi": True}, ADMIN)
+    assert r["berhasil"] is True and keluar_on == [["NJ248278"]]
+
+
+def test_keluarkan_unit_yang_sudah_lepas_tak_menulis(monkeypatch, keluar_on):
+    monkeypatch.setattr(ai.telematics, "cari_unit",
+                        lambda q, recs=None: {**_UNIT, "organizations": []})
+    r = ai._t_keluarkan_unit_fleet({"unit": "NJ248278", "konfirmasi": True}, ADMIN)
+    assert r.get("tidak_perlu") is True and keluar_on == []
+
+
+def test_keluarkan_butuh_gerbang_tulis(grant_tele, keluar_on):
+    assert "error" in ai._t_keluarkan_unit_fleet(
+        {"unit": "NJ248278", "konfirmasi": True}, LIHAT)
+    assert keluar_on == []
+
+
+# ── tool: audit_fleet_unit ───────────────────────────────────────────
+_POHON = [{"id": 623, "nama": "MAS", "parent_id": 1687},
+          {"id": 625, "nama": "JNT", "parent_id": 623},
+          {"id": 2305, "nama": "BANDUNG", "parent_id": 625}]
+
+
+@pytest.fixture
+def audit_on(monkeypatch):
+    # timpang: anggota BANDUNG saja, tanpa JNT & MAS
+    timpang = {**_UNIT, "cjh": "SJ465045",
+               "organizations": [{"id": 2305, "organizationName": "BANDUNG"}]}
+    rapi = {**_UNIT, "cjh": "SJ465047",
+            "organizations": [{"id": 2305}, {"id": 625}, {"id": 623}]}
+    lepas = {**_UNIT, "cjh": "SJ465050", "organizations": []}
+    monkeypatch.setattr(ai.telematics, "available", lambda: True)
+    monkeypatch.setattr(ai.telematics, "daftar_fleet", lambda: list(_POHON))
+    monkeypatch.setattr(ai.telematics, "semua_unit",
+                        lambda fleet="": {"total": 3,
+                                          "records": [timpang, rapi, lepas]})
+    tulis = []
+    monkeypatch.setattr(ai.telematics, "atur_org_unit",
+                        lambda p: (tulis.append(p) or True))
+    return tulis
+
+
+def test_audit_temukan_unit_tanpa_induk(audit_on):
+    """Unit anggota cabang tapi bukan anggota induknya. Tak terlihat dari
+    daftar biasa karena jumlah unit per cabang tetap benar (roll-up)."""
+    r = ai._t_audit_fleet_unit({}, ADMIN)
+    assert r["rapi"] is False and r["jumlah_timpang"] == 1
+    assert r["unit"][0]["unit"] == "SJ465045"
+    assert r["unit"][0]["induk_hilang"] == ["JNT", "MAS"]
+    assert r["unit_tanpa_fleet"] == 1          # unit lepas ≠ struktur salah
+    assert audit_on == []                      # audit polos TIDAK menulis
+
+
+def test_audit_perbaiki_butuh_konfirmasi(audit_on):
+    r = ai._t_audit_fleet_unit({"perbaiki": True}, ADMIN)
+    assert r["perlu_konfirmasi"] is True and audit_on == []
+
+
+def test_audit_perbaiki_tambah_induk_tanpa_hapus_cabang(audit_on):
+    r = ai._t_audit_fleet_unit({"perbaiki": True, "konfirmasi": True}, ADMIN)
+    assert r["berhasil"] is True and r["jumlah_diperbaiki"] == 1
+    # delOrgId WAJIB kosong: keanggotaan cabang tidak boleh ikut hilang.
+    assert audit_on == [[{"cjh": "SJ465045", "delOrgId": [],
+                          "addOrgId": [625, 623]}]]
+
+
+def test_audit_rapi_dilaporkan_apa_adanya(monkeypatch, audit_on):
+    monkeypatch.setattr(ai.telematics, "semua_unit", lambda fleet="": {
+        "total": 1, "records": [{**_UNIT, "cjh": "SJ465047",
+                                 "organizations": [{"id": 2305}, {"id": 625},
+                                                   {"id": 623}]}]})
+    r = ai._t_audit_fleet_unit({}, ADMIN)
+    assert r["rapi"] is True and audit_on == []
+
+
+def test_audit_lihat_boleh_perbaiki_tidak(grant_tele, audit_on):
+    """Pemegang 'lihat' boleh mengaudit (baca), tapi perbaikannya ditolak —
+    itu operasi tulis."""
+    assert ai._t_audit_fleet_unit({}, LIHAT)["rapi"] is False
+    r = ai._t_audit_fleet_unit({"perbaiki": True, "konfirmasi": True}, LIHAT)
+    assert "error" in r and audit_on == []
+
+
+# ── service: operasi tulis baru ──────────────────────────────────────
+def test_keluarkan_dari_fleet_sukses_tanpa_field_data(cfg_on, monkeypatch):
+    """⛔ unassignCars sukses TANPA field `data` — kalau body dibaca seperti
+    endpoint biasa, operasi yang BERHASIL terbaca gagal."""
+    kirim = {}
+
+    class R:
+        status_code = 200
+        @staticmethod
+        def json():
+            return {"code": 200, "message": "Operate Success"}
+    monkeypatch.setattr(t, "_get_token", lambda force=False: "TOK")
+    monkeypatch.setattr(t.requests, "post",
+                        lambda url, **kw: (kirim.update(url=url, **kw) or R()))
+    assert t.keluarkan_dari_fleet(["SJ465045", "SJ465047"]) is True
+    assert kirim["data"]["cjhList"] == "SJ465045,SJ465047"   # koma, bukan array
+
+
+def test_atur_org_unit_satu_panggilan(cfg_on, monkeypatch):
+    kirim = {}
+
+    class R:
+        status_code = 200
+        @staticmethod
+        def json():
+            return {"code": 200}
+    monkeypatch.setattr(t, "_get_token", lambda force=False: "TOK")
+    monkeypatch.setattr(t.requests, "post",
+                        lambda url, **kw: (kirim.update(url=url, **kw) or R()))
+    ok = t.atur_org_unit([{"cjh": "A", "delOrgId": [], "addOrgId": [625]},
+                          {"cjh": "B", "delOrgId": [], "addOrgId": [625]}])
+    assert ok is True and len(kirim["json"]) == 2      # 2 unit, 1 panggilan
+
+
+def test_set_vin_kirim_ke_kdvin(cfg_on, monkeypatch):
+    kirim = {}
+
+    class R:
+        status_code = 200
+        @staticmethod
+        def json():
+            return {"code": 200, "data": None}
+    monkeypatch.setattr(t, "_get_token", lambda force=False: "TOK")
+    monkeypatch.setattr(t.requests, "post",
+                        lambda url, **kw: (kirim.update(url=url, **kw) or R()))
+    assert t.set_vin("SJ465045", "lzz1blmj3sj465047") is not None
+    assert kirim["url"].endswith("/api/vehicleManage/updateKdVin")
+    assert kirim["data"] == {"cjh": "SJ465045", "kdVin": "LZZ1BLMJ3SJ465047"}
+
+
+def test_set_vin_daftar_pasangan_tak_bergeser(monkeypatch, vin_on):
+    """Batch VIN memakai array of object (bukan dua array sejajar) supaya
+    pasangan unit↔VIN tak pernah bisa bergeser diam-diam."""
+    monkeypatch.setattr(ai.telematics, "cari_unit",
+                        lambda q, recs=None: {**_UNIT, "cjh": str(q).upper(),
+                                              "kdVin": ""})
+    r = ai._t_set_vin_unit({"daftar": [
+        {"unit": "SJ465045", "vin": "LZZ1BLMJ3SJ465045"},
+        {"unit": "SJ465047", "vin": "LZZ1BLMJ3SJ465047"}],
+        "konfirmasi": True}, ADMIN)
+    assert r is not None
+    assert sorted(vin_on) == [("SJ465045", "LZZ1BLMJ3SJ465045"),
+                              ("SJ465047", "LZZ1BLMJ3SJ465047")]
