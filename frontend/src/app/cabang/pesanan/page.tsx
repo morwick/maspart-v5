@@ -95,7 +95,7 @@ export default function BranchOrdersPage() {
         {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
 
         {/* Ringkasan jumlah per status */}
-        <div className="mb-4 grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))" }}>
+        <div className="mb-4 grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(130px, 100%), 1fr))" }}>
           {TABS.filter((t) => t.key !== "all").map((t) => (
             <button
               key={t.key}
@@ -135,7 +135,8 @@ export default function BranchOrdersPage() {
           </div>
         ) : (
           <div className="surface" style={{ overflow: "auto" }}>
-            <table className="tbl">
+            <div className="tblwrap">
+            <table className="tbl cardify">
               <thead>
                 <tr>
                   <th>Kode</th>
@@ -156,12 +157,12 @@ export default function BranchOrdersPage() {
                       style={{ cursor: "pointer" }}
                       onClick={() => router.push(`/cabang/pesanan/${encodeURIComponent(o.order_code)}`)}
                     >
-                      <td className="pn">{o.order_code}</td>
-                      <td>{o.username}</td>
-                      <td className="num mono">{rp(o.total)}</td>
-                      <td><span className={"pill " + stt.pill}>{stt.label}</span></td>
-                      <td style={{ color: "var(--ink-500)" }}>{fmtDate(o.created_at)}</td>
-                      <td onClick={(e) => e.stopPropagation()}>
+                      <td data-label="Kode" className="pn">{o.order_code}</td>
+                      <td data-label="Pemesan">{o.username}</td>
+                      <td data-label="Total" className="num mono">{rp(o.total)}</td>
+                      <td data-label="Status"><span className={"pill " + stt.pill}>{stt.label}</span></td>
+                      <td data-label="Tanggal" style={{ color: "var(--ink-500)" }}>{fmtDate(o.created_at)}</td>
+                      <td data-label="Aksi" onClick={(e) => e.stopPropagation()}>
                         {o.status === "diproses" ? (
                           <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => quickStatus(o.order_code, "dikirim")}>
                             {busy ? "…" : "Kirim"}
@@ -184,6 +185,7 @@ export default function BranchOrdersPage() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>

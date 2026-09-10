@@ -140,7 +140,7 @@ export default function BerandaPage() {
 
         {/* ── Ringkas cabang (hanya akun cabang) ── */}
         {branch && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginTop: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))", gap: 14, marginTop: 16 }}>
             <Link href="/cabang/pesanan" className="surface" style={{ padding: 18, display: "block", textDecoration: "none", color: "inherit" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div className="stat-label">Pesanan masuk</div>
@@ -165,7 +165,7 @@ export default function BerandaPage() {
           <div style={{ fontSize: 14, fontWeight: 650, color: "var(--ink-800)" }}>Menu Anda</div>
           <div style={{ fontSize: 12, color: "var(--ink-500)" }}>{tiles.length} menu tersedia</div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12, marginTop: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(240px, 100%), 1fr))", gap: 12, marginTop: 12 }}>
           {tiles.map((t) => (
             <Link key={t.key} href={t.href} className="surface" style={{ padding: 16, display: "flex", alignItems: "center", gap: 13, textDecoration: "none", color: "inherit" }}>
               <span style={{ display: "inline-flex", width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", background: "var(--brand-50)", color: "var(--brand-700)", border: "1px solid var(--brand-100)", flexShrink: 0 }}>{t.icon}</span>

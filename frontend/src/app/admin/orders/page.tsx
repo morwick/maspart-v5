@@ -52,7 +52,8 @@ export default function AdminOrdersPage() {
           <div className="surface" style={{ overflowX: "auto", overflowY: "hidden" }}>
             {/* 7 kolom → `overflow:hidden` dulu memotong Bukti & Tanggal di layar
                 kecil tanpa cara menggesernya. Lihat catatan sama di /keranjang. */}
-            <table className="tbl">
+            <div className="tblwrap">
+            <table className="tbl cardify">
               <thead>
                 <tr>
                   <th>Kode</th>
@@ -73,18 +74,19 @@ export default function AdminOrdersPage() {
                       style={{ cursor: "pointer" }}
                       onClick={() => router.push(`/admin/orders/${encodeURIComponent(o.order_code)}`)}
                     >
-                      <td className="pn">{o.order_code}</td>
-                      <td>{o.username}</td>
-                      <td>{o.gudang || "—"}</td>
-                      <td className="num mono">{rp(o.total)}</td>
-                      <td><span className={"pill " + st.pill}>{st.label}</span></td>
-                      <td>{o.payment_proof_url ? <span className="pill pill-info">ada</span> : <span style={{ color: "var(--ink-400)" }}>—</span>}</td>
-                      <td style={{ color: "var(--ink-500)" }}>{fmtDate(o.created_at)}</td>
+                      <td data-label="Kode" className="pn">{o.order_code}</td>
+                      <td data-label="Pemesan">{o.username}</td>
+                      <td data-label="Cabang">{o.gudang || "—"}</td>
+                      <td data-label="Total" className="num mono">{rp(o.total)}</td>
+                      <td data-label="Status"><span className={"pill " + st.pill}>{st.label}</span></td>
+                      <td data-label="Bukti">{o.payment_proof_url ? <span className="pill pill-info">ada</span> : <span style={{ color: "var(--ink-400)" }}>—</span>}</td>
+                      <td data-label="Tanggal" style={{ color: "var(--ink-500)" }}>{fmtDate(o.created_at)}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>

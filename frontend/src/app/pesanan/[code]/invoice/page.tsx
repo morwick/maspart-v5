@@ -179,6 +179,7 @@ export default function InvoicePage() {
             </div>
 
             {/* Items */}
+            <div className="tblwrap">
             <table className="tbl inv-tbl">
               <thead>
                 <tr>
@@ -203,6 +204,7 @@ export default function InvoicePage() {
                 ))}
               </tbody>
             </table>
+            </div>
 
             {/* Ringkasan */}
             <div className="inv-totals">

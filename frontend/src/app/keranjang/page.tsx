@@ -333,7 +333,8 @@ export default function KeranjangPage() {
                 pembeli tak bisa menghapus item dari keranjang di HP sama sekali.
                 overflowY hidden dipertahankan agar sudut kartu tetap terklip. */}
             <div className="surface" style={{ overflowX: "auto", overflowY: "hidden" }}>
-              <table className="tbl">
+              <div className="tblwrap">
+              <table className="tbl cardify">
                 <thead>
                   <tr>
                     <th>Part Number</th>
@@ -351,8 +352,8 @@ export default function KeranjangPage() {
                       style={itemsBeli.includes(i) ? undefined : { opacity: 0.45 }}
                       title={itemsBeli.includes(i) ? undefined : "Gudang lain — dipesan di transaksi berikutnya"}
                     >
-                      <td className="pn">{i.part_number}</td>
-                      <td>
+                      <td data-label="Part Number" className="pn">{i.part_number}</td>
+                      <td data-label="Nama">
                         {i.name}
                         {!bisaBeli(i) && (
                           <span className="pill pill-warn" style={{ marginLeft: 8 }}>
@@ -365,10 +366,10 @@ export default function KeranjangPage() {
                           </div>
                         )}
                       </td>
-                      <td className="num mono">
+                      <td data-label="Harga" className="num mono">
                         {hargaOf(i) > 0 ? rp(hargaOf(i)) : <span className="pill pill-warn">—</span>}
                       </td>
-                      <td>
+                      <td data-label="Qty">
                         <input
                           type="number"
                           min={1}
@@ -381,7 +382,7 @@ export default function KeranjangPage() {
                           style={{ width: 80, height: 32 }}
                         />
                       </td>
-                      <td className="num mono">{rp(hargaOf(i) * i.qty)}</td>
+                      <td data-label="Subtotal" className="num mono">{rp(hargaOf(i) * i.qty)}</td>
                       <td>
                         <button className="btn btn-danger btn-sm" title="Hapus" onClick={() => { removeFromCart(i.part_number); refresh(); }}>✕</button>
                       </td>
@@ -389,6 +390,7 @@ export default function KeranjangPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
 
             {/* Alamat Penerima */}

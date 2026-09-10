@@ -1,10 +1,27 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 export const metadata: Metadata = {
   title: "MasPart",
   description: "Part Number Finder — pencarian & katalog spare part",
+};
+
+/* Viewport DIEKSPLISITKAN (dulu hanya bawaan Next):
+   - `viewportFit: "cover"` = halaman boleh memakai area di balik notch;
+     pasangannya `env(safe-area-inset-*)` di globals.css/AppShell.
+   - `maximumScale` sengaja TIDAK dikunci — mengunci zoom menghalangi user
+     yang butuh memperbesar. Zoom-paksa saat mengetik sudah diatasi dengan
+     menaikkan font kolom isian ke 16px, bukan dengan melarang zoom.
+   - `themeColor` membuat bilah status HP ikut warna tema aktif. */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#faf9f5" },
+    { media: "(prefers-color-scheme: dark)", color: "#0e130f" },
+  ],
 };
 
 export default function RootLayout({

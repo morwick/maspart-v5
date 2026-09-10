@@ -163,7 +163,8 @@ export default function AdminGudangPage() {
           </div>
         ) : (
           <div className="surface" style={{ overflow: "auto" }}>
-            <table className="tbl">
+            <div className="tblwrap">
+            <table className="tbl cardify">
               <thead>
                 <tr>
                   <th>Gudang</th>
@@ -179,11 +180,11 @@ export default function AdminGudangPage() {
               <tbody>
                 {items.map((it) => (
                   <tr key={it.label}>
-                    <td>
+                    <td data-label="Gudang">
                       <div style={{ fontWeight: 550 }}>{it.display}</div>
                       <div className="mono" style={{ fontSize: 11, color: "var(--ink-400)" }}>{it.label}</div>
                     </td>
-                    <td>
+                    <td data-label="Koordinat (lat, lon)">
                       <input
                         className="input mono"
                         style={{ width: 210, height: 32 }}
@@ -192,7 +193,7 @@ export default function AdminGudangPage() {
                         onChange={(e) => setCoord(it.label, e.target.value)}
                       />
                     </td>
-                    <td>
+                    <td data-label="Kode Pos">
                       <input
                         className="input mono"
                         style={{ width: 96, height: 32 }}
@@ -202,7 +203,7 @@ export default function AdminGudangPage() {
                         onChange={(e) => patch(it.label, { origin_postal: e.target.value.replace(/\D/g, "").slice(0, 10) })}
                       />
                     </td>
-                    <td style={{ textAlign: "center" }}>
+                    <td data-label="Bisa Kirim" style={{ textAlign: "center" }}>
                       <input
                         type="checkbox"
                         checked={it.can_ship !== false}
@@ -210,14 +211,14 @@ export default function AdminGudangPage() {
                         onChange={(e) => patch(it.label, { can_ship: e.target.checked })}
                       />
                     </td>
-                    <td style={{ textAlign: "center" }}>
+                    <td data-label="Pembeli" style={{ textAlign: "center" }}>
                       <input
                         type="checkbox"
                         checked={it.selectable}
                         onChange={(e) => patch(it.label, { selectable: e.target.checked })}
                       />
                     </td>
-                    <td>
+                    <td data-label="Key / Akun">
                       <input
                         className="input"
                         style={{ width: 130, height: 32 }}
@@ -227,7 +228,7 @@ export default function AdminGudangPage() {
                         onChange={(e) => patch(it.label, { key: e.target.value.trim().toLowerCase() })}
                       />
                     </td>
-                    <td>
+                    <td data-label="No. PIC">
                       <input
                         className="input mono"
                         style={{ width: 140, height: 32 }}
@@ -236,13 +237,14 @@ export default function AdminGudangPage() {
                         onChange={(e) => patch(it.label, { pic: e.target.value })}
                       />
                     </td>
-                    <td style={{ color: "var(--ink-500)", fontSize: 12 }}>
+                    <td data-label="Terdekat (otomatis)" style={{ color: "var(--ink-500)", fontSize: 12 }}>
                       {it.nearest.length ? it.nearest.join(" · ") : "—"}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 

@@ -72,7 +72,7 @@ export default function ChatPage() {
             <div style={{ fontSize: 12.5 }}>Buka detail sebuah part lalu klik <b>💬 Chat Gudang</b> untuk menanyakan ketersediaan stok.</div>
           </div>
         ) : (
-          <div className="grid gap-4" style={{ gridTemplateColumns: "minmax(180px, 240px) 1fr" }}>
+          <div className="grid gap-4" style={{ gridTemplateColumns: "minmax(min(180px, 100%), 240px) 1fr" }}>
             {/* Daftar percakapan */}
             <div className="surface" style={{ overflow: "hidden", height: "fit-content" }}>
               <div className="px-3 py-2.5" style={{ fontSize: 12.5, fontWeight: 600, borderBottom: "1px solid var(--ink-150)" }}>

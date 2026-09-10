@@ -1307,6 +1307,11 @@ main > div.mx-auto[class*="max-w-"] {
   .no-print {
     display: none !important;
   }
+  /* Pembungkus tabel tak boleh memotong isi saat dicetak — di kertas tak ada
+     yang bisa digulir, jadi kotaknya dibuat mengalir apa adanya. */
+  .tblwrap {
+    overflow: visible !important;
+  }
   .inv-page {
     background: #fff !important;
   }
@@ -1318,5 +1323,385 @@ main > div.mx-auto[class*="max-w-"] {
   }
   @page {
     margin: 14mm;
+  }
+}
+
+/* ============================================================
+   Lapisan HP (≤640px) — ditaruh PALING AKHIR agar menimpa semua di atas.
+   Prinsip: satu-satunya yang boleh menggulir mendatar adalah kotak yang
+   memang lebar (tabel, deret chip). Badan halaman TIDAK PERNAH.
+   ============================================================ */
+
+/* ── Pagar scroll mendatar ──
+   ⛔ SENGAJA TIDAK memakai `overflow-x: hidden/clip` di html/body. Menyembunyikan
+   luberan memang menghilangkan bilah gulir, tapi sekaligus membuat kontrol yang
+   meluber MUSTAHIL dicapai — di alat lapangan itu lebih buruk daripada tampilan
+   yang kurang rapi. Luberan diatasi di sumbernya: kotak yang memang lebar
+   (`.tblwrap`, `.chiprow`) menggulir sendiri, dan halaman di dalam AppShell
+   sudah dibatasi `<main class="overflow-auto">`.
+   Yang tersisa di sini hanya pagar agar tak ada anak yang melebihi lebar layar. */
+html,
+body {
+  max-width: 100%;
+}
+/* Teks tanpa spasi (PN panjang, URL, nomor rangka) dulu memaksa lebar minimum
+   pada sel/kartu dan itulah penyebab luberan yang tersisa setelah tabel
+   dibungkus. Dipatahkan di tempat, bukan disembunyikan. */
+.tbl td,
+.tbl th,
+.surface {
+  overflow-wrap: anywhere;
+}
+
+/* ── Pembungkus tabel ──
+   Kotak inilah yang menggulir, bukan halaman. Dipakai di semua halaman
+   bertabel; `.tblwrap` sengaja berlaku di SEMUA lebar agar layar sempit
+   non-HP (jendela desktop dikecilkan) ikut terlindungi. */
+.tblwrap {
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  max-width: 100%;
+}
+/* Scrollbar tipis supaya tak memakan tinggi baris di desktop. */
+.tblwrap::-webkit-scrollbar {
+  height: 8px;
+}
+.tblwrap::-webkit-scrollbar-thumb {
+  background: var(--ink-200);
+  border-radius: 99px;
+}
+.tblwrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Deret chip/filter yang panjang: gulir mendatar, bukan membungkus jadi
+   tiga baris yang memakan setengah layar HP. */
+.chiprow {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.chiprow::-webkit-scrollbar {
+  display: none;
+}
+.chiprow > * {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 640px) {
+  /* ⛔ Sumber utama keluhan "tiap ketik, layar nge-zoom sendiri":
+     Safari iOS MEMAKSA zoom saat kolom isian ber-font < 16px difokuskan.
+     Tingginya ikut naik ke 44px = ambang target sentuh yang layak. */
+  /* Disasar per ELEMEN, bukan per kelas .input/.select/.textarea: kolom yang
+     paling sering diketik di HP — komposer Asisten AI — ternyata sebuah
+     <textarea> polos tanpa kelas, dan kolom di /batch memakai utilitas Tailwind
+     saja. Keduanya lolos dari aturan berbasis kelas dan tetap memicu zoom.
+     `!important` DISENGAJA dan HANYA untuk font-size: belasan kolom menyetel
+     `style={{ fontSize: 13.5 }}` inline, dan inline style menang atas media
+     query. Tinggi TIDAK dipaksa — banyak kolom sengaja pendek (32-36px)
+     karena duduk di dalam baris tabel, memaksanya 44px akan merusak baris itu. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea,
+  .input,
+  .select,
+  .textarea {
+    font-size: 16px !important;
+  }
+  .input,
+  .select {
+    height: 44px;
+  }
+
+  /* Target sentuh. 36px masih meleset di jempol; .btn-sm 28px jelas terlalu
+     kecil. Padding ikut dilonggarkan agar labelnya tak mepet tepi. */
+  .btn {
+    height: 42px;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+  .btn-sm {
+    height: 34px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+  .btn-lg {
+    height: 48px;
+    font-size: 15px;
+  }
+
+  /* Checkbox/radio bawaan sekitar 13px — terlalu kecil untuk jempol. Tidak
+     memicu zoom iOS (hanya kolom teks yang begitu), murni soal target sentuh. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Tabel dirapatkan: di 390px, padding 14px per sel membuang ±25% lebar
+     layar hanya untuk ruang kosong. */
+  .tbl {
+    --row-px: 10px;
+    --cell-fs: 13px;
+  }
+  .tbl thead th {
+    padding-left: var(--row-px);
+    padding-right: var(--row-px);
+    font-size: 10.5px;
+  }
+
+  /* Kartu/panel: 20px padding di HP menyisakan sedikit sekali ruang isi. */
+  .surface-pad {
+    padding: 14px;
+  }
+  .surface {
+    border-radius: var(--r-sm);
+  }
+
+  /* Tab yang banyak (mis. /admin/monitoring) digulir, jangan dibungkus. */
+  .tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tabs .tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  /* Invoice: padding cetak 32/36px terlalu boros di layar HP. */
+  .inv-sheet {
+    padding: 16px 14px;
+    font-size: 12.5px;
+  }
+  .inv-head {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .inv-meta {
+    grid-template-columns: 1fr 1fr;
+  }
+  .inv-parties {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Ruang aman (notch / home indicator) ──
+   Header memakai padding responsif Tailwind (px-3 / sm:px-5); di sini hanya
+   DITAMBAH sisi kiri-kanan bila peramban melaporkan area terpotong. Pada
+   perangkat tanpa notch env() bernilai 0, jadi tak ada perubahan apa pun. */
+.cc-header {
+  padding-left: calc(env(safe-area-inset-left) + 12px);
+  padding-right: calc(env(safe-area-inset-right) + 12px);
+}
+@media (min-width: 640px) {
+  .cc-header {
+    padding-left: calc(env(safe-area-inset-left) + 20px);
+    padding-right: calc(env(safe-area-inset-right) + 20px);
+  }
+}
+/* Sidebar drawer di HP: hormati notch kiri & home indicator bawah. */
+.cc-side {
+  padding-left: env(safe-area-inset-left);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* ── Tabel → kartu di HP ──
+   Menggeser tabel ke samping memang membuat kolom TERCAPAI, tapi membaca stok
+   & harga jadi butuh dua gerakan. Untuk halaman yang paling sering dibuka di
+   lapangan, satu baris tabel disajikan ulang sebagai satu kartu — pola yang
+   sudah dipakai jawaban Asisten (.md-cards), kini untuk tabel halaman.
+   Pasangan kelas: `.hp-hide` (sembunyi di HP) & `.hp-only` (hanya di HP). */
+/* ⛔ Utilitas ini WAJIB memakai !important. globals.css menulis kelas komponen
+   (.pill, .rowcards, ...) SETELAH utilitas Tailwind, dan spesifisitasnya sama —
+   tanpa !important yang menang adalah kelas komponennya, bukan aturan
+   sembunyi/tampil ini. Terbukti dua kali saat pengujian: lencana "EPC live"
+   tetap tampil di HP, dan daftar kartu ikut tampil di desktop. */
+.hp-only {
+  display: none !important;
+}
+@media (max-width: 640px) {
+  .hp-only {
+    display: revert !important;
+  }
+  .hp-hide {
+    display: none !important;
+  }
+}
+
+/* Daftar kartu membawa sendiri sifat "hanya HP"-nya, jadi tak bergantung pada
+   urutan penulisan terhadap .hp-only. */
+.rowcards {
+  display: none;
+  gap: 8px;
+  padding: 10px;
+}
+@media (max-width: 640px) {
+  .rowcards {
+    display: grid;
+  }
+}
+.rcard {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--ink-150);
+  border-radius: var(--r-md);
+  background: var(--paper);
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+}
+.rcard:active {
+  background: var(--ink-50);
+}
+.rcard-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.rcard-pn {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-900);
+  overflow-wrap: anywhere;
+}
+.rcard-name {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-800);
+  line-height: 1.35;
+}
+.rcard-meta {
+  font-size: 12px;
+  color: var(--ink-500);
+  overflow-wrap: anywhere;
+}
+.rcard-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--ink-150);
+}
+.rcard-harga {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Grid dua-kolom yang harus menumpuk di HP ──
+   Keduanya dulu ditulis `gridTemplateColumns` inline, jadi mustahil di-media-
+   query dari berkas komponen. Dipindah ke kelas supaya bisa menumpuk. */
+
+/* Dashboard → "Akses cepat". Di 390px tiap sel hanya menyisakan ±100px untuk
+   teks setelah ikon & padding, sehingga "Tanya Asisten" pecah dua baris. */
+.quickgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--ink-150);
+}
+
+/* /compare → dua kotak Part Number + tombol dalam satu baris. Di HP tiap kotak
+   tinggal ±100px — terlalu sempit untuk PN 12 karakter berhuruf monospace. */
+.comparerow {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr auto;
+}
+
+@media (max-width: 640px) {
+  .quickgrid {
+    grid-template-columns: 1fr;
+  }
+  .comparerow {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Tabel berlabel → kartu di HP (`.tbl.cardify`) ──
+   Tiap <td> membawa `data-label` = judul kolomnya, jadi di HP baris tabel bisa
+   dilipat menjadi kartu "label : nilai" tanpa kehilangan arti kolom. Ini
+   generalisasi dari kartu tulisan-tangan di /search, dan dipakai 31 tabel.
+   ⛔ Sengaja TIDAK dipasang pada: tabel berkolom dinamis (judulnya dari .map(),
+   tak bisa dilabeli statis) dan halaman invoice (dokumen cetak). Keduanya tetap
+   memakai .tblwrap — tergulir, bukan terpotong. */
+@media (max-width: 640px) {
+  .tbl.cardify,
+  .tbl.cardify tbody {
+    display: block;
+  }
+  /* Judul kolom sudah pindah ke tiap sel lewat data-label. */
+  .tbl.cardify thead {
+    display: none;
+  }
+  .tbl.cardify tbody tr {
+    display: block;
+    margin-bottom: 8px;
+    padding: 4px 12px;
+    border: 1px solid var(--ink-150);
+    border-radius: var(--r-md);
+    background: var(--paper);
+    box-shadow: var(--shadow-1);
+  }
+  .tbl.cardify tbody tr:hover td {
+    background: transparent;
+  }
+  .tbl.cardify tbody td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    height: auto;
+    min-height: 36px;
+    padding: 7px 0;
+    border-bottom: 1px dashed var(--ink-150);
+    text-align: left;
+  }
+  .tbl.cardify tbody tr td:last-child {
+    border-bottom: none;
+  }
+  /* Label kolom di kiri, nilai di kanan. Sel tanpa data-label (kolom aksi /
+     ikon buka-tutup) tampil polos memenuhi lebar. */
+  .tbl.cardify tbody td[data-label]::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    max-width: 45%;
+    color: var(--ink-500);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .tbl.cardify tbody td:not([data-label]) {
+    justify-content: flex-end;
+  }
+  /* Sel angka: .num meratakan ke kanan lewat text-align, yang tak berlaku lagi
+     di mode flex — perataannya diambil alih justify-content di atas. */
+  .tbl.cardify tbody td.num {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Baris rincian ber-colSpan (mis. /stok per gudang) tetap melebar penuh. */
+  .tbl.cardify tbody td[colspan] {
+    display: block;
+    padding: 8px 0;
+    border-bottom: none;
+  }
+  .tbl.cardify tbody td[colspan]::before {
+    content: none;
   }
 }

@@ -743,6 +743,7 @@ export default function PartDetailPage() {
                             {/* Mode gabungan bisa punya banyak kolom varian → biar
                                 menggeser sendiri, jangan memaksa halaman melebar. */}
                             <div style={{ overflowX: "auto" }}>
+                            <div className="tblwrap">
                             <table className="tbl">
                               {varian && !varianAktif && (
                                 <thead>
@@ -785,6 +786,7 @@ export default function PartDetailPage() {
                               )}
                             </table>
                             </div>
+                            </div>
                             <div className="px-4 py-2" style={{ fontSize: 11.5, color: "var(--ink-400)", borderTop: "1px solid var(--ink-150)" }}>
                               Klik baris gudang untuk melihat lokasi rak & kartu stok.
                               {varian && " Rak dicatat per gudang untuk part ini (berlaku semua varian)."}
@@ -811,6 +813,7 @@ export default function PartDetailPage() {
                     <div className="px-4 py-2.5 flex items-center gap-2" style={{ fontSize: 13, fontWeight: 600, borderBottom: "1px solid var(--ink-150)" }}>
                       Spesifikasi <span className="pill">sumber: SIMS</span>
                     </div>
+                    <div className="tblwrap">
                     <table className="tbl">
                       <tbody>
                         {spec.berat_kirim_kg != null && (
@@ -851,6 +854,7 @@ export default function PartDetailPage() {
                         )}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 )}
 
@@ -1497,6 +1501,7 @@ function WeichaiStockCard({ pn }: { pn: string }) {
             <span style={{ fontSize: 12, color: "var(--ink-500)" }}>tersedia di pemasok</span>
           </div>
           {stock.per_cabang.length > 0 ? (
+            <div className="tblwrap">
             <table className="tbl">
               <tbody>
                 {stock.per_cabang.map((b) => (
@@ -1509,6 +1514,7 @@ function WeichaiStockCard({ pn }: { pn: string }) {
                 ))}
               </tbody>
             </table>
+            </div>
           ) : (
             <div className="px-4 pb-3" style={{ fontSize: 12, color: "var(--ink-400)" }}>
               Rincian per-cabang tak tersedia.

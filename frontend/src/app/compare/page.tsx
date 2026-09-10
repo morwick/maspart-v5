@@ -98,7 +98,7 @@ export default function ComparePage() {
           Analisis interchange berdasarkan foto SIMS (bentuk + warna) dan nama part.
         </p>
 
-        <form onSubmit={run} className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr auto" }}>
+        <form onSubmit={run} className="comparerow">
           <input className="input mono" value={pn1} onChange={(e) => setPn1(e.target.value)} placeholder="Part Number #1" />
           <input className="input mono" value={pn2} onChange={(e) => setPn2(e.target.value)} placeholder="Part Number #2" />
           <button className="btn btn-primary" disabled={loading}>{loading ? "Menganalisis…" : "Cek Interchange"}</button>

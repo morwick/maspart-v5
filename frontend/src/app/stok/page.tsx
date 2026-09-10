@@ -181,7 +181,8 @@ export default function StokPage() {
 
         {data && data.rows.length > 0 && (
           <div className="surface" style={{ marginTop: 12, overflow: "auto" }}>
-            <table className="tbl">
+            <div className="tblwrap">
+            <table className="tbl cardify">
               <thead>
                 <tr>
                   <th style={{ width: 28 }} aria-label="Rincian" />
@@ -208,6 +209,7 @@ export default function StokPage() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 
@@ -276,10 +278,10 @@ function StokRow({
     <>
       <tr onClick={onToggle} style={{ cursor: "pointer" }} title="Klik untuk rincian per gudang">
         <td style={{ color: "var(--ink-400)", fontSize: 11, textAlign: "center" }}>{open ? "▾" : "▸"}</td>
-        <td className="pn">{row["Part Number"]}</td>
-        <td style={{ fontWeight: 500 }}>{row["Part Name"]}</td>
-        <td className="num mono">{row["Stok"]}</td>
-        <td style={{ color: "var(--ink-500)" }}>{row["Satuan"]}</td>
+        <td data-label="Part Number" className="pn">{row["Part Number"]}</td>
+        <td data-label="Part Name" style={{ fontWeight: 500 }}>{row["Part Name"]}</td>
+        <td data-label="Stok" className="num mono">{row["Stok"]}</td>
+        <td data-label="Satuan" style={{ color: "var(--ink-500)" }}>{row["Satuan"]}</td>
       </tr>
       {open && (
         <tr>

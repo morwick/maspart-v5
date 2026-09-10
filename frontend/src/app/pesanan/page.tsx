@@ -93,7 +93,8 @@ export default function PesananPage() {
           </div>
         ) : (
           <div className="surface" style={{ overflow: "auto" }}>
-            <table className="tbl">
+            <div className="tblwrap">
+            <table className="tbl cardify">
               <thead>
                 <tr>
                   <th>Kode</th>
@@ -115,12 +116,12 @@ export default function PesananPage() {
                       style={{ cursor: "pointer" }}
                       onClick={() => router.push(`/pesanan/${encodeURIComponent(o.order_code)}`)}
                     >
-                      <td className="pn">{o.order_code}</td>
-                      <td>{o.gudang || "—"}</td>
-                      <td className="num mono">{rp(o.total)}</td>
-                      <td><span className={"pill " + st.pill}>{st.label}</span></td>
-                      <td style={{ color: "var(--ink-500)" }}>{fmtDate(o.created_at)}</td>
-                      <td onClick={(e) => e.stopPropagation()}>
+                      <td data-label="Kode" className="pn">{o.order_code}</td>
+                      <td data-label="Dikirim dari">{o.gudang || "—"}</td>
+                      <td data-label="Total" className="num mono">{rp(o.total)}</td>
+                      <td data-label="Status"><span className={"pill " + st.pill}>{st.label}</span></td>
+                      <td data-label="Tanggal" style={{ color: "var(--ink-500)" }}>{fmtDate(o.created_at)}</td>
+                      <td data-label="Aksi" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
                           {lunas && (
                             <button
@@ -144,6 +145,7 @@ export default function PesananPage() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>

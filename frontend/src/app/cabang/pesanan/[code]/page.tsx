@@ -92,7 +92,8 @@ export default function BranchOrderDetailPage() {
                   <span className="grow" />
                   <span style={{ fontSize: 12, color: "var(--ink-500)" }}>{itemCount} item · {order.username}</span>
                 </div>
-                <table className="tbl">
+                <div className="tblwrap">
+                <table className="tbl cardify">
                   <thead>
                     <tr>
                       <th>Part Number</th>
@@ -105,15 +106,16 @@ export default function BranchOrderDetailPage() {
                   <tbody>
                     {order.items.map((it, i) => (
                       <tr key={i}>
-                        <td className="pn">{it.part_number}</td>
-                        <td>{it.name}</td>
-                        <td className="num mono">{rp(it.price)}</td>
-                        <td className="num">{it.qty}</td>
-                        <td className="num mono">{rp(it.line_total)}</td>
+                        <td data-label="Part Number" className="pn">{it.part_number}</td>
+                        <td data-label="Nama">{it.name}</td>
+                        <td data-label="Harga" className="num mono">{rp(it.price)}</td>
+                        <td data-label="Qty" className="num">{it.qty}</td>
+                        <td data-label="Subtotal" className="num mono">{rp(it.line_total)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                </div>
                 <div className="px-4 py-3" style={{ borderTop: "1px solid var(--ink-150)" }}>
                   <div className="flex justify-between" style={{ fontSize: 13 }}>
                     <span style={{ color: "var(--ink-500)" }}>Subtotal</span>

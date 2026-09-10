@@ -113,7 +113,7 @@ export default function AdminAppConfigPage() {
                 Cukup isi <b>nomor versi</b> (mis. <span className="mono">2.1.4</span>). Aplikasi membandingkannya dengan versinya
                 sendiri; bila ada yang lebih baru, muncul halaman ajakan unduh. Kosongkan <b>Versi terbaru</b> untuk menonaktifkan notifikasi.
               </p>
-              <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+              <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(200px, 100%), 1fr))" }}>
                 <label className="flex flex-col gap-1">
                   <span className="stat-label">Versi terbaru</span>
                   <input className="input" value={version.latest_name} placeholder="2.1.4"
@@ -159,7 +159,7 @@ export default function AdminAppConfigPage() {
             {/* ── Default Cari by Foto ── */}
             <section className="surface surface-pad">
               <div style={{ fontSize: 14, fontWeight: 650, marginBottom: 12 }}>Default Cari by Foto</div>
-              <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+              <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(160px, 100%), 1fr))" }}>
                 <label className="flex flex-col gap-1">
                   <span className="stat-label">top_k (jumlah kandidat)</span>
                   <input className="input" type="number" value={foto.top_k}
@@ -181,7 +181,7 @@ export default function AdminAppConfigPage() {
             {/* ── Limit Cari Part ── */}
             <section className="surface surface-pad">
               <div style={{ fontSize: 14, fontWeight: 650, marginBottom: 12 }}>Limit Cari Part</div>
-              <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+              <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))" }}>
                 <label className="flex flex-col gap-1">
                   <span className="stat-label">page_size</span>
                   <input className="input" type="number" value={search.page_size}

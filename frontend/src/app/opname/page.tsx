@@ -236,7 +236,7 @@ export default function OpnamePage() {
             </div>
 
             <div className="max-h-[60vh] overflow-auto rounded-xl ring-1 ring-zinc-200">
-              <table className="tbl">
+              <table className="tbl cardify">
                 <thead className="sticky top-0 bg-zinc-50 text-left text-zinc-600">
                   <tr>
                     <th className="px-3 py-2 font-medium">Part Number</th>
@@ -255,10 +255,10 @@ export default function OpnamePage() {
                         : null;
                     return (
                       <tr key={r.pn} className="hover:bg-zinc-50">
-                        <td className="px-3 py-1.5 font-mono">{r.pn}</td>
-                        <td className="px-3 py-1.5 text-zinc-600">{r.part_name || "—"}</td>
-                        <td className="px-3 py-1.5">{r.qty_sistem ?? "—"}</td>
-                        <td className="px-3 py-1.5">
+                        <td data-label="Part Number" className="px-3 py-1.5 font-mono">{r.pn}</td>
+                        <td data-label="Part Name" className="px-3 py-1.5 text-zinc-600">{r.part_name || "—"}</td>
+                        <td data-label="Sistem" className="px-3 py-1.5">{r.qty_sistem ?? "—"}</td>
+                        <td data-label="Fisik" className="px-3 py-1.5">
                           <input
                             type="number"
                             value={r.qty_fisik ?? ""}
@@ -270,14 +270,14 @@ export default function OpnamePage() {
                             className="w-20 rounded border border-zinc-300 px-2 py-1 text-sm outline-none focus:border-brand"
                           />
                         </td>
-                        <td
+                        <td data-label="Selisih"
                           className={`px-3 py-1.5 font-medium ${
                             sel === null ? "text-zinc-400" : sel === 0 ? "text-green-600" : "text-amber-600"
                           }`}
                         >
                           {sel === null ? "—" : sel > 0 ? `+${sel}` : sel}
                         </td>
-                        <td className="px-3 py-1.5">
+                        <td data-label="Catatan" className="px-3 py-1.5">
                           <input
                             value={r.note}
                             onChange={(e) => setRow(r.pn, { note: e.target.value })}
@@ -298,7 +298,7 @@ export default function OpnamePage() {
           <div className="mt-8">
             <h3 className="mb-2 text-sm font-semibold text-zinc-700">Riwayat Opname</h3>
             <div className="overflow-x-auto rounded-xl ring-1 ring-zinc-200">
-              <table className="tbl">
+              <table className="tbl cardify">
                 <thead className="bg-zinc-50 text-left text-zinc-600">
                   <tr>
                     <th className="px-3 py-2 font-medium">Selesai</th>
@@ -318,14 +318,14 @@ export default function OpnamePage() {
                     ).length;
                     return (
                       <tr key={h.session_id}>
-                        <td className="px-3 py-2 text-zinc-500">
+                        <td data-label="Selesai" className="px-3 py-2 text-zinc-500">
                           {h.finalized_at
                             ? new Date(h.finalized_at.replace("Z", "") + "Z").toLocaleString("id-ID")
                             : "—"}
                         </td>
-                        <td className="px-3 py-2 text-zinc-500">{h.source_filename || "—"}</td>
-                        <td className="px-3 py-2">{items.length}</td>
-                        <td className="px-3 py-2 text-amber-600">{sel}</td>
+                        <td data-label="Sumber" className="px-3 py-2 text-zinc-500">{h.source_filename || "—"}</td>
+                        <td data-label="Jumlah Part" className="px-3 py-2">{items.length}</td>
+                        <td data-label="Selisih" className="px-3 py-2 text-amber-600">{sel}</td>
                       </tr>
                     );
                   })}

@@ -54,7 +54,7 @@ export default function AdminSalesPage() {
         ) : (
           <>
             {/* KPI */}
-            <div className="grid gap-3 mb-5" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+            <div className="grid gap-3 mb-5" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(160px, 100%), 1fr))" }}>
               <div className="surface surface-pad">
                 <div className="stat-label">Omzet (terjual)</div>
                 <div className="stat-value mono" style={{ color: "var(--brand-700)" }}>{rp(s?.omzet ?? 0)}</div>
@@ -102,20 +102,22 @@ export default function AdminSalesPage() {
                 {data.by_gudang.length === 0 ? (
                   <div style={{ fontSize: 13, color: "var(--ink-400)" }}>Belum ada penjualan.</div>
                 ) : (
-                  <table className="tbl">
+                  <div className="tblwrap">
+                  <table className="tbl cardify">
                     <thead>
                       <tr><th>Cabang</th><th className="num">Pesanan</th><th className="num">Omzet</th></tr>
                     </thead>
                     <tbody>
                       {data.by_gudang.map((g) => (
                         <tr key={g.gudang}>
-                          <td>{g.gudang}</td>
-                          <td className="num">{g.count}</td>
-                          <td className="num mono">{rp(g.omzet)}</td>
+                          <td data-label="Cabang">{g.gudang}</td>
+                          <td data-label="Pesanan" className="num">{g.count}</td>
+                          <td data-label="Omzet" className="num mono">{rp(g.omzet)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             </div>
@@ -124,20 +126,22 @@ export default function AdminSalesPage() {
             <div className="grid gap-4 md:grid-cols-2 mt-4">
               <div className="surface surface-pad">
                 <div className="mb-3" style={{ fontSize: 14, fontWeight: 600 }}>Pesanan per Status</div>
-                <table className="tbl">
+                <div className="tblwrap">
+                <table className="tbl cardify">
                   <thead>
                     <tr><th>Status</th><th className="num">Jumlah</th><th className="num">Nilai</th></tr>
                   </thead>
                   <tbody>
                     {Object.entries(data.by_status).map(([st, v]) => (
                       <tr key={st}>
-                        <td><span className={"pill " + (ORDER_STATUS[st]?.pill || "")}>{ORDER_STATUS[st]?.label || st}</span></td>
-                        <td className="num">{v.count}</td>
-                        <td className="num mono">{rp(v.omzet)}</td>
+                        <td data-label="Status"><span className={"pill " + (ORDER_STATUS[st]?.pill || "")}>{ORDER_STATUS[st]?.label || st}</span></td>
+                        <td data-label="Jumlah" className="num">{v.count}</td>
+                        <td data-label="Nilai" className="num mono">{rp(v.omzet)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
 
               <div className="surface surface-pad">
@@ -145,23 +149,25 @@ export default function AdminSalesPage() {
                 {data.top_parts.length === 0 ? (
                   <div style={{ fontSize: 13, color: "var(--ink-400)" }}>Belum ada penjualan.</div>
                 ) : (
-                  <table className="tbl">
+                  <div className="tblwrap">
+                  <table className="tbl cardify">
                     <thead>
                       <tr><th>Part</th><th className="num">Qty</th><th className="num">Omzet</th></tr>
                     </thead>
                     <tbody>
                       {data.top_parts.map((p) => (
                         <tr key={p.part_number}>
-                          <td>
+                          <td data-label="Part">
                             <div className="pn">{p.part_number}</div>
                             <div className="truncate" style={{ fontSize: 11.5, color: "var(--ink-500)" }}>{p.name}</div>
                           </td>
-                          <td className="num">{p.qty}</td>
-                          <td className="num mono">{rp(p.omzet)}</td>
+                          <td data-label="Qty" className="num">{p.qty}</td>
+                          <td data-label="Omzet" className="num mono">{rp(p.omzet)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             </div>

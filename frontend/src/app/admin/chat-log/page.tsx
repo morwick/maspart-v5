@@ -303,7 +303,8 @@ export default function ChatLogPage() {
                 </button>
               </div>
             )}
-            <table className="tbl">
+            <div className="tblwrap">
+            <table className="tbl cardify">
               <thead>
                 <tr>
                   <th>Waktu</th>
@@ -326,10 +327,10 @@ export default function ChatLogPage() {
                     style={{ cursor: "pointer" }}
                     title="Klik untuk lihat jawaban AI"
                   >
-                    <td style={{ fontSize: 11.5, color: "var(--ink-500)", whiteSpace: "nowrap" }}>
+                    <td data-label="Waktu" style={{ fontSize: 11.5, color: "var(--ink-500)", whiteSpace: "nowrap" }}>
                       {new Date(r.created_at).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" })}
                     </td>
-                    <td style={{ whiteSpace: "nowrap" }}>
+                    <td data-label="Akun" style={{ whiteSpace: "nowrap" }}>
                       <button
                         onClick={(e) => { e.stopPropagation(); setFilterUser(filterUser === r.username ? "" : r.username || ""); }}
                         title={r.role ? `Peran: ${r.role}` : undefined}
@@ -354,18 +355,18 @@ export default function ChatLogPage() {
                         </span>
                       )}
                     </td>
-                    <td style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.question || ""}>
+                    <td data-label="Pertanyaan" style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.question || ""}>
                       {r.question || "—"}
                       {r.guard_hit && <span className="pill" style={{ marginLeft: 6, height: 18, fontSize: 10, padding: "0 6px" }}>guard</span>}
                       {r.tool_failed && <span className="pill" style={{ marginLeft: 4, height: 18, fontSize: 10, padding: "0 6px" }}>tool gagal</span>}
                       {r.diulang && <span className="pill" style={{ marginLeft: 4, height: 18, fontSize: 10, padding: "0 6px" }} title="User mengetik ulang pertanyaan yang sama">🔁 diulang</span>}
                     </td>
-                    <td style={{ fontSize: 11, color: "var(--ink-600)" }} title={r.tools || ""}>
+                    <td data-label="Tool" style={{ fontSize: 11, color: "var(--ink-600)" }} title={r.tools || ""}>
                       {r.tools_count > 0 ? `${r.tools_count} tool` : "—"}
                     </td>
-                    <td className="num mono">{r.rounds}</td>
-                    <td className="num mono">{(r.latency_ms / 1000).toFixed(1)}s</td>
-                    <td
+                    <td data-label="Ronde" className="num mono">{r.rounds}</td>
+                    <td data-label="Latensi" className="num mono">{(r.latency_ms / 1000).toFixed(1)}s</td>
+                    <td data-label="Token"
                       className="num mono"
                       style={{ fontSize: 11, whiteSpace: "nowrap" }}
                       title={
@@ -378,7 +379,7 @@ export default function ChatLogPage() {
                         ? `${fmtTok(r.tokens_in)} / ${fmtTok(r.tokens_out)}`
                         : "—"}
                     </td>
-                    <td style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>
+                    <td data-label="Outcome" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>
                       {r.outcome || "—"}
                       <span style={{ marginLeft: 6, color: "var(--ink-400)" }}>{open ? "▾" : "▸"}</span>
                     </td>
@@ -425,6 +426,7 @@ export default function ChatLogPage() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>

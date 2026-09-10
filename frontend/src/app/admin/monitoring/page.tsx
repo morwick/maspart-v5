@@ -229,7 +229,7 @@ export default function AdminMonitoringPage() {
             </div>
 
             <div className="mb-6 overflow-x-auto rounded-xl ring-1 ring-zinc-200">
-              <table className="tbl">
+              <table className="tbl cardify">
                 <thead className="bg-zinc-50 text-left text-zinc-600">
                   <tr>
                     <th className="px-3 py-2 font-medium">Status</th>
@@ -251,7 +251,7 @@ export default function AdminMonitoringPage() {
                 <tbody className="divide-y divide-zinc-100 bg-white">
                   {users.map((u) => (
                     <tr key={u.username} className="hover:bg-zinc-50">
-                      <td className="px-3 py-2">
+                      <td data-label="Status" className="px-3 py-2">
                         {u.online ? (
                           <span className="inline-flex items-center gap-1.5 font-medium text-green-600">
                             <span className="h-2 w-2 rounded-full bg-green-500" /> online
@@ -266,7 +266,7 @@ export default function AdminMonitoringPage() {
                           </span>
                         )}
                       </td>
-                      <td className="px-3 py-2 font-medium">
+                      <td data-label="Username" className="px-3 py-2 font-medium">
                         <span className="inline-flex items-center gap-1.5">
                           {u.username}
                           {u.kemungkinan_dipakai_ramai && (
@@ -279,10 +279,10 @@ export default function AdminMonitoringPage() {
                           )}
                         </span>
                       </td>
-                      <td className="px-3 py-2">{u.role}</td>
-                      <td className="px-3 py-2 font-mono text-xs text-zinc-600">{u.last_ip ?? "—"}</td>
-                      <td className="px-3 py-2 text-zinc-600">{u.last_device ?? "—"}</td>
-                      <td className="px-3 py-2 text-zinc-500">
+                      <td data-label="Role" className="px-3 py-2">{u.role}</td>
+                      <td data-label="IP terakhir" className="px-3 py-2 font-mono text-xs text-zinc-600">{u.last_ip ?? "—"}</td>
+                      <td data-label="Perangkat" className="px-3 py-2 text-zinc-600">{u.last_device ?? "—"}</td>
+                      <td data-label="Sebaran (h)" className="px-3 py-2 text-zinc-500">
                         {u.login_count ? (
                           <button
                             onClick={() => openHistory(u.username)}
@@ -298,10 +298,10 @@ export default function AdminMonitoringPage() {
                           "—"
                         )}
                       </td>
-                      <td className="px-3 py-2 text-zinc-500" title={fmt(u.last_active_at)}>
+                      <td data-label="Aktif terakhir" className="px-3 py-2 text-zinc-500" title={fmt(u.last_active_at)}>
                         {u.online ? ago(u.last_active_at) : fmt(u.last_active_at)}
                       </td>
-                      <td className="px-3 py-2 text-zinc-500">{fmt(u.last_login_at)}</td>
+                      <td data-label="Login terakhir" className="px-3 py-2 text-zinc-500">{fmt(u.last_login_at)}</td>
                     </tr>
                   ))}
                   {users.length === 0 && (
@@ -317,7 +317,7 @@ export default function AdminMonitoringPage() {
 
             <h3 className="mb-2 text-sm font-semibold text-zinc-700">Aktivitas terbaru</h3>
             <div className="overflow-x-auto rounded-xl ring-1 ring-zinc-200">
-              <table className="tbl">
+              <table className="tbl cardify">
                 <thead className="bg-zinc-50 text-left text-zinc-600">
                   <tr>
                     <th className="px-3 py-2 font-medium">Waktu</th>
@@ -329,10 +329,10 @@ export default function AdminMonitoringPage() {
                 <tbody className="divide-y divide-zinc-100 bg-white">
                   {data.recent_activity.map((a, i) => (
                     <tr key={i}>
-                      <td className="px-3 py-2 text-zinc-500">{fmt(a.created_at)}</td>
-                      <td className="px-3 py-2">{a.username}</td>
-                      <td className="px-3 py-2">{a.action}</td>
-                      <td className="px-3 py-2 text-zinc-500">
+                      <td data-label="Waktu" className="px-3 py-2 text-zinc-500">{fmt(a.created_at)}</td>
+                      <td data-label="User" className="px-3 py-2">{a.username}</td>
+                      <td data-label="Aksi" className="px-3 py-2">{a.action}</td>
+                      <td data-label="Dari" className="px-3 py-2 text-zinc-500">
                         {a.ip ? (
                           <span>
                             <span className="font-mono text-xs">{a.ip}</span>
@@ -376,7 +376,8 @@ export default function AdminMonitoringPage() {
                   tutup
                 </button>
               </div>
-              <table className="tbl w-full">
+              <div className="tblwrap">
+              <table className="tbl w-full cardify">
                 <thead className="bg-zinc-50 text-left text-zinc-600">
                   <tr>
                     <th className="px-3 py-2 font-medium">Waktu</th>
@@ -387,9 +388,9 @@ export default function AdminMonitoringPage() {
                 <tbody className="divide-y divide-zinc-100">
                   {detail.rows.map((r) => (
                     <tr key={r.id}>
-                      <td className="px-3 py-2 text-zinc-500">{fmt(r.created_at)}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{r.ip ?? "—"}</td>
-                      <td className="px-3 py-2">{r.device ?? "—"}</td>
+                      <td data-label="Waktu" className="px-3 py-2 text-zinc-500">{fmt(r.created_at)}</td>
+                      <td data-label="IP" className="px-3 py-2 font-mono text-xs">{r.ip ?? "—"}</td>
+                      <td data-label="Perangkat" className="px-3 py-2">{r.device ?? "—"}</td>
                     </tr>
                   ))}
                   {detail.rows.length === 0 && (
@@ -401,6 +402,7 @@ export default function AdminMonitoringPage() {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )}

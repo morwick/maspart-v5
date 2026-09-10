@@ -395,6 +395,10 @@ export default function SearchPage() {
 
             {pageItems.length > 0 && (
               <div style={{ overflow: "auto" }}>
+                {/* Di HP tabel ini diganti daftar kartu (lihat .rowcards di bawah):
+                    6 kolom tak terbaca di 390px, dan stok/harga — dua hal yang
+                    paling dicari — dulu terpotong di luar layar. */}
+                <div className="tblwrap hp-hide">
                 <table className="tbl">
                   <thead>
                     <tr>
@@ -500,6 +504,64 @@ export default function SearchPage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
+
+                {/* Sajian HP: satu baris tabel = satu kartu. Urutan & isinya
+                    sengaja sama persis dengan tabel di atas (termasuk lencana
+                    SIMS dan gerbang beli), jadi tak ada informasi yang hanya
+                    bisa dilihat di desktop. */}
+                <div className="rowcards">
+                  {pageItems.map((r, i) => {
+                    const habis = Object.values(r.gudang || {}).reduce((n, q) => n + (Number(q) || 0), 0) <= 0;
+                    return (
+                      <div
+                        key={`hp-${r.part_number}-${i}`}
+                        className="rcard"
+                        onClick={() => openDetail(r.part_number)}
+                      >
+                        <div className="rcard-top">
+                          <span className="rcard-pn">{r.part_number}</span>
+                          {showStok && (
+                            r.stok === "—"
+                              ? <span className="pill">stok —</span>
+                              : <span className="pill pill-brand" style={{ whiteSpace: "nowrap" }}>stok {r.stok}</span>
+                          )}
+                        </div>
+                        <div className="rcard-name">
+                          {r.part_name}
+                          {r.source === "sims" && (
+                            <span className="pill pill-info" style={{ marginLeft: 6, fontWeight: 600 }}>SIMS</span>
+                          )}
+                        </div>
+                        <div className="rcard-meta">{r.file}</div>
+                        {(showHarga || isBuyer) && (
+                          <div className="rcard-foot">
+                            <span className="rcard-harga">{showHarga ? r.harga : ""}</span>
+                            {isBuyer && (
+                              habis ? (
+                                <span className="pill pill-danger">Habis</span>
+                              ) : !hasPrice(r.harga) ? (
+                                <span className="pill pill-warn">Tanpa harga</span>
+                              ) : !hasWeight(r.berat) ? (
+                                <span className="pill pill-warn">Tanpa berat</span>
+                              ) : (
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    addToCart({ part_number: r.part_number, name: r.part_name, harga: r.harga, berat: r.berat });
+                                  }}
+                                >
+                                  +🛒 Keranjang
+                                </button>
+                              )
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

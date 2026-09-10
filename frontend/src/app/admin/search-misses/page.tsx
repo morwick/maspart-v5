@@ -136,7 +136,8 @@ export default function SearchMissesPage() {
               Usulan AI menunggu keputusan ({usulan.length})
             </div>
             <div className="surface" style={{ overflow: "auto" }}>
-              <table className="tbl">
+              <div className="tblwrap">
+              <table className="tbl cardify">
                 <thead>
                   <tr>
                     <th>Istilah</th>
@@ -148,13 +149,13 @@ export default function SearchMissesPage() {
                 <tbody>
                   {usulan.map((u) => (
                     <tr key={u.id}>
-                      <td>
+                      <td data-label="Istilah">
                         <div style={{ fontWeight: 500 }}>{u.triggers.join(", ")}</div>
                         {u.alasan && (
                           <div style={{ fontSize: 11.5, color: "var(--ink-500)" }}>{u.alasan}</div>
                         )}
                       </td>
-                      <td>
+                      <td data-label="Kata kunci katalog (tervalidasi)">
                         {u.keywords.map((k) => (
                           <span key={k} className="pill" style={{ marginRight: 4, height: 20, fontSize: 10.5, padding: "0 7px" }}>{k}</span>
                         ))}
@@ -162,7 +163,7 @@ export default function SearchMissesPage() {
                           <span key={k} className="pill" title="Dibuang: tidak ditemukan di katalog" style={{ marginRight: 4, height: 20, fontSize: 10.5, padding: "0 7px", opacity: 0.45, textDecoration: "line-through" }}>{k}</span>
                         ))}
                       </td>
-                      <td className="num mono">{Math.round((u.confidence || 0) * 100)}%</td>
+                      <td data-label="Keyakinan" className="num mono">{Math.round((u.confidence || 0) * 100)}%</td>
                       <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                         <button
                           className="btn btn-primary btn-sm"
@@ -186,6 +187,7 @@ export default function SearchMissesPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )}
@@ -196,7 +198,8 @@ export default function SearchMissesPage() {
 
         {rows.length > 0 ? (
           <div className="surface" style={{ overflow: "auto" }}>
-            <table className="tbl">
+            <div className="tblwrap">
+            <table className="tbl cardify">
               <thead>
                 <tr>
                   <th>Query</th>
@@ -208,9 +211,9 @@ export default function SearchMissesPage() {
               <tbody>
                 {rows.map((m) => (
                   <tr key={m.query}>
-                    <td style={{ fontWeight: 500 }}>{m.query}</td>
-                    <td className="num mono">{m.count}</td>
-                    <td>
+                    <td data-label="Query" style={{ fontWeight: 500 }}>{m.query}</td>
+                    <td data-label="Frekuensi" className="num mono">{m.count}</td>
+                    <td data-label="Sumber">
                       {(m.sources || []).map((s) => (
                         <span key={s} className="pill" style={{ marginRight: 4, height: 20, fontSize: 10.5, padding: "0 7px" }}>{s}</span>
                       ))}
@@ -232,6 +235,7 @@ export default function SearchMissesPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         ) : (
           !loading && (

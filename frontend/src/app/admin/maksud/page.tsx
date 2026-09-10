@@ -248,7 +248,8 @@ export default function MaksudPage() {
 
         {view.length > 0 ? (
           <div className="surface" style={{ overflow: "auto" }}>
-            <table className="tbl">
+            <div className="tblwrap">
+            <table className="tbl cardify">
               <thead>
                 <tr>
                   <th>Frasa user</th>
@@ -260,13 +261,13 @@ export default function MaksudPage() {
               <tbody>
                 {view.map(({ e, i }) => (
                   <tr key={i}>
-                    <td>
+                    <td data-label="Frasa user">
                       {e.frasa.map((f) => (
                         <span key={f} className="pill pill-brand" style={{ margin: "1px 4px 1px 0", height: 20, fontSize: 10.5, padding: "0 7px" }}>{f}</span>
                       ))}
                     </td>
-                    <td className="mono" style={{ fontSize: 12 }}>{e.tool}</td>
-                    <td style={{ fontSize: 12.5, color: "var(--ink-700)" }}>{e.catatan}</td>
+                    <td data-label="Alat" className="mono" style={{ fontSize: 12 }}>{e.tool}</td>
+                    <td data-label="Catatan" style={{ fontSize: 12.5, color: "var(--ink-700)" }}>{e.catatan}</td>
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       <button className="btn btn-secondary btn-sm" onClick={() => startEdit(i)} style={{ marginRight: 6 }}>
                         Edit
@@ -279,6 +280,7 @@ export default function MaksudPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         ) : (
           !loading && (

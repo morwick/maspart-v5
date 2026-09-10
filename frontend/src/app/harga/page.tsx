@@ -244,7 +244,8 @@ function ListHarga({
 
       {data && data.rows.length > 0 && (
         <div className="surface" style={{ marginTop: 12, overflow: "auto" }}>
-          <table className="tbl">
+          <div className="tblwrap">
+          <table className="tbl cardify">
             <thead>
               <tr>
                 <th>Part Number</th>
@@ -255,13 +256,14 @@ function ListHarga({
             <tbody>
               {data.rows.map((r, i) => (
                 <tr key={i}>
-                  <td className="pn">{r["Part Number"]}</td>
-                  <td style={{ fontWeight: 500 }}>{r["Part Name"]}</td>
-                  <td className="num mono">{r["Harga (Rp)"]}</td>
+                  <td data-label="Part Number" className="pn">{r["Part Number"]}</td>
+                  <td data-label="Part Name" style={{ fontWeight: 500 }}>{r["Part Name"]}</td>
+                  <td data-label="Harga (Rp)" className="num mono">{r["Harga (Rp)"]}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -423,7 +425,8 @@ function BatchHarga({
             <button className="btn btn-secondary btn-sm" onClick={handleExport}>⬇ Export Excel</button>
           </div>
           <div className="surface" style={{ overflow: "auto" }}>
-            <table className="tbl">
+            <div className="tblwrap">
+            <table className="tbl cardify">
               <thead>
                 <tr>
                   <th>Part Number</th>
@@ -435,16 +438,17 @@ function BatchHarga({
               <tbody>
                 {data.results.map((r, i) => (
                   <tr key={i}>
-                    <td className="pn">{r.pn}</td>
-                    <td className="num mono">{fmtCny(r.cny)}</td>
-                    <td className="num mono" style={{ fontWeight: 500 }}>{fmtRp(r.idr)}</td>
-                    <td style={{ fontSize: 12, color: "var(--ink-500)" }}>
+                    <td data-label="Part Number" className="pn">{r.pn}</td>
+                    <td data-label="Harga (CNY)" className="num mono">{fmtCny(r.cny)}</td>
+                    <td data-label="Harga (IDR)" className="num mono" style={{ fontWeight: 500 }}>{fmtRp(r.idr)}</td>
+                    <td data-label="Ket." style={{ fontSize: 12, color: "var(--ink-500)" }}>
                       {r.status === "ok" ? r.note ?? "✓" : "Tidak ditemukan"}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}

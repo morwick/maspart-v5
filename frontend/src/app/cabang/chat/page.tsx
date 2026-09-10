@@ -57,7 +57,7 @@ export default function BranchChatPage() {
             Belum ada chat dari pembeli.
           </div>
         ) : (
-          <div className="grid gap-4" style={{ gridTemplateColumns: "minmax(200px, 260px) 1fr" }}>
+          <div className="grid gap-4" style={{ gridTemplateColumns: "minmax(min(200px, 100%), 260px) 1fr" }}>
             {/* Daftar pembeli */}
             <div className="surface" style={{ overflow: "hidden", height: "fit-content" }}>
               <div className="px-3 py-2.5" style={{ fontSize: 12.5, fontWeight: 600, borderBottom: "1px solid var(--ink-150)" }}>

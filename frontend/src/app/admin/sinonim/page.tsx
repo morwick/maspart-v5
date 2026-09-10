@@ -243,7 +243,8 @@ export default function SinonimPage() {
 
         {view.length > 0 ? (
           <div className="surface" style={{ overflow: "auto" }}>
-            <table className="tbl">
+            <div className="tblwrap">
+            <table className="tbl cardify">
               <thead>
                 <tr>
                   <th style={{ width: 110 }}>Grup</th>
@@ -255,13 +256,13 @@ export default function SinonimPage() {
               <tbody>
                 {view.map(({ e, i }) => (
                   <tr key={i}>
-                    <td><span className="pill" style={{ height: 20, fontSize: 10.5, padding: "0 7px" }}>{e.grup || "umum"}</span></td>
-                    <td>
+                    <td data-label="Grup"><span className="pill" style={{ height: 20, fontSize: 10.5, padding: "0 7px" }}>{e.grup || "umum"}</span></td>
+                    <td data-label="Istilah lapangan">
                       {e.triggers.map((t) => (
                         <span key={t} className="pill pill-brand" style={{ margin: "1px 4px 1px 0", height: 20, fontSize: 10.5, padding: "0 7px" }}>{t}</span>
                       ))}
                     </td>
-                    <td style={{ fontSize: 12.5, color: "var(--ink-700)" }}>{e.keywords.join(", ")}</td>
+                    <td data-label="Kata kunci katalog" style={{ fontSize: 12.5, color: "var(--ink-700)" }}>{e.keywords.join(", ")}</td>
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       <button className="btn btn-secondary btn-sm" onClick={() => startEdit(i)} style={{ marginRight: 6 }}>
                         Edit
@@ -274,6 +275,7 @@ export default function SinonimPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         ) : (
           !loading && (

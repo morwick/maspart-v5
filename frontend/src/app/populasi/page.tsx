@@ -226,6 +226,7 @@ export default function PopulasiPage() {
         {/* Hanya area ini yang menggulir — header tabel (thead) sticky di atasnya */}
         <div className="surface" style={{ marginTop: 12, flex: 1, minHeight: 0, overflow: "auto" }}>
           {data && data.rows.length > 0 ? (
+            <div className="tblwrap">
             <table className="tbl">
               <thead>
                 <tr>
@@ -262,6 +263,7 @@ export default function PopulasiPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           ) : (
             <div className="grid place-items-center" style={{ height: "100%", minHeight: 160, color: "var(--ink-500)", fontSize: 13.5 }}>
               {loading ? "Memuat…" : "Tidak ada data yang cocok."}

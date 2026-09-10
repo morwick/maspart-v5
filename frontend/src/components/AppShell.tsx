@@ -374,7 +374,11 @@ export default function AppShell({
   );
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    /* ⛔ `h-screen` (100vh) SALAH di HP: Safari/Chrome mobile menghitung 100vh
+       dengan bilah URL tersembunyi, jadi bagian bawah konten terpotong selama
+       bilah itu masih tampak. `100dvh` mengikuti tinggi yang benar-benar
+       terlihat; `h-screen` ditinggal sebagai cadangan untuk peramban lama. */
+    <div className="flex h-screen overflow-hidden" style={{ height: "100dvh" }}>
       {/* Sidebar desktop: rail atau expanded */}
       <div className="hidden md:flex">{collapsed ? sidebarRail : sidebarExpanded}</div>
 
@@ -388,7 +392,9 @@ export default function AppShell({
 
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-3 px-4 sm:px-5" style={{ background: "var(--paper)", borderBottom: "1px solid var(--ink-150)" }}>
+        {/* `cc-header` (globals.css) menambah ruang aman notch di tepi kiri/kanan
+            tanpa mematikan padding responsif px-3 / sm:px-5. */}
+        <header className="cc-header flex h-14 shrink-0 items-center gap-2 px-3 sm:gap-3 sm:px-5" style={{ background: "var(--paper)", borderBottom: "1px solid var(--ink-150)" }}>
           <button
             onClick={() => (window.matchMedia("(min-width: 768px)").matches ? toggleCollapsed() : setOpen(true))}
             aria-label="Buka/tutup menu"
@@ -416,8 +422,15 @@ export default function AppShell({
 
           <div className="flex flex-1 items-center justify-end gap-2.5 sm:flex-none">
             {actions}
+            {/* Lencana "EPC live" bersifat informatif, bukan kontrol. Di 390px ia
+                merebut ruang dari judul halaman & tombol tema, jadi disembunyikan
+                di HP dan kembali muncul mulai lebar sm. */}
+            {/* ⛔ `hidden` Tailwind TIDAK cukup di sini: `.pill{display:inline-flex}`
+                ditulis setelah utilitas Tailwind di globals.css, spesifisitasnya
+                sama, jadi .pill menang dan lencana tetap tampil. `.hp-hide` ada
+                di akhir berkas dan memakai !important. */}
             {!isBuyer && (
-              <span className="pill pill-brand pill-dot" title="EPC Sinotruk aktif" style={{ whiteSpace: "nowrap" }}>EPC live</span>
+              <span className="pill pill-brand pill-dot hp-hide" title="EPC Sinotruk aktif" style={{ whiteSpace: "nowrap" }}>EPC live</span>
             )}
             <ThemeToggle />
             {isBuyer && (

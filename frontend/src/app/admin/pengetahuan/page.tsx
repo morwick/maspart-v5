@@ -595,7 +595,8 @@ export default function PengetahuanPage() {
                 : "Belum ada. Tambahkan lewat form di atas."}
             </div>
           ) : (
-            <table className="tbl">
+            <div className="tblwrap">
+            <table className="tbl cardify">
               <thead>
                 <tr>
                   <th>Judul</th>
@@ -611,7 +612,7 @@ export default function PengetahuanPage() {
                 {shown.map((d) => (
                   <Fragment key={d.id}>
                     <tr style={{ opacity: d.aktif ? 1 : 0.55 }}>
-                      <td>
+                      <td data-label="Judul">
                         <button
                           className="btn btn-ghost btn-sm"
                           onClick={() => buka(d)}
@@ -625,7 +626,7 @@ export default function PengetahuanPage() {
                           </div>
                         )}
                       </td>
-                      <td style={{ fontSize: 12 }}>
+                      <td data-label="Sumber" style={{ fontSize: 12 }}>
                         {d.berkas?.length ? (
                           d.berkas.map((b) => b.nama).join(", ")
                         ) : d.asal === "chat" ? (
@@ -640,8 +641,8 @@ export default function PengetahuanPage() {
                           "diketik admin"
                         )}
                       </td>
-                      <td>{d.jumlah_chunk}</td>
-                      <td style={{ fontSize: 12 }}>
+                      <td data-label="Bagian">{d.jumlah_chunk}</td>
+                      <td data-label="Pengayaan" style={{ fontSize: 12 }}>
                         {d.pengayaan === "llm"
                           ? "AI"
                           : d.pengayaan === "campuran"
@@ -650,7 +651,7 @@ export default function PengetahuanPage() {
                               ? "otomatis"
                               : "—"}
                       </td>
-                      <td>
+                      <td data-label="Pembeli">
                         <button
                           className="btn btn-ghost btn-sm"
                           onClick={() => togglePublik(d)}
@@ -667,7 +668,7 @@ export default function PengetahuanPage() {
                           {d.untuk_pembeli ? "Publik" : "Internal"}
                         </button>
                       </td>
-                      <td style={{ fontSize: 12, color: warnaStatus(d.status) }}>
+                      <td data-label="Status" style={{ fontSize: 12, color: warnaStatus(d.status) }}>
                         {LABEL_STATUS[d.status] || d.status}
                         {d.perlu_reindex && (
                           <div
@@ -857,6 +858,7 @@ export default function PengetahuanPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       </div>

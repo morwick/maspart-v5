@@ -325,7 +325,8 @@ export default function RakPage() {
           </div>
         ) : shown.length > 0 ? (
           <div className="surface" style={{ marginTop: 14, overflow: "auto" }}>
-            <table className="tbl">
+            <div className="tblwrap">
+            <table className="tbl cardify">
               <thead>
                 <tr>
                   <th>Part Number</th>
@@ -355,6 +356,7 @@ export default function RakPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         ) : gudang ? (
           <div className="surface" style={{ marginTop: 14 }}>
@@ -512,14 +514,14 @@ function BarisRak({
 
   return (
     <tr>
-      <td className="pn">
+      <td data-label="Part Number" className="pn">
         <Link href={`/part/${encodeURIComponent(row.part_number)}`} style={{ color: "var(--brand-700)" }}>
           {row.part_number}
         </Link>
       </td>
-      <td className="mono" style={{ fontWeight: 550 }}>{row.rak || "—"}</td>
-      <td style={{ color: "var(--ink-600)" }}>{row.catatan || ""}</td>
-      <td>
+      <td data-label="Rak" className="mono" style={{ fontWeight: 550 }}>{row.rak || "—"}</td>
+      <td data-label="Catatan" style={{ color: "var(--ink-600)" }}>{row.catatan || ""}</td>
+      <td data-label="Kartu">
         {row.foto_url ? (
           <button
             type="button"
@@ -539,11 +541,11 @@ function BarisRak({
           <span style={{ color: "var(--ink-400)", fontSize: 12 }}>—</span>
         )}
       </td>
-      <td style={{ color: "var(--ink-500)", fontSize: 12 }}>
+      <td data-label="Diperbarui" style={{ color: "var(--ink-500)", fontSize: 12 }}>
         {row.updated_by || "—"}
         {row.updated_at ? ` · ${tglSingkat(row.updated_at)}` : ""}
       </td>
-      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+      <td data-label="Aksi" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
         <button className="btn btn-secondary btn-sm" onClick={onEdit}>Ubah</button>{" "}
         <button className="btn btn-secondary btn-sm" onClick={onHapus}>Hapus</button>
       </td>

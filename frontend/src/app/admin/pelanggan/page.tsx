@@ -142,7 +142,8 @@ export default function AdminPelangganPage() {
 
   const tabel = (daftar: TautPelangganRow[]) => (
     <div style={{ overflowX: "auto" }}>
-      <table className="table" style={{ width: "100%" }}>
+      <div className="tblwrap">
+      <table className="table cardify" style={{ width: "100%" }}>
         <thead>
           <tr>
             <th style={{ textAlign: "left" }}>Akun</th>
@@ -153,14 +154,14 @@ export default function AdminPelangganPage() {
         <tbody>
           {daftar.map((r) => (
             <tr key={r.username}>
-              <td>
+              <td data-label="Akun">
                 <strong>{r.username}</strong>
                 <div style={{ fontSize: 12, color: "var(--ink-500)" }}>
                   {r.role}
                   {!r.is_active && " · nonaktif"}
                 </div>
               </td>
-              <td>
+              <td data-label="Pelanggan Accurate">
                 {r.customer_id ? (
                   <>
                     {r.customer_name || `#${r.customer_id}`}
@@ -174,7 +175,7 @@ export default function AdminPelangganPage() {
                   </span>
                 )}
               </td>
-              <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+              <td data-label="Aksi" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                 <button
                   className="btn btn-secondary btn-sm"
                   disabled={busy}
@@ -207,6 +208,7 @@ export default function AdminPelangganPage() {
           )}
         </tbody>
       </table>
+      </div>
     </div>
   );
 

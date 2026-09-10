@@ -133,15 +133,15 @@ export default function DashboardPage() {
         </div>
 
         {/* Stat cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginTop: 22 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(200px, 100%), 1fr))", gap: 14, marginTop: 22 }}>
           {stats.map((st) => <StatCard key={st.label} st={st} />)}
         </div>
 
         {/* Quick access + activity */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 14, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: 14, marginTop: 14 }}>
           <div className="surface" style={{ overflow: "hidden" }}>
             <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--ink-150)", fontSize: 13.5, fontWeight: 650 }}>Akses cepat</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, background: "var(--ink-150)" }}>
+            <div className="quickgrid">
               {quick.map((q) => (
                 <Link key={q.href} href={q.href} style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", background: "var(--paper)", textDecoration: "none", color: "inherit" }}>
                   <span style={{ display: "inline-flex", width: 34, height: 34, borderRadius: 8, alignItems: "center", justifyContent: "center", background: "var(--brand-50)", color: "var(--brand-700)", border: "1px solid var(--brand-100)", flexShrink: 0 }}>{q.icon}</span>

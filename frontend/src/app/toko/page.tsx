@@ -127,7 +127,7 @@ function ProductStrip({ title, icon, items, cartQty, open, add, qtyFn, rm }: {
         <span style={{ color: "var(--brand-700)" }}>{icon}</span>
         <span style={{ fontSize: 14.5, fontWeight: 700 }}>{title}</span>
       </div>
-      <div style={{ display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(170px, 200px)", gap: 12, overflowX: "auto", paddingBottom: 6, scrollSnapType: "x proximity" }}>
+      <div style={{ display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(min(170px, 100%), 200px)", gap: 12, overflowX: "auto", paddingBottom: 6, scrollSnapType: "x proximity" }}>
         {items.map((p) => (
           <div key={p.part_number} style={{ scrollSnapAlign: "start", display: "grid" }}>
             <ProductCard
@@ -373,7 +373,7 @@ export default function TokoPage() {
 
         {/* ── Grid produk ── */}
         {loading ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(170px, 100%), 1fr))", gap: 12 }}>
             {Array.from({ length: 12 }).map((_, i) => (
               <div key={i} className="surface" style={{ height: 300, opacity: 0.55, animation: "pulse 1.4s ease-in-out infinite" }} />
             ))}
@@ -389,7 +389,7 @@ export default function TokoPage() {
           </div>
         ) : (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(170px, 100%), 1fr))", gap: 12 }}>
               {items.map((p) => (
                 <ProductCard
                   key={p.part_number}

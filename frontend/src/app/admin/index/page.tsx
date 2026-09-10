@@ -273,7 +273,7 @@ export default function AdminIndexPage() {
 
         {results.length > 0 && (
           <div className="mt-5 overflow-x-auto rounded-xl ring-1 ring-zinc-200">
-            <table className="tbl">
+            <table className="tbl cardify">
               <thead className="bg-zinc-50 text-left text-zinc-600">
                 <tr>
                   <th className="px-3 py-2 font-medium">Part Number</th>
@@ -287,12 +287,12 @@ export default function AdminIndexPage() {
               <tbody className="divide-y divide-zinc-100 bg-white">
                 {results.map((r, i) => (
                   <tr key={i}>
-                    <td className="px-3 py-2 font-mono">{r.pn}</td>
-                    <td className="px-3 py-2">{r.found}</td>
-                    <td className="px-3 py-2">{r.already}</td>
-                    <td className="px-3 py-2 font-medium text-green-700">{r.indexed}</td>
-                    <td className="px-3 py-2">{r.failed}</td>
-                    <td className="px-3 py-2 text-xs text-zinc-500">{r.error ?? "✓"}</td>
+                    <td data-label="Part Number" className="px-3 py-2 font-mono">{r.pn}</td>
+                    <td data-label="Ditemukan" className="px-3 py-2">{r.found}</td>
+                    <td data-label="Sudah ada" className="px-3 py-2">{r.already}</td>
+                    <td data-label="Terindeks" className="px-3 py-2 font-medium text-green-700">{r.indexed}</td>
+                    <td data-label="Gagal" className="px-3 py-2">{r.failed}</td>
+                    <td data-label="Ket." className="px-3 py-2 text-xs text-zinc-500">{r.error ?? "✓"}</td>
                   </tr>
                 ))}
               </tbody>

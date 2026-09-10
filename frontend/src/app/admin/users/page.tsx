@@ -280,7 +280,7 @@ export default function AdminUsersPage() {
         </form>
 
         <div className="overflow-x-auto rounded-xl ring-1 ring-zinc-200">
-          <table className="tbl">
+          <table className="tbl cardify">
             <thead className="bg-zinc-50 text-left text-zinc-600">
               <tr>
                 <th className="px-3 py-2 font-medium">Username</th>
@@ -294,13 +294,13 @@ export default function AdminUsersPage() {
               {users.map((u) => (
                 <Fragment key={u.username}>
                 <tr className="hover:bg-zinc-50">
-                  <td className="px-3 py-2 font-medium">
+                  <td data-label="Username" className="px-3 py-2 font-medium">
                     {u.username}
                     {u.username === me && (
                       <span className="ml-1 text-xs text-zinc-400">(anda)</span>
                     )}
                   </td>
-                  <td className="px-3 py-2">
+                  <td data-label="Role" className="px-3 py-2">
                     <span
                       className={`rounded px-1.5 py-0.5 text-xs ${
                         u.role === "admin"
@@ -313,7 +313,7 @@ export default function AdminUsersPage() {
                       {u.role}
                     </span>
                   </td>
-                  <td className="px-3 py-2">
+                  <td data-label="Status" className="px-3 py-2">
                     {u.is_active ? (
                       <span className="text-green-600">aktif</span>
                     ) : (
@@ -322,7 +322,7 @@ export default function AdminUsersPage() {
                   </td>
                   {/* Ringkas dulu — daftar gudang bisa panjang; klik melebar
                       jadi centang + Simpan supaya tabel tetap terbaca. */}
-                  <td
+                  <td data-label="Gudang Kelola"
                     className="px-3 py-2 text-xs"
                     style={{ cursor: "pointer", maxWidth: 220 }}
                     title="Klik untuk mengubah gudang yang boleh ditulis akun ini"
@@ -337,7 +337,7 @@ export default function AdminUsersPage() {
                       <span className="text-zinc-400">— (bukan pengelola gudang)</span>
                     )}
                   </td>
-                  <td className="space-x-1 whitespace-nowrap px-3 py-2 text-right text-xs">
+                  <td data-label="Aksi" className="space-x-1 whitespace-nowrap px-3 py-2 text-right text-xs">
                     <select
                       value={u.role}
                       onChange={(e) => setRoleFor(u, e.target.value)}
